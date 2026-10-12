@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use poe_config::Config;
 use poe_proto::Protocol;
+use poe_store::Store;
 use tokio::net::TcpListener;
 use tracing::{Instrument, info, warn};
 
@@ -16,6 +17,7 @@ use tracing::{Instrument, info, warn};
 pub struct LoginServer {
     pub config: Arc<Config>,
     pub protocol: Arc<Protocol>,
+    pub store: Arc<dyn Store>,
 }
 
 impl LoginServer {

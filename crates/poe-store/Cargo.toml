@@ -1,0 +1,11 @@
+[package]
+name = "poe-store"
+description = "Persistence: the Store trait and its SQLite implementation"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+thiserror.workspace = true

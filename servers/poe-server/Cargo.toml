@@ -12,6 +12,7 @@ instance-server.workspace = true
 login-server.workspace = true
 poe-config.workspace = true
 poe-proto.workspace = true
+poe-store.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
