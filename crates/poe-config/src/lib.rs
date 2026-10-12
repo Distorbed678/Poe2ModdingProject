@@ -71,6 +71,9 @@ pub struct DatabaseConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct AccountsConfig {
     pub name_prefix: String,
+    pub max_characters: u8,
+    #[serde(default)]
+    pub flags: [u8; 2],
 }
 
 #[derive(Debug, Clone, Deserialize)]

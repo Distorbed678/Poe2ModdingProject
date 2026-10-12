@@ -36,6 +36,8 @@ pub struct Character {
     pub start_state: String,
     pub level: u32,
     pub experience: u64,
+    /// `WorldAreas.Id` of the character's current/return area.
+    pub area: String,
 }
 
 /// Fields supplied when creating a character.
@@ -46,6 +48,8 @@ pub struct NewCharacter {
     pub league: String,
     pub class_id: u32,
     pub start_state: String,
+    pub level: u32,
+    pub area: String,
 }
 
 pub trait Store: Send + Sync {

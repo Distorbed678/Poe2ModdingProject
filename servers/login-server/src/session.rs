@@ -2,13 +2,14 @@
 
 use std::sync::Arc;
 
-use poe_data::views::StartState;
+use poe_data::views::{StartState, WorldArea};
 use poe_net::{Connection, DecodeError, Reader, hexdump::hexdump};
 use poe_proto::{
     Direction, Message, Protocol,
     login::{
-        Authenticate, AuthenticationResult, CharacterCreated, CharacterEntry, CharacterList,
-        CreateCharacter, KeepAlive, LeagueEntry, LeagueList, RequestCharacterList,
+        Authenticate, AuthenticationResult, CharacterCreated, CharacterDetails, CharacterEntry,
+        CharacterList, CreateCharacter, KeepAlive, LeagueEntry, LeagueList,
+        RequestCharacterDetails, RequestCharacterList,
     },
 };
 use poe_store::{Account, Character, NewCharacter};
@@ -23,6 +24,7 @@ enum ClientMessage {
     Authenticate(Authenticate),
     RequestCharacterList(RequestCharacterList),
     CreateCharacter(CreateCharacter),
+    RequestCharacterDetails(RequestCharacterDetails),
 }
 
 /// Reads one message of a known type (opcode checked against the table).
@@ -58,6 +60,9 @@ fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessag
         }
         Some(CreateCharacter::NAME) => {
             CreateCharacter::decode(r).map(ClientMessage::CreateCharacter)
+        }
+        Some(RequestCharacterDetails::NAME) => {
+            RequestCharacterDetails::decode(r).map(ClientMessage::RequestCharacterDetails)
         }
         _ => Err(DecodeError::Invalid {
             offset: at,
@@ -112,6 +117,19 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 };
                 create_character(&server, &mut conn, account, create).await?;
             }
+            ClientMessage::RequestCharacterDetails(req) => {
+                if account.as_ref().map(|a| a.id) != Some(req.account_id) {
+                    warn!(account_id = req.account_id, "details for a foreign account");
+                    continue;
+                }
+                info!(index = req.index, "character details requested");
+                let details = CharacterDetails {
+                    account_id: req.account_id,
+                    index: req.index,
+                    ..Default::default()
+                };
+                conn.send(&server.protocol.login.encode(&details)?).await?;
+            }
         }
     }
 }
@@ -143,7 +161,7 @@ async fn authenticate(
         result: 0,
         account_name: account.name.clone(),
         session_token: [0; 32],
-        account_flags: [0; 2],
+        account_flags: server.config.accounts.flags,
         message: String::new(),
     };
     conn.send(&server.protocol.login.encode(&reply)?).await?;
@@ -171,8 +189,9 @@ fn league_list(server: &LoginServer) -> LeagueList {
                 time_d0: 0,
                 time_d8: 0,
                 time_c8: 0,
-                raw_e0: [0; 3],
-                flag_c0: l.hardcore as u8,
+                // +0xe0 bit 1: hardcore (red banner); +0xe2 bit 2 selects the banner variant.
+                raw_e0: [if l.hardcore { 0x02 } else { 0 }, 0, 0],
+                flag_c0: 0,
                 flag_c1: 0,
                 flag_c2: 0,
             })
@@ -187,9 +206,15 @@ async fn send_character_list(
     account_id: u32,
 ) -> anyhow::Result<()> {
     let characters = server.store.characters(account_id)?;
+    let entries = characters
+        .iter()
+        .map(|c| character_entry(server, c))
+        .collect::<anyhow::Result<_>>()?;
     let list = CharacterList {
         account_id,
-        characters: characters.iter().map(character_entry).collect(),
+        characters: entries,
+        // +0x29: character slot limit (select screen compares it with the count).
+        unk_29: server.config.accounts.max_characters,
         ..Default::default()
     };
     conn.send(&server.protocol.login.encode(&list)?).await?;
@@ -198,15 +223,21 @@ async fn send_character_list(
 
 /// Maps a stored character onto the list entry. Field placement is provisional
 /// (Documentation/protocol/login.md): +0x4e is the class (used for the 3D preview),
-/// +0x4c is assumed to be the level.
-fn character_entry(c: &Character) -> CharacterEntry {
-    CharacterEntry {
+/// +0x4c is assumed to be the level, +0x4a is the current area and +0x48 a fallback area
+/// (both WorldAreas.HASH16; select screen code at `0x140f02cef`).
+fn character_entry(server: &LoginServer, c: &Character) -> anyhow::Result<CharacterEntry> {
+    let area_hash = WorldArea::find(&server.data, &c.area)?
+        .map(|a| a.hash16)
+        .unwrap_or_default();
+    Ok(CharacterEntry {
         name: c.name.clone(),
         league: c.league.clone(),
         unk_4c: c.level.min(255) as u8,
         unk_4e: c.class_id as u8,
+        unk_4a: area_hash,
+        unk_48: area_hash,
         ..Default::default()
-    }
+    })
 }
 
 /// Why a creation request was refused (logged; the client error code is still provisional).
@@ -232,6 +263,10 @@ async fn create_character(
         Some(reason)
     } else if !server.config.leagues.iter().any(|l| l.id == req.league) {
         Some("unknown league")
+    } else if server.store.characters(account.id)?.len()
+        >= server.config.accounts.max_characters as usize
+    {
+        Some("character slots full")
     } else {
         None
     };
@@ -255,6 +290,8 @@ async fn create_character(
                 league: req.league.clone(),
                 class_id: start.class_id,
                 start_state: start.id.clone(),
+                level: start.level,
+                area: start.hub_area.clone().unwrap_or_default(),
             };
             let created = server.store.create_character(&new)?;
             match &created {

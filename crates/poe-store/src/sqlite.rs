@@ -8,6 +8,7 @@ use crate::{Account, Character, NewCharacter, Result, Store, StoreError};
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_accounts.sql"),
     include_str!("../migrations/0002_characters.sql"),
+    include_str!("../migrations/0003_character_area.sql"),
 ];
 
 pub struct SqliteStore {
@@ -62,11 +63,12 @@ fn character_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Character> {
         start_state: r.get(5)?,
         level: r.get(6)?,
         experience: r.get(7)?,
+        area: r.get(8)?,
     })
 }
 
 const CHARACTER_COLUMNS: &str =
-    "id, account_id, name, league, class_id, start_state, level, experience";
+    "id, account_id, name, league, class_id, start_state, level, experience, area";
 
 impl Store for SqliteStore {
     fn account_by_login_key(&self, login_key: &str) -> Result<Option<Account>> {
@@ -150,6 +152,8 @@ mod character_tests {
             league: "Standard".into(),
             class_id: 2,
             start_state: "DexFourDefault".into(),
+            level: 1,
+            area: "G1_1".into(),
         };
         let c = store.create_character(&new).unwrap().expect("created");
         assert_eq!(c.level, 1);

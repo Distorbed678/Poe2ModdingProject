@@ -38,7 +38,7 @@ Encodings: integers big-endian. `wstring` uses the compact per-character encodin
 | result | u16 | 0 = success; non-zero goes to the error path |
 | account_name | wstring | |
 | session_token | 32 bytes | kept with the account |
-| account_flags | 2 bytes | the client splits them into individual flag bits (meaning TBD) |
+| account_flags | 2 bytes | split into booleans in the account entry. **Byte 0:** bit 2 opens the terms-of-use window, bit 3 the cheating warning, bit 4 the RMT warning, bit 7 "update required" (`LoginState::AuthenticationResultHandler` `0x140ef5140`); keep these clear. Setting bits 0, 1, 5 and 6 of byte 0 plus bits 0 and 1 of byte 1 (`[0x63, 0x03]`, config `[accounts] flags`) removes the "Get Full Access" button; which single bit does it is TBD |
 | message | astring | passed to a message/URL routine; empty = none |
 
 ## Incoming packet factory
@@ -67,3 +67,36 @@ The client's login factory is `0x14214fa60` (opcode → class, then vtable slot 
 | 0x47 | `0x143509d20` | 0x30 |
 
 Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatcher is the switch at `0x1420e8193`, inside a function starting at `0x1420e8130`.
+
+## Login flow after authentication (verified 2026-10-12)
+| Step | Direction | Message | Notes |
+|---|---|---|---|
+| 1 | C→S | `0x0018` RequestCharacterList | `u32 account_id` |
+| 2 | S→C | `0x0015` CharacterList | must carry the same `account_id` (the client drops it otherwise) |
+| 3 | S→C | `0x001b` LeagueList | sent by our server right after the character list |
+| 4 | C→S | `0x0010` RequestCharacterDetails | `u32 account_id, u8 index`; sent automatically for the selected character |
+| 5 | S→C | `0x0011` CharacterDetails | same tail layout as the list; empty blob/pairs are accepted |
+| — | C→S | `0x0012` CreateCharacter | `astring name, astring league, u32 (1), u32, u32, wstring start_state, 32 bytes` |
+| — | S→C | `0x0016` CharacterCreated | `u32 account_id, u16 result (0 = ok), u16`; then a fresh CharacterList |
+
+### CharacterList entry fields (confirmed so far)
+| Field | Meaning |
+|---|---|
+| +0x4e (u8) | class: `Characters.IntegerId` (drives the 3D preview) |
+| +0x4a (u16) | current area: `WorldAreas.HASH16` (select screen `0x140f02cef`) |
+| +0x48 (u16) | fallback area: `WorldAreas.HASH16` |
+| +0x4c (u8) | assumed level |
+
+### CharacterList trailer
+| Field | Meaning |
+|---|---|
+| +0x29 (u8) | character slot limit. The select screen refuses creation when the count reaches it (`0x140f0d475`) |
+
+### LeagueEntry bitfield (+0xe0, 3 bytes)
+| Bit | Meaning |
+|---|---|
+| byte 0 bit 1 | hardcore (red banner, `0x140ecaed9`) |
+| byte 2 bit 2 | selects the "green" banner variant |
+| byte 1 bit 5 | tested by the select screen |
+
+The league label is still grey on the select screen (cosmetic, TBD).
