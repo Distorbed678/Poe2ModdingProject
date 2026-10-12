@@ -24,6 +24,11 @@ public_port = 6112
 [database]
 path = "data/server.sqlite"
 
+[accounts]
+# Accounts are created automatically on first login, keyed by the client's machine hash,
+# and named <name_prefix><id>.
+name_prefix = "Exile"
+
 [gateway]
 # Entry written into GameFiles/gateway_list.txt (replaces the official list while deployed).
 region = "Local"

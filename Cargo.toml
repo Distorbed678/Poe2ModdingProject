@@ -25,10 +25,13 @@ poe_data_tools = "4.0.1"
 salsa20 = "0.10"
 sha2 = "0.10"
 rand = "0.9"
+rusqlite = { version = "0.37", features = ["bundled"] }
+hex = "0.4"
 
 poe-config = { path = "crates/poe-config" }
 poe-net = { path = "crates/poe-net" }
 poe-proto = { path = "crates/poe-proto" }
+poe-store = { path = "crates/poe-store" }
 poe-data = { path = "crates/poe-data" }
 login-server = { path = "servers/login-server" }
 instance-server = { path = "servers/instance-server" }

@@ -1,12 +1,13 @@
 //! Byte codec for PoE messages.
 //!
-//! Conventions (from PoE1 research, to be confirmed per field for 0.5.5e; see
-//! `Documentation/protocol/framing.md`):
-//! - integers are big-endian,
-//! - `wstring`: u16 length in UTF-16 code units, then UTF-16LE data,
-//! - `astring`: u16 length in bytes, then raw bytes (ASCII),
-//! - compact integers: a 1–4 byte prefix-coded varint (leading 1-bits give the extra byte count);
-//!   the signed variant is added once its 0.5.5e encoding is confirmed.
+//! Conventions (see `Documentation/protocol/framing.md`):
+//! - integers are big-endian (confirmed: the client byte-swaps with htons/htonl),
+//! - `wstring` (0.5.5e, client reader `0x141cfb3c0`): u16 character count, then per
+//!   character either one byte `< 0x80` (ASCII), `0x80` + u16 LE (BMP code unit) or `0xc0` +
+//!   u32 LE (any code point),
+//! - `astring`: u16 length in bytes, then raw bytes,
+//! - compact integers: prefix-coded varints (leading 1-bits give the extra byte count), in
+//!   unsigned and signed (sign-extended) flavours.
 
 use thiserror::Error;
 
@@ -89,19 +90,25 @@ impl<'a> Reader<'a> {
 
     read_be!(u16: u16, u32: u32, u64: u64, i16: i16, i32: i32, i64: i64, f32: f32, f64: f64);
 
-    /// u16 length (UTF-16 code units) followed by UTF-16LE data.
+    /// Compact wide string: u16 count, then one entry per character (see module docs).
     pub fn wstring(&mut self) -> DecodeResult<String> {
-        let start = self.pos;
-        let len = self.u16()? as usize;
-        let raw = self.bytes(len * 2)?;
-        let units: Vec<u16> = raw
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
-        String::from_utf16(&units).map_err(|_| DecodeError::Invalid {
-            offset: start,
-            what: "utf-16 string",
-        })
+        let count = self.u16()? as usize;
+        let mut out = String::with_capacity(count);
+        for _ in 0..count {
+            let at = self.pos;
+            let invalid = DecodeError::Invalid {
+                offset: at,
+                what: "wstring character",
+            };
+            let c = match self.u8()? {
+                b @ 0..0x80 => b as u32,
+                0x80 => u16::from_le_bytes(self.array()?) as u32,
+                0xc0 => u32::from_le_bytes(self.array()?),
+                _ => return Err(invalid),
+            };
+            out.push(char::from_u32(c).ok_or(invalid)?);
+        }
+        Ok(out)
     }
 
     /// u16 byte length followed by raw (ASCII/UTF-8) bytes.
@@ -115,23 +122,37 @@ impl<'a> Reader<'a> {
         })
     }
 
-    /// Prefix-coded unsigned varint: `0xxxxxxx` (1 byte), `10xxxxxx` (2), `110xxxxx` (3),
-    /// `1110xxxx` (4), all big-endian.
+    /// Prefix-coded unsigned varint (client reader `0x1408719a0`): `0xxxxxxx` (7 bits),
+    /// `10xxxxxx` +1 byte (14), `110xxxxx` +2 (21), `1110xxxx` +3 (28), otherwise a prefix
+    /// byte followed by a full big-endian u32.
     pub fn varuint(&mut self) -> DecodeResult<u32> {
-        let start = self.pos;
         let first = self.u8()?;
-        let extra = first.leading_ones() as usize;
-        if extra > 3 {
-            return Err(DecodeError::Invalid {
-                offset: start,
-                what: "varint prefix",
-            });
+        let extra = first.leading_ones();
+        if extra >= 4 {
+            return self.u32();
         }
         let mut value = (first & (0x7f >> extra)) as u32;
-        for &b in self.bytes(extra)? {
+        for &b in self.bytes(extra as usize)? {
             value = (value << 8) | b as u32;
         }
         Ok(value)
+    }
+
+    /// Signed counterpart of [`Self::varuint`] (client reader `0x141cfbfe0`): same shapes, the
+    /// top payload bit is the sign.
+    pub fn varint(&mut self) -> DecodeResult<i32> {
+        let first = self.u8()?;
+        let extra = first.leading_ones();
+        if extra >= 4 {
+            return self.i32();
+        }
+        let mut value = (first & (0x7f >> extra)) as u32;
+        for &b in self.bytes(extra as usize)? {
+            value = (value << 8) | b as u32;
+        }
+        let bits = 7 + 7 * extra; // 7, 14, 21, 28 payload bits
+        let shift = 32 - bits;
+        Ok(((value << shift) as i32) >> shift)
     }
 }
 
@@ -198,10 +219,19 @@ impl Writer {
     write_be!(u16: u16, u32: u32, u64: u64, i16: i16, i32: i32, i64: i64, f32: f32, f64: f64);
 
     pub fn wstring(&mut self, s: &str) -> &mut Self {
-        let units: Vec<u16> = s.encode_utf16().collect();
-        self.u16(units.len() as u16);
-        for u in units {
-            self.buf.extend_from_slice(&u.to_le_bytes());
+        self.u16(s.chars().count() as u16);
+        for c in s.chars() {
+            match c as u32 {
+                c @ 0..0x80 => {
+                    self.u8(c as u8);
+                }
+                c @ 0x80..0x10000 => {
+                    self.u8(0x80).bytes(&(c as u16).to_le_bytes());
+                }
+                c => {
+                    self.u8(0xc0).bytes(&c.to_le_bytes());
+                }
+            }
         }
         self
     }
@@ -216,10 +246,25 @@ impl Writer {
             0..0x80 => self.u8(v as u8),
             0x80..0x4000 => self.u16(0x8000 | v as u16),
             0x4000..0x20_0000 => self.bytes(&[0xc0 | (v >> 16) as u8, (v >> 8) as u8, v as u8]),
-            _ => {
-                assert!(v < 0x1000_0000, "varuint out of range: {v}");
-                self.u32(0xe000_0000 | v)
-            }
+            0x20_0000..0x1000_0000 => self.u32(0xe000_0000 | v),
+            _ => self.u8(0xf0).u32(v),
+        }
+    }
+
+    pub fn varint(&mut self, v: i32) -> &mut Self {
+        let fits = |bits: u32| (-(1i64 << (bits - 1))..(1i64 << (bits - 1))).contains(&(v as i64));
+        let raw = v as u32;
+        if fits(7) {
+            self.u8((raw & 0x7f) as u8)
+        } else if fits(14) {
+            self.u16(0x8000 | (raw & 0x3fff) as u16)
+        } else if fits(21) {
+            let p = raw & 0x1f_ffff;
+            self.bytes(&[0xc0 | (p >> 16) as u8, (p >> 8) as u8, p as u8])
+        } else if fits(28) {
+            self.u32(0xe000_0000 | (raw & 0x0fff_ffff))
+        } else {
+            self.u8(0xf0).i32(v)
         }
     }
 }
@@ -242,19 +287,23 @@ mod tests {
     #[test]
     fn wstring_roundtrip() {
         let mut w = Writer::new();
-        w.wstring("Hëllo");
-        assert_eq!(&w.as_slice()[..4], &[0, 5, b'H', 0]);
-        assert_eq!(Reader::new(w.as_slice()).wstring().unwrap(), "Hëllo");
+        w.wstring("Hë😀");
+        // count 3: 'H' as one byte, 'ë' as 0x80 + u16 LE, the emoji as 0xc0 + u32 LE.
+        assert_eq!(
+            w.as_slice(),
+            &[0, 3, b'H', 0x80, 0xeb, 0x00, 0xc0, 0x00, 0xf6, 0x01, 0x00]
+        );
+        assert_eq!(Reader::new(w.as_slice()).wstring().unwrap(), "Hë😀");
     }
 
     #[test]
     fn incomplete_reports_missing_bytes() {
-        let mut r = Reader::new(&[0, 4, b'a', 0]);
+        let mut r = Reader::new(&[0, 4, b'a']);
         assert_eq!(
             r.wstring(),
             Err(DecodeError::Incomplete {
-                offset: 2,
-                needed: 6
+                offset: 3,
+                needed: 1
             })
         );
     }
@@ -271,10 +320,38 @@ mod tests {
             0x1f_ffff,
             0x20_0000,
             0x0fff_ffff,
+            u32::MAX,
         ] {
             let mut w = Writer::new();
             w.varuint(v);
             assert_eq!(Reader::new(w.as_slice()).varuint().unwrap(), v, "{v:#x}");
         }
+    }
+
+    #[test]
+    fn varint_roundtrip() {
+        for v in [
+            0,
+            1,
+            -1,
+            63,
+            -64,
+            64,
+            -65,
+            8191,
+            -8192,
+            1 << 20,
+            -(1 << 20),
+            1 << 27,
+            -(1 << 27),
+            i32::MAX,
+            i32::MIN,
+        ] {
+            let mut w = Writer::new();
+            w.varint(v);
+            assert_eq!(Reader::new(w.as_slice()).varint().unwrap(), v, "{v}");
+        }
+        // Client semantics: 0x7f is -1 in the one-byte form.
+        assert_eq!(Reader::new(&[0x7f]).varint().unwrap(), -1);
     }
 }

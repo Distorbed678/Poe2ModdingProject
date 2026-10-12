@@ -3,6 +3,7 @@ use std::sync::Arc;
 use login_server::LoginServer;
 use poe_config::Config;
 use poe_proto::Protocol;
+use poe_store::SqliteStore;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -14,9 +15,11 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(version = %config.game.version, "starting poe-server");
 
     let protocol = Arc::new(Protocol::load(&config.game.protocol_dir)?);
+    let store = Arc::new(SqliteStore::open(&config.database.path)?);
     let login = Arc::new(LoginServer {
         config: config.clone(),
         protocol: protocol.clone(),
+        store: store.clone(),
     });
 
     tokio::try_join!(login.run(), instance_server::run(config.clone()),)?;

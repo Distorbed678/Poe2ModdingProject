@@ -34,6 +34,7 @@ pub struct Config {
     pub login: LoginConfig,
     pub instance: InstanceConfig,
     pub database: DatabaseConfig,
+    pub accounts: AccountsConfig,
     pub gateway: GatewayConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
@@ -65,6 +66,11 @@ pub struct InstanceConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DatabaseConfig {
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountsConfig {
+    pub name_prefix: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
