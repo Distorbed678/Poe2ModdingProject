@@ -262,8 +262,9 @@ impl CharacterEntry {
 /// Character list (deserializer `0x14214e090`, client struct offsets in comments).
 #[derive(Debug, Clone, Default)]
 pub struct CharacterList {
-    /// +0x70
-    pub unk_70: u32,
+    /// Account the list belongs to; the client drops the list unless it matches a
+    /// logged-in account (handler `0x1420e8534`). Client +0x70.
+    pub account_id: u32,
     pub characters: Vec<CharacterEntry>,
     /// +0x28
     pub unk_28: u8,
@@ -287,7 +288,7 @@ impl Message for CharacterList {
     const NAME: &'static str = "CharacterList";
     const DIRECTION: Direction = Direction::Server;
     fn encode(&self, w: &mut Writer) {
-        w.u32(self.unk_70).u8(self.characters.len() as u8);
+        w.u32(self.account_id).u8(self.characters.len() as u8);
         for c in &self.characters {
             c.encode(w);
         }
@@ -304,7 +305,7 @@ impl Message for CharacterList {
         w.u32(self.unk_68).u32(self.unk_6c);
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
-        let unk_70 = r.u32()?;
+        let account_id = r.u32()?;
         let count = r.u8()?;
         let characters = (0..count)
             .map(|_| CharacterEntry::decode(r))
@@ -320,7 +321,7 @@ impl Message for CharacterList {
             .map(|_| Ok((r.u16()?, r.varint()?)))
             .collect::<Result<_, DecodeError>>()?;
         Ok(Self {
-            unk_70,
+            account_id,
             characters,
             unk_28,
             unk_29,
@@ -331,5 +332,198 @@ impl Message for CharacterList {
             unk_68: r.u32()?,
             unk_6c: r.u32()?,
         })
+    }
+}
+
+/// One league in [`LeagueList`] (entry reader `0x142716bd0`, 0xe8-byte client struct).
+/// Text fields must not be empty; meanings of the later fields are provisional.
+#[derive(Debug, Clone, Default)]
+pub struct LeagueEntry {
+    /// Internal id, e.g. "Standard" (client +0x10).
+    pub id: String,
+    /// Display name (client +0x40).
+    pub name: String,
+    /// client +0x60
+    pub text_60: String,
+    /// client +0x80
+    pub text_80: String,
+    /// client +0xa0
+    pub text_a0: String,
+    /// client +0xd0 (start time?)
+    pub time_d0: u64,
+    /// client +0xd8 (end time?)
+    pub time_d8: u64,
+    /// client +0xc8
+    pub time_c8: u64,
+    /// client +0xe0
+    pub raw_e0: [u8; 3],
+    /// client +0xc0
+    pub flag_c0: u8,
+    /// client +0xc1
+    pub flag_c1: u8,
+    /// client +0xc2
+    pub flag_c2: u8,
+}
+
+impl LeagueEntry {
+    fn encode(&self, w: &mut Writer) {
+        w.wstring(&self.id)
+            .wstring(&self.name)
+            .wstring(&self.text_60)
+            .wstring(&self.text_80)
+            .wstring(&self.text_a0)
+            // u64s are read raw by the client (no byte swap): little-endian.
+            .bytes(&self.time_d0.to_le_bytes())
+            .bytes(&self.time_d8.to_le_bytes())
+            .bytes(&self.time_c8.to_le_bytes())
+            .bytes(&self.raw_e0)
+            .u8(self.flag_c0)
+            .u8(self.flag_c1)
+            .u8(self.flag_c2);
+    }
+
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            id: r.wstring()?,
+            name: r.wstring()?,
+            text_60: r.wstring()?,
+            text_80: r.wstring()?,
+            text_a0: r.wstring()?,
+            time_d0: u64::from_le_bytes(r.array()?),
+            time_d8: u64::from_le_bytes(r.array()?),
+            time_c8: u64::from_le_bytes(r.array()?),
+            raw_e0: r.array()?,
+            flag_c0: r.u8()?,
+            flag_c1: r.u8()?,
+            flag_c2: r.u8()?,
+        })
+    }
+}
+
+/// League list (deserializer `0x14214f070`, handler `0x1420e918e`).
+#[derive(Debug, Clone, Default)]
+pub struct LeagueList {
+    /// Server time in seconds since the Unix epoch; the client stores the offset to its clock.
+    pub server_time: u64,
+    pub leagues: Vec<LeagueEntry>,
+    /// Bit 0: stored in the login session (meaning TBD). Bit 1: append to the existing
+    /// list instead of replacing it.
+    pub flags: u8,
+}
+
+impl Message for LeagueList {
+    const NAME: &'static str = "LeagueList";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        // The client reads the u64 raw (no byte swap): send it little-endian.
+        w.bytes(&self.server_time.to_le_bytes())
+            .u32(self.leagues.len() as u32);
+        for l in &self.leagues {
+            l.encode(w);
+        }
+        w.u8(self.flags);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let server_time = u64::from_le_bytes(r.array()?);
+        let count = r.u32()?;
+        let leagues = (0..count)
+            .map(|_| LeagueEntry::decode(r))
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            server_time,
+            leagues,
+            flags: r.u8()?,
+        })
+    }
+}
+
+/// Create a character (client serializer `0x1420e4b40`, built in `0x1420e9b60`).
+#[derive(Debug, Clone)]
+pub struct CreateCharacter {
+    pub name: String,
+    pub league: String,
+    /// Client +0x50 (observed 1; meaning TBD).
+    pub unk_50: u32,
+    /// Client +0x54.
+    pub unk_54: u32,
+    /// Client +0x58.
+    pub unk_58: u32,
+    /// `CharacterStartStates.Id`, e.g. "DexFourDefault".
+    pub start_state: String,
+    /// Client +0x5c: hash of an optional input (zero when unused).
+    pub hash: [u8; 32],
+}
+
+impl Message for CreateCharacter {
+    const NAME: &'static str = "CreateCharacter";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.astring(&self.name)
+            .astring(&self.league)
+            .u32(self.unk_50)
+            .u32(self.unk_54)
+            .u32(self.unk_58)
+            .wstring(&self.start_state)
+            .bytes(&self.hash);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            name: r.astring()?,
+            league: r.astring()?,
+            unk_50: r.u32()?,
+            unk_54: r.u32()?,
+            unk_58: r.u32()?,
+            start_state: r.wstring()?,
+            hash: r.array()?,
+        })
+    }
+}
+
+/// Character creation result (deserializer `0x14214dd00`, handler `0x1420e8da6`, which
+/// forwards all three fields to its listeners). Provisional: the meaning of the fields is
+/// inferred, see `Documentation/protocol/login.md`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CharacterCreated {
+    pub account_id: u32,
+    /// 0 = success.
+    pub result: u16,
+    pub unk_16: u16,
+}
+
+impl Message for CharacterCreated {
+    const NAME: &'static str = "CharacterCreated";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u32(self.account_id).u16(self.result).u16(self.unk_16);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            account_id: r.u32()?,
+            result: r.u16()?,
+            unk_16: r.u16()?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod create_tests {
+    use super::*;
+
+    #[test]
+    fn create_character_matches_capture() {
+        // Captured 2026-10-12 (Ranger "test" in Standard).
+        let mut bytes = vec![0x00, 0x04];
+        bytes.extend_from_slice(b"test");
+        bytes.extend_from_slice(&[0x00, 0x08]);
+        bytes.extend_from_slice(b"Standard");
+        bytes.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x0e]);
+        bytes.extend_from_slice(b"DexFourDefault");
+        bytes.extend_from_slice(&[0; 32]);
+        let mut r = Reader::new(&bytes);
+        let c = CreateCharacter::decode(&mut r).unwrap();
+        assert!(r.is_empty());
+        assert_eq!((c.name.as_str(), c.league.as_str()), ("test", "Standard"));
+        assert_eq!(c.start_state, "DexFourDefault");
+        assert_eq!(c.unk_50, 1);
     }
 }

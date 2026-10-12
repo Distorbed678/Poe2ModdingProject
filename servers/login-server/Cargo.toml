@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 poe-config.workspace = true
+poe-data.workspace = true
 poe-net.workspace = true
 poe-proto.workspace = true
 poe-store.workspace = true

@@ -7,9 +7,12 @@
 KeepAlive = 0x0001
 KeyExchange = 0x0002
 Authenticate = 0x0005
+CreateCharacter = 0x0012
 RequestCharacterList = 0x0018
 
 [server]
 KeyExchange = 0x0002
 AuthenticationResult = 0x0004
 CharacterList = 0x0015
+CharacterCreated = 0x0016
+LeagueList = 0x001b

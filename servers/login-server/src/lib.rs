@@ -8,6 +8,7 @@ mod session;
 use std::sync::Arc;
 
 use poe_config::Config;
+use poe_data::GameData;
 use poe_proto::Protocol;
 use poe_store::Store;
 use tokio::net::TcpListener;
@@ -18,6 +19,7 @@ pub struct LoginServer {
     pub config: Arc<Config>,
     pub protocol: Arc<Protocol>,
     pub store: Arc<dyn Store>,
+    pub data: Arc<GameData>,
 }
 
 impl LoginServer {
