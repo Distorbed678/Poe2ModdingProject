@@ -47,7 +47,6 @@ impl Module {
     }
 
     /// Finds all matches of an IDA-style pattern (`"48 8b ?? 05"`) in the image.
-    #[allow(dead_code)]
     pub fn scan(&self, pattern: &str) -> Vec<usize> {
         let pat = parse_pattern(pattern);
         if pat.is_empty() {
@@ -67,5 +66,24 @@ fn parse_pattern(pattern: &str) -> Vec<Option<u8>> {
     pattern
         .split_whitespace()
         .map(|t| u8::from_str_radix(t, 16).ok())
+        .collect()
+}
+
+/// Pointer-sized values on the current thread's stack from `rsp` upwards that point into
+/// `module`, converted to Ghidra addresses. Bounded by the thread's stack limits.
+pub fn stack_refs(module: &Module, rsp: usize, max: usize) -> Vec<usize> {
+    let (mut low, mut high) = (0usize, 0usize);
+    unsafe {
+        windows_sys::Win32::System::Threading::GetCurrentThreadStackLimits(&mut low, &mut high)
+    };
+    if rsp < low || rsp >= high {
+        return Vec::new();
+    }
+    (rsp..high)
+        .step_by(8)
+        .map(|slot| unsafe { (slot as *const usize).read() })
+        .filter(|&v| module.contains(v))
+        .take(max)
+        .map(|v| module.to_ghidra(v))
         .collect()
 }

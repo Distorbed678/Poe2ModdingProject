@@ -30,11 +30,21 @@ impl Default for LogConfig {
 #[serde(default)]
 pub struct FeatureConfig {
     pub crash_log: bool,
+    pub crypto_bypass: bool,
+    pub net_trace: bool,
+    pub net_trace_dump_bytes: usize,
+    pub block_external: bool,
 }
 
 impl Default for FeatureConfig {
     fn default() -> Self {
-        Self { crash_log: true }
+        Self {
+            crash_log: true,
+            crypto_bypass: true,
+            net_trace: false,
+            net_trace_dump_bytes: 256,
+            block_external: true,
+        }
     }
 }
 

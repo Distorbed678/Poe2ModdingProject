@@ -18,9 +18,12 @@ crate-type = ["cdylib"]
 log = { version = "0.4", features = ["std", "serde"] }
 ilhook = "2"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 toml = "0.9"
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_System_IO",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Kernel",
     "Win32_System_LibraryLoader",

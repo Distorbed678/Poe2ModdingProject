@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use login_server::LoginServer;
 use poe_config::Config;
+use poe_proto::Protocol;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -11,9 +13,12 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     tracing::info!(version = %config.game.version, "starting poe-server");
 
-    tokio::try_join!(
-        login_server::run(config.clone()),
-        instance_server::run(config.clone()),
-    )?;
+    let protocol = Arc::new(Protocol::load(&config.game.protocol_dir)?);
+    let login = Arc::new(LoginServer {
+        config: config.clone(),
+        protocol: protocol.clone(),
+    });
+
+    tokio::try_join!(login.run(), instance_server::run(config.clone()),)?;
     Ok(())
 }

@@ -1,0 +1,9 @@
+# Login protocol opcodes for client 0.5.5e (u16, big-endian on the wire).
+# [client] = messages the client sends, [server] = messages the server sends.
+# Layouts: Documentation/protocol/login.md
+
+[client]
+KeyExchange = 0x0002
+
+[server]
+KeyExchange = 0x0002

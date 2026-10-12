@@ -12,6 +12,6 @@ pub mod codec;
 pub mod conn;
 pub mod hexdump;
 
-pub use cipher::{Plain, StreamCipher};
+pub use cipher::{KeyMaterial, Plain, Salsa20Stream, StreamCipher};
 pub use codec::{DecodeError, Reader, Writer};
 pub use conn::Connection;

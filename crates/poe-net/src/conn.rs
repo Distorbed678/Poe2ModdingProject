@@ -13,7 +13,12 @@ use tokio::{
 };
 use tracing::trace;
 
-use crate::{Plain, cipher::StreamCipher, hexdump::hexdump};
+use crate::{
+    Plain,
+    cipher::StreamCipher,
+    codec::{DecodeError, Reader},
+    hexdump::hexdump,
+};
 
 pub struct Connection {
     stream: TcpStream,
@@ -66,6 +71,34 @@ impl Connection {
             trace!(peer = %self.peer, len = n, "recv\n{}", hexdump(&self.inbound[start..]));
         }
         Ok(n)
+    }
+
+    /// Decodes one message with `decode`, reading from the socket until it has enough bytes.
+    ///
+    /// `decode` must return [`DecodeError::Incomplete`] when the buffer ends early. Returns
+    /// `Ok(None)` if the peer closed the connection before a full message arrived.
+    pub async fn decode<T>(
+        &mut self,
+        mut decode: impl FnMut(&mut Reader<'_>) -> Result<T, DecodeError>,
+    ) -> std::io::Result<Option<T>> {
+        loop {
+            let mut reader = Reader::new(&self.inbound);
+            match decode(&mut reader) {
+                Ok(value) => {
+                    let used = reader.position();
+                    self.consume(used);
+                    return Ok(Some(value));
+                }
+                Err(DecodeError::Incomplete { .. }) => {
+                    if self.read_more().await? == 0 {
+                        return Ok(None);
+                    }
+                }
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                }
+            }
+        }
     }
 
     /// Encrypts (if a cipher is set) and writes a complete message.

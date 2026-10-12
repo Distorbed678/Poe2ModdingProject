@@ -8,3 +8,13 @@ level = "debug"
 [features]
 # Log access violations and other fatal exceptions with module-relative addresses.
 crash_log = true
+# Replace the login key exchange (signature check + DH) with SHA-512(server public key) so
+# the private server can derive the session keys. Required to log in to the private server.
+crypto_bypass = true
+# Log the process's send/recv/WSASend/WSARecv/connect calls with payload prefix and call
+# stack (Ghidra addresses). Research aid; data is ciphertext once encryption is active.
+net_trace = true
+net_trace_dump_bytes = 256
+# Refuse connections to non-loopback addresses (keeps the client away from official
+# services such as the shop, telemetry and crash upload while using the private server).
+block_external = true

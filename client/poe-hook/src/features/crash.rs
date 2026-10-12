@@ -74,16 +74,11 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
         context.R14,
         context.R15
     );
-    // Return addresses on the stack that point into the game: a cheap call-stack hint.
-    let rsp = context.Rsp as usize;
+    // Game-code addresses on the stack: a cheap call-stack hint.
     if let Some(m) = main {
-        let frames: Vec<String> = (0..256)
-            .filter_map(|i| {
-                let slot = rsp + i * 8;
-                let v = unsafe { (slot as *const usize).read_unaligned() };
-                m.contains(v).then(|| format!("{:#x}", m.to_ghidra(v)))
-            })
-            .take(16)
+        let frames: Vec<String> = crate::module::stack_refs(&m, context.Rsp as usize, 16)
+            .iter()
+            .map(|a| format!("{a:#x}"))
             .collect();
         msg += &format!("\n  stack refs: {}", frames.join(" "));
     }
