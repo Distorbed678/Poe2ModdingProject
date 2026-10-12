@@ -1,0 +1,12 @@
+# Modding
+
+Modding is a design goal from the start. This page records the hooks that already exist and those that are planned.
+
+## Server
+- **File overrides (exists):** `poe_data::GameFiles::push_override(dir)` puts a directory in front of Bundles2. A file at `<dir>/<virtual path>` (for example `data/balance/worldareas.datc64`) replaces the bundled one. Later overrides win.
+- **Hook bus (planned, `poe-mod-api`):** events for login, character creation, area enter/leave, tick, packet in/out and entity spawn. Mods subscribe to these events. Native Rust mods come first; a scripting runtime (Lua or WASM) is chosen later.
+- **Data-driven content:** server logic reads game tables by column name, so modified tables flow through without code changes.
+
+## Client
+- **Feature modules (exists):** `client/poe-hook/src/features/`. Each feature is toggled in `poe-hook.toml`.
+- **Planned:** a loose-file override hook so client mods can ship replacement assets (sharing the same `mods/<name>/` layout as the server), plus packet hooks for custom messages.

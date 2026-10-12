@@ -1,0 +1,42 @@
+# Server configuration. Paths are relative to the working directory (the repo root
+# when started with `cargo run`). Override the file location with POE_CONFIG=<path>.
+
+[game]
+version = "0.5.5e"
+# Provided copy of the client install; game data is read from <game_dir>/Bundles2.
+game_dir = "GameFiles"
+# Community .datc64 schema (Tools/fetch-tools.sh downloads it).
+schema = "Tools/dat-schema/schema-poe2.min.json"
+# Opcode tables for this client version.
+protocol_dir = "protocol/0.5.5e"
+
+[login]
+bind = "0.0.0.0:20481"
+# Host written into gateway_list.txt by `cargo xtask deploy-client`.
+public_host = "127.0.0.1"
+
+[instance]
+bind = "0.0.0.0:6112"
+# Host/port the login server tells the client to connect to.
+public_host = "127.0.0.1"
+public_port = 6112
+
+[database]
+path = "data/server.sqlite"
+
+[gateway]
+# Entry written into GameFiles/gateway_list.txt (replaces the official list while deployed).
+region = "Local"
+display_name = "Local Server"
+
+[logging]
+# tracing EnvFilter syntax; RUST_LOG overrides it.
+filter = "info,poe_net=debug"
+
+[[leagues]]
+id = "Standard"
+hardcore = false
+
+[[leagues]]
+id = "Hardcore"
+hardcore = true

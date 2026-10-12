@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "servers/*", "tools/xtask"]
+# The client DLL targets Windows and is built separately (cargo xtask build-dll).
+exclude = ["client/poe-hook"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4", features = ["derive"] }
+poe_data_tools = "4.0.1"
+
+poe-config = { path = "crates/poe-config" }
+poe-net = { path = "crates/poe-net" }
+poe-proto = { path = "crates/poe-proto" }
+poe-data = { path = "crates/poe-data" }
+login-server = { path = "servers/login-server" }
+instance-server = { path = "servers/instance-server" }

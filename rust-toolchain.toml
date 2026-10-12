@@ -1,0 +1,5 @@
+[toolchain]
+# poe_data_tools (bundle/dat access) requires nightly features (f16, trait_alias).
+channel = "nightly-2026-08-10"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]

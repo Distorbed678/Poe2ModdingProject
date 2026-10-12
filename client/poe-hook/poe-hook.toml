@@ -1,0 +1,10 @@
+# poe-hook configuration (deployed next to PathOfExileSteam.exe; edits there are kept
+# across redeploys). Log file: poe-hook.log next to the exe.
+
+[log]
+# error | warn | info | debug | trace
+level = "debug"
+
+[features]
+# Log access violations and other fatal exceptions with module-relative addresses.
+crash_log = true

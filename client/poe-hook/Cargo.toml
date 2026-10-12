@@ -1,0 +1,36 @@
+[package]
+name = "poe-hook"
+description = "Client-side hook DLL for the PoE2 client, loaded as a version.dll proxy"
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Built separately from the server workspace for x86_64-pc-windows-msvc:
+#   cargo xtask build-dll
+[workspace]
+
+[lib]
+name = "poe_hook"
+crate-type = ["cdylib"]
+
+[dependencies]
+log = { version = "0.4", features = ["std", "serde"] }
+ilhook = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
+
+[profile.release]
+panic = "abort"
+debug = 1

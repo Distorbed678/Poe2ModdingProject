@@ -1,0 +1,20 @@
+# Game data and RE databases (never committed)
+/GameFiles/
+/GhidraProject/
+
+# Build output
+/target/
+**/target/
+
+# Downloaded / generated tools (see Tools/README.md and Tools/fetch-tools.sh)
+/Tools/*
+!/Tools/README.md
+!/Tools/fetch-tools.sh
+
+# Runtime data
+/data/
+/captures/
+*.log
+*.sqlite
+*.sqlite-*
+*.db
