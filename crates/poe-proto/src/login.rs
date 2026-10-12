@@ -355,11 +355,12 @@ pub struct LeagueEntry {
     pub time_d8: u64,
     /// client +0xc8
     pub time_c8: u64,
-    /// client +0xe0
+    /// client +0xe0: bitfield. Byte 0 bit 1 = hardcore (red banner, `0x140ecaed9`);
+    /// byte 1 bit 5 and byte 2 bit 2 are also tested by the UI (meaning TBD).
     pub raw_e0: [u8; 3],
     /// client +0xc0
     pub flag_c0: u8,
-    /// client +0xc1
+    /// client +0xc1: league category id compared by the select screen (0x39 = none?).
     pub flag_c1: u8,
     /// client +0xc2
     pub flag_c2: u8,
@@ -525,5 +526,89 @@ mod create_tests {
         assert_eq!((c.name.as_str(), c.league.as_str()), ("test", "Standard"));
         assert_eq!(c.start_state, "DexFourDefault");
         assert_eq!(c.unk_50, 1);
+    }
+}
+
+/// Sent by the client for the selected character on the select screen (account id +
+/// list index); answered with [`CharacterDetails`].
+#[derive(Debug, Clone, Copy)]
+pub struct RequestCharacterDetails {
+    pub account_id: u32,
+    pub index: u8,
+}
+
+impl Message for RequestCharacterDetails {
+    const NAME: &'static str = "RequestCharacterDetails";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u32(self.account_id).u8(self.index);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            account_id: r.u32()?,
+            index: r.u8()?,
+        })
+    }
+}
+
+/// Details of one character (deserializer `0x14214e650`). Same trailing layout as
+/// [`CharacterList`]; the blob and pairs probably carry equipment/appearance (TBD).
+#[derive(Debug, Clone, Default)]
+pub struct CharacterDetails {
+    /// Client +0x48
+    pub account_id: u32,
+    /// Client +0x4c
+    pub index: u8,
+    /// Client +0x4e
+    pub unk_4e: u16,
+    /// Client +0x50
+    pub unk_50: u16,
+    /// Client +0x10: u16-length byte blob.
+    pub blob_10: Vec<u8>,
+    /// Client +0x28: (u16 key, signed varint value) pairs.
+    pub pairs_28: Vec<(u16, i32)>,
+    /// Client +0x54
+    pub unk_54: u32,
+    /// Client +0x58
+    pub unk_58: u32,
+}
+
+impl Message for CharacterDetails {
+    const NAME: &'static str = "CharacterDetails";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u32(self.account_id)
+            .u8(self.index)
+            .u16(self.unk_4e)
+            .u16(self.unk_50)
+            .u16(self.blob_10.len() as u16)
+            .bytes(&self.blob_10)
+            .varuint(self.pairs_28.len() as u32);
+        for &(k, v) in &self.pairs_28 {
+            w.u16(k).varint(v);
+        }
+        w.u32(self.unk_54).u32(self.unk_58);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let account_id = r.u32()?;
+        let index = r.u8()?;
+        let unk_4e = r.u16()?;
+        let unk_50 = r.u16()?;
+        let blob_len = r.u16()? as usize;
+        let blob_10 = r.bytes(blob_len)?.to_vec();
+        let pairs = r.varuint()?;
+        let pairs_28 = (0..pairs)
+            .map(|_| Ok((r.u16()?, r.varint()?)))
+            .collect::<Result<_, DecodeError>>()?;
+        Ok(Self {
+            account_id,
+            index,
+            unk_4e,
+            unk_50,
+            blob_10,
+            pairs_28,
+            unk_54: r.u32()?,
+            unk_58: r.u32()?,
+        })
     }
 }

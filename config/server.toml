@@ -28,6 +28,12 @@ path = "data/server.sqlite"
 # Accounts are created automatically on first login, keyed by the client's machine hash,
 # and named <name_prefix><id>.
 name_prefix = "Exile"
+# Character slots per account (sent to the client and enforced on creation).
+max_characters = 24
+# Two account flag bytes sent with the authentication result; the client splits them into
+# bits (Documentation/protocol/login.md). Byte 0 bits 2/3/4/7 open the terms-of-use window,
+# the cheating warning, the RMT warning and "update required" respectively: keep them clear.
+flags = [0x63, 0x03]
 
 [gateway]
 # Entry written into GameFiles/gateway_list.txt (replaces the official list while deployed).
