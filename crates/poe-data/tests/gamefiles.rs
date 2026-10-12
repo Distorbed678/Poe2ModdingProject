@@ -45,3 +45,15 @@ fn finds_first_area() {
     );
     assert_eq!(row.int("Act").unwrap(), 1);
 }
+
+#[test]
+fn resolves_start_state() {
+    let Some(data) = open() else { return };
+    let s = poe_data::views::StartState::find(&data, "DexFourDefault")
+        .unwrap()
+        .expect("DexFourDefault exists");
+    assert_eq!(
+        (s.class_id, s.class_name.as_str(), s.level),
+        (2, "Ranger", 1)
+    );
+}

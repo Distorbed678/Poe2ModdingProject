@@ -9,6 +9,7 @@ mod dat;
 mod error;
 mod files;
 mod schema;
+pub mod views;
 
 pub use dat::{Row, Table, Value};
 pub use error::{DataError, Result};

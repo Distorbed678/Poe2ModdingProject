@@ -1,6 +1,9 @@
 //! Virtual file system: override directories layered over the client's `Bundles2`.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use bytes::Bytes;
 use poe_data_tools::fs::{FS, FileSystem};
@@ -11,8 +14,9 @@ use crate::{DataError, Result};
 ///
 /// Paths are case-insensitive (the bundle index stores them lowercased). Override
 /// directories are searched first, newest first, which is how server mods replace files.
+/// The bundle reader keeps per-file state internally, so it sits behind a mutex.
 pub struct GameFiles {
-    bundles: FS,
+    bundles: Mutex<FS>,
     overrides: Vec<PathBuf>,
 }
 
@@ -23,7 +27,7 @@ impl GameFiles {
             message: e.to_string(),
         })?;
         Ok(Self {
-            bundles,
+            bundles: Mutex::new(bundles),
             overrides: Vec::new(),
         })
     }
@@ -47,7 +51,7 @@ impl GameFiles {
                     });
             }
         }
-        self.bundles.read(&path).map_err(|e| {
+        self.bundles.lock().unwrap().read(&path).map_err(|e| {
             let message = e.to_string();
             if message.to_ascii_lowercase().contains("not found") {
                 DataError::FileNotFound(path.clone())
@@ -58,8 +62,8 @@ impl GameFiles {
     }
 
     /// All virtual paths in the bundle index (overrides are not listed).
-    pub fn list(&self) -> impl Iterator<Item = String> + '_ {
-        self.bundles.list()
+    pub fn list(&self) -> Vec<String> {
+        self.bundles.lock().unwrap().list().collect()
     }
 }
 

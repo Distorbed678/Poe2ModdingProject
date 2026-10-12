@@ -2,10 +2,13 @@ use std::{path::Path, sync::Mutex};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::{Account, Result, Store, StoreError};
+use crate::{Account, Character, NewCharacter, Result, Store, StoreError};
 
 /// Ordered schema migrations; `user_version` records how many were applied.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_accounts.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_accounts.sql"),
+    include_str!("../migrations/0002_characters.sql"),
+];
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
@@ -49,6 +52,22 @@ fn account_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
     })
 }
 
+fn character_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Character> {
+    Ok(Character {
+        id: r.get(0)?,
+        account_id: r.get(1)?,
+        name: r.get(2)?,
+        league: r.get(3)?,
+        class_id: r.get(4)?,
+        start_state: r.get(5)?,
+        level: r.get(6)?,
+        experience: r.get(7)?,
+    })
+}
+
+const CHARACTER_COLUMNS: &str =
+    "id, account_id, name, league, class_id, start_state, level, experience";
+
 impl Store for SqliteStore {
     fn account_by_login_key(&self, login_key: &str) -> Result<Option<Account>> {
         let conn = self.conn.lock().unwrap();
@@ -81,6 +100,66 @@ impl Store for SqliteStore {
             login_key: login_key.to_owned(),
             name,
         })
+    }
+
+    fn characters(&self, account_id: u32) -> Result<Vec<Character>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CHARACTER_COLUMNS} FROM characters WHERE account_id = ?1 ORDER BY id"
+        ))?;
+        let rows = stmt.query_map(params![account_id], character_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>> {
+        let conn = self.conn.lock().unwrap();
+        let inserted = conn.execute(
+            "INSERT INTO characters (account_id, name, league, class_id, start_state)
+             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(name) DO NOTHING",
+            params![
+                new.account_id,
+                new.name,
+                new.league,
+                new.class_id,
+                new.start_state
+            ],
+        )?;
+        if inserted == 0 {
+            return Ok(None);
+        }
+        let id = conn.last_insert_rowid();
+        Ok(Some(conn.query_row(
+            &format!("SELECT {CHARACTER_COLUMNS} FROM characters WHERE id = ?1"),
+            params![id],
+            character_from_row,
+        )?))
+    }
+}
+
+#[cfg(test)]
+mod character_tests {
+    use super::*;
+
+    #[test]
+    fn creates_and_lists_characters() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store.create_account("k", "Exile").unwrap();
+        let new = NewCharacter {
+            account_id: a.id,
+            name: "Tester".into(),
+            league: "Standard".into(),
+            class_id: 2,
+            start_state: "DexFourDefault".into(),
+        };
+        let c = store.create_character(&new).unwrap().expect("created");
+        assert_eq!(c.level, 1);
+        // Names are unique, case-insensitively.
+        let dup = NewCharacter {
+            name: "tester".into(),
+            ..new
+        };
+        assert!(store.create_character(&dup).unwrap().is_none());
+        assert_eq!(store.characters(a.id).unwrap(), vec![c]);
     }
 }
 
