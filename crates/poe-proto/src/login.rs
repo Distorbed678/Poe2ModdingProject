@@ -612,3 +612,96 @@ impl Message for CharacterDetails {
         })
     }
 }
+
+/// "Play" on the character select screen (client serializer `0x1420e4660`). One entry per
+/// local player (split-screen on consoles): `(character index, account id)`.
+#[derive(Debug, Clone, Default)]
+pub struct PlayCharacter {
+    /// Bit 0..6 from client +0x10, bit 7 from client +0x11 (meaning TBD).
+    pub flags: u8,
+    pub selections: Vec<(u32, u32)>,
+}
+
+impl Message for PlayCharacter {
+    const NAME: &'static str = "PlayCharacter";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.flags).varuint(self.selections.len() as u32);
+        for &(index, account) in &self.selections {
+            w.u32(index).u32(account);
+        }
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let flags = r.u8()?;
+        let count = r.varuint()?;
+        let selections = (0..count)
+            .map(|_| Ok((r.u32()?, r.u32()?)))
+            .collect::<Result<_, DecodeError>>()?;
+        Ok(Self { flags, selections })
+    }
+}
+
+/// Hand-off to an instance server (deserializer `0x14214ece0`, handler `0x1420e8ef8`,
+/// connect `0x14211dbb0`).
+#[derive(Debug, Clone)]
+pub struct InstanceDetails {
+    /// Host the client connects to (client +0x10).
+    pub host: String,
+    /// TCP port (client +0x38).
+    pub port: u16,
+    /// Client +0x30 (provisional: ticket).
+    pub unk_30: u32,
+    /// Target area, `WorldAreas.HASH16` (client +0x3a; looked up, the hand-off fails if
+    /// unknown).
+    pub area_hash: u16,
+    /// Client +0x34.
+    pub unk_34: u32,
+    /// 64 bytes of stream key material for the instance connection (client +0x3c).
+    pub keys: [u8; 64],
+    /// Client +0x7c.
+    pub unk_7c: [u8; 8],
+    /// Client +0x84.
+    pub unk_84: u8,
+}
+
+impl Message for InstanceDetails {
+    const NAME: &'static str = "InstanceDetails";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.astring(&self.host)
+            .u16(self.port)
+            .u32(self.unk_30)
+            .u16(self.area_hash)
+            .u32(self.unk_34)
+            .bytes(&self.keys)
+            .bytes(&self.unk_7c)
+            .u8(self.unk_84);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            host: r.astring()?,
+            port: r.u16()?,
+            unk_30: r.u32()?,
+            area_hash: r.u16()?,
+            unk_34: r.u32()?,
+            keys: r.array()?,
+            unk_7c: r.array()?,
+            unk_84: r.u8()?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod play_tests {
+    use super::*;
+
+    #[test]
+    fn play_character_matches_capture() {
+        // Captured 2026-10-12: index 0, account 1.
+        let bytes = [0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 1];
+        let mut r = Reader::new(&bytes);
+        let p = PlayCharacter::decode(&mut r).unwrap();
+        assert!(r.is_empty());
+        assert_eq!(p.selections, vec![(0, 1)]);
+    }
+}

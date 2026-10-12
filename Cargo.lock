@@ -1170,6 +1170,7 @@ name = "instance-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "poe-cluster",
  "poe-config",
  "poe-net",
  "tokio",
@@ -1345,6 +1346,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
+ "poe-cluster",
  "poe-config",
  "poe-data",
  "poe-net",
@@ -1630,6 +1632,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "poe-cluster"
+version = "0.1.0"
+dependencies = [
+ "rand 0.9.5",
+]
+
+[[package]]
 name = "poe-config"
 version = "0.1.0"
 dependencies = [
@@ -1679,6 +1688,7 @@ dependencies = [
  "anyhow",
  "instance-server",
  "login-server",
+ "poe-cluster",
  "poe-config",
  "poe-data",
  "poe-proto",

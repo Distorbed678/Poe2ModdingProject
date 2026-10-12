@@ -34,3 +34,18 @@ Open items:
 - The league label is grey on the select screen.
 - The meaning of the remaining entry fields.
 - Error codes for refused character creation.
+
+## M2: status and next steps (paused 2026-10-12)
+Implemented, **not yet tested live**:
+1. `PlayCharacter` (C→S `0x0e`: `u8 flags, varuint n, (u32 char_index, u32 account_id)[n]`) triggers a ticket from `poe-cluster::MemoryTickets` (60 s, single use, 64-byte random keys).
+2. The server then sends `InstanceDetails` (S→C `0x14`):
+   - `astring host, u16 port, u32 (ticket), u16 area HASH16, u32, 64-byte keys, 8 bytes, u8`;
+   - host and port come from `[instance] public_host/public_port`, the area from the character's `area`.
+3. The instance server (port 6112) logs the client's first bytes raw, and decrypted with each pending ticket's client→server keys.
+
+To resume:
+- Run `cargo run -p poe-server` and `cargo xtask run-client`, log in, click Play on a character.
+- Check the server log for the instance connection and its first message (data/server-run.log).
+- Then reverse engineer the client's first instance message and the server's area/entity messages:
+  - The instance packet factories still need to be found. `tools/re/find_opcode_stores.py` shows clusters at 0x14215xxxx–0x14218xxxx.
+  - Look for "Generating level N area" in `GameFiles/logs/Client.txt`.

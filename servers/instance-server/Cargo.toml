@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+poe-cluster.workspace = true
 poe-config.workspace = true
 poe-net.workspace = true
 tokio.workspace = true

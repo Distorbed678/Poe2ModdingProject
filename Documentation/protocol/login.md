@@ -100,3 +100,11 @@ Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatc
 | byte 1 bit 5 | tested by the select screen |
 
 The league label is still grey on the select screen (cosmetic, TBD).
+
+## Hand-off to the instance server
+| Message | Layout |
+|---|---|
+| C→S `0x0e` PlayCharacter | `u8 flags, varuint count, (u32 character_index, u32 account_id)[count]` (one entry per local split-screen player) |
+| S→C `0x14` InstanceDetails | `astring host, u16 port (+0x38), u32 (+0x30), u16 area HASH16 (+0x3a, must exist in WorldAreas), u32 (+0x34), 64-byte key material (+0x3c), 8 bytes (+0x7c), u8 (+0x84)` |
+
+Evidence: deserializer `0x14214ece0`; handler `0x1420e8ef8`; the instance connect (`0x14211dbb0`) logs host = the string and port = struct +0x80 (packet +0x38).
