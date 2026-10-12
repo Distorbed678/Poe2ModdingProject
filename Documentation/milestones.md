@@ -2,8 +2,8 @@
 
 | # | Goal | Status |
 |---|---|---|
-| M0 | Foundation: repo, tools, workspace, config, data access, client DLL proxy, deploy tooling | in progress |
-| M1 | Login → character select/creation, league selection | – |
+| M0 | Foundation: repo, tools, workspace, config, data access, client DLL proxy, deploy tooling | done |
+| M1 | Login → character select/creation, league selection | in progress |
 | M2 | Instance server transfer, first zone loads with the player | – |
 | M3 | Movement (WASD and click-to-move) | – |
 | M4 | Server-side terrain generation (reimplement the client generator) for collision | – |
@@ -19,4 +19,4 @@
 - [x] Login and instance listeners that hexdump incoming bytes
 - [x] `poe-hook` version.dll proxy with logging and a crash logger
 - [x] `cargo xtask build-dll / deploy-client / revert-client / run-client`
-- [ ] Verified: the client loads the DLL and connects to the local login server
+- [x] Verified 2026-10-12: the DLL loads under Proton, the client reads our gateway entry and connects to 127.0.0.1:20481, and the server logs the first message (see protocol/login.md)
