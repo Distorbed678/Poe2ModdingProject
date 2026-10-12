@@ -8,8 +8,8 @@ use poe_proto::{
     Direction, Message, Protocol,
     login::{
         Authenticate, AuthenticationResult, CharacterCreated, CharacterDetails, CharacterEntry,
-        CharacterList, CreateCharacter, KeepAlive, LeagueEntry, LeagueList,
-        RequestCharacterDetails, RequestCharacterList,
+        CharacterList, CreateCharacter, InstanceDetails, KeepAlive, LeagueEntry, LeagueList,
+        PlayCharacter, RequestCharacterDetails, RequestCharacterList,
     },
 };
 use poe_store::{Account, Character, NewCharacter};
@@ -25,6 +25,7 @@ enum ClientMessage {
     RequestCharacterList(RequestCharacterList),
     CreateCharacter(CreateCharacter),
     RequestCharacterDetails(RequestCharacterDetails),
+    PlayCharacter(PlayCharacter),
 }
 
 /// Reads one message of a known type (opcode checked against the table).
@@ -64,6 +65,7 @@ fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessag
         Some(RequestCharacterDetails::NAME) => {
             RequestCharacterDetails::decode(r).map(ClientMessage::RequestCharacterDetails)
         }
+        Some(PlayCharacter::NAME) => PlayCharacter::decode(r).map(ClientMessage::PlayCharacter),
         _ => Err(DecodeError::Invalid {
             offset: at,
             what: "unknown login opcode",
@@ -129,6 +131,13 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                     ..Default::default()
                 };
                 conn.send(&server.protocol.login.encode(&details)?).await?;
+            }
+            ClientMessage::PlayCharacter(play) => {
+                let Some(account) = &account else {
+                    warn!("play before authentication");
+                    continue;
+                };
+                play_character(&server, &mut conn, account, play).await?;
             }
         }
     }
@@ -310,5 +319,51 @@ async fn create_character(
     if created.is_some() {
         send_character_list(server, conn, account.id).await?;
     }
+    Ok(())
+}
+
+/// Hands the client off to the instance server for the selected character.
+async fn play_character(
+    server: &LoginServer,
+    conn: &mut Connection,
+    account: &Account,
+    play: PlayCharacter,
+) -> anyhow::Result<()> {
+    // Local split-screen players are not supported: use the first selection.
+    let Some(&(index, account_id)) = play.selections.first() else {
+        warn!("play without a selection");
+        return Ok(());
+    };
+    if account_id != account.id {
+        warn!(account_id, "play for a foreign account");
+        return Ok(());
+    }
+    let characters = server.store.characters(account.id)?;
+    let Some(character) = characters.get(index as usize) else {
+        warn!(index, "play: no such character");
+        return Ok(());
+    };
+    let Some(area) = WorldArea::find(&server.data, &character.area)? else {
+        warn!(area = %character.area, "play: character area not in game data");
+        return Ok(());
+    };
+    let ticket = server.tickets.issue(account.id, character.id, &area.id);
+    info!(
+        character = %character.name,
+        area = %area.id,
+        ticket = format_args!("{:#010x}", ticket.id),
+        "handing off to instance server"
+    );
+    let details = InstanceDetails {
+        host: server.config.instance.public_host.clone(),
+        port: server.config.instance.public_port,
+        unk_30: ticket.id,
+        area_hash: area.hash16,
+        unk_34: 0,
+        keys: ticket.keys,
+        unk_7c: [0; 8],
+        unk_84: 0,
+    };
+    conn.send(&server.protocol.login.encode(&details)?).await?;
     Ok(())
 }

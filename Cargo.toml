@@ -32,6 +32,7 @@ poe-config = { path = "crates/poe-config" }
 poe-net = { path = "crates/poe-net" }
 poe-proto = { path = "crates/poe-proto" }
 poe-store = { path = "crates/poe-store" }
+poe-cluster = { path = "crates/poe-cluster" }
 poe-data = { path = "crates/poe-data" }
 login-server = { path = "servers/login-server" }
 instance-server = { path = "servers/instance-server" }

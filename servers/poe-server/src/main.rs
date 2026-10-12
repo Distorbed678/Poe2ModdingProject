@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use login_server::LoginServer;
+use poe_cluster::MemoryTickets;
 use poe_config::Config;
 use poe_data::GameData;
 use poe_proto::Protocol;
@@ -17,6 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     let protocol = Arc::new(Protocol::load(&config.game.protocol_dir)?);
     let store = Arc::new(SqliteStore::open(&config.database.path)?);
+    let tickets = Arc::new(MemoryTickets::new(std::time::Duration::from_secs(60)));
     let data = Arc::new(GameData::open(&config.game.game_dir, &config.game.schema)?);
     tracing::info!(game_dir = %config.game.game_dir.display(), "game data opened");
     let login = Arc::new(LoginServer {
@@ -24,8 +26,12 @@ async fn main() -> anyhow::Result<()> {
         protocol: protocol.clone(),
         store: store.clone(),
         data: data.clone(),
+        tickets: tickets.clone(),
     });
 
-    tokio::try_join!(login.run(), instance_server::run(config.clone()),)?;
+    tokio::try_join!(
+        login.run(),
+        instance_server::run(config.clone(), tickets.clone())
+    )?;
     Ok(())
 }

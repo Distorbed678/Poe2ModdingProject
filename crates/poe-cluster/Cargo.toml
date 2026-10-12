@@ -1,0 +1,10 @@
+[package]
+name = "poe-cluster"
+description = "Coordination between login and instance servers: hand-off tickets, instance directory"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rand.workspace = true

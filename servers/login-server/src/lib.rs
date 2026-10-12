@@ -7,6 +7,7 @@ mod session;
 
 use std::sync::Arc;
 
+use poe_cluster::TicketRegistry;
 use poe_config::Config;
 use poe_data::GameData;
 use poe_proto::Protocol;
@@ -20,6 +21,7 @@ pub struct LoginServer {
     pub protocol: Arc<Protocol>,
     pub store: Arc<dyn Store>,
     pub data: Arc<GameData>,
+    pub tickets: Arc<dyn TicketRegistry>,
 }
 
 impl LoginServer {
