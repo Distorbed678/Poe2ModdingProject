@@ -29,9 +29,13 @@ async fn main() -> anyhow::Result<()> {
         tickets: tickets.clone(),
     });
 
-    tokio::try_join!(
-        login.run(),
-        instance_server::run(config.clone(), tickets.clone())
-    )?;
+    let instance = Arc::new(instance_server::InstanceServer {
+        config: config.clone(),
+        protocol: protocol.clone(),
+        tickets: tickets.clone(),
+        data: data.clone(),
+    });
+
+    tokio::try_join!(login.run(), instance.run())?;
     Ok(())
 }

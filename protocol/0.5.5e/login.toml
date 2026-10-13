@@ -11,6 +11,9 @@ PlayCharacter = 0x000e
 RequestCharacterDetails = 0x0010
 CreateCharacter = 0x0012
 RequestCharacterList = 0x0018
+# Sent instead of 0x18 after a previous session reached the instance hand-off (u32 account
+# id). Provisional: handled like RequestCharacterList.
+RequestCharacterListAlt = 0x0046
 
 [server]
 KeyExchange = 0x0002

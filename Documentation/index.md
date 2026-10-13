@@ -12,6 +12,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 | [client-dll.md](client-dll.md) | The `poe-hook` (version.dll) client DLL: features and config |
 | [protocol/framing.md](protocol/framing.md) | Wire format: encodings, framing, encryption |
 | [protocol/login.md](protocol/login.md) | Login protocol messages |
+| [protocol/instance.md](protocol/instance.md) | Instance protocol: opening sequence, area info |
 | [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the DLL bypass |
 | [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Reverse-engineering findings (Ghidra addresses) for 0.5.5e |
 | [research/poe1-prior-art.md](research/poe1-prior-art.md) | What public PoE1 research says about the protocol |

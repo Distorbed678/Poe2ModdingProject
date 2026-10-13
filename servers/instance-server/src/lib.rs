@@ -1,60 +1,135 @@
 //! Instance server: hosts areas. The login server hands clients over with a ticket;
 //! the instance server validates it, sends the area and runs the simulation.
+//!
+//! Connection opening (Documentation/protocol/instance.md):
+//! 1. client `Hello` (plaintext) carrying the hand-off ticket,
+//! 2. server `EnableEncryption` (plaintext), then both directions switch to Salsa20 with the
+//!    ticket's key material,
+//! 3. server `AreaInfo` (area + seed): the client generates the terrain and loads the area.
 
 use std::sync::Arc;
 
-use poe_cluster::TicketRegistry;
+use poe_cluster::{Ticket, TicketRegistry};
 use poe_config::Config;
-use poe_net::{Connection, KeyMaterial, StreamCipher, hexdump::hexdump};
-use tokio::net::TcpListener;
+use poe_data::{GameData, views::WorldArea};
+use poe_net::{Connection, DecodeError, KeyMaterial, hexdump::hexdump};
+use poe_proto::{
+    Message, Protocol,
+    instance::{AreaInfo, EnableEncryption, Hello},
+};
+use rand::RngCore;
+use tokio::net::{TcpListener, TcpStream};
 use tracing::{Instrument, info, warn};
 
-pub async fn run(config: Arc<Config>, tickets: Arc<dyn TicketRegistry>) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(config.instance.bind).await?;
-    info!(addr = %config.instance.bind, "instance server listening");
-    loop {
-        let (stream, peer) = listener.accept().await?;
-        let span = tracing::info_span!("instance", %peer);
-        let tickets = tickets.clone();
-        tokio::spawn(
-            async move {
-                if let Err(e) = handle(stream, tickets).await {
-                    warn!("connection error: {e:#}");
-                }
-            }
-            .instrument(span),
-        );
-    }
+/// State shared by all instance connections.
+pub struct InstanceServer {
+    pub config: Arc<Config>,
+    pub protocol: Arc<Protocol>,
+    pub tickets: Arc<dyn TicketRegistry>,
+    pub data: Arc<GameData>,
 }
 
-async fn handle(
-    stream: tokio::net::TcpStream,
-    tickets: Arc<dyn TicketRegistry>,
-) -> anyhow::Result<()> {
-    let mut conn = Connection::new(stream)?;
-    info!("client connected");
-    // Protocol not implemented yet: log what the client sends, raw and decrypted with the
-    // keys of each pending hand-off ticket (to learn how the instance stream starts).
-    let mut first = true;
-    loop {
-        if conn.read_more().await? == 0 {
-            info!("client disconnected");
+impl InstanceServer {
+    pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
+        let listener = TcpListener::bind(self.config.instance.bind).await?;
+        info!(addr = %self.config.instance.bind, "instance server listening");
+        loop {
+            let (stream, peer) = listener.accept().await?;
+            let span = tracing::info_span!("instance", %peer);
+            let server = self.clone();
+            tokio::spawn(
+                async move {
+                    if let Err(e) = server.handle(stream).await {
+                        warn!("connection error: {e:#}");
+                    }
+                }
+                .instrument(span),
+            );
+        }
+    }
+
+    async fn handle(&self, stream: TcpStream) -> anyhow::Result<()> {
+        let mut conn = Connection::new(stream)?;
+        info!("client connected");
+        let hello_op = self.protocol.instance.id(Hello::DIRECTION, Hello::NAME)?;
+        let Some(hello) = conn
+            .decode(|r| {
+                let at = r.position();
+                if r.u16()? != hello_op {
+                    return Err(DecodeError::Invalid {
+                        offset: at,
+                        what: "expected Hello",
+                    });
+                }
+                Hello::decode(r)
+            })
+            .await?
+        else {
             return Ok(());
-        }
-        let data = conn.buffer().to_vec();
-        info!(len = data.len(), "received (raw)\n{}", hexdump(&data));
-        if first {
-            for ticket in tickets.pending() {
-                let mut copy = data.clone();
-                KeyMaterial(ticket.keys).client_to_server().apply(&mut copy);
-                info!(
-                    ticket = format_args!("{:#010x}", ticket.id),
-                    "decrypted with ticket keys\n{}",
-                    hexdump(&copy)
-                );
+        };
+        let Some(ticket) = self.tickets.redeem(hello.ticket) else {
+            warn!(
+                ticket = format_args!("{:#010x}", hello.ticket),
+                "unknown or expired ticket"
+            );
+            return Ok(());
+        };
+        info!(
+            ticket = format_args!("{:#010x}", ticket.id),
+            account = ticket.account_id,
+            character = ticket.character_id,
+            area = %ticket.area,
+            "ticket redeemed"
+        );
+
+        conn.send(
+            &self
+                .protocol
+                .instance
+                .encode(&EnableEncryption::default())?,
+        )
+        .await?;
+        let keys = KeyMaterial(ticket.keys);
+        conn.set_ciphers(
+            Box::new(keys.client_to_server()),
+            Box::new(keys.server_to_client()),
+        );
+
+        self.send_area(&mut conn, &ticket).await?;
+
+        // Not decoded yet: log the client's decrypted messages.
+        loop {
+            if conn.buffer().is_empty() && conn.read_more().await? == 0 {
+                info!("client disconnected");
+                return Ok(());
             }
-            first = false;
+            info!(
+                len = conn.buffer().len(),
+                "received\n{}",
+                hexdump(conn.buffer())
+            );
+            let n = conn.buffer().len();
+            conn.consume(n);
         }
-        conn.consume(data.len());
+    }
+
+    async fn send_area(&self, conn: &mut Connection, ticket: &Ticket) -> anyhow::Result<()> {
+        let Some(area) = WorldArea::find(&self.data, &ticket.area)? else {
+            anyhow::bail!("ticket area {} not in game data", ticket.area);
+        };
+        let (instance_id, seed) = {
+            let mut rng = rand::rng();
+            (rng.next_u32(), rng.next_u32())
+        };
+        let msg = AreaInfo {
+            instance_id,
+            area_hash: area.hash16,
+            text_38: String::new(),
+            seed,
+            ..Default::default()
+        };
+        info!(area = %area.id, seed = msg.seed, instance = msg.instance_id, "sending area");
+        conn.send(&self.protocol.instance.encode(&msg)?).await?;
+        Ok(())
     }
 }

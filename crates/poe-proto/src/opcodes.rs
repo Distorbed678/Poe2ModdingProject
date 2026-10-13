@@ -134,13 +134,15 @@ impl OpcodeTable {
 #[derive(Debug)]
 pub struct Protocol {
     pub login: OpcodeTable,
+    pub instance: OpcodeTable,
 }
 
 impl Protocol {
-    /// Loads `<dir>/login.toml` (more channels are added as they are reverse engineered).
+    /// Loads `<dir>/login.toml` and `<dir>/instance.toml`.
     pub fn load(dir: &Path) -> Result<Self, ProtocolError> {
         Ok(Self {
             login: load_table(dir, "login")?,
+            instance: load_table(dir, "instance")?,
         })
     }
 }
