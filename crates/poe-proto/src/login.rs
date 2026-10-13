@@ -118,13 +118,16 @@ pub struct AuthenticationResult {
     pub account_id: u32,
     /// 0 = success; anything else is shown as an error.
     pub result: u16,
-    pub account_name: String,
+    /// Notice shown in a popup after login when non-empty (+0x38; language-tagged sections
+    /// are supported by the client). This slot used to carry the account name, which is why
+    /// a popup with the name appeared after every login.
+    pub notice: String,
     /// Opaque 32 bytes stored with the logged-in account.
     pub session_token: [u8; 32],
     /// Two bytes of account flags; the client splits them into individual bits.
     pub account_flags: [u8; 2],
-    /// Free-form string passed to the client's message/URL handling (empty = none).
-    pub message: String,
+    /// Account name (+0x68), kept by the login session.
+    pub account_name: String,
 }
 
 impl Message for AuthenticationResult {
@@ -133,19 +136,19 @@ impl Message for AuthenticationResult {
     fn encode(&self, w: &mut Writer) {
         w.u32(self.account_id)
             .u16(self.result)
-            .wstring(&self.account_name)
+            .wstring(&self.notice)
             .bytes(&self.session_token)
             .bytes(&self.account_flags)
-            .astring(&self.message);
+            .astring(&self.account_name);
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             account_id: r.u32()?,
             result: r.u16()?,
-            account_name: r.wstring()?,
+            notice: r.wstring()?,
             session_token: r.array()?,
             account_flags: r.array()?,
-            message: r.astring()?,
+            account_name: r.astring()?,
         })
     }
 }

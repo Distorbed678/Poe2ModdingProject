@@ -162,6 +162,12 @@ pub struct LeagueConfig {
     pub id: String,
     #[serde(default)]
     pub hardcore: bool,
+    /// Permanent league (Standard/Hardcore): not offered in the character select "Join" list.
+    #[serde(default)]
+    pub permanent: bool,
+    /// `LeagueFlag.Id` for the league's banner and icon (e.g. "StandardFlag").
+    #[serde(default)]
+    pub flag: Option<String>,
 }
 
 impl Config {

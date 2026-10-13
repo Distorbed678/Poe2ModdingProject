@@ -49,10 +49,14 @@ filter = "info,poe_net=debug"
 [[leagues]]
 id = "Standard"
 hardcore = false
+permanent = true
+flag = "StandardFlag"
 
 [[leagues]]
 id = "Hardcore"
 hardcore = true
+permanent = true
+flag = "HardcoreFlag"
 
 # Player inventories sent on instance entry (one per Inventories.dat row; the client's UI
 # looks each slot up and fails on a missing one). Sizes are [width, height].
