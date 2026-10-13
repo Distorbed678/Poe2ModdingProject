@@ -82,6 +82,8 @@ pub struct AreaInfo {
     pub bytes_b: [u8; 3],
     /// Client +0x24
     pub unk_24: u32,
+    /// Client +0x70: `u16` count + big-endian `u32`s (PoE1 sent a preload list here).
+    pub list_70: Vec<u32>,
 }
 
 impl Message for AreaInfo {
@@ -101,10 +103,13 @@ impl Message for AreaInfo {
             .bytes(&self.flags)
             .bytes(&self.bytes_b)
             .u32(self.unk_24);
-        // Vectors, all empty: u16-count u32s (+0x70), u16-count u8s (+0x88), u8-count u8s
-        // (+0x58), u16-count u16s (+0xe8), u8-count raw 8-byte items (+0x100), u16-count
-        // u16s (+0x118).
-        w.u16(0).u16(0).u8(0).u16(0).u8(0).u16(0);
+        w.u16(self.list_70.len() as u16);
+        for v in &self.list_70 {
+            w.u32(*v);
+        }
+        // Vectors, all empty: u16-count u8s (+0x88), u8-count u8s (+0x58), u16-count u16s
+        // (+0xe8), u8-count raw 8-byte items (+0x100), u16-count u16s (+0x118).
+        w.u16(0).u8(0).u16(0).u8(0).u16(0);
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let m = Self {
@@ -117,6 +122,7 @@ impl Message for AreaInfo {
             flags: r.array()?,
             bytes_b: r.array()?,
             unk_24: r.u32()?,
+            list_70: Vec::new(),
         };
         if m.flags != [0; 3] {
             return Err(DecodeError::Invalid {
@@ -124,8 +130,11 @@ impl Message for AreaInfo {
                 what: "AreaInfo optional blocks",
             });
         }
+        let mut m = m;
         let n = r.u16()? as usize;
-        r.bytes(n * 4)?;
+        for _ in 0..n {
+            m.list_70.push(r.u32()?);
+        }
         let n = r.u16()? as usize;
         r.bytes(n)?;
         let n = r.u8()? as usize;
@@ -259,7 +268,10 @@ impl Default for PlayerState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InitialState {
     pub unk_10: u8,
-    pub unk_1f8: u32,
+    /// Server frame length in ms (world vfunc +0x178 -> world +0x11c). Every frame marker
+    /// (`0x2f4`) records it, and the client advances its simulation by that much per frame:
+    /// 0 freezes animations, fades and timers (models never appear).
+    pub frame_ms: u32,
     /// Bits 0..2 -> client +0x1fc..+0x1fe.
     pub flags: u8,
     pub characters: Vec<CharacterState>,
@@ -271,7 +283,7 @@ impl Message for InitialState {
     const DIRECTION: Direction = Direction::Server;
     fn encode(&self, w: &mut Writer) {
         w.u8(self.unk_10)
-            .varuint(self.unk_1f8)
+            .varuint(self.frame_ms)
             .u8(self.flags)
             .u8(self.characters.len() as u8);
         for c in &self.characters {
@@ -299,7 +311,7 @@ impl Message for InitialState {
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let mut m = Self {
             unk_10: r.u8()?,
-            unk_1f8: r.varuint()?,
+            frame_ms: r.varuint()?,
             flags: r.u8()?,
             ..Default::default()
         };
@@ -389,6 +401,24 @@ impl SimulationHeader {
             unk_18: r.u8()?,
             unk_1a: r.u16()?,
         })
+    }
+}
+
+/// Sets the server frame length in ms (`u8`), applied immediately (not queued) through world
+/// vfunc +0x178 -> world +0x11c, like `InitialState::frame_ms`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SimulationFrameValue {
+    pub value: u8,
+}
+
+impl Message for SimulationFrameValue {
+    const NAME: &'static str = "SimulationFrameValue";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.value);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self { value: r.u8()? })
     }
 }
 

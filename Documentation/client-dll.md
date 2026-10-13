@@ -43,4 +43,10 @@ Five seconds after the local player entity is created, the DLL logs:
 - a NaN/inf scan of every component;
 - the Animated AO.
 
-It also hooks the frame drain (`0x1421306c0`, logs dt) and the frame-mode entity update (`0x141e7d7f0`, counts player updates). Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the player's render visibility (`0x1416a9810`) as an experiment.
+It also hooks:
+- the frame drain (`0x1421306c0`), logging dt and the caller for frame-mode worlds;
+- the frame-mode entity update (`0x141e7d7f0`), logging the player's dt (xmm1);
+- the front-end world update (`0x14167ea40`), logging dt;
+- the initial-state reader, logging stack references (useful when an object is applied twice).
+
+Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the player's render visibility (`0x1416a9810`) as an experiment.

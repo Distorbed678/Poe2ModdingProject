@@ -20,8 +20,12 @@ bind = "0.0.0.0:6112"
 # Host/port the login server tells the client to connect to.
 public_host = "127.0.0.1"
 public_port = 6112
-# Simulation frame interval in ms (one 0x2f4 tick marker per frame).
+# Simulation frame interval in ms (one 0x2f4 tick marker per frame; also sent in
+# InitialState as the frame length).
 tick_ms = 33
+# Terrain seeds known to generate (dev bridge until server-side generation, M4); some random
+# seeds fail in the client. Extracted from a live Client.txt by tools/re/clientlog_terrain.py.
+known_seeds = "data/terrain-vectors.tsv"
 
 [database]
 path = "data/server.sqlite"

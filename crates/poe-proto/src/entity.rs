@@ -39,12 +39,8 @@ impl Component {
             Self::Life(c) => c.encode(w),
             Self::Animated(path) => match path {
                 Some(p) => {
-                    // RE experiment: bit 3 starts animation (u32 index, f32, u32).
-                    let anim = std::env::var("POE_ANIM").ok().and_then(|v| v.parse::<u32>().ok());
-                    w.u8(if anim.is_some() { 0x09 } else { 0x01 }).utf16_le(p);
-                    if let Some(a) = anim {
-                        w.u32_le(a).f32_le(0.0).u32_le(0);
-                    }
+                    // Bit 0: animated object by path.
+                    w.u8(0x01).utf16_le(p);
                 }
                 None => {
                     w.u8(0);

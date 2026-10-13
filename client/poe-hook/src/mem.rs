@@ -38,7 +38,6 @@ pub(crate) fn c_string(addr: usize, max: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&out).into_owned())
 }
 
-
 /// NUL-terminated UTF-16 string at `addr` (at most `max` units).
 pub(crate) fn wide_string(addr: usize, max: usize) -> Option<String> {
     let mut out = Vec::new();

@@ -36,6 +36,9 @@ async fn main() -> anyhow::Result<()> {
         data: data.clone(),
         stats: Arc::new(poe_game::stats::StatRegistry::load(&data)?),
         store: store.clone(),
+        seeds: Arc::new(instance_server::seeds::KnownSeeds::load(
+            &config.instance.known_seeds,
+        )),
     });
 
     tokio::try_join!(login.run(), instance.run())?;

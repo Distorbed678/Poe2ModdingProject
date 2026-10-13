@@ -123,6 +123,10 @@ pub struct InstanceConfig {
     /// Simulation frame interval: a tick marker (0x2f4) is sent this often.
     #[serde(default = "default_tick_ms")]
     pub tick_ms: u64,
+    /// Optional TSV of terrain seeds known to generate (`area, level, seed, ...`); the server
+    /// picks one for areas listed there, since some random seeds fail to generate.
+    #[serde(default)]
+    pub known_seeds: PathBuf,
 }
 
 fn default_tick_ms() -> u64 {
