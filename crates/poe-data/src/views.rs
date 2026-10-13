@@ -88,6 +88,11 @@ impl WorldArea {
 /// A `Characters` row (a playable class).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharacterClass {
+    /// `Characters.AOFile`: the class's animated object (model).
+    pub ao_file: String,
+    pub base_strength: i64,
+    pub base_dexterity: i64,
+    pub base_intelligence: i64,
     /// Metadata path of the class's object type, e.g. `Metadata/Characters/Dex/DexFour`.
     pub metadata_id: String,
     pub name: String,
@@ -111,6 +116,10 @@ impl CharacterClass {
                     integer_id,
                     base_max_life: row.int("BaseMaxLife")?,
                     base_max_mana: row.int("BaseMaxMana")?,
+                    ao_file: row.str("AOFile")?,
+                    base_strength: row.int("BaseStrength")?,
+                    base_dexterity: row.int("BaseDexterity")?,
+                    base_intelligence: row.int("BaseIntelligence")?,
                 }));
             }
         }
@@ -160,4 +169,11 @@ pub fn league_flag_index(data: &GameData, id: &str) -> Result<Option<u32>> {
         }
     }
     Ok(None)
+}
+
+/// Network key of a stat: `Stats.dat` row + 1 (the client queries e.g. `actor_scale_+%`,
+/// row 1913, as 1914).
+pub fn stat_key(data: &GameData, id: &str) -> Result<Option<u32>> {
+    let table = data.table("Stats")?;
+    Ok(table.find_index_by_str("Id", id)?.map(|i| i as u32 + 1))
 }

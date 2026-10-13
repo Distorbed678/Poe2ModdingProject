@@ -34,6 +34,8 @@ async fn main() -> anyhow::Result<()> {
         protocol: protocol.clone(),
         tickets: tickets.clone(),
         data: data.clone(),
+        stats: Arc::new(poe_game::stats::StatRegistry::load(&data)?),
+        store: store.clone(),
     });
 
     tokio::try_join!(login.run(), instance.run())?;

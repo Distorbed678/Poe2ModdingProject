@@ -33,3 +33,14 @@ After a crash the client writes `PoE-<time>-<pid>.dmp` (plus `.txt`, `.log.txt` 
 
 ## Entity tracing (`dump_object_types`)
 Besides dumping the object-type table, this feature hooks `0x141e71120` (entity initial-state reader). It logs each entity's components (vtable, reader, owner), then wraps each serialized component's reader to log the blob span it consumed. That is how [protocol/entities.md](protocol/entities.md) was measured: send an all-zero blob, padded, and read the spans.
+
+### Player state probes (`dump_object_types`, 2026-10-13)
+Five seconds after the local player entity is created, the DLL logs:
+- entity flags +0x8c/+0x8d;
+- Positioned scales and positions;
+- the world's frame-mode and pause flags;
+- the Render component's disabled flag (+0x39a);
+- a NaN/inf scan of every component;
+- the Animated AO.
+
+It also hooks the frame drain (`0x1421306c0`, logs dt) and the frame-mode entity update (`0x141e7d7f0`, counts player updates). Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the player's render visibility (`0x1416a9810`) as an experiment.

@@ -38,6 +38,8 @@ pub struct Character {
     pub experience: u64,
     /// `WorldAreas.Id` of the character's current/return area.
     pub area: String,
+    /// The start area's intro (washed-up opening) has been played.
+    pub intro_done: bool,
 }
 
 /// Fields supplied when creating a character.
@@ -60,4 +62,6 @@ pub trait Store: Send + Sync {
     fn characters(&self, account_id: u32) -> Result<Vec<Character>>;
     /// Creates a character; `Ok(None)` if the name is already taken.
     fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>>;
+    /// Marks the start area's intro as played.
+    fn set_intro_done(&self, character_id: u32) -> Result<()>;
 }

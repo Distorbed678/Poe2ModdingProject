@@ -10,6 +10,7 @@ mod error;
 mod files;
 pub mod hash;
 mod schema;
+pub mod template;
 pub mod views;
 
 pub use dat::{Row, Table, Value};

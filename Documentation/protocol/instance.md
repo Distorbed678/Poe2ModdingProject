@@ -74,5 +74,12 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 - The DLL's `crash_log` logs C++ exceptions (type and `what()`).
 - `exit_trace` logs `ExitProcess` and `TerminateProcess` with stack refs.
 - The instance server's post-area messages can be chosen with `POE_EXPERIMENT` (comma list: `players`, `inventories`, `spawn`, `initial`).
+- Other RE overrides of the instance server (environment variables):
+  - `POE_AREA` (login server): the area to send;
+  - `POE_SEED`: the terrain seed;
+  - `POE_SPAWN=x,y`: the grid spawn cell;
+  - `POE_SPAWN_DELAY_MS`: wait before creating the player;
+  - `POE_ANIM=<index>`: start that animation through Animated bit 3;
+  - `POE_NPC=<metadata path>`: also add that object as entity 2 next to the player.
 - The DLL's `dump_object_types` feature also logs, per spawned entity, its components and the blob span each component reader consumes.
 

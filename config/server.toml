@@ -85,7 +85,9 @@ Flask1 = [5, 1]
 layout_dir = "GameFiles"
 filler = ["fill", "blank"]
 
+# First visit plays the washed-up opening (new characters on the Riverbank).
+intro_areas = ["G1_1"]
+
 [spawn.start_tiles]
-# The washed-up intro of the Riverbank (next to the intro tree; the tree centre itself is not
-# walkable in every orientation).
-G1_1 = "ZombieIntroFeature"
+# The washed-up intro of the Riverbank (the spawn is snapped to the nearest walkable cell).
+G1_1 = "Intro_Tree"

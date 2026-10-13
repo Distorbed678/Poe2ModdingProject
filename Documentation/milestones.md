@@ -36,15 +36,20 @@ Open items:
 - Error codes for refused character creation.
 
 ## M2: status and next steps (2026-10-13)
-Working end to end: Play → `InstanceDetails` → Hello/EnableEncryption → AreaInfo (client generates the area and reports terrain hashes) → LocalPlayers → AddInventory ×120 → PlayerEntity → AddObject (player) → ticks → InitialState. The client shows the game screen with the HUD (life orb, skill bar, "WASD to move").
+Working end to end: Play → `InstanceDetails` → Hello/EnableEncryption → AreaInfo (client generates the area and reports terrain hashes) → LocalPlayers → AddInventory ×120 → PlayerEntity → AddObject (player) → ticks every `tick_ms` → InitialState. The client shows the game screen with the HUD.
 
-Open items:
-- **Spawn position: solved for G1_1 (2026-10-13).** The grey view meant the player was not on walkable ground (filler tiles, or inside the intro tree in rotated layouts).
-  - Dev bridge until M4: when the client's area load (`0x14167b270`) returns, the DLL exports the generated tile layout as `GameFiles/terrain_layout_<tile hash>.tsv`.
-  - The server matches it by the tile hash from TerrainHashes and spawns at the centre of the area's start feature (`[spawn.start_tiles]`, G1_1 = `ZombieIntroFeature`), or else at the playable tile nearest the map centre.
-  - Verified on random seeds: the Riverbank renders.
-- The mana orb is empty, so the Life pool order (life/mana/ES) is still a guess.
-- The Actor section is undecoded (zeros).
+Done:
+- **Class and default stats** (verified in the character panel, Ranger level 1: Str 7, Dex 15, Int 7, Life 28, Mana 34, Evasion 5%, mana regeneration 1.4/s):
+  - the object type is the class (`Characters.Id`, e.g. `Metadata/Characters/Dex/DexFour`);
+  - the Stats component carries the merged object-template defaults (`poe_data::template`, `Character.ot`) plus the class's base attributes, life and mana and the per-level stats (`poe_game::stats::character_defaults`), keyed by `Stats.dat` row + 1;
+  - Player sends the class byte (`PlayerClass` +0x158) and Animated the class's `.ao`.
+- **Spawn on walkable ground**: dev bridge until M4 (the DLL exports the client's tile layout and cell grids; the server picks the start feature and snaps to the nearest walkable cell).
+- **New characters wash up** in the intro area (Player flags bit 0) once; `characters.intro_done` is stored.
+- Towns and hideouts use seed 1 (matches live tile hashes).
+- Mana pool order fixed (mana orb full).
+
+Open (blocking M2's "player is visible"):
+- **The player body is not drawn.** The entity exists, is awake (+0x8d bit 2), is updated every simulation frame (~30 Hz), has rendering enabled (Render +0x39a = 0) and its light is drawn. Forcing the AO scene node visible (`0x1416a9810`) changes nothing. See [re/findings-2026-10-13.md](re/findings-2026-10-13.md#player-model-not-drawn).
+- **Grey view on a fresh client.** The first area entry of a client process shows grey with a black vertical bar; entering again in the same process (after a reconnect) shows the area normally. A spawn delay does not help.
 - The post-area messages are still behind `POE_EXPERIMENT`; they should become the default flow.
-- Rendering: the 3D view is uniform grey fog with a black vertical bar that scales with zoom; the minimap shows terrain around the player. Ruled out: missing simulation ticks (now sent every `tick_ms`), death state, spawn outside the map (the Riverbank terrain is 69×69 tiles, logged by the DLL probe). Next test: `POE_AREA=G1_town` to see whether the problem is specific to the Riverbank.
 - Client input seen: `0x63` WASD direction (`u8, varint x, varint y, 3 bytes`), `0x1c` about 10 Hz (heartbeat?, no reply sent yet).

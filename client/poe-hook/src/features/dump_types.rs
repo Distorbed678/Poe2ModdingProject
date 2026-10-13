@@ -45,6 +45,17 @@ static HOOKED_READERS: Mutex<Option<HashSet<usize>>> = Mutex::new(None);
 
 static OUT: OnceLock<PathBuf> = OnceLock::new();
 static DONE: AtomicBool = AtomicBool::new(false);
+/// Last entity created with id 1 (our player) and how often the per-frame entity update
+/// (`ENTITY_UPDATE`) ran for it.
+static PLAYER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static PLAYER_UPDATES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Per-frame update of an awake entity (`(entity, dt)`).
+const ENTITY_UPDATE: usize = 0x141e71090;
+/// World frame drain (`world, f32 dt`): applies queued simulation packets, updates entities.
+const FRAME_DRAIN: usize = 0x1421306c0;
+/// Per-entity tail update in frame mode (`entity + 0x58, dt`), from `0x1421370f0`.
+const ENTITY_TICK: usize = 0x141e7d7f0;
+static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     OUT.set(out).ok();
@@ -67,6 +78,29 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     );
     let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
     Box::leak(Box::new(point));
+    let hooker = Hooker::new(
+        main.from_ghidra(ENTITY_UPDATE),
+        HookType::JmpBack(on_entity_update),
+        CallbackOption::None,
+        0,
+        HookFlags::empty(),
+    );
+    let point = unsafe { hooker.hook() }.map_err(|e| format!("hook entity update: {e:?}"))?;
+    Box::leak(Box::new(point));
+    for (addr, cb) in [
+        (FRAME_DRAIN, on_frame_drain as unsafe extern "win64" fn(*mut Registers, usize)),
+        (ENTITY_TICK, on_entity_tick),
+    ] {
+        let hooker = Hooker::new(
+            main.from_ghidra(addr),
+            HookType::JmpBack(cb),
+            CallbackOption::None,
+            0,
+            HookFlags::empty(),
+        );
+        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {addr:#x}: {e:?}"))?;
+        Box::leak(Box::new(point));
+    }
     for addr in LOAD_AREA {
         let hooker = Hooker::new(
             main.from_ghidra(addr),
@@ -79,6 +113,42 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
         Box::leak(Box::new(point));
     }
     Ok(())
+}
+
+unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
+    let n = DRAINS.fetch_add(1, Ordering::Relaxed) + 1;
+    if matches!(n, 1 | 10 | 100 | 1000 | 3000) {
+        use crate::mem::read;
+        let world = unsafe { (*regs).rcx } as usize;
+        let dt = f32::from_bits(unsafe { (*regs).xmm1 } as u32);
+        log::info!(
+            "frame drain #{n}: world {world:#x} dt={dt} +0x661={:?} frames(+0x6a8)={:?} player updates={}",
+            read::<u8>(world + 0x661),
+            read::<u64>(world + 0x6a8),
+            PLAYER_UPDATES.load(Ordering::Relaxed)
+        );
+    }
+}
+
+unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
+    let entity = (unsafe { (*regs).rcx } as usize).wrapping_sub(0x58);
+    if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
+        let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
+        if matches!(n, 1 | 10 | 100 | 1000) {
+            let dt = unsafe { (*regs).rdx } as u32;
+            log::info!("player entity tick #{n} dt={dt:#x} ({})", f32::from_bits(dt));
+        }
+    }
+}
+
+unsafe extern "win64" fn on_entity_update(regs: *mut Registers, _: usize) {
+    let entity = unsafe { (*regs).rcx } as usize;
+    if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
+        let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
+        if matches!(n, 1 | 10 | 100 | 1000) {
+            log::info!("player entity update #{n} dt={:#x}", unsafe { (*regs).rdx });
+        }
+    }
 }
 
 type LoadAreaFn =
@@ -126,6 +196,20 @@ unsafe fn export_layout(world: usize) {
         return;
     };
     log::info!("terrain at world+{offset:#x}");
+    // Exploration: vectors (begin, end, capacity) inside the terrain object and their sizes,
+    // to locate per-cell grids (walkability, heights).
+    for off in (0..0x400).step_by(8) {
+        let (Some(b), Some(e), Some(c)) = (
+            read::<usize>(terrain + off),
+            read::<usize>(terrain + off + 8),
+            read::<usize>(terrain + off + 16),
+        ) else {
+            continue;
+        };
+        if b > 0x10000 && e >= b && c >= e && e - b > 0x1000 && e - b < 0x4000000 {
+            log::info!("  terrain+{off:#x}: vector of {:#x} bytes", e - b);
+        }
+    }
     // Tile hash as logged by the client ("Tile hash: N"), also sent to the server in
     // TerrainHashes; it names the export so the server reads the matching layout. World-map
     // loads (area kind 0x20/0x21/0x23 at +0x98 -> +0x1b4) log no hash and are skipped.
@@ -152,10 +236,42 @@ unsafe fn export_layout(world: usize) {
             out += &format!("{x}\t{y}\t{path}\n");
         }
     }
+    unsafe { export_grids(terrain, w as usize, h as usize, tile_hash) };
     let path = crate::exe_dir().join(format!("terrain_layout_{tile_hash}.tsv"));
     match std::fs::write(&path, out) {
         Ok(()) => log::info!("exported {w}x{h} layout to {}", path.display()),
         Err(e) => log::error!("layout export: {e}"),
+    }
+}
+
+/// The four per-cell layers of the terrain (vectors at +0xd0, +0xe8, +0x100, +0x118; 4 bits
+/// per cell, `ceil(cells_x / 2)` bytes per row, rows = cells_y). Written as
+/// `terrain_grid_<tile hash>.bin`: `b"PWG1"`, u32 cells_x, u32 cells_y, u32 bytes_per_row,
+/// u32 layer count, then each layer's bytes.
+unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
+    use crate::mem::read;
+    let (cells_x, cells_y) = (w * 23, h * 23);
+    let bytes_per_row = cells_x.div_ceil(2);
+    let mut out = Vec::new();
+    out.extend_from_slice(b"PWG1");
+    for v in [cells_x, cells_y, bytes_per_row, 4] {
+        out.extend_from_slice(&(v as u32).to_le_bytes());
+    }
+    for off in [0xd0, 0xe8, 0x100, 0x118] {
+        let (Some(b), Some(e)) = (read::<usize>(terrain + off), read::<usize>(terrain + off + 8))
+        else {
+            return;
+        };
+        if e - b != bytes_per_row * cells_y || !crate::mem::readable(b, e - b) {
+            log::warn!("grid at terrain+{off:#x}: unexpected size {:#x}", e - b);
+            return;
+        }
+        out.extend_from_slice(unsafe { std::slice::from_raw_parts(b as *const u8, e - b) });
+    }
+    let path = crate::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
+    match std::fs::write(&path, out) {
+        Ok(()) => log::info!("exported {cells_x}x{cells_y} cell grids to {}", path.display()),
+        Err(e) => log::error!("grid export: {e}"),
     }
 }
 
@@ -174,6 +290,127 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         let end = *((entity + 0x18) as *const usize);
         let count = (end.saturating_sub(begin)) / 8;
         let id = *((entity + 0x88) as *const u32);
+        if id == 1 {
+            PLAYER.store(entity, Ordering::SeqCst);
+            PLAYER_UPDATES.store(0, Ordering::SeqCst);
+            // State flags a few seconds later (+0x8c bit 3: in the wake/update set).
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if PLAYER.load(Ordering::SeqCst) != entity {
+                    return;
+                }
+                use crate::mem::read;
+                let b = |o: usize| read::<u8>(entity + o).unwrap_or(0xff);
+                log::info!(
+                    "player entity after 5 s: +0x8c={:#04x} +0x8d={:#04x} updates={}",
+                    b(0x8c),
+                    b(0x8d),
+                    PLAYER_UPDATES.load(Ordering::SeqCst)
+                );
+                // Positioned (component 0) scale/transform floats and Actor (component 9) +0x230.
+                let comps0 = read::<usize>(entity + 0x10).unwrap_or(0);
+                if let (Some(pos), Some(actor)) =
+                    (read::<usize>(comps0), read::<usize>(comps0 + 9 * 8))
+                {
+                    let f = |a: usize| read::<f32>(a).unwrap_or(f32::NAN);
+                    log::info!(
+                        "  positioned +0x46c={} +0x470={} +0x474={} +0x490=({}, {}) +0x49c={}; actor +0x230={}",
+                        f(pos + 0x46c),
+                        f(pos + 0x470),
+                        f(pos + 0x474),
+                        f(pos + 0x490),
+                        f(pos + 0x494),
+                        f(pos + 0x49c),
+                        f(actor + 0x230)
+                    );
+                }
+                // The world object (entity +0x78) and the vtable slots InitialState's header
+                // drives (0x178 u32, 0x200 two flags, 0x60 flag, 0x1f0).
+                if let (Some(m), Some(world)) = (MAIN.get(), read::<usize>(entity + 0x78)) {
+                    let vt = read::<usize>(world).unwrap_or(0);
+                    let slot = |o: usize| {
+                        let f = read::<usize>(vt + o).unwrap_or(0);
+                        if m.contains(f) { m.to_ghidra(f) } else { f }
+                    };
+                    log::info!(
+                        "  world {world:#x} vtable {:#x}: 0x178={:#x} 0x200={:#x} 0x60={:#x} 0x1f0={:#x}",
+                        if m.contains(vt) { m.to_ghidra(vt) } else { vt },
+                        slot(0x178),
+                        slot(0x200),
+                        slot(0x60),
+                        slot(0x1f0)
+                    );
+                    // Frame drain 0x1421306c0: +0x661 frame mode, +0x868 paused (entities
+                    // update with dt 0), +0x86a tick markers accepted; +0x11c set by 0x2f5.
+                    let w = |o: usize| read::<u8>(world + o).unwrap_or(0xff);
+                    log::info!(
+                        "  world +0x661={} +0x868={} +0x869={} +0x86a={} +0x11c={} +0x84a={}",
+                        w(0x661),
+                        w(0x868),
+                        w(0x869),
+                        w(0x86a),
+                        w(0x11c),
+                        w(0x84a)
+                    );
+                }
+                // Render component (getter 0x140150cb0, by name): +0x39a non-zero = rendering
+                // disabled (GEAL EnableRendering clears it, then calls 0x1416a9810).
+                if let Some(m) = MAIN.get() {
+                    let get_render: extern "win64" fn(usize) -> usize =
+                        unsafe { std::mem::transmute(m.from_ghidra(0x140150cb0)) };
+                    let render = get_render(entity);
+                    let bytes: Vec<String> = (0x390..0x3a0)
+                        .map(|o| format!("{:02x}", read::<u8>(render + o).unwrap_or(0xee)))
+                        .collect();
+                    log::info!("  render {render:#x} +0x390..: {}", bytes.join(" "));
+                    // Experiment: re-apply visibility (shows the AO scene node).
+                    if render != 0 && std::env::var_os("POE_HOOK_FORCE_SHOW").is_some() {
+                        let refresh: extern "win64" fn(usize) =
+                            unsafe { std::mem::transmute(m.from_ghidra(0x1416a9810)) };
+                        refresh(render);
+                        log::info!("  forced render visibility refresh");
+                    }
+                }
+                // NaN/inf scan of every component (first 0x800 bytes): a degenerate transform
+                // would explain an invisible model and a grey camera.
+                let begin = read::<usize>(entity + 0x10).unwrap_or(0);
+                let end = read::<usize>(entity + 0x18).unwrap_or(0);
+                for (i, c) in (begin..end).step_by(8).enumerate() {
+                    let Some(comp) = read::<usize>(c) else { continue };
+                    let vt = read::<usize>(comp).unwrap_or(0);
+                    let bad: Vec<String> = (0..0x800usize)
+                        .step_by(4)
+                        .filter_map(|o| {
+                            let v = read::<u32>(comp + o)?;
+                            // NaN or inf only (exponent all ones), skip 0xffffffff fillers.
+                            (v & 0x7f80_0000 == 0x7f80_0000 && v != 0xffff_ffff)
+                                .then(|| format!("+{o:#x}={v:#x}"))
+                        })
+                        .take(12)
+                        .collect();
+                    log::info!(
+                        "  component {i} {comp:#x} vtable {:#x}: {}",
+                        MAIN.get().map_or(vt, |m| if m.contains(vt) { m.to_ghidra(vt) } else { vt }),
+                        bad.join(" ")
+                    );
+                }
+                // Animated component (index 5): its animated object (+0x350) and that
+                // object's path (+8 -> wide string).
+                use crate::mem::wide_string;
+                let comps = read::<usize>(entity + 0x10).unwrap_or(0);
+                if let Some(animated) = read::<usize>(comps + 5 * 8) {
+                    let ao = read::<usize>(animated + 0x350).unwrap_or(0);
+                    let path = read::<usize>(ao + 8).and_then(|p| wide_string(p, 200));
+                    let words: Vec<String> = (0..8)
+                        .map(|i| format!("{:x}", read::<usize>(ao + i * 8).unwrap_or(0)))
+                        .collect();
+                    log::info!(
+                        "  animated {animated:#x} ao {ao:#x} path {path:?} head [{}]",
+                        words.join(" ")
+                    );
+                }
+            });
+        }
         // The read loop only visits the first `serialized` components (type +0x28 -> +0x78);
         // the rest are client-only and their +0x98 slot is not a reader.
         let ty = *((entity + 8) as *const usize);
@@ -182,7 +419,7 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         } else {
             0
         };
-        log::info!("entity {id:#x} initial state: {count} components ({serialized} serialized), blob {len} bytes at pos {pos} (data {data:#x})");
+        log::info!("entity {id:#x} at {entity:#x} initial state: {count} components ({serialized} serialized), blob {len} bytes at pos {pos} (data {data:#x})");
         for i in 0..count.min(64) {
             let comp = *((begin + i * 8) as *const usize);
             if comp < 0x10000 {

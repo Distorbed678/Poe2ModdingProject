@@ -19,15 +19,22 @@ Components in order, with their readers. Sizes are measured with every flag and 
 
 | # | Component | Reader | Bytes | Layout (zero flags) |
 |---|---|---|---|---|
-| 0 | Positioned | `0x141dd8820` | 17 | `i32 grid x, i32 grid y, u32, u16, u8 flags[3]` (flags select optional sections; a type flag adds a leading 8 bytes for some objects) |
+| 0 | Positioned | `0x141dd8820` | 17 | `i32 grid x (+0x444), i32 grid y (+0x448), u32 (+0x44c), u16 team (+0x1e0), u8 flags[3]`; a type flag adds a leading 8 bytes for some objects. Flags0: bit 2 `u32, u32` explicit height (+0x440/+0x48c), bit 5 `3 × u32` (+0x474/+0x46c/+0x470), bit 6 `2 × u32` world position (else from the grid), bit 7 → +0x1e5 bit 1. Flags1: bit 0 `3 × u32 + 2 bytes + u32 + 4 bytes`, bit 1 `u8, u8`, bit 2 `4 × u32`, bit 3 `u8, u8`, bit 4 `u32`, bit 6 `u8`, bit 7 `u8`. Flags2: bit 1 sub-reader `0x141ec9ba0` |
 | 1 | Stats | `0x142180fe0` | 13 | `varuint n, (varuint stat, varint value)[n]`, player section `u8, u8 (ShapeshiftForms row+1), u8[3] (ShapeshiftForms rows+1), u8 count`, `u32, u8, u8` |
 | 2 | Pathfinding | – | 0 | |
 | 3 | Buffs | `0x141db4f00` | 2 | `u16 count` |
 | 4 | Life | `0x141d8c0e0` | 125 | pools long/short/long/short/long/long (`u32, (u32, i16), u32` + `u32` in the long form), 3 × `(u32, i16)` (count from the type), `(u32, i16)`, `u8 flags` |
-| 5 | Animated | `0x141da6540` | 1 | `u8 flags` |
-| 6 | Player | `0x141dcf320` | 39 + 2×name | `u32 len + UTF-16LE name, u8, u32, u32, u32, u16, u16, u16 n + (u8, u64)[n], u16 n + (u8, u64)[n], u8[5], u16, u16, u8 flags (bit 0: "WashedUp" intro), u8, u8, varuint n + u32[n], u8 n + entries` |
+| 5 | Animated | `0x141da6540` | 1 | `u8 flags`; bit 0: animated object, as `u32` row (bit 1) or `u32 count + UTF-16LE path` (skipped if equal to the current AO); bit 2 sub-reader `0x141da9e40`; bit 3 `u32 animation, f32, u32` starts an animation (`0x141d439e0`; index into the AO's `.amd`, e.g. `OneRig.amd` has only `idle_01`), then bit 5 `u32, u32`; bit 4 `u32`; bit 6 → +0x18a; bit 7 `5 × u32` (+0x25c..+0x278) |
+| 6 | Player | `0x141dcf320` | 39 + 2×name | `u32 len + UTF-16LE name, u8 class (PlayerClass +0x158), u32 (0x141dd11e0), u32 (+0x1d0), u32 (+0x1d4), u16 (+0x200), u16 (+0x202), u16 n + (u8, u64)[n], u16 n + (u8, u64)[n], u8[5], u16, u16 (two Hideouts.dat keys), u8 flags (bit 0: "WashedUp" intro, bit 1, bit 2, bit 3), u8, u8, varuint n + u32[n], u8 n + entries` |
 | 7 | PlayerClass | – | 0 | |
 | 8 | Inventories | `0x141d82a40` | 2 | `u8 n + (u8 slot, inventory ref 0x1426c3f60)[n], u8 k + u32[k]` |
-| 9 | Actor | `0x1416d8090` → `0x142147180` | 40–48 | not decoded; zeros work (length depends on state) |
+| 9 | Actor | `0x1416d8090` → `0x142147180` | 40–48 | partly decoded: 3 × (2 values, string), sub-reader `0x142149390`, flags (`0x14214c4e0`), 4 × (u8 flags + up to 3 × u32), `u32` (+0x4bc); flags bit 1 wstring, bit 2 `u8` (`0x141e52b90`), bit 3 `u32` (+0x230, then stat 0x77a `actor_scale_+%` is read); if a component's +0x1e0 < 1, `u16 animation, u8, u32` (current animation). Zeros work |
 
-Status: with these sections (name, life and mana from `Characters.BaseMaxLife/BaseMaxMana`), plus the inventories and InitialState from [instance.md](instance.md), the client reaches the game screen with HUD. The player still spawns at grid (0, 0), outside the map.
+Status: with these sections plus the inventories and InitialState from [instance.md](instance.md), the client reaches the game screen with HUD and the class's default stats. The player's body is not drawn yet (see [milestones.md](../milestones.md)).
+
+## NPCs (`Metadata/NPC/NPC.ot`)
+Serialized components: Positioned, Animated, InteractionAction (`0x141d81300`), NPC (`0x141d966a0`), MinimapIcon, Transitionable (`0x142180310`, `u8`: bits 0-6 state, bit 7), StateMachine (`0x14214cad0`/`0x141dfa320`).
+
+StateMachine: `u8 shared-state count, u8 second count, then per shared state (flag +0x2c in the type) varint value + u8 flags, per second-kind entry u32 + u8`. The counts must equal the number of states the template defines (`define_shared_state`), else "Number of shared states is different on client and server! Delta: N". Example: `Una` defines `visible`, so `[1, 0, 1, 0]`.
+
+Spawning `Una` that way gets through the readers but crashes in the client's script interpreter (`0x1426f2220`, null bytecode). Its states are per-player quest flags, which the server does not send yet. Client-only types (doodads such as `EzomyteCivilianMale01`) are rejected: "Unknown object type serialized by server".
