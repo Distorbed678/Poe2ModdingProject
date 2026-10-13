@@ -1172,7 +1172,10 @@ dependencies = [
  "anyhow",
  "poe-cluster",
  "poe-config",
+ "poe-data",
  "poe-net",
+ "poe-proto",
+ "rand 0.9.5",
  "tokio",
  "tracing",
 ]

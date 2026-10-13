@@ -56,7 +56,7 @@ fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessag
     match protocol.login.name(Direction::Client, opcode) {
         Some(KeepAlive::NAME) => Ok(ClientMessage::KeepAlive),
         Some(Authenticate::NAME) => Authenticate::decode(r).map(ClientMessage::Authenticate),
-        Some(RequestCharacterList::NAME) => {
+        Some(RequestCharacterList::NAME | "RequestCharacterListAlt") => {
             RequestCharacterList::decode(r).map(ClientMessage::RequestCharacterList)
         }
         Some(CreateCharacter::NAME) => {
