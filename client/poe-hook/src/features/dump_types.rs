@@ -183,6 +183,50 @@ unsafe fn log_terrain(component: usize) {
             h * 23,
             head.join(" ")
         );
+        dump_tiles(terrain, w as usize, h as usize);
+    }
+}
+
+/// Tile records (0x38 bytes, vector at terrain +0x28, row-major `w`×`h`) are written to
+/// `terrain_tiles.txt` with any metadata/art paths reachable from them (pointer chains up to
+/// two levels, read with guards since the record layout is not known yet). Shows where the
+/// generator placed each room, e.g. the start room of an area.
+fn dump_tiles(terrain: usize, w: usize, h: usize) {
+    use crate::mem::{read, wide_string};
+    let Some(tiles) = read::<usize>(terrain + 0x28) else { return };
+    let path_at = |p: usize| -> Option<String> {
+        let s = wide_string(p, 200)?;
+        (s.starts_with("Metadata/") || s.starts_with("Art/")).then_some(s)
+    };
+    let mut out = String::new();
+    for y in 0..h {
+        for x in 0..w {
+            let rec = tiles + (y * w + x) * 0x38;
+            let mut found = Vec::new();
+            for q in 0..7 {
+                let Some(p1) = read::<usize>(rec + q * 8) else { continue };
+                if let Some(s) = path_at(p1) {
+                    found.push(format!("q{q}:{s}"));
+                    continue;
+                }
+                for k in (0..0x60).step_by(8) {
+                    let Some(p2) = read::<usize>(p1.wrapping_add(k)) else { break };
+                    if let Some(s) = path_at(p2) {
+                        found.push(format!("q{q}+{k:#x}:{s}"));
+                        break;
+                    }
+                }
+            }
+            let raw: Vec<String> = (0..7)
+                .map(|q| format!("{:x}", read::<usize>(rec + q * 8).unwrap_or(0)))
+                .collect();
+            out += &format!("{x} {y} [{}] {}\n", raw.join(" "), found.join(" | "));
+        }
+    }
+    let path = crate::exe_dir().join("terrain_tiles.txt");
+    match std::fs::write(&path, out) {
+        Ok(()) => log::info!("    dumped {} tiles to {}", w * h, path.display()),
+        Err(e) => log::error!("    tile dump: {e}"),
     }
 }
 

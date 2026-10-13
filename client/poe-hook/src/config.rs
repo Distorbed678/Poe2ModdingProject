@@ -37,6 +37,9 @@ pub struct FeatureConfig {
     pub trace_addresses: Vec<String>,
     pub trace_limit: u32,
     pub dump_object_types: bool,
+    /// Keys posted to the game window for unattended tests: `[[ms_after_load, vk], ...]`
+    /// (e.g. 0x0D Enter to log in and play, 0x2C PrintScreen for an in-game screenshot).
+    pub auto_keys: Vec<(u64, u16)>,
 }
 
 impl Default for FeatureConfig {
@@ -50,6 +53,7 @@ impl Default for FeatureConfig {
             trace_addresses: Vec::new(),
             trace_limit: 20,
             dump_object_types: false,
+            auto_keys: Vec::new(),
         }
     }
 }

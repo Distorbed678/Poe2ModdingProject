@@ -245,7 +245,10 @@ impl InstanceServer {
         };
         let (instance_id, seed) = {
             let mut rng = rand::rng();
-            (rng.next_u32(), rng.next_u32())
+            (
+                rng.next_u32(),
+                area.fixed_seed().unwrap_or_else(|| rng.next_u32()),
+            )
         };
         let msg = AreaInfo {
             instance_id,

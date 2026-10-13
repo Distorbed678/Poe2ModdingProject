@@ -15,6 +15,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 | [protocol/instance.md](protocol/instance.md) | Instance protocol: opening sequence, area info, inventories, spawn |
 | [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components) |
 | [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the DLL bypass |
+| [re/findings-2026-10-13.md](re/findings-2026-10-13.md) | Offline analysis: live-log comparison, client packet classes, rendering/spawn notes |
 | [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Reverse-engineering findings (Ghidra addresses) for 0.5.5e |
 | [research/poe1-prior-art.md](research/poe1-prior-art.md) | What public PoE1 research says about the protocol |
 | [research/tools.md](research/tools.md) | Survey of datamining and RE tools |

@@ -3,6 +3,7 @@
 //! New behaviour (encryption bypass, packet tracing, asset overrides for client mods...) is
 //! added as another module here and registered in [`init_all`].
 
+mod auto_keys;
 mod crash;
 mod crypto_bypass;
 mod dump_types;
@@ -65,4 +66,7 @@ pub fn init_all(config: &Config, main: &Module) {
     for (name, enabled, init) in features {
         report(name, enabled, || init(main));
     }
+    report("auto_keys", !f.auto_keys.is_empty(), || {
+        auto_keys::init(f.auto_keys.clone())
+    });
 }
