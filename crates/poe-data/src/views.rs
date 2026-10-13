@@ -147,3 +147,17 @@ impl InventorySlot {
             .collect()
     }
 }
+
+/// Index of a `LeagueFlag` row by id. The client identifies a character's league flag
+/// (banner and icon) by row + 1; 0 or 1 select the generic event banner.
+pub fn league_flag_index(data: &GameData, id: &str) -> Result<Option<u32>> {
+    let table = data.table("LeagueFlag")?;
+    for i in 0..table.len() {
+        if let Some(row) = table.row(i)
+            && row.str("Id")? == id
+        {
+            return Ok(Some(i as u32));
+        }
+    }
+    Ok(None)
+}

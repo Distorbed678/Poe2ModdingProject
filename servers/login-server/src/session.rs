@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use poe_cluster::TicketCharacter;
-use poe_data::views::{StartState, WorldArea};
+use poe_data::views::{StartState, WorldArea, league_flag_index};
 use poe_net::{Connection, DecodeError, Reader, hexdump::hexdump};
 use poe_proto::{
     Direction, Message, Protocol,
@@ -169,10 +169,10 @@ async fn authenticate(
     let reply = AuthenticationResult {
         account_id: account.id,
         result: 0,
-        account_name: account.name.clone(),
+        notice: String::new(),
         session_token: [0; 32],
         account_flags: server.config.accounts.flags,
-        message: String::new(),
+        account_name: account.name.clone(),
     };
     conn.send(&server.protocol.login.encode(&reply)?).await?;
     Ok(account)
@@ -199,8 +199,13 @@ fn league_list(server: &LoginServer) -> LeagueList {
                 time_d0: 0,
                 time_d8: 0,
                 time_c8: 0,
-                // +0xe0 bit 1: hardcore (red banner); +0xe2 bit 2 selects the banner variant.
-                raw_e0: [if l.hardcore { 0x02 } else { 0 }, 0, 0],
+                // +0xe0 bit 1: hardcore. +0xe1 bit 1: permanent (character select skips the
+                // league in its "Join" list; set for Standard/Hardcore).
+                raw_e0: [
+                    if l.hardcore { 0x02 } else { 0 },
+                    if l.permanent { 0x02 } else { 0 },
+                    0,
+                ],
                 flag_c0: 0,
                 flag_c1: 0,
                 flag_c2: 0,
@@ -239,9 +244,21 @@ fn character_entry(server: &LoginServer, c: &Character) -> anyhow::Result<Charac
     let area_hash = WorldArea::find(&server.data, &c.area)?
         .map(|a| a.hash16)
         .unwrap_or_default();
+    // +0x4d: LeagueFlag row + 1 (banner; select screen `0x1406b9dc7` -> `0x140c7e460`).
+    let flag = server
+        .config
+        .leagues
+        .iter()
+        .find(|l| l.id == c.league)
+        .and_then(|l| l.flag.as_deref());
+    let league_flag = match flag {
+        Some(id) => league_flag_index(&server.data, id)?.map_or(0, |i| (i + 1) as u8),
+        None => 0,
+    };
     Ok(CharacterEntry {
         name: c.name.clone(),
         league: c.league.clone(),
+        unk_4d: league_flag,
         unk_4c: c.level.min(255) as u8,
         unk_4e: c.class_id as u8,
         unk_4a: area_hash,

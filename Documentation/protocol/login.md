@@ -36,10 +36,10 @@ Encodings: integers big-endian. `wstring` uses the compact per-character encodin
 |---|---|---|
 | account_id | u32 | stored in the logged-in account record |
 | result | u16 | 0 = success; non-zero goes to the error path |
-| account_name | wstring | |
+| notice | wstring (+0x38) | shown in a popup after login when non-empty; may hold language-tagged sections (`0x140ef5140`). It used to carry the account name, which caused the "Exile1 / OK" popup |
 | session_token | 32 bytes | kept with the account |
 | account_flags | 2 bytes | split into booleans in the account entry. **Byte 0:** bit 2 opens the terms-of-use window, bit 3 the cheating warning, bit 4 the RMT warning, bit 7 "update required" (`LoginState::AuthenticationResultHandler` `0x140ef5140`); keep these clear. Setting bits 0, 1, 5 and 6 of byte 0 plus bits 0 and 1 of byte 1 (`[0x63, 0x03]`, config `[accounts] flags`) removes the "Get Full Access" button; which single bit does it is TBD |
-| message | astring | passed to a message/URL routine; empty = none |
+| account_name | astring (+0x68) | the account name kept by the login session |
 
 ## Incoming packet factory
 The client's login factory is `0x14214fa60` (opcode → class, then vtable slot 2 = deserialize). Classes by opcode (vtable):
@@ -86,20 +86,29 @@ Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatc
 | +0x4a (u16) | current area: `WorldAreas.HASH16` (select screen `0x140f02cef`) |
 | +0x48 (u16) | fallback area: `WorldAreas.HASH16` |
 | +0x4c (u8) | assumed level |
+| +0x4d (u8) | league banner: `LeagueFlag` row + 1 |
 
 ### CharacterList trailer
 | Field | Meaning |
 |---|---|
 | +0x29 (u8) | character slot limit. The select screen refuses creation when the count reaches it (`0x140f0d475`) |
 
-### LeagueEntry bitfield (+0xe0, 3 bytes)
+### LeagueEntry (0xe8 bytes, reader `0x142716bd0`)
+Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the select screen, +0x80, +0xa0), three u64 (+0xd0 start, +0xd8, +0xc8 end), 3 flag bytes (+0xe0), u8 +0xc0, u8 +0xc1, u8 +0xc2. After the list: a flags byte (bit 0 → +0x30, bit 1 → +0x31).
+
 | Bit | Meaning |
 |---|---|
-| byte 0 bit 1 | hardcore (red banner, `0x140ecaed9`) |
-| byte 2 bit 2 | selects the "green" banner variant |
-| byte 1 bit 5 | tested by the select screen |
+| +0xe0 bit 1 | hardcore (red text and banner) |
+| +0xe0 bit 2 | timed event (Events panel `0x1408b3dd0`; bits 3/4/5 gate on the start/end times) |
+| +0xe0 bit 7 | not offered in the character-select "Join" list |
+| +0xe1 bit 1 | **permanent league**: not offered in the "Join" list (`0x1406bee00`); copied to characters (+0x3ab). Set for Standard and Hardcore (`[[leagues]] permanent`) |
+| +0xe1 bit 4 | entry faded (0.5 alpha) |
+| +0xe1 bits 5, 6 | extra confirmation warnings at character creation (`0x140ece3e0`) |
+| +0xe2 bit 2 | "green" variant / creation warning |
 
-The league label is still grey on the select screen (cosmetic, TBD).
+- The character-select **"Join" list** (lower right) has one entry per league unless it is flagged permanent (+0xe1 bit 1) or hidden (+0xe0 bit 7), or its end time has passed. Before the fix Standard and Hardcore appeared there.
+- The **league label** under a character is grey (`0xff676767`) for every non-hardcore league and dark red for hardcore (`0x1406b95f0`). Grey is normal.
+- The **league banner** comes from CharacterEntry **+0x4d = `LeagueFlag.dat` row + 1** (`0x140c7e460`). 0 or 1 give the grey event banner. The row's IsHC/IsSSF pick red or blue and the green variant. Config: `[[leagues]] flag = "StandardFlag"`.
 
 ## Hand-off to the instance server
 | Message | Layout |
