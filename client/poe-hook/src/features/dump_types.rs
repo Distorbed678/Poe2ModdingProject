@@ -30,6 +30,12 @@ const READ_INITIAL_STATE: usize = 0x141e71120;
 const ENTRY_SIZE: usize = 0x30;
 /// Shared `ret 0` stub used as the reader of components without initial state.
 const NOOP_READER: usize = 0x14010a080;
+/// Area loads that generate the terrain and log "Tile hash"/"Doodad hash" (`this` in rcx; the
+/// instance path is `0x14167b270`). When one returns, the layout is exported for the server
+/// (`terrain_layout_<tile hash>.tsv`).
+const LOAD_AREA: [usize; 2] = [0x14167b270, 0x14212f500];
+/// Vtable of the area terrain object (size in tiles at +0x18/+0x20, tiles at +0x28).
+const TERRAIN_VTABLE: usize = 0x143385b10;
 /// Positioned component reader: after it runs, the terrain size is logged (the reader clamps
 /// the grid position to it).
 const POSITIONED_READER: usize = 0x141dd8820;
@@ -61,7 +67,96 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     );
     let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
     Box::leak(Box::new(point));
+    for addr in LOAD_AREA {
+        let hooker = Hooker::new(
+            main.from_ghidra(addr),
+            HookType::Retn(on_load_area),
+            CallbackOption::None,
+            addr,
+            HookFlags::empty(),
+        );
+        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook load area: {e:?}"))?;
+        Box::leak(Box::new(point));
+    }
     Ok(())
+}
+
+type LoadAreaFn =
+    unsafe extern "win64" fn(usize, usize, usize, usize, usize, usize, usize, usize) -> usize;
+
+/// Runs the area load, then exports the generated layout. Stack arguments (5th..8th) are
+/// passed through.
+unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at: usize) -> usize {
+    let r = unsafe { &*regs };
+    let f: LoadAreaFn = unsafe { std::mem::transmute(original) };
+    let ret = unsafe {
+        f(
+            r.rcx as usize,
+            r.rdx as usize,
+            r.r8 as usize,
+            r.r9 as usize,
+            r.get_stack(5) as usize,
+            r.get_stack(6) as usize,
+            r.get_stack(7) as usize,
+            r.get_stack(8) as usize,
+        )
+    };
+    log::info!("area load {at:#x} returned");
+    unsafe { export_layout(r.rcx as usize) };
+    ret
+}
+
+/// Writes `terrain_layout_<tile hash>.tsv` next to the exe: a `size<TAB>w<TAB>h` line, then one
+/// `x<TAB>y<TAB>tile path` line per tile. Dev bridge until the server generates terrain (M4).
+unsafe fn export_layout(world: usize) {
+    use crate::mem::{read, wide_string};
+    // The terrain object is a member (or pointed-to member) of the world; find it by its
+    // vtable instead of assuming an offset.
+    let Some(m) = MAIN.get() else { return };
+    let terrain_vt = m.from_ghidra(TERRAIN_VTABLE);
+    // Embedded by value (the terrain's +8 points back to its owner) or behind a pointer.
+    let Some((offset, terrain)) = (0..0x2000).step_by(8).find_map(|off| {
+        let v = read::<usize>(world + off)?;
+        if v == terrain_vt {
+            return Some((off, world + off));
+        }
+        (read::<usize>(v)? == terrain_vt).then_some((off, v))
+    }) else {
+        log::warn!("layout export: no terrain object found in world {world:#x}");
+        return;
+    };
+    log::info!("terrain at world+{offset:#x}");
+    // Tile hash as logged by the client ("Tile hash: N"), also sent to the server in
+    // TerrainHashes; it names the export so the server reads the matching layout. World-map
+    // loads (area kind 0x20/0x21/0x23 at +0x98 -> +0x1b4) log no hash and are skipped.
+    let kind = read::<usize>(world + 0x98).and_then(|a| read::<u32>(a + 0x1b4));
+    if matches!(kind, Some(0x20 | 0x21 | 0x23)) {
+        return;
+    }
+    let Some(tile_hash) = read::<u32>(world + 0x114) else { return };
+    let (Some(w), Some(h), Some(tiles)) = (
+        read::<u32>(terrain + 0x18),
+        read::<u32>(terrain + 0x20),
+        read::<usize>(terrain + 0x28),
+    ) else {
+        return;
+    };
+    let mut out = format!("size\t{w}\t{h}\n");
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            // Tile record +8 -> tile object, whose +8 is the .tdt path (see terrain_tiles.txt).
+            let path = read::<usize>(tiles + (y * w as usize + x) * 0x38 + 8)
+                .and_then(|t| read::<usize>(t + 8))
+                .and_then(|p| wide_string(p, 200))
+                .unwrap_or_default();
+            out += &format!("{x}\t{y}\t{path}\n");
+        }
+    }
+    let path = crate::exe_dir().join(format!("terrain_layout_{tile_hash}.tsv"));
+    match std::fs::write(&path, out) {
+        Ok(()) => log::info!("exported {w}x{h} layout to {}", path.display()),
+        Err(e) => log::error!("layout export: {e}"),
+    }
 }
 
 static MAIN: OnceLock<Module> = OnceLock::new();

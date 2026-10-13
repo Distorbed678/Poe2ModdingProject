@@ -42,6 +42,24 @@ pub struct Config {
     pub leagues: Vec<LeagueConfig>,
     #[serde(default)]
     pub inventories: InventoriesConfig,
+    #[serde(default)]
+    pub spawn: SpawnConfig,
+}
+
+/// Player start position (see `instance-server::spawn`). Until the server generates terrain
+/// (M4) it relies on the layout exported by the client DLL.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SpawnConfig {
+    /// Directory where the DLL writes `terrain_layout_<tile hash>.tsv`; empty disables the
+    /// bridge.
+    #[serde(default)]
+    pub layout_dir: String,
+    /// Substrings of tile paths that are never playable (map filler).
+    #[serde(default)]
+    pub filler: Vec<String>,
+    /// Per `WorldAreas.Id`: a substring of the start tile's path.
+    #[serde(default)]
+    pub start_tiles: std::collections::BTreeMap<String, String>,
 }
 
 /// Player inventories created on instance entry. Slots come from `Inventories.dat`; grid

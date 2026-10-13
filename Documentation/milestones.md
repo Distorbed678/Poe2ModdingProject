@@ -39,7 +39,10 @@ Open items:
 Working end to end: Play → `InstanceDetails` → Hello/EnableEncryption → AreaInfo (client generates the area and reports terrain hashes) → LocalPlayers → AddInventory ×120 → PlayerEntity → AddObject (player) → ticks → InitialState. The client shows the game screen with the HUD (life orb, skill bar, "WASD to move").
 
 Open items:
-- **Spawn position**: Positioned sends grid (0, 0), so the camera sits in fog outside the map. We need a walkable start position, either from server-side terrain (M4) or from the client's generated terrain (DLL dump).
+- **Spawn position: solved for G1_1 (2026-10-13).** The grey view meant the player was not on walkable ground (filler tiles, or inside the intro tree in rotated layouts).
+  - Dev bridge until M4: when the client's area load (`0x14167b270`) returns, the DLL exports the generated tile layout as `GameFiles/terrain_layout_<tile hash>.tsv`.
+  - The server matches it by the tile hash from TerrainHashes and spawns at the centre of the area's start feature (`[spawn.start_tiles]`, G1_1 = `ZombieIntroFeature`), or else at the playable tile nearest the map centre.
+  - Verified on random seeds: the Riverbank renders.
 - The mana orb is empty, so the Life pool order (life/mana/ES) is still a guess.
 - The Actor section is undecoded (zeros).
 - The post-area messages are still behind `POE_EXPERIMENT`; they should become the default flow.
