@@ -11,3 +11,8 @@ EnableEncryption = 0x0011
 AreaInfo = 0x001e
 LocalPlayers = 0x0022
 InitialState = 0x0023
+PlayerEntity = 0x0024
+AddInventory = 0x00df
+# Simulation messages (second factory 0x142186aa0): queued per frame, applied by 0x142134240.
+SimulationTick = 0x02f4
+AddObject = 0x02f7

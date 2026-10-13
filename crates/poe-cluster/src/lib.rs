@@ -14,14 +14,23 @@ use std::{
 
 use rand::RngCore;
 
+/// The character being handed off (what the instance server needs to spawn it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TicketCharacter {
+    pub id: u32,
+    pub name: String,
+    /// `Characters.IntegerId` of the class.
+    pub class_id: u32,
+    pub level: u32,
+}
+
 /// A pending hand-off to an instance server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ticket {
     /// Value sent to the client (and expected back from it).
     pub id: u32,
     pub account_id: u32,
-    pub character_id: u32,
-    pub character_name: String,
+    pub character: TicketCharacter,
     /// `WorldAreas.Id` to load.
     pub area: String,
     /// 64 bytes of stream key material for the instance connection.
@@ -30,8 +39,7 @@ pub struct Ticket {
 
 pub trait TicketRegistry: Send + Sync {
     /// Issues a ticket with a fresh id and keys.
-    fn issue(&self, account_id: u32, character_id: u32, character_name: &str, area: &str)
-    -> Ticket;
+    fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket;
     /// Takes a ticket out of the registry (single use).
     fn redeem(&self, id: u32) -> Option<Ticket>;
     /// All unredeemed tickets (used to match a connection when the client does not send
@@ -60,13 +68,7 @@ impl MemoryTickets {
 }
 
 impl TicketRegistry for MemoryTickets {
-    fn issue(
-        &self,
-        account_id: u32,
-        character_id: u32,
-        character_name: &str,
-        area: &str,
-    ) -> Ticket {
+    fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket {
         let mut rng = rand::rng();
         let mut keys = [0u8; 64];
         rng.fill_bytes(&mut keys);
@@ -81,8 +83,7 @@ impl TicketRegistry for MemoryTickets {
         let ticket = Ticket {
             id,
             account_id,
-            character_id,
-            character_name: character_name.to_owned(),
+            character,
             area: area.to_owned(),
             keys,
         };
@@ -110,7 +111,13 @@ mod tests {
     #[test]
     fn tickets_are_single_use() {
         let reg = MemoryTickets::new(Duration::from_secs(60));
-        let t = reg.issue(1, 2, "test", "G1_1");
+        let character = TicketCharacter {
+            id: 2,
+            name: "test".into(),
+            class_id: 2,
+            level: 1,
+        };
+        let t = reg.issue(1, character, "G1_1");
         assert_eq!(reg.pending().len(), 1);
         assert_eq!(reg.redeem(t.id), Some(t.clone()));
         assert_eq!(reg.redeem(t.id), None);

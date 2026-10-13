@@ -209,38 +209,298 @@ impl Message for LocalPlayers {
     }
 }
 
-/// Initial state (deserializer `0x142158130`); only the empty form is supported so far.
-#[derive(Debug, Clone, Copy, Default)]
+/// Per-character state block of [`InitialState`] (client entry size 0x70). Consumed by
+/// `0x1420edaa0` for the local player whose [`PlayerState`] points at it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CharacterState {
+    /// Two lists of 0x68-byte records (reader `0x141ce2e20`); only empty lists are supported.
+    pub unk_00: Vec<()>,
+    pub unk_18: Vec<()>,
+    /// (u32, u32) pairs at +0x30.
+    pub pairs: Vec<(u32, u32)>,
+    /// Wide string at +0x48.
+    pub text: String,
+    /// Flag bytes at +0x68..+0x6a (bits copied to the client player, see the docs).
+    pub flags: [u8; 3],
+}
+
+/// Per-player entry of [`InitialState`] (client entry size 0x68), matched by `player_id`
+/// against the id assigned with `0x24`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerState {
+    pub player_id: u32,
+    /// Low 6 bits: index into [`InitialState::characters`]; bits 6/7 -> +7/+6.
+    pub character: u8,
+    /// Bits 0..2 -> +8..+10.
+    pub flags: u8,
+    pub unk_5: u8,
+    /// Per weapon set (main, swap, third): row index into
+    /// `CharacterShapeshiftBasicSkills.dat` (`0xff`: none, which crashes the weapon-slot UI).
+    /// Stored at local player +0x7980.
+    pub rows: [u8; 3],
+    /// u16 list at +0x40 (the client keeps the first three).
+    pub unk_40: Vec<u16>,
+}
+
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self {
+            player_id: 0,
+            character: 0,
+            flags: 0,
+            unk_5: 0,
+            rows: [0; 3],
+            unk_40: Vec::new(),
+        }
+    }
+}
+
+/// Initial state (deserializer `0x142158130`, handler `0x142122eed`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InitialState {
     pub unk_10: u8,
     pub unk_1f8: u32,
     /// Bits 0..2 -> client +0x1fc..+0x1fe.
     pub flags: u8,
+    pub characters: Vec<CharacterState>,
+    pub players: Vec<PlayerState>,
 }
 
 impl Message for InitialState {
     const NAME: &'static str = "InitialState";
     const DIRECTION: Direction = Direction::Server;
     fn encode(&self, w: &mut Writer) {
-        // Two empty lists (0x70-byte and 0x68-byte entries) follow the header.
         w.u8(self.unk_10)
             .varuint(self.unk_1f8)
             .u8(self.flags)
-            .u8(0)
-            .u8(0);
+            .u8(self.characters.len() as u8);
+        for c in &self.characters {
+            w.u16(c.unk_00.len() as u16)
+                .u16(c.unk_18.len() as u16)
+                .u8(c.pairs.len() as u8);
+            for (a, b) in &c.pairs {
+                w.u32(*a).u32(*b);
+            }
+            w.wstring(&c.text).bytes(&c.flags);
+        }
+        w.u8(self.players.len() as u8);
+        for p in &self.players {
+            w.u32(p.player_id)
+                .u8(p.character)
+                .u8(p.flags)
+                .u8(p.unk_5)
+                .bytes(&p.rows)
+                .u16(p.unk_40.len() as u16);
+            for v in &p.unk_40 {
+                w.u16(*v);
+            }
+        }
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
-        let m = Self {
+        let mut m = Self {
             unk_10: r.u8()?,
             unk_1f8: r.varuint()?,
             flags: r.u8()?,
+            ..Default::default()
         };
-        if r.u8()? != 0 || r.u8()? != 0 {
-            return Err(DecodeError::Invalid {
-                offset: r.position(),
-                what: "InitialState lists not supported",
+        let unsupported = |r: &Reader<'_>| DecodeError::Invalid {
+            offset: r.position(),
+            what: "InitialState 0x68-byte records not supported",
+        };
+        for _ in 0..r.u8()? {
+            if r.u16()? != 0 || r.u16()? != 0 {
+                return Err(unsupported(r));
+            }
+            let pairs = (0..r.u8()?)
+                .map(|_| Ok((r.u32()?, r.u32()?)))
+                .collect::<Result<_, DecodeError>>()?;
+            m.characters.push(CharacterState {
+                pairs,
+                text: r.wstring()?,
+                flags: r.array()?,
+                ..Default::default()
             });
         }
+        for _ in 0..r.u8()? {
+            let mut p = PlayerState {
+                player_id: r.u32()?,
+                character: r.u8()?,
+                flags: r.u8()?,
+                unk_5: r.u8()?,
+                rows: r.array()?,
+                ..Default::default()
+            };
+            for _ in 0..r.u16()? {
+                p.unk_40.push(r.u16()?);
+            }
+            m.players.push(p);
+        }
         Ok(m)
+    }
+}
+
+/// Assigns the entity a local player controls (handler sets local player +0x184; the entity
+/// with that id becomes the controlled character when it is added).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayerEntity {
+    pub unk: u8,
+    /// Local player index (from [`LocalPlayers`]).
+    pub local_index: u8,
+    pub entity_id: u32,
+}
+
+impl Message for PlayerEntity {
+    const NAME: &'static str = "PlayerEntity";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk).u8(self.local_index).u32(self.entity_id);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk: r.u8()?,
+            local_index: r.u8()?,
+            entity_id: r.u32()?,
+        })
+    }
+}
+
+/// Header shared by simulation messages (`0x141f4b680`). The frame processor orders a
+/// frame's messages by the last three fields.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SimulationHeader {
+    /// Entity the message applies to.
+    pub entity_id: u32,
+    pub unk_14: u32,
+    pub unk_18: u8,
+    pub unk_1a: u16,
+}
+
+impl SimulationHeader {
+    fn encode(&self, w: &mut Writer) {
+        w.u32(self.entity_id)
+            .u32(self.unk_14)
+            .u8(self.unk_18)
+            .u16(self.unk_1a);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            entity_id: r.u32()?,
+            unk_14: r.u32()?,
+            unk_18: r.u8()?,
+            unk_1a: r.u16()?,
+        })
+    }
+}
+
+/// Ends a simulation frame (no body).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SimulationTick;
+
+impl Message for SimulationTick {
+    const NAME: &'static str = "SimulationTick";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, _: &mut Writer) {}
+    fn decode(_: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self)
+    }
+}
+
+/// Spawns an entity: object type key (MurmurHash2 of its metadata path) and its initial
+/// state blob (read by `0x141e71120`; layout in `Documentation/protocol/entities.md`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AddObject {
+    pub header: SimulationHeader,
+    pub type_key: u32,
+    pub blob: Vec<u8>,
+}
+
+impl Message for AddObject {
+    const NAME: &'static str = "AddObject";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u32(self.type_key)
+            .varuint(self.blob.len() as u32)
+            .bytes(&self.blob);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let header = SimulationHeader::decode(r)?;
+        let type_key = r.u32()?;
+        let len = r.varuint()? as usize;
+        Ok(Self {
+            header,
+            type_key,
+            blob: r.bytes(len)?.to_vec(),
+        })
+    }
+}
+
+/// An inventory (client class vtable `0x143573a28`; serializer `0x1425aa290`, reader
+/// `0x1425aa550`). Items are not supported yet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Inventory {
+    /// +0x140 (provisional: `Inventories.InventoryIdKey`).
+    pub id_key: u8,
+    /// +0x144: `Inventories.dat` row index.
+    pub slot: u8,
+    pub width: u8,
+    pub height: u8,
+}
+
+impl Inventory {
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.id_key)
+            .u8(self.slot)
+            .u8(self.width)
+            .u8(self.height)
+            // Flags: no optional sections.
+            .u8(0)
+            // Item count.
+            .varuint(0);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let inv = Self {
+            id_key: r.u8()?,
+            slot: r.u8()?,
+            width: r.u8()?,
+            height: r.u8()?,
+        };
+        if r.u8()? != 0 || r.varuint()? != 0 {
+            return Err(DecodeError::Invalid {
+                offset: r.position(),
+                what: "inventory flags/items not supported",
+            });
+        }
+        Ok(inv)
+    }
+}
+
+/// Creates (or replaces) a server inventory for a local player (handler in the per-player
+/// processor, registry insert `0x141cf1da0`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AddInventory {
+    pub unk_10: u8,
+    pub local_index: u8,
+    /// Server inventory id (the registry key).
+    pub inventory_id: u32,
+    pub inventory: Inventory,
+}
+
+impl Message for AddInventory {
+    const NAME: &'static str = "AddInventory";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_10)
+            .u8(self.local_index)
+            .u32(self.inventory_id);
+        self.inventory.encode(w);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk_10: r.u8()?,
+            local_index: r.u8()?,
+            inventory_id: r.u32()?,
+            inventory: Inventory::decode(r)?,
+        })
     }
 }

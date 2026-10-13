@@ -218,6 +218,37 @@ impl Writer {
 
     write_be!(u16: u16, u32: u32, u64: u64, i16: i16, i32: i32, i64: i64, f32: f32, f64: f64);
 
+    /// Little-endian integers and floats: entity state blobs are copied raw by the client.
+    pub fn u16_le(&mut self, v: u16) -> &mut Self {
+        self.bytes(&v.to_le_bytes())
+    }
+
+    pub fn i16_le(&mut self, v: i16) -> &mut Self {
+        self.bytes(&v.to_le_bytes())
+    }
+
+    pub fn u32_le(&mut self, v: u32) -> &mut Self {
+        self.bytes(&v.to_le_bytes())
+    }
+
+    pub fn i32_le(&mut self, v: i32) -> &mut Self {
+        self.bytes(&v.to_le_bytes())
+    }
+
+    pub fn f32_le(&mut self, v: f32) -> &mut Self {
+        self.bytes(&v.to_le_bytes())
+    }
+
+    /// Blob string: u32 LE UTF-16 unit count, then UTF-16LE units.
+    pub fn utf16_le(&mut self, s: &str) -> &mut Self {
+        let units: Vec<u16> = s.encode_utf16().collect();
+        self.u32_le(units.len() as u32);
+        for u in units {
+            self.u16_le(u);
+        }
+        self
+    }
+
     pub fn wstring(&mut self, s: &str) -> &mut Self {
         self.u16(s.chars().count() as u16);
         for c in s.chars() {

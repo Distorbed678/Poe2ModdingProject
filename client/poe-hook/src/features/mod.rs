@@ -12,16 +12,38 @@ mod trace_calls;
 
 use crate::{config::Config, module::Module};
 
-pub fn init_all(config: &Config, main: &Module) {
+/// Features that must be active before the game runs any code: the network hooks (so
+/// `block_external` also stops the crash-report helper, which connects out immediately).
+/// Called from `DllMain`.
+pub fn init_early(config: &Config, main: &Module) {
     let f = &config.features;
-    let net = || net_trace::Options {
+    let options = net_trace::Options {
         trace: f.net_trace,
         dump_bytes: f.net_trace_dump_bytes,
         block_external: f.block_external,
     };
+    report("net_hooks", f.net_trace || f.block_external, || {
+        net_trace::init(main, options)
+    });
+}
+
+fn report(name: &str, enabled: bool, init: impl FnOnce() -> Result<(), String>) {
+    if !enabled {
+        log::info!("feature {name}: disabled");
+        return;
+    }
+    match init() {
+        Ok(()) => log::info!("feature {name}: enabled"),
+        Err(e) => log::error!("feature {name}: failed: {e}"),
+    }
+}
+
+/// The remaining features, enabled from a background thread.
+pub fn init_all(config: &Config, main: &Module) {
+    let f = &config.features;
     let trace = (f.trace_addresses.clone(), f.trace_limit);
     let dump_path = crate::exe_dir().join("object_types.txt");
-    let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 6] = [
+    let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 5] = [
         (
             "dump_object_types",
             f.dump_object_types,
@@ -39,20 +61,8 @@ pub fn init_all(config: &Config, main: &Module) {
             f.crypto_bypass,
             Box::new(crypto_bypass::init),
         ),
-        (
-            "net_hooks",
-            f.net_trace || f.block_external,
-            Box::new(move |m| net_trace::init(m, net())),
-        ),
     ];
     for (name, enabled, init) in features {
-        if !enabled {
-            log::info!("feature {name}: disabled");
-            continue;
-        }
-        match init(main) {
-            Ok(()) => log::info!("feature {name}: enabled"),
-            Err(e) => log::error!("feature {name}: failed: {e}"),
-        }
+        report(name, enabled, || init(main));
     }
 }

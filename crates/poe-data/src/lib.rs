@@ -8,6 +8,7 @@
 mod dat;
 mod error;
 mod files;
+pub mod hash;
 mod schema;
 pub mod views;
 

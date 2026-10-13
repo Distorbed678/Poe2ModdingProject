@@ -37,42 +37,42 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
    The client logs "Client-Safe Instance ID = …" and "Generating level N area "X" with seed S", then generates the terrain.
 5. **C→S `0x009a` TerrainHashes** after terrain generation: `u8, u32 tile hash, u32 doodad hash`. Confirmed: the client logs "Tile hash: N" and "Doodad hash: N" with the same values. These are the reference values for server-side terrain generation (M4).
 
-## After the area loads (in progress)
-- **S→C `0x0022` LocalPlayers** (`u8, u8 n, (u8 index, wstring character name)[n]`): handler `0x142122dc1`. It assigns indices to the *existing* local-player objects by name (+0x181) and does not create players. Sending it alone is harmless: the client stays on the loading screen.
-- **S→C `0x0023` InitialState** (`u8, varuint, u8 flags, u8 n, 0x70-byte entries[n], u8 m, 0x68-byte entries[m]`): handler `0x142122eed` passes the header to the world object (vtable calls) and runs `0x1420edaa0` per local session (that function matches entries by the player id at session player +0x184). **Sent before any player entity exists, it makes the client quit cleanly** (main loop returns, `ExitProcess(0)`). It probably has to follow the player-entity messages.
-- **S→C `0x0024`** (u8 at +0x18, u32 at +0x1c): sets the player id (+0x184) on the local player whose index matches.
-- Entity and simulation messages come from the second factory `0x142186aa0` (map in `../re/instance_factory2_s2c.json`): 0x64, 0x65, 0xa3, 0x1af–0x1fe, 0x222/0x223, 0x26f/0x270, 0x295/0x296, 0x2a4–0x2a6, 0x2ef, **0x2f4 (tick marker, no body)**, 0x2f5, **0x2f7–0x300**, 0x302, 0x30e, 0x316, 0x318, 0x319, 0x31b, 0x324.
-  - They share a header (`0x141f4b680`): `u32, u32, u8, u16`.
-  - `0x2f7` = header + `u32` + varuint length + blob (probably serialized entity data).
-  - No direct opcode comparison was found for these; dispatch is still to be found.
+## After the area loads (verified 2026-10-13: the player reaches the game screen)
+The server sends, in this order (`POE_EXPERIMENT=players,inventories,spawn,initial`):
+1. **S→C `0x0022` LocalPlayers** (`u8, u8 n, (u8 index, wstring character name)[n]`): handler `0x142122dc1`. Assigns indices to the existing local-player objects by name (+0x181).
+2. **S→C `0x00df` AddInventory**, one per `Inventories.dat` row except `StashInventoryId`:
+   - `u8, u8 local player index, u32 inventory id, inventory`.
+   - inventory (reader `0x1425aa550`, serializer `0x1425aa290`): `u8 id key, u8 slot (= Inventories row), u8 width, u8 height, u8 flags, [u64 if flags&8], [4×u32 if flags&0x10], varuint item count, items`.
+   - Handled in the per-player processor `0x142106a30` (case 0xdf), registry insert `0x141cf1da0`. The registry also maps slot → inventory id (0x79 slots, except 0x1a). The in-game UI resolves every slot through it, and a missing one throws "Invalid inventory id".
+   - Grid sizes are not in the game tables; they are configured in `[inventories]` of `config/server.toml`.
+3. **S→C `0x0024` PlayerEntity**: `u8, u8 local player index, u32 entity id`. Sets the local player's entity id (+0x184).
+4. **S→C `0x02f7` AddObject** for the player entity, then **`0x02f4`** ticks (see below and [entities.md](entities.md)).
+5. **S→C `0x0023` InitialState** (deserializer `0x142158130`, handler `0x142122eed`):
+   - `u8, varuint, u8 flags (3 bits), u8 n, CharacterState[n], u8 m, PlayerState[m]`.
+   - CharacterState (0x70): `u16 n + 0x68-byte records (0x141ce2e20), u16 m + records, u8 k + (u32, u32)[k], wstring, 3 flag bytes`.
+   - PlayerState (0x68): `u32 player id, u8 (bits 0-5: CharacterState index, 6, 7), u8 flags, u8, u8 rows[3], u16 n + u16[n]`. `rows` are `CharacterShapeshiftBasicSkills.dat` row indices, one per weapon set (local player +0x7980); 0xff (none) crashes the weapon-slot UI.
+   - Entries are matched by player id, so InitialState must follow `0x24` and the player entity. Sent first, the client quits (`ExitProcess(0)`).
 
-### Simulation packets (factory 2): dispatch path (found 2026-10-13)
+### Simulation packets (factory 2, `0x142186aa0`; map in `../re/instance_factory2_s2c.json`)
 1. The stream reader `0x1421c5950` tries the registered packet handlers. Factory 2's handler (`0x1421c5810`) builds the packet and passes it to `0x1421340e0`.
 2. `0x1421340e0` **queues** the packet in the world's frame queue (world+0x6b0):
-   - `0x2f4` (tick marker) closes a frame;
+   - `0x2f4` (tick marker, no body) closes a frame;
    - `0x2f5` is applied immediately (world vfunc +0x178).
-3. Each frame, `0x1421306c0` drains the queue and applies every packet with `0x142134240` (switch on opcode). Header fields +0x14/+0x18/+0x1a order the packets inside a frame.
+3. Each frame, `0x1421306c0` drains the queue and applies every packet with `0x142134240` (switch on opcode). They share a header (`0x141f4b680`, `u32 entity id, u32, u8, u16`), and fields +0x14/+0x18/+0x1a order the packets inside a frame.
 
 ### S→C `0x2f7` AddObject (apply case `0x142134d47`)
 | Field | Meaning |
 |---|---|
 | header | `u32 entity id, u32, u8, u16` |
-| `u32` | **object type key = MurmurHash2(metadata path bytes, seed 0)**, e.g. `Metadata/Characters/Dex/DexFour` = `0xc393f3d5` (table dumped with the DLL's `dump_object_types`: 8494 types). An unknown key throws "Unknown object type serialized by server" |
-| `varuint len, blob` | serialized components, parsed by `0x141e70450(entity, type, id, blob, world)` |
+| `u32` | **object type key = MurmurHash2(ASCII metadata path, seed 0)** (`poe_data::hash::object_type_key`), e.g. `Metadata/Characters/Dex/DexFour` = `0xc393f3d5`. The class path is `Characters.Id`. An unknown key throws "Unknown object type serialized by server" |
+| `varuint len, blob` | initial state, read by `0x141e71120`: see [entities.md](entities.md) |
 
 If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb30` makes it that player's controlled entity.
-
-### S→C `0x0024` SetLocalPlayerEntity
-`u8, u8 local player index, u32 entity id`.
-
-Next steps:
-1. Work out the component blob format (`0x141e70450` and each component's deserializer, in the order given by the object's .ot/.otc template).
-2. Send `0x24` → `0x2f7` (player) → `0x2f4` ticks → `0x23`.
-'''
 
 ## Tools
 - `tools/re/dump_factory.py`, `find_switches.py`, `case_strings.py` map factories and handlers.
 - The DLL's `crash_log` logs C++ exceptions (type and `what()`).
 - `exit_trace` logs `ExitProcess` and `TerminateProcess` with stack refs.
-- The instance server's post-area messages can be chosen with `POE_EXPERIMENT=players,initial`.
+- The instance server's post-area messages can be chosen with `POE_EXPERIMENT` (comma list: `players`, `inventories`, `spawn`, `initial`).
+- The DLL's `dump_object_types` feature also logs, per spawned entity, its components and the blob span each component reader consumes.
 

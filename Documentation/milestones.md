@@ -4,7 +4,7 @@
 |---|---|---|
 | M0 | Foundation: repo, tools, workspace, config, data access, client DLL proxy, deploy tooling | done |
 | M1 | Login → character select/creation, league selection | done (league label colour TBD) |
-| M2 | Instance server transfer, first zone loads with the player | in progress |
+| M2 | Instance server transfer, first zone loads with the player | in progress (game screen reached) |
 | M3 | Movement (WASD and click-to-move) | – |
 | M4 | Server-side terrain generation (reimplement the client generator) for collision | – |
 | M5 | Zone/instance transfer | – |
@@ -35,17 +35,11 @@ Open items:
 - The meaning of the remaining entry fields.
 - Error codes for refused character creation.
 
-## M2: status and next steps (paused 2026-10-12)
-Implemented, **not yet tested live**:
-1. `PlayCharacter` (C→S `0x0e`: `u8 flags, varuint n, (u32 char_index, u32 account_id)[n]`) triggers a ticket from `poe-cluster::MemoryTickets` (60 s, single use, 64-byte random keys).
-2. The server then sends `InstanceDetails` (S→C `0x14`):
-   - `astring host, u16 port, u32 (ticket), u16 area HASH16, u32, 64-byte keys, 8 bytes, u8`;
-   - host and port come from `[instance] public_host/public_port`, the area from the character's `area`.
-3. The instance server (port 6112) logs the client's first bytes raw, and decrypted with each pending ticket's client→server keys.
+## M2: status and next steps (2026-10-13)
+Working end to end: Play → `InstanceDetails` → Hello/EnableEncryption → AreaInfo (client generates the area and reports terrain hashes) → LocalPlayers → AddInventory ×120 → PlayerEntity → AddObject (player) → ticks → InitialState. The client shows the game screen with the HUD (life orb, skill bar, "WASD to move").
 
-To resume:
-- Run `cargo run -p poe-server` and `cargo xtask run-client`, log in, click Play on a character.
-- Check the server log for the instance connection and its first message (data/server-run.log).
-- Then reverse engineer the client's first instance message and the server's area/entity messages:
-  - The instance packet factories still need to be found. `tools/re/find_opcode_stores.py` shows clusters at 0x14215xxxx–0x14218xxxx.
-  - Look for "Generating level N area" in `GameFiles/logs/Client.txt`.
+Open items:
+- **Spawn position**: Positioned sends grid (0, 0), so the camera sits in fog outside the map. We need a walkable start position, either from server-side terrain (M4) or from the client's generated terrain (DLL dump).
+- The mana orb is empty, so the Life pool order (life/mana/ES) is still a guess.
+- The Actor section is undecoded (zeros).
+- The post-area messages are still behind `POE_EXPERIMENT`; they should become the default flow.
