@@ -18,3 +18,10 @@ net_trace_dump_bytes = 256
 # Refuse connections to non-loopback addresses (keeps the client away from official
 # services such as the shop, telemetry and crash upload while using the private server).
 block_external = true
+# Logging breakpoints: Ghidra addresses (function starts) to hook; each hit logs rcx/rdx/r8/r9
+# and the game call stack, up to trace_limit hits per address.
+trace_addresses = []
+trace_limit = 20
+# Dump the client's object-type table (key -> metadata path) to object_types.txt the first
+# time the server's add-object message is applied (RE aid).
+dump_object_types = false

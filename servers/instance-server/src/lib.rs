@@ -133,6 +133,25 @@ impl InstanceServer {
             conn.send(&self.protocol.instance.encode(&players)?).await?;
             info!("sent LocalPlayers");
         }
+        if experiment.split(',').any(|e| e == "spawn") {
+            // 0x24: local player 0 controls entity 1; 0x2f7 adds entity 1 (type key 0, empty
+            // blob); then tick markers so the simulation frame is applied.
+            let mut w = poe_net::Writer::new();
+            w.u16(0x24).u8(0).u8(0).u32(1);
+            w.u16(0x2f7).u32(1).u32(0).u8(0).u16(0).u32(0).varuint(0);
+            for _ in 0..3 {
+                w.u16(0x2f4);
+            }
+            conn.send(w.as_slice()).await?;
+            info!("sent spawn experiment");
+        }
+        if experiment.split(',').any(|e| e == "entity") {
+            // Empty 0x2f7 (simulation header + u32 + empty blob) to trace its consumer.
+            let mut w = poe_net::Writer::new();
+            w.u16(0x2f7).u32(0).u32(0).u8(0).u16(0).u32(0).varuint(0);
+            conn.send(w.as_slice()).await?;
+            info!("sent empty 0x2f7");
+        }
         if experiment.split(',').any(|e| e == "initial") {
             conn.send(&self.protocol.instance.encode(&InitialState::default())?)
                 .await?;
