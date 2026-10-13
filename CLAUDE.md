@@ -46,6 +46,11 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 - `cargo xtask run-client` launches `GameFiles/PathOfExileSteam.exe` through Proton with its own prefix (`Tools/proton-prefix`). Steam must be running.
 - `Tools/poe_data_tools/poe_data_tools -p 2 --steam GameFiles list '<glob>'` lists and extracts game files.
 
+## Reference data from live play
+- `~/.local/share/Steam/steamapps/common/Path of Exile 2/logs/Client.txt` is the user's client log from **real play sessions on official servers** (about 80 MB). It shows what a correct session looks like: area/seed pairs, tile and doodad hashes, loading timings, the order of client events, and warnings. Use it as a reference.
+- **Read only.** Never modify, move or truncate it, or anything else in the Steam install. Copy excerpts into `data/` (git-ignored) if needed. Do not commit its contents, since it may hold account details.
+- Analysis scripts: `tools/re/clientlog_*.py`.
+
 ## Logs
 - Client: `GameFiles/logs/Client.txt`.
 - DLL: `GameFiles/poe-hook.log`.

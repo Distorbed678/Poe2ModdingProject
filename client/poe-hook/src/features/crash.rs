@@ -13,10 +13,12 @@ use windows_sys::Win32::{
         EXCEPTION_PRIV_INSTRUCTION, EXCEPTION_STACK_OVERFLOW,
     },
     System::Diagnostics::Debug::{AddVectoredExceptionHandler, EXCEPTION_POINTERS},
-    System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, VirtualQuery},
 };
 
-use crate::module::Module;
+use crate::{
+    mem::{c_string, read},
+    module::Module,
+};
 
 const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
 /// MSVC C++ `throw`.
@@ -95,41 +97,6 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     }
     log::error!("{msg}");
     EXCEPTION_CONTINUE_SEARCH
-}
-
-/// Whether `len` bytes at `addr` are committed memory (cheap guard before raw reads).
-fn readable(addr: usize, len: usize) -> bool {
-    if addr < 0x10000 {
-        return false;
-    }
-    let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
-    let n = unsafe {
-        VirtualQuery(
-            addr as *const _,
-            &mut mbi,
-            size_of::<MEMORY_BASIC_INFORMATION>(),
-        )
-    };
-    n != 0 && mbi.State == MEM_COMMIT && addr + len <= mbi.BaseAddress as usize + mbi.RegionSize
-}
-
-fn read<T: Copy>(addr: usize) -> Option<T> {
-    readable(addr, size_of::<T>()).then(|| unsafe { (addr as *const T).read_unaligned() })
-}
-
-fn c_string(addr: usize, max: usize) -> Option<String> {
-    if !readable(addr, 1) {
-        return None;
-    }
-    let mut out = Vec::new();
-    for i in 0..max {
-        let b: u8 = read(addr + i)?;
-        if b == 0 {
-            break;
-        }
-        out.push(b);
-    }
-    Some(String::from_utf8_lossy(&out).into_owned())
 }
 
 /// `ExceptionInformation`: [magic, object, ThrowInfo*, image base].

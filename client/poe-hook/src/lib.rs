@@ -9,6 +9,7 @@
 mod config;
 mod features;
 mod logger;
+mod mem;
 mod module;
 mod proxy;
 

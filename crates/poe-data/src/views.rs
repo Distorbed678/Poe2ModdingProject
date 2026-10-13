@@ -56,11 +56,18 @@ pub struct WorldArea {
     pub act: i64,
     pub level: i64,
     pub is_town: bool,
+    pub is_hideout: bool,
     /// 16-bit area hash the client uses to reference areas compactly.
     pub hash16: u16,
 }
 
 impl WorldArea {
+    /// Towns and hideouts always use layout seed 1 (every one of them in live client logs);
+    /// other areas get a random seed per instance.
+    pub fn fixed_seed(&self) -> Option<u32> {
+        (self.is_town || self.is_hideout).then_some(1)
+    }
+
     pub fn find(data: &GameData, id: &str) -> Result<Option<Self>> {
         let areas = data.table("WorldAreas")?;
         let Some(row) = areas.find_by_str("Id", id)? else {
@@ -72,6 +79,7 @@ impl WorldArea {
             act: row.int("Act")?,
             level: row.int("AreaLevel")?,
             is_town: row.bool("IsTown")?,
+            is_hideout: row.bool("IsHideout")?,
             hash16: row.int("HASH16")? as u16,
         }))
     }
