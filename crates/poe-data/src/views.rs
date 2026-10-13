@@ -76,3 +76,66 @@ impl WorldArea {
         }))
     }
 }
+
+/// A `Characters` row (a playable class).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CharacterClass {
+    /// Metadata path of the class's object type, e.g. `Metadata/Characters/Dex/DexFour`.
+    pub metadata_id: String,
+    pub name: String,
+    pub integer_id: u32,
+    pub base_max_life: i64,
+    pub base_max_mana: i64,
+}
+
+impl CharacterClass {
+    /// Looks up a class by `Characters.IntegerId` (the id stored with each character).
+    pub fn by_integer_id(data: &GameData, integer_id: u32) -> Result<Option<Self>> {
+        let characters = data.table("Characters")?;
+        for i in 0..characters.len() {
+            let Some(row) = characters.row(i) else {
+                continue;
+            };
+            if row.int("IntegerId")? as u32 == integer_id {
+                return Ok(Some(Self {
+                    metadata_id: row.str("Id")?,
+                    name: row.str("Name")?,
+                    integer_id,
+                    base_max_life: row.int("BaseMaxLife")?,
+                    base_max_mana: row.int("BaseMaxMana")?,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Object type key the client uses for this class's player entity.
+    pub fn object_type_key(&self) -> u32 {
+        crate::hash::object_type_key(&self.metadata_id)
+    }
+}
+
+/// An `Inventories` row: a kind of inventory (main bag, an equipment slot, ...). The row index
+/// is the slot index the client uses (inventory +0x144; 121 rows in 0.5.5e).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventorySlot {
+    pub index: u8,
+    pub id: String,
+    pub id_key: i64,
+}
+
+impl InventorySlot {
+    pub fn all(data: &GameData) -> Result<Vec<Self>> {
+        let table = data.table("Inventories")?;
+        (0..table.len())
+            .filter_map(|i| table.row(i).map(|r| (i, r)))
+            .map(|(i, row)| {
+                Ok(Self {
+                    index: i as u8,
+                    id: row.str("Id")?,
+                    id_key: row.int("InventoryIdKey")?,
+                })
+            })
+            .collect()
+    }
+}

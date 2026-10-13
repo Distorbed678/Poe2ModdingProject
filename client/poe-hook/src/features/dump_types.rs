@@ -4,12 +4,17 @@
 //! `{u32 key, .., wchar* path at +8}` to resolve the object type key carried by the
 //! server's add-object message (0x2f7). The dump (`object_types.txt` next to the exe, one
 //! `key<TAB>path` per line) gives the key for each metadata path.
+//!
+//! It also traces entity deserialization: the components of each entity read by
+//! `READ_INITIAL_STATE` and, per component reader, the blob span it consumed. That gives the
+//! exact layout of a server-sent blob in one run.
 
 use std::{
+    collections::HashSet,
     io::Write,
     path::PathBuf,
     sync::{
-        OnceLock,
+        Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -20,7 +25,14 @@ use crate::module::Module;
 
 /// Ghidra address of the object-type lookup (0.5.5e).
 const LOOKUP: usize = 0x1416936c0;
+/// Entity initial-state reader `(entity, blob)`: logs the entity's components (0.5.5e).
+const READ_INITIAL_STATE: usize = 0x141e71120;
 const ENTRY_SIZE: usize = 0x30;
+/// Shared `ret 0` stub used as the reader of components without initial state.
+const NOOP_READER: usize = 0x14010a080;
+
+/// Readers already hooked (Ghidra addresses).
+static HOOKED_READERS: Mutex<Option<HashSet<usize>>> = Mutex::new(None);
 
 static OUT: OnceLock<PathBuf> = OnceLock::new();
 static DONE: AtomicBool = AtomicBool::new(false);
@@ -36,7 +48,101 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     );
     let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
     Box::leak(Box::new(point));
+    MAIN.set(*main).ok();
+    let hooker = Hooker::new(
+        main.from_ghidra(READ_INITIAL_STATE),
+        HookType::JmpBack(on_read_initial_state),
+        CallbackOption::None,
+        0,
+        HookFlags::empty(),
+    );
+    let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
+    Box::leak(Box::new(point));
     Ok(())
+}
+
+static MAIN: OnceLock<Module> = OnceLock::new();
+
+/// Logs each component of the entity being deserialized: object address, vtable and the
+/// component's initial-state reader (vtable +0x98), as Ghidra addresses.
+unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
+    let r = unsafe { &*regs };
+    let Some(m) = MAIN.get() else { return };
+    unsafe {
+        let entity = r.rcx as usize;
+        let blob = r.rdx as *const usize;
+        let (data, len, pos) = (*blob, *blob.add(1), *blob.add(2));
+        let begin = *((entity + 0x10) as *const usize);
+        let end = *((entity + 0x18) as *const usize);
+        let count = (end.saturating_sub(begin)) / 8;
+        let id = *((entity + 0x88) as *const u32);
+        // The read loop only visits the first `serialized` components (type +0x28 -> +0x78);
+        // the rest are client-only and their +0x98 slot is not a reader.
+        let ty = *((entity + 8) as *const usize);
+        let serialized = if ty > 0x10000 {
+            *((*((ty + 0x28) as *const usize) + 0x78) as *const usize)
+        } else {
+            0
+        };
+        log::info!("entity {id:#x} initial state: {count} components ({serialized} serialized), blob {len} bytes at pos {pos} (data {data:#x})");
+        for i in 0..count.min(64) {
+            let comp = *((begin + i * 8) as *const usize);
+            if comp < 0x10000 {
+                continue;
+            }
+            let vt = *(comp as *const usize);
+            let reader = if m.contains(vt) { *((vt + 0x98) as *const usize) } else { 0 };
+            // The read loop only calls components whose owner (+8) is this entity.
+            let owned = *((comp + 8) as *const usize) == entity;
+            log::info!(
+                "  component {i}: vtable={:#x} reader={:#x} owned={owned}",
+                if m.contains(vt) { m.to_ghidra(vt) } else { vt },
+                if m.contains(reader) { m.to_ghidra(reader) } else { reader }
+            );
+            if owned && i < serialized && m.contains(reader) {
+                hook_reader(m, m.to_ghidra(reader));
+            }
+        }
+    }
+}
+
+/// Wraps a component reader to log the blob span it consumes. Installed lazily, before the
+/// reader first runs (we are at the entry of the function that calls it).
+fn hook_reader(m: &Module, ghidra: usize) {
+    if ghidra == NOOP_READER {
+        return;
+    }
+    let mut hooked = HOOKED_READERS.lock().unwrap_or_else(|e| e.into_inner());
+    if !hooked.get_or_insert_with(HashSet::new).insert(ghidra) {
+        return;
+    }
+    let hooker = Hooker::new(
+        m.from_ghidra(ghidra),
+        HookType::Retn(on_reader),
+        CallbackOption::None,
+        ghidra,
+        HookFlags::empty(),
+    );
+    match unsafe { hooker.hook() } {
+        Ok(point) => {
+            Box::leak(Box::new(point));
+        }
+        Err(e) => log::error!("hook reader {ghidra:#x}: {e:?}"),
+    }
+}
+
+type ReaderFn = unsafe extern "win64" fn(usize, usize, usize, usize) -> usize;
+
+unsafe extern "win64" fn on_reader(regs: *mut Registers, original: usize, ghidra: usize) -> usize {
+    let r = unsafe { &*regs };
+    let blob = r.rdx as *const usize;
+    let start = unsafe { *blob.add(2) };
+    log::info!("    reader {ghidra:#x} starts at blob pos {start}");
+    let f: ReaderFn = unsafe { std::mem::transmute(original) };
+    let ret = unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) };
+    let end = unsafe { *blob.add(2) };
+    log::info!("    reader {ghidra:#x} read {} bytes ({start}..{end})", end - start);
+    ret
 }
 
 unsafe fn wide(ptr: usize) -> String {

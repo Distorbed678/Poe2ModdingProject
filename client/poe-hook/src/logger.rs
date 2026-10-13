@@ -1,7 +1,7 @@
 //! Minimal file logger behind the `log` facade.
 
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::Write,
     path::Path,
     sync::Mutex,
@@ -41,8 +41,13 @@ impl log::Log for FileLogger {
     fn flush(&self) {}
 }
 
+/// Appends to `path`: the client may restart itself (each process loads the DLL again), and
+/// truncating would lose the previous process's log. `run-client` clears the file per launch.
 pub fn init(path: &Path, level: log::LevelFilter) {
-    let Ok(file) = File::create(path) else { return };
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let _ = writeln!(file, "---- process {} ----", std::process::id());
     let logger = Box::leak(Box::new(FileLogger {
         file: Mutex::new(file),
     }));

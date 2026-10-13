@@ -40,6 +40,43 @@ pub struct Config {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub leagues: Vec<LeagueConfig>,
+    #[serde(default)]
+    pub inventories: InventoriesConfig,
+}
+
+/// Player inventories created on instance entry. Slots come from `Inventories.dat`; grid
+/// sizes are not in the game tables, so they are configured here by `Inventories.Id`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InventoriesConfig {
+    /// Grid size for slots not listed in `sizes`.
+    #[serde(default = "default_inventory_size")]
+    pub default_size: [u8; 2],
+    #[serde(default)]
+    pub sizes: std::collections::BTreeMap<String, [u8; 2]>,
+    /// `Inventories.Id` values never sent (account-wide or not per-character).
+    #[serde(default)]
+    pub skip: Vec<String>,
+}
+
+fn default_inventory_size() -> [u8; 2] {
+    [1, 1]
+}
+
+impl Default for InventoriesConfig {
+    fn default() -> Self {
+        Self {
+            default_size: default_inventory_size(),
+            sizes: Default::default(),
+            skip: Vec::new(),
+        }
+    }
+}
+
+impl InventoriesConfig {
+    /// (width, height) of an inventory slot.
+    pub fn size(&self, id: &str) -> [u8; 2] {
+        self.sizes.get(id).copied().unwrap_or(self.default_size)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

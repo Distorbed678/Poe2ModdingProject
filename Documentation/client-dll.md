@@ -5,10 +5,10 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 ## Structure
 | File | Role |
 |---|---|
-| `src/lib.rs` | `DllMain`. Starts an init thread (no work under the loader lock), then config, log and features. |
+| `src/lib.rs` | `DllMain`. Loads the config, opens the log and installs the network hooks synchronously (only file I/O and patching of the already-mapped ws2_32), then starts a thread for the other features. The client's crash-report helper process connects out within milliseconds of starting, so the network guard must be active before the game runs. |
 | `src/proxy.rs` | Forwards all 16 version.dll exports to the system DLL, resolved lazily. |
 | `src/config.rs` | `poe-hook.toml` next to the exe. Falls back to defaults if missing. |
-| `src/logger.rs` | `poe-hook.log` next to the exe. |
+| `src/logger.rs` | `poe-hook.log` next to the exe. Appends, with a `---- process <pid> ----` header per process, so a client restart (or the crash-report helper) does not erase the previous log. `run-client` clears it per launch. |
 | `src/module.rs` | Main-module base and size, Ghidra↔runtime address conversion (image base 0x140000000), byte-pattern scanning. |
 | `src/features/` | Feature modules, registered in `features/mod.rs`. |
 
@@ -27,3 +27,9 @@ Planned: packet trace at the cipher layer, asset overrides.
 
 ## Building
 `cargo xtask build-dll` runs `Tools/cargo-xwin/bin/cargo-xwin xwin build --target x86_64-pc-windows-msvc --release`, keeping the MSVC SDK cache in `Tools/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
+
+## Crash reports
+After a crash the client writes `PoE-<time>-<pid>.dmp` (plus `.txt`, `.log.txt` and `.poecap` side files) under `My Games/Path of Exile 2/poe2_production` in the prefix. A helper process uploads them, both right after the crash and on the next launch. With `block_external` installed from `DllMain`, the upload connections are refused. `cargo xtask run-client` also moves pending dumps to `data/crash-dumps/` (git-ignored) before launching, so nothing is left to upload and the dumps stay available for debugging.
+
+## Entity tracing (`dump_object_types`)
+Besides dumping the object-type table, this feature hooks `0x141e71120` (entity initial-state reader). It logs each entity's components (vtable, reader, owner), then wraps each serialized component's reader to log the blob span it consumed. That is how [protocol/entities.md](protocol/entities.md) was measured: send an all-zero blob, padded, and read the spans.

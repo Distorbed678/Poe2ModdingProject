@@ -11,11 +11,18 @@ use std::sync::Arc;
 
 use poe_cluster::{Ticket, TicketRegistry};
 use poe_config::Config;
-use poe_data::{GameData, views::WorldArea};
+use poe_data::{
+    GameData,
+    views::{CharacterClass, InventorySlot, WorldArea},
+};
 use poe_net::{Connection, DecodeError, KeyMaterial, hexdump::hexdump};
 use poe_proto::{
-    Message, Protocol,
-    instance::{AreaInfo, EnableEncryption, Hello, InitialState, LocalPlayers, TerrainHashes},
+    Message, Protocol, entity,
+    instance::{
+        AddInventory, AddObject, AreaInfo, CharacterState, EnableEncryption, Hello, InitialState,
+        Inventory, LocalPlayers, PlayerEntity, PlayerState, SimulationHeader, SimulationTick,
+        TerrainHashes,
+    },
 };
 use rand::RngCore;
 use tokio::net::{TcpListener, TcpStream};
@@ -77,7 +84,7 @@ impl InstanceServer {
         info!(
             ticket = format_args!("{:#010x}", ticket.id),
             account = ticket.account_id,
-            character = ticket.character_id,
+            character = ticket.character.id,
             area = %ticket.area,
             "ticket redeemed"
         );
@@ -128,22 +135,62 @@ impl InstanceServer {
         if experiment.split(',').any(|e| e == "players") {
             let players = LocalPlayers {
                 unk: 0,
-                players: vec![(0, ticket.character_name.clone())],
+                players: vec![(0, ticket.character.name.clone())],
             };
             conn.send(&self.protocol.instance.encode(&players)?).await?;
             info!("sent LocalPlayers");
         }
-        if experiment.split(',').any(|e| e == "spawn") {
-            // 0x24: local player 0 controls entity 1; 0x2f7 adds entity 1 (type key 0, empty
-            // blob); then tick markers so the simulation frame is applied.
-            let mut w = poe_net::Writer::new();
-            w.u16(0x24).u8(0).u8(0).u32(1);
-            w.u16(0x2f7).u32(1).u32(0).u8(0).u16(0).u32(0).varuint(0);
-            for _ in 0..3 {
-                w.u16(0x2f4);
+        if experiment.split(',').any(|e| e == "inventories") {
+            // One empty inventory per slot; the in-game UI resolves every slot it shows.
+            let cfg = &self.config.inventories;
+            let mut out = Vec::new();
+            let mut count = 0;
+            for slot in InventorySlot::all(&self.data)? {
+                if cfg.skip.contains(&slot.id) {
+                    continue;
+                }
+                let [width, height] = cfg.size(&slot.id);
+                out.extend(self.protocol.instance.encode(&AddInventory {
+                    inventory_id: slot.index as u32 + 1,
+                    inventory: Inventory {
+                        id_key: slot.id_key as u8,
+                        slot: slot.index,
+                        width,
+                        height,
+                    },
+                    ..Default::default()
+                })?);
+                count += 1;
             }
-            conn.send(w.as_slice()).await?;
-            info!("sent spawn experiment");
+            conn.send(&out).await?;
+            info!(count, "sent inventories");
+        }
+        if experiment.split(',').any(|e| e == "spawn") {
+            // Local player 0 controls entity 1, then entity 1 is added with the class's object
+            // type and its initial state (layout: poe_proto::entity).
+            let Some(class) = CharacterClass::by_integer_id(&self.data, ticket.character.class_id)?
+            else {
+                anyhow::bail!("unknown class id {}", ticket.character.class_id);
+            };
+            let entity_id = 1;
+            let table = &self.protocol.instance;
+            let mut out = table.encode(&PlayerEntity {
+                entity_id,
+                ..Default::default()
+            })?;
+            out.extend(table.encode(&AddObject {
+                header: SimulationHeader {
+                    entity_id,
+                    ..Default::default()
+                },
+                type_key: class.object_type_key(),
+                blob: player_blob(&ticket.character.name, &class),
+            })?);
+            for _ in 0..3 {
+                out.extend(table.encode(&SimulationTick)?);
+            }
+            conn.send(&out).await?;
+            info!(class = %class.metadata_id, "sent spawn experiment");
         }
         if experiment.split(',').any(|e| e == "entity") {
             // Empty 0x2f7 (simulation header + u32 + empty blob) to trace its consumer.
@@ -153,8 +200,17 @@ impl InstanceServer {
             info!("sent empty 0x2f7");
         }
         if experiment.split(',').any(|e| e == "initial") {
-            conn.send(&self.protocol.instance.encode(&InitialState::default())?)
-                .await?;
+            // One character-state block and a player entry for player id 1 (assigned by the
+            // "spawn" experiment's 0x24).
+            let initial = InitialState {
+                characters: vec![CharacterState::default()],
+                players: vec![PlayerState {
+                    player_id: 1,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            conn.send(&self.protocol.instance.encode(&initial)?).await?;
             info!("sent InitialState");
         }
 
@@ -193,4 +249,26 @@ impl InstanceServer {
         conn.send(&self.protocol.instance.encode(&msg)?).await?;
         Ok(())
     }
+}
+
+/// Initial state of a freshly spawned player character (components of `character.ot`).
+fn player_blob(name: &str, class: &CharacterClass) -> Vec<u8> {
+    use poe_proto::entity::{Actor, Component, Life, Player, Positioned, Stats};
+    let clamp = |v: i64| v.clamp(1, u32::MAX as i64) as u32;
+    entity::initial_state_blob(&[
+        Component::Positioned(Positioned::default()),
+        Component::Stats(Stats::default()),
+        Component::Buffs,
+        Component::Life(Life::character(
+            clamp(class.base_max_life),
+            clamp(class.base_max_mana),
+        )),
+        Component::Animated,
+        Component::Player(Player {
+            name: name.to_owned(),
+            ..Default::default()
+        }),
+        Component::Inventories,
+        Component::Actor(Actor::default()),
+    ])
 }

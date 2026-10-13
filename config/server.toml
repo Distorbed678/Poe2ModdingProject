@@ -51,3 +51,23 @@ hardcore = false
 [[leagues]]
 id = "Hardcore"
 hardcore = true
+
+# Player inventories sent on instance entry (one per Inventories.dat row; the client's UI
+# looks each slot up and fails on a missing one). Sizes are [width, height].
+[inventories]
+default_size = [1, 1]
+# Row 26 is excluded by the client's inventory registry.
+skip = ["StashInventoryId"]
+
+[inventories.sizes]
+MainInventory1 = [12, 5]
+BodyArmour1 = [2, 3]
+Weapon1 = [2, 4]
+Offhand1 = [2, 4]
+Weapon2 = [2, 4]
+Offhand2 = [2, 4]
+Helm1 = [2, 2]
+Gloves1 = [2, 2]
+Boots1 = [2, 2]
+Belt1 = [2, 1]
+Flask1 = [5, 1]

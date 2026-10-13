@@ -161,6 +161,7 @@ fn run_client(root: &Path, config: &Config, proton: &str) -> Result<()> {
     // A dedicated prefix: never the Steam install's compatdata/2694490.
     let prefix = root.join("Tools/proton-prefix");
     std::fs::create_dir_all(&prefix)?;
+    quarantine_crash_dumps(root, &prefix)?;
     let game = std::fs::canonicalize(&config.game.game_dir)?;
     let mut cmd = Command::new(proton_bin);
     cmd.arg("run")
@@ -172,6 +173,39 @@ fn run_client(root: &Path, config: &Config, proton: &str) -> Result<()> {
         .env("SteamGameId", STEAM_APPID)
         .env("WINEDLLOVERRIDES", "version=n,b");
     run(&mut cmd)
+}
+
+/// The client uploads pending crash dumps (`PoE-*.dmp` plus `.poecap`/`.txt` side files) from
+/// a helper process at startup. Move them into `data/crash-dumps/` (git-ignored) so nothing is
+/// left to upload and the dumps stay available for our own debugging.
+fn quarantine_crash_dumps(root: &Path, prefix: &Path) -> Result<()> {
+    let users = prefix.join("pfx/drive_c/users");
+    let Ok(entries) = std::fs::read_dir(&users) else {
+        return Ok(());
+    };
+    let target = root.join("data/crash-dumps");
+    for user in entries.flatten() {
+        let dir = user
+            .path()
+            .join("Documents/My Games/Path of Exile 2/poe2_production");
+        let Ok(files) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let name = file.file_name();
+            if !name.to_string_lossy().starts_with("PoE-") {
+                continue;
+            }
+            std::fs::create_dir_all(&target)?;
+            std::fs::rename(file.path(), target.join(&name))
+                .with_context(|| format!("moving {}", file.path().display()))?;
+            println!(
+                "moved crash dump {} to data/crash-dumps",
+                name.to_string_lossy()
+            );
+        }
+    }
+    Ok(())
 }
 
 fn utf16le_with_bom(text: &str) -> Vec<u8> {

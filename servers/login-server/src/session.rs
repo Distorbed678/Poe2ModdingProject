@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use poe_cluster::TicketCharacter;
 use poe_data::views::{StartState, WorldArea};
 use poe_net::{Connection, DecodeError, Reader, hexdump::hexdump};
 use poe_proto::{
@@ -347,9 +348,16 @@ async fn play_character(
         warn!(area = %character.area, "play: character area not in game data");
         return Ok(());
     };
-    let ticket = server
-        .tickets
-        .issue(account.id, character.id, &character.name, &area.id);
+    let ticket = server.tickets.issue(
+        account.id,
+        TicketCharacter {
+            id: character.id,
+            name: character.name.clone(),
+            class_id: character.class_id,
+            level: character.level,
+        },
+        &area.id,
+    );
     info!(
         character = %character.name,
         area = %area.id,
