@@ -38,7 +38,7 @@ fn init() {
 }
 
 /// Directory of the host executable (the game folder).
-fn exe_dir() -> PathBuf {
+pub(crate) fn exe_dir() -> PathBuf {
     let mut buf = [0u16; 1024];
     let len =
         unsafe { GetModuleFileNameW(std::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32) };

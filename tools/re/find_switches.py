@@ -17,21 +17,21 @@ md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
 md.detail = True
 ins = list(md.disasm(img.read(start, length), start))
 for idx, i in enumerate(ins):
-    if not (i.mnemonic == "jmp" and i.op_str == "rcx"):
+    if not (i.mnemonic == "jmp" and i.operands[0].type == x86.X86_OP_REG):
         continue
     window = ins[max(0, idx - 16) : idx]
     base = 0
     count = None
     byte_table = dword_table = None
     for p in window:
-        if p.mnemonic in ("sub", "add") and p.op_str.startswith("eax, "):
+        if p.mnemonic in ("sub", "add") and p.operands[0].type == x86.X86_OP_REG and p.operands[1].type == x86.X86_OP_IMM and p.operands[0].size == 4:
             v = p.operands[1].imm
             base = v if p.mnemonic == "sub" else -v
-        if p.mnemonic == "cmp" and p.op_str.startswith("eax, ") and p.operands[1].type == x86.X86_OP_IMM:
+        if p.mnemonic == "cmp" and p.operands[0].type == x86.X86_OP_REG and p.operands[0].size == 4 and p.operands[1].type == x86.X86_OP_IMM:
             count = p.operands[1].imm + 1
         if p.mnemonic == "movzx" and "byte ptr" in p.op_str:
             byte_table = img.base + p.operands[1].mem.disp
-        if p.mnemonic == "mov" and p.op_str.startswith("ecx, dword ptr"):
+        if p.mnemonic == "mov" and "dword ptr" in p.op_str and p.operands[1].type == x86.X86_OP_MEM and p.operands[1].mem.scale == 4:
             dword_table = img.base + p.operands[1].mem.disp
     if count is None or dword_table is None:
         continue

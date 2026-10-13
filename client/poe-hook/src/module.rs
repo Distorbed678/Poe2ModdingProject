@@ -41,7 +41,6 @@ impl Module {
     }
 
     /// Converts a Ghidra address to a runtime address.
-    #[allow(dead_code)]
     pub fn from_ghidra(&self, addr: usize) -> usize {
         addr - 0x1_4000_0000 + self.base
     }

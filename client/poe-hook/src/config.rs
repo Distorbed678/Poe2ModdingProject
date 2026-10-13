@@ -34,6 +34,9 @@ pub struct FeatureConfig {
     pub net_trace: bool,
     pub net_trace_dump_bytes: usize,
     pub block_external: bool,
+    pub trace_addresses: Vec<String>,
+    pub trace_limit: u32,
+    pub dump_object_types: bool,
 }
 
 impl Default for FeatureConfig {
@@ -44,6 +47,9 @@ impl Default for FeatureConfig {
             net_trace: false,
             net_trace_dump_bytes: 256,
             block_external: true,
+            trace_addresses: Vec::new(),
+            trace_limit: 20,
+            dump_object_types: false,
         }
     }
 }

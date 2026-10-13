@@ -5,8 +5,10 @@
 
 mod crash;
 mod crypto_bypass;
+mod dump_types;
 mod exit_trace;
 mod net_trace;
+mod trace_calls;
 
 use crate::{config::Config, module::Module};
 
@@ -17,7 +19,19 @@ pub fn init_all(config: &Config, main: &Module) {
         dump_bytes: f.net_trace_dump_bytes,
         block_external: f.block_external,
     };
-    let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 4] = [
+    let trace = (f.trace_addresses.clone(), f.trace_limit);
+    let dump_path = crate::exe_dir().join("object_types.txt");
+    let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 6] = [
+        (
+            "dump_object_types",
+            f.dump_object_types,
+            Box::new(move |m| dump_types::init(m, dump_path.clone())),
+        ),
+        (
+            "trace_calls",
+            !f.trace_addresses.is_empty(),
+            Box::new(move |m| trace_calls::init(m, &trace.0, trace.1)),
+        ),
         ("crash_log", f.crash_log, Box::new(crash::init)),
         ("exit_trace", f.crash_log, Box::new(exit_trace::init)),
         (

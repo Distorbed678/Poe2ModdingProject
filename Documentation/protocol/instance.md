@@ -46,9 +46,28 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
   - `0x2f7` = header + `u32` + varuint length + blob (probably serialized entity data).
   - No direct opcode comparison was found for these; dispatch is still to be found.
 
+### Simulation packets (factory 2): dispatch path (found 2026-10-13)
+1. The stream reader `0x1421c5950` tries the registered packet handlers. Factory 2's handler (`0x1421c5810`) builds the packet and passes it to `0x1421340e0`.
+2. `0x1421340e0` **queues** the packet in the world's frame queue (world+0x6b0):
+   - `0x2f4` (tick marker) closes a frame;
+   - `0x2f5` is applied immediately (world vfunc +0x178).
+3. Each frame, `0x1421306c0` drains the queue and applies every packet with `0x142134240` (switch on opcode). Header fields +0x14/+0x18/+0x1a order the packets inside a frame.
+
+### S→C `0x2f7` AddObject (apply case `0x142134d47`)
+| Field | Meaning |
+|---|---|
+| header | `u32 entity id, u32, u8, u16` |
+| `u32` | **object type key = MurmurHash2(metadata path bytes, seed 0)**, e.g. `Metadata/Characters/Dex/DexFour` = `0xc393f3d5` (table dumped with the DLL's `dump_object_types`: 8494 types). An unknown key throws "Unknown object type serialized by server" |
+| `varuint len, blob` | serialized components, parsed by `0x141e70450(entity, type, id, blob, world)` |
+
+If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb30` makes it that player's controlled entity.
+
+### S→C `0x0024` SetLocalPlayerEntity
+`u8, u8 local player index, u32 entity id`.
+
 Next steps:
-1. Find where factory-2 packets are dispatched (the simulation event queue) and how the entity blob is parsed (object type and component serialization).
-2. Build the player entity, then send 0x24/0x23 in the right order.
+1. Work out the component blob format (`0x141e70450` and each component's deserializer, in the order given by the object's .ot/.otc template).
+2. Send `0x24` → `0x2f7` (player) → `0x2f4` ticks → `0x23`.
 '''
 
 ## Tools
