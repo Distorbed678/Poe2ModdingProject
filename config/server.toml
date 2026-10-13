@@ -73,3 +73,15 @@ Gloves1 = [2, 2]
 Boots1 = [2, 2]
 Belt1 = [2, 1]
 Flask1 = [5, 1]
+
+# Player start position. Dev bridge until server-side terrain generation (M4): the client DLL
+# exports the generated layout and the player starts on the area's start tile, or else on
+# the playable tile nearest the map centre.
+[spawn]
+layout_dir = "GameFiles"
+filler = ["fill", "blank"]
+
+[spawn.start_tiles]
+# The washed-up intro of the Riverbank (next to the intro tree; the tree centre itself is not
+# walkable in every orientation).
+G1_1 = "ZombieIntroFeature"
