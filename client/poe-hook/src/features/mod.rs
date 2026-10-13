@@ -5,6 +5,7 @@
 
 mod crash;
 mod crypto_bypass;
+mod exit_trace;
 mod net_trace;
 
 use crate::{config::Config, module::Module};
@@ -16,8 +17,9 @@ pub fn init_all(config: &Config, main: &Module) {
         dump_bytes: f.net_trace_dump_bytes,
         block_external: f.block_external,
     };
-    let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 3] = [
+    let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 4] = [
         ("crash_log", f.crash_log, Box::new(crash::init)),
+        ("exit_trace", f.crash_log, Box::new(exit_trace::init)),
         (
             "crypto_bypass",
             f.crypto_bypass,
