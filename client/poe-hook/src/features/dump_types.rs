@@ -55,6 +55,9 @@ const ENTITY_UPDATE: usize = 0x141e71090;
 const FRAME_DRAIN: usize = 0x1421306c0;
 /// Per-entity tail update in frame mode (`entity + 0x58, dt`), from `0x1421370f0`.
 const ENTITY_TICK: usize = 0x141e7d7f0;
+/// Game update vfunc (`this, ?, f32 xmm2, f32 dt xmm3`): adds dt to this +0x17cc, which the
+/// world update (`0x14169c0b0`) takes (and zeroes) as the frame-mode dt.
+const GAME_UPDATE: usize = 0x14167ea40;
 static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
@@ -88,8 +91,12 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     let point = unsafe { hooker.hook() }.map_err(|e| format!("hook entity update: {e:?}"))?;
     Box::leak(Box::new(point));
     for (addr, cb) in [
-        (FRAME_DRAIN, on_frame_drain as unsafe extern "win64" fn(*mut Registers, usize)),
+        (
+            FRAME_DRAIN,
+            on_frame_drain as unsafe extern "win64" fn(*mut Registers, usize),
+        ),
         (ENTITY_TICK, on_entity_tick),
+        (GAME_UPDATE, on_game_update),
     ] {
         let hooker = Hooker::new(
             main.from_ghidra(addr),
@@ -115,7 +122,54 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn begin_components(entity: usize) -> usize {
+    crate::mem::read::<usize>(entity + 0x10).unwrap_or(0)
+}
+
+unsafe extern "win64" fn on_game_update(regs: *mut Registers, _: usize) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static LAST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed) + 1;
+    let this = unsafe { (*regs).rcx } as usize;
+    let changed = LAST.swap(this, Ordering::Relaxed) != this;
+    if changed || matches!(n, 1 | 2 | 10 | 100 | 1000 | 5000 | 10000) {
+        let r = unsafe { &*regs };
+        log::info!(
+            "game update #{n}: this {:#x} rdx {:#x} xmm2={} xmm3={} acc={:?}",
+            r.rcx,
+            r.rdx,
+            f32::from_bits(r.xmm2 as u32),
+            f32::from_bits(r.xmm3 as u32),
+            crate::mem::read::<f32>(r.rcx as usize + 0x17cc)
+        );
+    }
+}
+
 unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
+    use crate::mem::read;
+    let world = unsafe { (*regs).rcx } as usize;
+    // Frame-mode worlds (the game world): log a few calls with dt and pause flags.
+    if read::<u8>(world + 0x661).is_some_and(|m| m != 0) {
+        static GAME: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = GAME.fetch_add(1, Ordering::Relaxed) + 1;
+        if matches!(n, 1 | 2 | 3 | 30 | 300 | 3000) {
+            log::info!(
+                "game frame drain #{n}: world {world:#x} dt={} xmm2={} ret={:#x} +0x868={:?} +0x869={:?} frames={:?}",
+                f32::from_bits(unsafe { (*regs).xmm1 } as u32),
+                f32::from_bits(unsafe { (*regs).xmm2 } as u32),
+                read::<usize>(unsafe { (*regs).rsp } as usize)
+                    .map(|a| MAIN.get().map_or(a, |m| if m.contains(a) {
+                        m.to_ghidra(a)
+                    } else {
+                        a
+                    }))
+                    .unwrap_or(0),
+                read::<u8>(world + 0x868),
+                read::<u8>(world + 0x869),
+                read::<u64>(world + 0x6a8)
+            );
+        }
+    }
     let n = DRAINS.fetch_add(1, Ordering::Relaxed) + 1;
     if matches!(n, 1 | 10 | 100 | 1000 | 3000) {
         use crate::mem::read;
@@ -135,8 +189,11 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
         let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
         if matches!(n, 1 | 10 | 100 | 1000) {
-            let dt = unsafe { (*regs).rdx } as u32;
-            log::info!("player entity tick #{n} dt={dt:#x} ({})", f32::from_bits(dt));
+            let dt = f32::from_bits(unsafe { (*regs).xmm1 } as u32);
+            log::info!(
+                "player entity tick #{n} dt={dt} (edx {:#x})",
+                unsafe { (*regs).rdx } as u32
+            );
         }
     }
 }
@@ -217,7 +274,9 @@ unsafe fn export_layout(world: usize) {
     if matches!(kind, Some(0x20 | 0x21 | 0x23)) {
         return;
     }
-    let Some(tile_hash) = read::<u32>(world + 0x114) else { return };
+    let Some(tile_hash) = read::<u32>(world + 0x114) else {
+        return;
+    };
     let (Some(w), Some(h), Some(tiles)) = (
         read::<u32>(terrain + 0x18),
         read::<u32>(terrain + 0x20),
@@ -258,8 +317,10 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
         out.extend_from_slice(&(v as u32).to_le_bytes());
     }
     for off in [0xd0, 0xe8, 0x100, 0x118] {
-        let (Some(b), Some(e)) = (read::<usize>(terrain + off), read::<usize>(terrain + off + 8))
-        else {
+        let (Some(b), Some(e)) = (
+            read::<usize>(terrain + off),
+            read::<usize>(terrain + off + 8),
+        ) else {
             return;
         };
         if e - b != bytes_per_row * cells_y || !crate::mem::readable(b, e - b) {
@@ -270,7 +331,10 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
     }
     let path = crate::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
     match std::fs::write(&path, out) {
-        Ok(()) => log::info!("exported {cells_x}x{cells_y} cell grids to {}", path.display()),
+        Ok(()) => log::info!(
+            "exported {cells_x}x{cells_y} cell grids to {}",
+            path.display()
+        ),
         Err(e) => log::error!("grid export: {e}"),
     }
 }
@@ -371,12 +435,61 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
                         log::info!("  forced render visibility refresh");
                     }
                 }
+                // Positioned height as the client samples it (0x141de5390 returns f32 in xmm0).
+                if let (Some(m), Some(pos)) = (MAIN.get(), read::<usize>(begin_components(entity)))
+                {
+                    let height: extern "win64" fn(usize) -> f32 =
+                        unsafe { std::mem::transmute(m.from_ghidra(0x141de5390)) };
+                    log::info!("  positioned height {}", height(pos));
+                    // Terrain height samples across the map (world vfunc +0x1a8 -> terrain,
+                    // 0x141d0d420(terrain, &[x, y]) -> f32).
+                    if let Some(world) = read::<usize>(entity + 0x78) {
+                        let vt = read::<usize>(world).unwrap_or(0);
+                        if let Some(f) = read::<usize>(vt + 0x1a8) {
+                            let get_terrain: extern "win64" fn(usize) -> usize =
+                                unsafe { std::mem::transmute(f) };
+                            let sample: extern "win64" fn(usize, *const [f32; 2]) -> f32 =
+                                unsafe { std::mem::transmute(m.from_ghidra(0x141d0d420)) };
+                            let terrain = get_terrain(world);
+                            let mut row = Vec::new();
+                            for gy in 0..6 {
+                                for gx in 0..6 {
+                                    let p =
+                                        [gx as f32 * 1500.0 + 250.0, gy as f32 * 1400.0 + 250.0];
+                                    row.push(format!("{:.0}", sample(terrain, &p)));
+                                }
+                            }
+                            let (px, py) = (
+                                read::<f32>(pos + 0x490).unwrap_or(0.0),
+                                read::<f32>(pos + 0x494).unwrap_or(0.0),
+                            );
+                            let near: Vec<String> = (-2..=2)
+                                .flat_map(|dy| (-2..=2).map(move |dx| (dx, dy)))
+                                .map(|(dx, dy)| {
+                                    let p = [px + dx as f32 * 60.0, py + dy as f32 * 60.0];
+                                    format!("{:.0}", sample(terrain, &p))
+                                })
+                                .collect();
+                            log::info!(
+                                "  heights around player (60-unit steps): {}",
+                                near.join(" ")
+                            );
+                            let here = sample(terrain, &[px, py]);
+                            log::info!(
+                                "  terrain {terrain:#x} height here {here}, grid 6x6: {}",
+                                row.join(" ")
+                            );
+                        }
+                    }
+                }
                 // NaN/inf scan of every component (first 0x800 bytes): a degenerate transform
                 // would explain an invisible model and a grey camera.
                 let begin = read::<usize>(entity + 0x10).unwrap_or(0);
                 let end = read::<usize>(entity + 0x18).unwrap_or(0);
                 for (i, c) in (begin..end).step_by(8).enumerate() {
-                    let Some(comp) = read::<usize>(c) else { continue };
+                    let Some(comp) = read::<usize>(c) else {
+                        continue;
+                    };
                     let vt = read::<usize>(comp).unwrap_or(0);
                     let bad: Vec<String> = (0..0x800usize)
                         .step_by(4)
@@ -390,7 +503,11 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
                         .collect();
                     log::info!(
                         "  component {i} {comp:#x} vtable {:#x}: {}",
-                        MAIN.get().map_or(vt, |m| if m.contains(vt) { m.to_ghidra(vt) } else { vt }),
+                        MAIN.get().map_or(vt, |m| if m.contains(vt) {
+                            m.to_ghidra(vt)
+                        } else {
+                            vt
+                        }),
                         bad.join(" ")
                     );
                 }
@@ -419,20 +536,35 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         } else {
             0
         };
-        log::info!("entity {id:#x} at {entity:#x} initial state: {count} components ({serialized} serialized), blob {len} bytes at pos {pos} (data {data:#x})");
+        log::info!(
+            "entity {id:#x} at {entity:#x} initial state: {count} components ({serialized} serialized), blob {len} bytes at pos {pos} (data {data:#x})"
+        );
+        let refs: Vec<String> = crate::module::stack_refs(m, r.rsp as usize, 24)
+            .into_iter()
+            .map(|a| format!("{a:#x}"))
+            .collect();
+        log::info!("  initial state stack refs: {}", refs.join(" "));
         for i in 0..count.min(64) {
             let comp = *((begin + i * 8) as *const usize);
             if comp < 0x10000 {
                 continue;
             }
             let vt = *(comp as *const usize);
-            let reader = if m.contains(vt) { *((vt + 0x98) as *const usize) } else { 0 };
+            let reader = if m.contains(vt) {
+                *((vt + 0x98) as *const usize)
+            } else {
+                0
+            };
             // The read loop only calls components whose owner (+8) is this entity.
             let owned = *((comp + 8) as *const usize) == entity;
             log::info!(
                 "  component {i}: vtable={:#x} reader={:#x} owned={owned}",
                 if m.contains(vt) { m.to_ghidra(vt) } else { vt },
-                if m.contains(reader) { m.to_ghidra(reader) } else { reader }
+                if m.contains(reader) {
+                    m.to_ghidra(reader)
+                } else {
+                    reader
+                }
             );
             if owned && i < serialized && m.contains(reader) {
                 hook_reader(m, m.to_ghidra(reader));
@@ -476,7 +608,10 @@ unsafe extern "win64" fn on_reader(regs: *mut Registers, original: usize, ghidra
     let f: ReaderFn = unsafe { std::mem::transmute(original) };
     let ret = unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) };
     let end = unsafe { *blob.add(2) };
-    log::info!("    reader {ghidra:#x} read {} bytes ({start}..{end})", end - start);
+    log::info!(
+        "    reader {ghidra:#x} read {} bytes ({start}..{end})",
+        end - start
+    );
     if ghidra == POSITIONED_READER {
         unsafe { log_terrain(r.rcx as usize) };
     }
@@ -525,7 +660,9 @@ unsafe fn log_terrain(component: usize) {
 /// generator placed each room, e.g. the start room of an area.
 fn dump_tiles(terrain: usize, w: usize, h: usize) {
     use crate::mem::{read, wide_string};
-    let Some(tiles) = read::<usize>(terrain + 0x28) else { return };
+    let Some(tiles) = read::<usize>(terrain + 0x28) else {
+        return;
+    };
     let path_at = |p: usize| -> Option<String> {
         let s = wide_string(p, 200)?;
         (s.starts_with("Metadata/") || s.starts_with("Art/")).then_some(s)
@@ -536,13 +673,17 @@ fn dump_tiles(terrain: usize, w: usize, h: usize) {
             let rec = tiles + (y * w + x) * 0x38;
             let mut found = Vec::new();
             for q in 0..7 {
-                let Some(p1) = read::<usize>(rec + q * 8) else { continue };
+                let Some(p1) = read::<usize>(rec + q * 8) else {
+                    continue;
+                };
                 if let Some(s) = path_at(p1) {
                     found.push(format!("q{q}:{s}"));
                     continue;
                 }
                 for k in (0..0x60).step_by(8) {
-                    let Some(p2) = read::<usize>(p1.wrapping_add(k)) else { break };
+                    let Some(p2) = read::<usize>(p1.wrapping_add(k)) else {
+                        break;
+                    };
                     if let Some(s) = path_at(p2) {
                         found.push(format!("q{q}+{k:#x}:{s}"));
                         break;

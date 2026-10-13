@@ -14,6 +14,7 @@ use poe_config::Config;
 use poe_game::stats::StatRegistry;
 use poe_store::Store;
 
+pub mod seeds;
 mod spawn;
 use poe_data::{
     GameData,
@@ -42,6 +43,8 @@ pub struct InstanceServer {
     /// Stat ids -> network keys (built once from Stats.dat).
     pub stats: Arc<StatRegistry>,
     pub store: Arc<dyn Store>,
+    /// Seeds the client is known to generate (`instance.known_seeds`).
+    pub seeds: Arc<seeds::KnownSeeds>,
 }
 
 impl InstanceServer {
@@ -146,129 +149,9 @@ impl InstanceServer {
             }
         }
         .unwrap_or((0, 0));
-        // RE experiment: POE_SPAWN_DELAY_MS waits before creating the player.
-        if let Some(ms) = std::env::var("POE_SPAWN_DELAY_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-        }
+        self.enter_world(&mut conn, &ticket, spawn).await?;
 
-        // RE experiment: which post-area messages to send, from POE_EXPERIMENT (comma list of
-        // "players", "initial"); default: none.
-        let experiment = std::env::var("POE_EXPERIMENT").unwrap_or_default();
-        if experiment.split(',').any(|e| e == "players") {
-            let players = LocalPlayers {
-                unk: 0,
-                players: vec![(0, ticket.character.name.clone())],
-            };
-            conn.send(&self.protocol.instance.encode(&players)?).await?;
-            info!("sent LocalPlayers");
-        }
-        if experiment.split(',').any(|e| e == "inventories") {
-            // One empty inventory per slot; the in-game UI resolves every slot it shows.
-            let cfg = &self.config.inventories;
-            let mut out = Vec::new();
-            let mut count = 0;
-            for slot in InventorySlot::all(&self.data)? {
-                if cfg.skip.contains(&slot.id) {
-                    continue;
-                }
-                let [width, height] = cfg.size(&slot.id);
-                out.extend(self.protocol.instance.encode(&AddInventory {
-                    inventory_id: slot.index as u32 + 1,
-                    inventory: Inventory {
-                        id_key: slot.id_key as u8,
-                        slot: slot.index,
-                        width,
-                        height,
-                    },
-                    ..Default::default()
-                })?);
-                count += 1;
-            }
-            conn.send(&out).await?;
-            info!(count, "sent inventories");
-        }
-        if experiment.split(',').any(|e| e == "spawn") {
-            // Local player 0 controls entity 1, then entity 1 is added with the class's object
-            // type and its initial state (layout: poe_proto::entity).
-            let Some(class) = CharacterClass::by_integer_id(&self.data, ticket.character.class_id)?
-            else {
-                anyhow::bail!("unknown class id {}", ticket.character.class_id);
-            };
-            // New characters wash up on their first visit to an intro area.
-            let washed_up = !ticket.character.intro_done
-                && self.config.spawn.intro_areas.contains(&ticket.area);
-            if washed_up {
-                self.store.set_intro_done(ticket.character.id)?;
-            }
-            let entity_id = 1;
-            let table = &self.protocol.instance;
-            let mut out = table.encode(&PlayerEntity {
-                entity_id,
-                ..Default::default()
-            })?;
-            out.extend(table.encode(&AddObject {
-                header: SimulationHeader {
-                    entity_id,
-                    ..Default::default()
-                },
-                type_key: class.object_type_key(),
-                blob: self.player_blob(&ticket.character, &class, spawn, washed_up)?,
-            })?);
-            // RE experiment: POE_NPC=<metadata path> spawns that object as entity 2 next to
-            // the player with a zero blob (Positioned first), to compare rendering.
-            if let Ok(npc) = std::env::var("POE_NPC") {
-                let mut blob = vec![entity::ENTITY_IN_WAKE_ZONE, 0];
-                blob.extend((spawn.0 + 15).to_le_bytes());
-                blob.extend(spawn.1.to_le_bytes());
-                // Rest of Positioned, 5 zero-count components, then StateMachine with one
-                // shared state (`visible = 1`, see una.ot).
-                if npc.ends_with("/Una") {
-                    blob.extend([0u8; 9 + 6]);
-                    blob.extend([1, 0, 1, 0]);
-                }
-                blob.extend([0u8; 1024]);
-                out.extend(table.encode(&AddObject {
-                    header: SimulationHeader {
-                        entity_id: 2,
-                        ..Default::default()
-                    },
-                    type_key: poe_data::hash::object_type_key(&npc),
-                    blob,
-                })?);
-                info!(%npc, "sent NPC experiment");
-            }
-            for _ in 0..3 {
-                out.extend(table.encode(&SimulationTick)?);
-            }
-            conn.send(&out).await?;
-            info!(class = %class.metadata_id, "sent spawn experiment");
-        }
-        if experiment.split(',').any(|e| e == "entity") {
-            // Empty 0x2f7 (simulation header + u32 + empty blob) to trace its consumer.
-            let mut w = poe_net::Writer::new();
-            w.u16(0x2f7).u32(0).u32(0).u8(0).u16(0).u32(0).varuint(0);
-            conn.send(w.as_slice()).await?;
-            info!("sent empty 0x2f7");
-        }
-        if experiment.split(',').any(|e| e == "initial") {
-            // One character-state block and a player entry for player id 1 (assigned by the
-            // "spawn" experiment's 0x24).
-            let initial = InitialState {
-                characters: vec![CharacterState::default()],
-                players: vec![PlayerState {
-                    player_id: 1,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            };
-            conn.send(&self.protocol.instance.encode(&initial)?).await?;
-            info!("sent InitialState");
-        }
-
-        // Simulation frames: the client advances world time on each tick marker.
+        // Simulation frames: each tick marker closes a frame of `tick_ms` (InitialState).
         let tick = self.protocol.instance.encode(&SimulationTick)?;
         let mut ticker =
             tokio::time::interval(Duration::from_millis(self.config.instance.tick_ms.max(1)));
@@ -303,6 +186,7 @@ impl InstanceServer {
             let pinned = std::env::var("POE_SEED").ok().and_then(|v| v.parse().ok());
             let seed = pinned
                 .or(area.fixed_seed())
+                .or_else(|| self.seeds.pick(&area.id, rng.next_u32()))
                 .unwrap_or_else(|| rng.next_u32());
             (rng.next_u32(), seed)
         };
@@ -319,6 +203,30 @@ impl InstanceServer {
     }
 }
 
+/// RE experiment: `POE_NPC=<metadata path>` adds that object as entity 2 next to the player
+/// with a zero blob (Positioned first). Objects with a StateMachine need their shared states
+/// (see Documentation/protocol/entities.md), so this suits simple types such as
+/// `Metadata/MiscellaneousObjects/Waypoint`.
+fn npc_experiment(
+    table: &poe_proto::OpcodeTable,
+    path: &str,
+    (x, y): (i32, i32),
+) -> anyhow::Result<Vec<u8>> {
+    let mut blob = vec![entity::ENTITY_IN_WAKE_ZONE, 0];
+    blob.extend((x + 15).to_le_bytes());
+    blob.extend(y.to_le_bytes());
+    blob.extend([0u8; 1024]);
+    info!(%path, "adding experiment object");
+    Ok(table.encode(&AddObject {
+        header: SimulationHeader {
+            entity_id: 2,
+            ..Default::default()
+        },
+        type_key: poe_data::hash::object_type_key(path),
+        blob,
+    })?)
+}
+
 /// RE experiment: `POE_SPAWN=x,y` forces the grid position (the client clamps it to the map).
 fn spawn_override() -> Option<(i32, i32)> {
     let v = std::env::var("POE_SPAWN").ok()?;
@@ -327,6 +235,101 @@ fn spawn_override() -> Option<(i32, i32)> {
 }
 
 impl InstanceServer {
+    /// After the client generated the area: local player, inventories, the player entity,
+    /// then InitialState (see Documentation/protocol/instance.md).
+    async fn enter_world(
+        &self,
+        conn: &mut Connection,
+        ticket: &Ticket,
+        spawn: (i32, i32),
+    ) -> anyhow::Result<()> {
+        let table = &self.protocol.instance;
+        let character = &ticket.character;
+        let players = LocalPlayers {
+            unk: 0,
+            players: vec![(0, character.name.clone())],
+        };
+        conn.send(&table.encode(&players)?).await?;
+
+        // One empty inventory per slot; the in-game UI resolves every slot it shows.
+        let cfg = &self.config.inventories;
+        let mut out = Vec::new();
+        for slot in InventorySlot::all(&self.data)? {
+            if cfg.skip.contains(&slot.id) {
+                continue;
+            }
+            let [width, height] = cfg.size(&slot.id);
+            out.extend(table.encode(&AddInventory {
+                inventory_id: slot.index as u32 + 1,
+                inventory: Inventory {
+                    id_key: slot.id_key as u8,
+                    slot: slot.index,
+                    width,
+                    height,
+                },
+                ..Default::default()
+            })?);
+        }
+        conn.send(&out).await?;
+
+        // Local player 0 controls entity 1, which is added with the class's object type and
+        // its initial state (layout: poe_proto::entity).
+        let Some(class) = CharacterClass::by_integer_id(&self.data, character.class_id)? else {
+            anyhow::bail!("unknown class id {}", character.class_id);
+        };
+        // New characters wash up on their first visit to an intro area.
+        let washed_up =
+            !character.intro_done && self.config.spawn.intro_areas.contains(&ticket.area);
+        if washed_up {
+            self.store.set_intro_done(character.id)?;
+        }
+        let entity_id = 1;
+        let mut out = table.encode(&PlayerEntity {
+            entity_id,
+            ..Default::default()
+        })?;
+        out.extend(table.encode(&AddObject {
+            header: SimulationHeader {
+                entity_id,
+                // Ordering within the frame: +0x14 = 0 (before entity updates), component
+                // +0x18 = 0xff. InitialState starts the world, which applies every queued packet
+                // without advancing the queue cursor; a nested flush during that apply (starting
+                // the WashedUp action from the Player reader) applies queued packets whose
+                // ordering matches the current position (0, 0, 0). With 0 here the player was
+                // added twice ("Replacing awake object") and the client crashed.
+                unk_18: 0xff,
+                ..Default::default()
+            },
+            type_key: class.object_type_key(),
+            blob: self.player_blob(character, &class, spawn, washed_up)?,
+        })?);
+        if let Ok(path) = std::env::var("POE_NPC") {
+            out.extend(npc_experiment(table, &path, spawn)?);
+        }
+        out.extend(table.encode(&SimulationTick)?);
+        conn.send(&out).await?;
+
+        // InitialState must follow 0x24 and the player entity (its handler uses the entity).
+        // `frame_ms` is the length of each simulation frame.
+        let initial = InitialState {
+            frame_ms: self.config.instance.tick_ms as u32,
+            characters: vec![CharacterState::default()],
+            players: vec![PlayerState {
+                player_id: 1,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        conn.send(&table.encode(&initial)?).await?;
+        info!(
+            class = %class.metadata_id,
+            ?spawn,
+            washed_up,
+            "player entered the world"
+        );
+        Ok(())
+    }
+
     /// Initial state of the player character (components of its object template): the
     /// class's object type with the template's default stats, class base stats and level.
     fn player_blob(
@@ -354,29 +357,32 @@ impl InstanceServer {
             stats = stats.0.len(),
             "player stats"
         );
-        Ok(entity::initial_state_blob(entity::ENTITY_IN_WAKE_ZONE, &[
-            Component::Positioned(Positioned {
-                grid_x,
-                grid_y,
-                // Team (low 15 bits), from the template's Positioned section.
-                unk_1e0: team,
-                ..Default::default()
-            }),
-            Component::Stats(Stats {
-                stats: stats.to_network(&self.stats),
-                ..Default::default()
-            }),
-            Component::Buffs,
-            Component::Life(Life::character(pool("maximum_life"), pool("maximum_mana"))),
-            Component::Animated(Some(class.ao_file.clone())),
-            Component::Player(Player {
-                name: character.name.clone(),
-                class: class.integer_id as u8,
-                washed_up,
-                ..Default::default()
-            }),
-            Component::Inventories,
-            Component::Actor(Actor::default()),
-        ]))
+        Ok(entity::initial_state_blob(
+            entity::ENTITY_IN_WAKE_ZONE,
+            &[
+                Component::Positioned(Positioned {
+                    grid_x,
+                    grid_y,
+                    // Team (low 15 bits), from the template's Positioned section.
+                    unk_1e0: team,
+                    ..Default::default()
+                }),
+                Component::Stats(Stats {
+                    stats: stats.to_network(&self.stats),
+                    ..Default::default()
+                }),
+                Component::Buffs,
+                Component::Life(Life::character(pool("maximum_life"), pool("maximum_mana"))),
+                Component::Animated(Some(class.ao_file.clone())),
+                Component::Player(Player {
+                    name: character.name.clone(),
+                    class: class.integer_id as u8,
+                    washed_up,
+                    ..Default::default()
+                }),
+                Component::Inventories,
+                Component::Actor(Actor::default()),
+            ],
+        ))
     }
 }

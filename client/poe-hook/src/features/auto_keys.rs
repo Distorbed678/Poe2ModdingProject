@@ -12,8 +12,8 @@ use windows_sys::Win32::{
     Foundation::{HWND, LPARAM},
     System::Threading::GetCurrentProcessId,
     UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW,
-        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_KEYDOWN, WM_KEYUP,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     },
 };
 
@@ -30,11 +30,16 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
         }
         loop {
             std::thread::sleep(Duration::from_millis(250));
-            let Ok(text) = std::fs::read_to_string(&file) else { continue };
+            let Ok(text) = std::fs::read_to_string(&file) else {
+                continue;
+            };
             let _ = std::fs::remove_file(&file);
             for entry in text.split_whitespace() {
                 if let Some(pos) = entry.strip_prefix("click:") {
-                    match pos.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?))) {
+                    match pos
+                        .split_once(',')
+                        .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
+                    {
                         Some((x, y)) => click(x, y),
                         None => log::warn!("poe-hook.keys: bad click {entry:?}"),
                     }

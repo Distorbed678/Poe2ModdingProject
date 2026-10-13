@@ -29,7 +29,11 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 ## Entities and rendering (2026-10-13)
 | Address | What |
 |---|---|
+| `0x1421302c0` | game world update in frame mode: plays queued frames in real time, dt = frame ms / 1000 |
 | `0x1421306c0` | world frame drain (`world, f32 dt`): applies queued simulation packets, updates entities |
+| `0x14212fc10` | world start (InitialState vfunc +0x1f0): applies all queued packets |
+| `0x1421301e0` | flush packets scheduled at the current (entity, component, sequence) position |
+| `0x141e72880` | object registry insert ("Replacing awake/asleep/deleted object") |
 | `0x1421370f0` | frame-mode entity update loop (component vfunc +0x50, then `0x141e7d7f0`) |
 | `0x1421340e0` | simulation packet queue (`0x2f4` frame marker, `0x2f5` → world vfunc +0x178) |
 | `0x140150cb0` | entity → Render component (by name) |

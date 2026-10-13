@@ -26,7 +26,7 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
    | +0x28, +0x29, +0x34 | u8 |
    | +0x24 | u32 |
    | [flags0 & 8] | u16 |
-   | +0x70 | u16 count + u32[] |
+   | +0x70 | u16 count + big-endian u32[] (`list_70`; a preload list in PoE1, use unknown, sent empty) |
    | +0x88 | u16 count + u8[] |
    | +0x58 | u8 count + u8[] |
    | +0xe8 | u16 count + u16[] |
@@ -35,10 +35,12 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
    | optional | blocks gated by flags1 bits 1/2/4/8 and flags0 bit 7 |
 
    The client logs "Client-Safe Instance ID = …" and "Generating level N area "X" with seed S", then generates the terrain.
+
+   Some seeds fail to generate (`TerrainGenerationException`, e.g. "Mismatching ground types … Cannot place Mud over WideRiverWater" in `G1_1`), and the client then never sends TerrainHashes. The official server generates terrain itself, so it never sends such seeds. Until M4, the server picks seeds from `instance.known_seeds` (the area/seed pairs from live logs, `tools/re/clientlog_terrain.py`). Towns and hideouts always use seed 1.
 5. **C→S `0x009a` TerrainHashes** after terrain generation: `u8, u32 tile hash, u32 doodad hash`. Confirmed: the client logs "Tile hash: N" and "Doodad hash: N" with the same values. These are the reference values for server-side terrain generation (M4).
 
-## After the area loads (verified 2026-10-13: the player reaches the game screen)
-The server sends, in this order (`POE_EXPERIMENT=players,inventories,spawn,initial`):
+## After the area loads (verified 2026-10-13: the player is visible in town and in the Riverbank intro)
+The server sends, in this order (`InstanceServer::enter_world`):
 1. **S→C `0x0022` LocalPlayers** (`u8, u8 n, (u8 index, wstring character name)[n]`): handler `0x142122dc1`. Assigns indices to the existing local-player objects by name (+0x181).
 2. **S→C `0x00df` AddInventory**, one per `Inventories.dat` row except `StashInventoryId`:
    - `u8, u8 local player index, u32 inventory id, inventory`.
@@ -46,9 +48,11 @@ The server sends, in this order (`POE_EXPERIMENT=players,inventories,spawn,initi
    - Handled in the per-player processor `0x142106a30` (case 0xdf), registry insert `0x141cf1da0`. The registry also maps slot → inventory id (0x79 slots, except 0x1a). The in-game UI resolves every slot through it, and a missing one throws "Invalid inventory id".
    - Grid sizes are not in the game tables; they are configured in `[inventories]` of `config/server.toml`.
 3. **S→C `0x0024` PlayerEntity**: `u8, u8 local player index, u32 entity id`. Sets the local player's entity id (+0x184).
-4. **S→C `0x02f7` AddObject** for the player entity, then **`0x02f4`** ticks (see below and [entities.md](entities.md)).
+4. **S→C `0x02f7` AddObject** for the player entity, then a **`0x02f4`** frame marker (see below and [entities.md](entities.md)). The header's component byte (+0x18) is `0xff`: see "Frame ordering" below.
 5. **S→C `0x0023` InitialState** (deserializer `0x142158130`, handler `0x142122eed`):
-   - `u8, varuint, u8 flags (3 bits), u8 n, CharacterState[n], u8 m, PlayerState[m]`.
+   - `u8, varuint frame_ms, u8 flags (3 bits), u8 n, CharacterState[n], u8 m, PlayerState[m]`.
+   - The handler calls world vfuncs: +0x178 (`frame_ms` → world +0x11c), +0x200 (flags bits 0/1: pause, world +0x868/+0x869), +0x60 (flags bit 2 → world +0xc4), then +0x1f0 (start the world: applies every queued simulation packet, `0x14212fc10`).
+   - **`frame_ms` is the length of a simulation frame.** Every frame marker records it, and the world update (`0x1421302c0`) plays the queued frames in real time, giving each frame's entity update `dt = frame_ms / 1000`. With 0, all client time stops: no animations, no fade-ins, so no models are drawn (only labels and lights), and the camera breaks on a fresh client (grey view with a black bar). The server sends `tick_ms` (33).
    - CharacterState (0x70): `u16 n + 0x68-byte records (0x141ce2e20), u16 m + records, u8 k + (u32, u32)[k], wstring, 3 flag bytes`.
    - PlayerState (0x68): `u32 player id, u8 (bits 0-5: CharacterState index, 6, 7), u8 flags, u8, u8 rows[3], u16 n + u16[n]`. `rows` are `CharacterShapeshiftBasicSkills.dat` row indices, one per weapon set (local player +0x7980); 0xff (none) crashes the weapon-slot UI.
    - Entries are matched by player id, so InitialState must follow `0x24` and the player entity. Sent first, the client quits (`ExitProcess(0)`).
@@ -57,8 +61,13 @@ The server sends, in this order (`POE_EXPERIMENT=players,inventories,spawn,initi
 1. The stream reader `0x1421c5950` tries the registered packet handlers. Factory 2's handler (`0x1421c5810`) builds the packet and passes it to `0x1421340e0`.
 2. `0x1421340e0` **queues** the packet in the world's frame queue (world+0x6b0):
    - `0x2f4` (tick marker, no body) closes a frame;
-   - `0x2f5` is applied immediately (world vfunc +0x178).
+   - `0x2f5` (`u8`) is applied immediately: world vfunc +0x178, the frame length like InitialState's `frame_ms`.
 3. Each frame, `0x1421306c0` drains the queue and applies every packet with `0x142134240` (switch on opcode). They share a header (`0x141f4b680`, `u32 entity id, u32, u8, u16`), and fields +0x14/+0x18/+0x1a order the packets inside a frame.
+
+### Frame ordering
+The header fields after the entity id schedule a packet within its frame: +0x14 is an entity order key (0 = before entity updates, an entity id = before that entity, `0xffffffff` = after all), +0x18 a component index (`0xff` = after all components), +0x1a a sequence number. During an entity's update the client flushes the packets scheduled at the current position (`0x1421301e0`: world +0x678/+0x67c/+0x67e).
+
+The world start (InitialState) applies every queued packet without advancing the queue cursor. If the player's AddObject is scheduled at (0, 0, 0), a flush nested inside its own apply matches it again. Starting the WashedUp action from the Player reader causes such a flush, so the client adds the player twice ("Replacing awake object with id 1") and crashes. The server therefore sends the player with +0x18 = `0xff`.
 
 ### S→C `0x2f7` AddObject (apply case `0x142134d47`)
 | Field | Meaning |
@@ -73,13 +82,10 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 - `tools/re/dump_factory.py`, `find_switches.py`, `case_strings.py` map factories and handlers.
 - The DLL's `crash_log` logs C++ exceptions (type and `what()`).
 - `exit_trace` logs `ExitProcess` and `TerminateProcess` with stack refs.
-- The instance server's post-area messages can be chosen with `POE_EXPERIMENT` (comma list: `players`, `inventories`, `spawn`, `initial`).
 - Other RE overrides of the instance server (environment variables):
   - `POE_AREA` (login server): the area to send;
   - `POE_SEED`: the terrain seed;
   - `POE_SPAWN=x,y`: the grid spawn cell;
-  - `POE_SPAWN_DELAY_MS`: wait before creating the player;
-  - `POE_ANIM=<index>`: start that animation through Animated bit 3;
-  - `POE_NPC=<metadata path>`: also add that object as entity 2 next to the player.
+  - `POE_NPC=<metadata path>`: also add that object as entity 2 next to the player (zero blob; e.g. `Metadata/MiscellaneousObjects/Waypoint`).
 - The DLL's `dump_object_types` feature also logs, per spawned entity, its components and the blob span each component reader consumes.
 
