@@ -43,3 +43,5 @@ Open items:
 - The mana orb is empty, so the Life pool order (life/mana/ES) is still a guess.
 - The Actor section is undecoded (zeros).
 - The post-area messages are still behind `POE_EXPERIMENT`; they should become the default flow.
+- Rendering: the 3D view is uniform grey fog with a black vertical bar that scales with zoom; the minimap shows terrain around the player. Ruled out: missing simulation ticks (now sent every `tick_ms`), death state, spawn outside the map (the Riverbank terrain is 69×69 tiles, logged by the DLL probe). Next test: `POE_AREA=G1_town` to see whether the problem is specific to the Riverbank.
+- Client input seen: `0x63` WASD direction (`u8, varint x, varint y, 3 bytes`), `0x1c` about 10 Hz (heartbeat?, no reply sent yet).

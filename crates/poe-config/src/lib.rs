@@ -98,6 +98,13 @@ pub struct InstanceConfig {
     pub bind: SocketAddr,
     pub public_host: String,
     pub public_port: u16,
+    /// Simulation frame interval: a tick marker (0x2f4) is sent this often.
+    #[serde(default = "default_tick_ms")]
+    pub tick_ms: u64,
+}
+
+fn default_tick_ms() -> u64 {
+    33
 }
 
 #[derive(Debug, Clone, Deserialize)]
