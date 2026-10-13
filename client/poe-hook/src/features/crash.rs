@@ -1,5 +1,9 @@
 //! Logs fatal exceptions with addresses translated to Ghidra's image base, so a crash in
 //! the client can be looked up directly in the Ghidra project.
+//!
+//! C++ exceptions (code `0xE06D7363`) are logged too, with the thrown type's name and its
+//! `what()` text when it is a `std::exception`: the client reports protocol errors that way
+//! ("Unable to deserialise packet", "Protocol violation ...").
 
 use std::sync::OnceLock;
 
@@ -9,11 +13,14 @@ use windows_sys::Win32::{
         EXCEPTION_PRIV_INSTRUCTION, EXCEPTION_STACK_OVERFLOW,
     },
     System::Diagnostics::Debug::{AddVectoredExceptionHandler, EXCEPTION_POINTERS},
+    System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, VirtualQuery},
 };
 
 use crate::module::Module;
 
 const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
+/// MSVC C++ `throw`.
+const CPP_EXCEPTION: i32 = 0xE06D7363u32 as i32;
 
 static MAIN: OnceLock<Module> = OnceLock::new();
 
@@ -36,6 +43,10 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
         EXCEPTION_PRIV_INSTRUCTION,
         EXCEPTION_STACK_OVERFLOW,
     ];
+    if code == CPP_EXCEPTION {
+        log_cpp_exception(record, context.Rip as usize);
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     if !fatal.contains(&code) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
@@ -84,4 +95,82 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     }
     log::error!("{msg}");
     EXCEPTION_CONTINUE_SEARCH
+}
+
+/// Whether `len` bytes at `addr` are committed memory (cheap guard before raw reads).
+fn readable(addr: usize, len: usize) -> bool {
+    if addr < 0x10000 {
+        return false;
+    }
+    let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    let n = unsafe {
+        VirtualQuery(
+            addr as *const _,
+            &mut mbi,
+            size_of::<MEMORY_BASIC_INFORMATION>(),
+        )
+    };
+    n != 0 && mbi.State == MEM_COMMIT && addr + len <= mbi.BaseAddress as usize + mbi.RegionSize
+}
+
+fn read<T: Copy>(addr: usize) -> Option<T> {
+    readable(addr, size_of::<T>()).then(|| unsafe { (addr as *const T).read_unaligned() })
+}
+
+fn c_string(addr: usize, max: usize) -> Option<String> {
+    if !readable(addr, 1) {
+        return None;
+    }
+    let mut out = Vec::new();
+    for i in 0..max {
+        let b: u8 = read(addr + i)?;
+        if b == 0 {
+            break;
+        }
+        out.push(b);
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// `ExceptionInformation`: [magic, object, ThrowInfo*, image base].
+fn log_cpp_exception(
+    record: &windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_RECORD,
+    rip: usize,
+) {
+    if record.NumberParameters < 4 {
+        return;
+    }
+    let object = record.ExceptionInformation[1];
+    let throw_info = record.ExceptionInformation[2];
+    let image = record.ExceptionInformation[3];
+    // ThrowInfo { attributes, pmfnUnwind, pForwardCompat, pCatchableTypeArray } (RVAs).
+    let type_name = read::<u32>(throw_info + 0xc)
+        .and_then(|cta| read::<u32>(image + cta as usize + 4))
+        .and_then(|ct| read::<u32>(image + ct as usize + 4))
+        .and_then(|td| c_string(image + td as usize + 0x10, 128))
+        .unwrap_or_default();
+    // std::exception { vtable, const char* what, bool owns }.
+    let what = read::<usize>(object + 8)
+        .and_then(|p| c_string(p, 300))
+        .unwrap_or_default();
+    let main = MAIN.get().copied();
+    let mut msg = format!("C++ exception {type_name} what={what:?}");
+    if let Some(m) = main {
+        if m.contains(rip) {
+            msg += &format!(" at ghidra {:#x}", m.to_ghidra(rip));
+        }
+        let frames: Vec<String> = crate::module::stack_refs(&m, unsafe { get_rsp() }, 16)
+            .iter()
+            .map(|a| format!("{a:#x}"))
+            .collect();
+        msg += &format!("\n  stack refs: {}", frames.join(" "));
+    }
+    log::warn!("{msg}");
+}
+
+#[inline(always)]
+unsafe fn get_rsp() -> usize {
+    let rsp: usize;
+    unsafe { std::arch::asm!("mov {}, rsp", out(reg) rsp) };
+    rsp
 }

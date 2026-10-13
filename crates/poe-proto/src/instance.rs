@@ -157,3 +157,90 @@ mod tests {
         assert_eq!(h.ticket, 0xf6a9_48f5);
     }
 }
+
+/// Client report after generating the area's terrain (provisional layout: u8 + two u32
+/// hashes, probably tiles and doodads; compared against the server's own generation).
+#[derive(Debug, Clone, Copy)]
+pub struct TerrainHashes {
+    pub unk: u8,
+    pub hash_a: u32,
+    pub hash_b: u32,
+}
+
+impl Message for TerrainHashes {
+    const NAME: &'static str = "TerrainHashes";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk).u32(self.hash_a).u32(self.hash_b);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk: r.u8()?,
+            hash_a: r.u32()?,
+            hash_b: r.u32()?,
+        })
+    }
+}
+
+/// Local players of this connection with their character names (serializer `0x1421578e0`;
+/// provisional meaning).
+#[derive(Debug, Clone, Default)]
+pub struct LocalPlayers {
+    pub unk: u8,
+    pub players: Vec<(u8, String)>,
+}
+
+impl Message for LocalPlayers {
+    const NAME: &'static str = "LocalPlayers";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk).u8(self.players.len() as u8);
+        for (index, name) in &self.players {
+            w.u8(*index).wstring(name);
+        }
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let unk = r.u8()?;
+        let n = r.u8()?;
+        let players = (0..n)
+            .map(|_| Ok((r.u8()?, r.wstring()?)))
+            .collect::<Result<_, DecodeError>>()?;
+        Ok(Self { unk, players })
+    }
+}
+
+/// Initial state (deserializer `0x142158130`); only the empty form is supported so far.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InitialState {
+    pub unk_10: u8,
+    pub unk_1f8: u32,
+    /// Bits 0..2 -> client +0x1fc..+0x1fe.
+    pub flags: u8,
+}
+
+impl Message for InitialState {
+    const NAME: &'static str = "InitialState";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        // Two empty lists (0x70-byte and 0x68-byte entries) follow the header.
+        w.u8(self.unk_10)
+            .varuint(self.unk_1f8)
+            .u8(self.flags)
+            .u8(0)
+            .u8(0);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let m = Self {
+            unk_10: r.u8()?,
+            unk_1f8: r.varuint()?,
+            flags: r.u8()?,
+        };
+        if r.u8()? != 0 || r.u8()? != 0 {
+            return Err(DecodeError::Invalid {
+                offset: r.position(),
+                what: "InitialState lists not supported",
+            });
+        }
+        Ok(m)
+    }
+}

@@ -347,7 +347,9 @@ async fn play_character(
         warn!(area = %character.area, "play: character area not in game data");
         return Ok(());
     };
-    let ticket = server.tickets.issue(account.id, character.id, &area.id);
+    let ticket = server
+        .tickets
+        .issue(account.id, character.id, &character.name, &area.id);
     info!(
         character = %character.name,
         area = %area.id,

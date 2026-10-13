@@ -4,7 +4,10 @@
 
 [client]
 Hello = 0x000f
+TerrainHashes = 0x009a
 
 [server]
 EnableEncryption = 0x0011
 AreaInfo = 0x001e
+LocalPlayers = 0x0022
+InitialState = 0x0023
