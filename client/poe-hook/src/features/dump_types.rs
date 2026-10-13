@@ -30,6 +30,9 @@ const READ_INITIAL_STATE: usize = 0x141e71120;
 const ENTRY_SIZE: usize = 0x30;
 /// Shared `ret 0` stub used as the reader of components without initial state.
 const NOOP_READER: usize = 0x14010a080;
+/// Positioned component reader: after it runs, the terrain size is logged (the reader clamps
+/// the grid position to it).
+const POSITIONED_READER: usize = 0x141dd8820;
 
 /// Readers already hooked (Ghidra addresses).
 static HOOKED_READERS: Mutex<Option<HashSet<usize>>> = Mutex::new(None);
@@ -142,7 +145,45 @@ unsafe extern "win64" fn on_reader(regs: *mut Registers, original: usize, ghidra
     let ret = unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) };
     let end = unsafe { *blob.add(2) };
     log::info!("    reader {ghidra:#x} read {} bytes ({start}..{end})", end - start);
+    if ghidra == POSITIONED_READER {
+        unsafe { log_terrain(r.rcx as usize) };
+    }
     ret
+}
+
+type TerrainFn = unsafe extern "win64" fn(usize) -> usize;
+
+/// Logs the area terrain the Positioned component was clamped to: the world's terrain object
+/// (world vtable +0x1a8) has the size in tiles at +0x18/+0x20 (23 grid cells per tile).
+unsafe fn log_terrain(component: usize) {
+    unsafe {
+        let entity = *((component + 8) as *const usize);
+        let world = *((entity + 0x78) as *const usize);
+        let vt = *(world as *const usize);
+        let f: TerrainFn = std::mem::transmute(*((vt + 0x1a8) as *const usize));
+        let terrain = f(world);
+        let (w, h) = (
+            *((terrain + 0x18) as *const u32),
+            *((terrain + 0x20) as *const u32),
+        );
+        let (x, y) = (
+            *((component + 0x444) as *const i32),
+            *((component + 0x448) as *const i32),
+        );
+        let floats: Vec<String> = (0..16)
+            .map(|i| format!("{:.2}", *((component + 0x480 + i * 4) as *const f32)))
+            .collect();
+        log::info!("    positioned +0x480.. floats [{}]", floats.join(" "));
+        let head: Vec<String> = (0..16)
+            .map(|i| format!("{:#x}", *((terrain + i * 8) as *const usize)))
+            .collect();
+        log::info!(
+            "    terrain {terrain:#x}: {w}x{h} tiles ({}x{} grid); player grid ({x}, {y}); head [{}]",
+            w * 23,
+            h * 23,
+            head.join(" ")
+        );
+    }
 }
 
 unsafe fn wide(ptr: usize) -> String {

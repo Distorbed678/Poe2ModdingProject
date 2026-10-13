@@ -7,7 +7,7 @@
 //!    ticket's key material,
 //! 3. server `AreaInfo` (area + seed): the client generates the terrain and loads the area.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use poe_cluster::{Ticket, TicketRegistry};
 use poe_config::Config;
@@ -214,19 +214,28 @@ impl InstanceServer {
             info!("sent InitialState");
         }
 
-        // Not decoded yet: log the client's decrypted messages.
+        // Simulation frames: the client advances world time on each tick marker.
+        let tick = self.protocol.instance.encode(&SimulationTick)?;
+        let mut ticker =
+            tokio::time::interval(Duration::from_millis(self.config.instance.tick_ms.max(1)));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Not decoded yet: log the client's decrypted messages (heartbeat 0x1c is skipped).
         loop {
-            if conn.buffer().is_empty() && conn.read_more().await? == 0 {
-                info!("client disconnected");
-                return Ok(());
+            tokio::select! {
+                n = conn.read_more() => {
+                    if n? == 0 {
+                        info!("client disconnected");
+                        return Ok(());
+                    }
+                    let data = conn.buffer();
+                    if !data.starts_with(&[0x00, 0x1c]) {
+                        info!(len = data.len(), "received\n{}", hexdump(data));
+                    }
+                    let n = data.len();
+                    conn.consume(n);
+                }
+                _ = ticker.tick() => conn.send(&tick).await?,
             }
-            info!(
-                len = conn.buffer().len(),
-                "received\n{}",
-                hexdump(conn.buffer())
-            );
-            let n = conn.buffer().len();
-            conn.consume(n);
         }
     }
 
@@ -252,11 +261,27 @@ impl InstanceServer {
 }
 
 /// Initial state of a freshly spawned player character (components of `character.ot`).
+///
+/// RE experiment: `POE_SPAWN=x,y` sets the grid position (the client clamps it to the map);
+/// a real start position needs the area's terrain (M4).
 fn player_blob(name: &str, class: &CharacterClass) -> Vec<u8> {
+    let (grid_x, grid_y) = std::env::var("POE_SPAWN")
+        .ok()
+        .and_then(|v| {
+            let (x, y) = v.split_once(',')?;
+            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+        })
+        .unwrap_or((0, 0));
     use poe_proto::entity::{Actor, Component, Life, Player, Positioned, Stats};
     let clamp = |v: i64| v.clamp(1, u32::MAX as i64) as u32;
     entity::initial_state_blob(&[
-        Component::Positioned(Positioned::default()),
+        Component::Positioned(Positioned {
+            grid_x,
+            grid_y,
+            // Team (low 15 bits; `team = 1` in character.ot).
+            unk_1e0: 1,
+            ..Default::default()
+        }),
         Component::Stats(Stats::default()),
         Component::Buffs,
         Component::Life(Life::character(

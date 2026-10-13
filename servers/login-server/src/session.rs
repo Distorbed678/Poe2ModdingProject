@@ -344,7 +344,9 @@ async fn play_character(
         warn!(index, "play: no such character");
         return Ok(());
     };
-    let Some(area) = WorldArea::find(&server.data, &character.area)? else {
+    // RE experiment: `POE_AREA=<WorldAreas.Id>` loads another area than the character's.
+    let area_id = std::env::var("POE_AREA").unwrap_or_else(|_| character.area.clone());
+    let Some(area) = WorldArea::find(&server.data, &area_id)? else {
         warn!(area = %character.area, "play: character area not in game data");
         return Ok(());
     };

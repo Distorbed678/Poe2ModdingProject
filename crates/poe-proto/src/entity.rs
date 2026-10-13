@@ -65,7 +65,9 @@ pub struct Positioned {
     /// Grid position (+0x444/+0x448), clamped by the client to the area size.
     pub grid_x: i32,
     pub grid_y: i32,
+    /// Facing (+0x44c, radians as f32 bits).
     pub unk_44c: u32,
+    /// +0x1e0: team in the low 15 bits (players: 1), bit 15 a flag.
     pub unk_1e0: u16,
 }
 
@@ -137,11 +139,11 @@ impl Pool {
 /// number of (u32, i16) entries (3 for characters), one more (u32, i16) and a flags byte.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Life {
-    /// +0x1a8, assumed to be life.
+    /// +0x1a8: life (the life orb shows it).
     pub life: Pool,
-    pub unk_200: Pool,
-    /// +0x240, assumed to be mana.
+    /// +0x200: mana (with the value in +0x240 instead, the mana orb stayed empty).
     pub mana: Pool,
+    pub unk_240: Pool,
     pub unk_298: Pool,
     /// +0x2e0, assumed to be energy shield.
     pub energy_shield: Pool,
@@ -156,8 +158,8 @@ impl Life {
     pub fn character(life: u32, mana: u32) -> Self {
         Self {
             life: Pool::full(life),
-            unk_200: Pool::default(),
             mana: Pool::full(mana),
+            unk_240: Pool::default(),
             unk_298: Pool::default(),
             energy_shield: Pool::default(),
             unk_330: Pool::default(),
@@ -169,8 +171,8 @@ impl Life {
 
     fn encode(&self, w: &mut Writer) {
         self.life.encode(w, true);
-        self.unk_200.encode(w, false);
-        self.mana.encode(w, true);
+        self.mana.encode(w, false);
+        self.unk_240.encode(w, true);
         self.unk_298.encode(w, false);
         self.energy_shield.encode(w, true);
         self.unk_330.encode(w, true);
