@@ -25,3 +25,17 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 - `Got Instance Details from login server` is the hand-off.
 - `Connecting to instance server at <ip>:<port>`.
 - `Generating level N area "<AreaId>" with seed <u32>`: the client generates terrain itself.
+
+## Entities and rendering (2026-10-13)
+| Address | What |
+|---|---|
+| `0x1421306c0` | world frame drain (`world, f32 dt`): applies queued simulation packets, updates entities |
+| `0x1421370f0` | frame-mode entity update loop (component vfunc +0x50, then `0x141e7d7f0`) |
+| `0x1421340e0` | simulation packet queue (`0x2f4` frame marker, `0x2f5` → world vfunc +0x178) |
+| `0x140150cb0` | entity → Render component (by name) |
+| `0x1416a9810` | Render: apply visibility to the AO scene node (+0x39a disabled flag) |
+| `0x141923f80` | GEAL `EnableRendering` lambda body |
+| `0x141d439e0` | animation controller: play animation (index, …) |
+| `0x141dfa320` | StateMachine reader (shared-state count check) |
+| `0x1426f2220` | GEAL script interpreter loop |
+| `0x140286850` | `Data/Balance/Hideouts.dat` table getter |

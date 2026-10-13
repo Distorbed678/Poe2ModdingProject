@@ -1173,8 +1173,10 @@ dependencies = [
  "poe-cluster",
  "poe-config",
  "poe-data",
+ "poe-game",
  "poe-net",
  "poe-proto",
+ "poe-store",
  "rand 0.9.5",
  "tokio",
  "tracing",
@@ -1663,6 +1665,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "poe-game"
+version = "0.1.0"
+dependencies = [
+ "poe-data",
+ "tracing",
+]
+
+[[package]]
 name = "poe-net"
 version = "0.1.0"
 dependencies = [
@@ -1694,6 +1704,7 @@ dependencies = [
  "poe-cluster",
  "poe-config",
  "poe-data",
+ "poe-game",
  "poe-proto",
  "poe-store",
  "tokio",

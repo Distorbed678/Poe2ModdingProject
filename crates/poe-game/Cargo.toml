@@ -1,0 +1,11 @@
+[package]
+name = "poe-game"
+description = "Game rules: character stats from game data (later: simulation)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+poe-data.workspace = true
+tracing.workspace = true

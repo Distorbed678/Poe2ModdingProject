@@ -19,8 +19,9 @@ pub enum Component {
     /// No active buffs (u16 count 0). Reader `0x141db4f00`.
     Buffs,
     Life(Life),
-    /// Flags byte 0 (no animation override). Reader `0x141da6540`.
-    Animated,
+    /// Reader `0x141da6540`. With a path, flags bit 0 is set and the animated object
+    /// (model) is loaded from it; players need it (`Characters.AOFile`).
+    Animated(Option<String>),
     Player(Player),
     /// No inventories (two zero counts). Reader `0x141d82a40`.
     Inventories,
@@ -36,9 +37,19 @@ impl Component {
                 w.u16_le(0);
             }
             Self::Life(c) => c.encode(w),
-            Self::Animated => {
-                w.u8(0);
-            }
+            Self::Animated(path) => match path {
+                Some(p) => {
+                    // RE experiment: bit 3 starts animation (u32 index, f32, u32).
+                    let anim = std::env::var("POE_ANIM").ok().and_then(|v| v.parse::<u32>().ok());
+                    w.u8(if anim.is_some() { 0x09 } else { 0x01 }).utf16_le(p);
+                    if let Some(a) = anim {
+                        w.u32_le(a).f32_le(0.0).u32_le(0);
+                    }
+                }
+                None => {
+                    w.u8(0);
+                }
+            },
             Self::Player(c) => c.encode(w),
             Self::Inventories => {
                 w.u8(0).u8(0);
@@ -48,10 +59,17 @@ impl Component {
     }
 }
 
-/// Encodes a full initial-state blob from the serialized components, in template order.
-pub fn initial_state_blob(components: &[Component]) -> Vec<u8> {
+/// Entity flags (first blob byte): bit 0 -> entity +0x8d |= 1; bit 1 -> +0x8d |= 4, the
+/// object starts in the **wake zone** (`ObjectInWakeZone`, `0x141e73bf0`): awake objects
+/// are updated and drawn. A player created without it stays invisible (and so does its
+/// light, leaving the scene dark).
+pub const ENTITY_IN_WAKE_ZONE: u8 = 0x02;
+
+/// Encodes a full initial-state blob from the entity flags and the serialized components,
+/// in template order.
+pub fn initial_state_blob(flags: u8, components: &[Component]) -> Vec<u8> {
     let mut w = Writer::new();
-    w.u8(0).u8(0);
+    w.u8(flags).u8(0);
     for c in components {
         c.encode(&mut w);
     }
@@ -187,22 +205,29 @@ impl Life {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Player {
     pub name: String,
-    pub unk_c: u8,
+    /// Written to the PlayerClass component (+0x158), which rebuilds when it changes:
+    /// the class (`Characters.IntegerId`).
+    pub class: u8,
     pub unk_u32: u32,
     pub unk_1d0: u32,
     pub unk_1d4: u32,
+    /// Flags bit 0: the "WashedUp" opening animation (new characters on the Riverbank).
+    pub washed_up: bool,
 }
 
 impl Player {
     fn encode(&self, w: &mut Writer) {
         w.utf16_le(&self.name)
-            .u8(self.unk_c)
+            .u8(self.class)
             .u32_le(self.unk_u32)
             .u32_le(self.unk_1d0)
             .u32_le(self.unk_1d4)
-            // u16 +0x200, u16 +0x202, two empty (u8, u64) lists, 5 bytes, two u16 data keys,
-            // flags (bit 0: "WashedUp" intro), u8, u8, varuint count of u32s, u8 count.
-            .bytes(&[0; 2 + 2 + 2 + 2 + 5 + 2 + 2 + 1 + 1 + 1 + 1 + 1]);
+            // u16 +0x200, u16 +0x202, two empty (u8, u64) lists, 5 bytes, two u16 data keys.
+            .bytes(&[0; 2 + 2 + 2 + 2 + 5 + 2 + 2])
+            // Flags (bit 0: washed up).
+            .u8(self.washed_up as u8)
+            // u8, u8, varuint count of u32s, u8 count.
+            .bytes(&[0; 4]);
     }
 }
 
@@ -243,7 +268,7 @@ mod tests {
         let mut life = Life::character(0, 0);
         life.life = Pool::default();
         assert_eq!(size(&Component::Life(life)), 125);
-        assert_eq!(size(&Component::Animated), 1);
+        assert_eq!(size(&Component::Animated(None)), 1);
         assert_eq!(size(&Component::Player(Player::default())), 39);
         assert_eq!(size(&Component::Inventories), 2);
         assert_eq!(size(&Component::Actor(Actor::default())), 48);

@@ -22,6 +22,8 @@ pub struct TicketCharacter {
     /// `Characters.IntegerId` of the class.
     pub class_id: u32,
     pub level: u32,
+    /// The start area's intro has been played (otherwise new characters wash up).
+    pub intro_done: bool,
 }
 
 /// A pending hand-off to an instance server.
@@ -116,6 +118,7 @@ mod tests {
             name: "test".into(),
             class_id: 2,
             level: 1,
+            intro_done: false,
         };
         let t = reg.issue(1, character, "G1_1");
         assert_eq!(reg.pending().len(), 1);

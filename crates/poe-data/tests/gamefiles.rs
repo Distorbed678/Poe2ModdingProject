@@ -57,3 +57,27 @@ fn resolves_start_state() {
         (2, "Ranger", 1)
     );
 }
+
+#[test]
+fn ranger_template_resolves_through_ao() {
+    let Some(data) = open() else { return };
+    let t =
+        poe_data::template::ObjectTemplate::load(&data, "Metadata/Characters/Dex/DexFour").unwrap();
+    assert!(
+        t.files.iter().any(|f| f.ends_with("Character.ot")),
+        "{:?}",
+        t.files
+    );
+    let stats = t.component("Stats");
+    assert!(stats.iter().any(|(k, v)| k == "is_player" && v == "1"));
+    assert!(
+        stats
+            .iter()
+            .any(|(k, v)| k == "life_per_level" && v == "12")
+    );
+    assert!(
+        t.component("Positioned")
+            .iter()
+            .any(|(k, v)| k == "team" && v == "1")
+    );
+}

@@ -34,5 +34,6 @@ poe-proto = { path = "crates/poe-proto" }
 poe-store = { path = "crates/poe-store" }
 poe-cluster = { path = "crates/poe-cluster" }
 poe-data = { path = "crates/poe-data" }
+poe-game = { path = "crates/poe-game" }
 login-server = { path = "servers/login-server" }
 instance-server = { path = "servers/instance-server" }

@@ -60,6 +60,10 @@ pub struct SpawnConfig {
     /// Per `WorldAreas.Id`: a substring of the start tile's path.
     #[serde(default)]
     pub start_tiles: std::collections::BTreeMap<String, String>,
+    /// Areas whose first visit plays the "washed up" opening (Player flag); without it the
+    /// intro area stays covered in grey fog.
+    #[serde(default)]
+    pub intro_areas: Vec<String>,
 }
 
 /// Player inventories created on instance entry. Slots come from `Inventories.dat`; grid

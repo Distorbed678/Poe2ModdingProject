@@ -164,6 +164,17 @@ impl Table {
         Ok(None)
     }
 
+    /// Index of the first row whose string column equals `value`.
+    pub fn find_index_by_str(&self, column: &str, value: &str) -> Result<Option<usize>> {
+        let col = self.column_index(column)?;
+        for (i, row) in self.rows().enumerate() {
+            if row.get_index(col)?.as_str() == Some(value) {
+                return Ok(Some(i));
+            }
+        }
+        Ok(None)
+    }
+
     fn column_index(&self, column: &str) -> Result<usize> {
         self.schema
             .column_index(column)

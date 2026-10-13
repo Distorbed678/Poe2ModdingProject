@@ -9,6 +9,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_accounts.sql"),
     include_str!("../migrations/0002_characters.sql"),
     include_str!("../migrations/0003_character_area.sql"),
+    include_str!("../migrations/0004_character_intro.sql"),
 ];
 
 pub struct SqliteStore {
@@ -64,11 +65,12 @@ fn character_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Character> {
         level: r.get(6)?,
         experience: r.get(7)?,
         area: r.get(8)?,
+        intro_done: r.get(9)?,
     })
 }
 
 const CHARACTER_COLUMNS: &str =
-    "id, account_id, name, league, class_id, start_state, level, experience, area";
+    "id, account_id, name, league, class_id, start_state, level, experience, area, intro_done";
 
 impl Store for SqliteStore {
     fn account_by_login_key(&self, login_key: &str) -> Result<Option<Account>> {
@@ -111,6 +113,15 @@ impl Store for SqliteStore {
         ))?;
         let rows = stmt.query_map(params![account_id], character_from_row)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn set_intro_done(&self, character_id: u32) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE characters SET intro_done = 1 WHERE id = ?1",
+            params![character_id],
+        )?;
+        Ok(())
     }
 
     fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>> {

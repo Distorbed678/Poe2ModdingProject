@@ -9,12 +9,15 @@
 
 use std::{sync::Arc, time::Duration};
 
-use poe_cluster::{Ticket, TicketRegistry};
+use poe_cluster::{Ticket, TicketCharacter, TicketRegistry};
 use poe_config::Config;
+use poe_game::stats::StatRegistry;
+use poe_store::Store;
 
 mod spawn;
 use poe_data::{
     GameData,
+    template::ObjectTemplate,
     views::{CharacterClass, InventorySlot, WorldArea},
 };
 use poe_net::{Connection, DecodeError, KeyMaterial, hexdump::hexdump};
@@ -36,6 +39,9 @@ pub struct InstanceServer {
     pub protocol: Arc<Protocol>,
     pub tickets: Arc<dyn TicketRegistry>,
     pub data: Arc<GameData>,
+    /// Stat ids -> network keys (built once from Stats.dat).
+    pub stats: Arc<StatRegistry>,
+    pub store: Arc<dyn Store>,
 }
 
 impl InstanceServer {
@@ -140,6 +146,13 @@ impl InstanceServer {
             }
         }
         .unwrap_or((0, 0));
+        // RE experiment: POE_SPAWN_DELAY_MS waits before creating the player.
+        if let Some(ms) = std::env::var("POE_SPAWN_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        }
 
         // RE experiment: which post-area messages to send, from POE_EXPERIMENT (comma list of
         // "players", "initial"); default: none.
@@ -184,6 +197,12 @@ impl InstanceServer {
             else {
                 anyhow::bail!("unknown class id {}", ticket.character.class_id);
             };
+            // New characters wash up on their first visit to an intro area.
+            let washed_up = !ticket.character.intro_done
+                && self.config.spawn.intro_areas.contains(&ticket.area);
+            if washed_up {
+                self.store.set_intro_done(ticket.character.id)?;
+            }
             let entity_id = 1;
             let table = &self.protocol.instance;
             let mut out = table.encode(&PlayerEntity {
@@ -196,8 +215,31 @@ impl InstanceServer {
                     ..Default::default()
                 },
                 type_key: class.object_type_key(),
-                blob: player_blob(&ticket.character.name, &class, spawn),
+                blob: self.player_blob(&ticket.character, &class, spawn, washed_up)?,
             })?);
+            // RE experiment: POE_NPC=<metadata path> spawns that object as entity 2 next to
+            // the player with a zero blob (Positioned first), to compare rendering.
+            if let Ok(npc) = std::env::var("POE_NPC") {
+                let mut blob = vec![entity::ENTITY_IN_WAKE_ZONE, 0];
+                blob.extend((spawn.0 + 15).to_le_bytes());
+                blob.extend(spawn.1.to_le_bytes());
+                // Rest of Positioned, 5 zero-count components, then StateMachine with one
+                // shared state (`visible = 1`, see una.ot).
+                if npc.ends_with("/Una") {
+                    blob.extend([0u8; 9 + 6]);
+                    blob.extend([1, 0, 1, 0]);
+                }
+                blob.extend([0u8; 1024]);
+                out.extend(table.encode(&AddObject {
+                    header: SimulationHeader {
+                        entity_id: 2,
+                        ..Default::default()
+                    },
+                    type_key: poe_data::hash::object_type_key(&npc),
+                    blob,
+                })?);
+                info!(%npc, "sent NPC experiment");
+            }
             for _ in 0..3 {
                 out.extend(table.encode(&SimulationTick)?);
             }
@@ -284,30 +326,57 @@ fn spawn_override() -> Option<(i32, i32)> {
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
-/// Initial state of a freshly spawned player character (components of `character.ot`).
-fn player_blob(name: &str, class: &CharacterClass, (grid_x, grid_y): (i32, i32)) -> Vec<u8> {
-    use poe_proto::entity::{Actor, Component, Life, Player, Positioned, Stats};
-    let clamp = |v: i64| v.clamp(1, u32::MAX as i64) as u32;
-    entity::initial_state_blob(&[
-        Component::Positioned(Positioned {
-            grid_x,
-            grid_y,
-            // Team (low 15 bits; `team = 1` in character.ot).
-            unk_1e0: 1,
-            ..Default::default()
-        }),
-        Component::Stats(Stats::default()),
-        Component::Buffs,
-        Component::Life(Life::character(
-            clamp(class.base_max_life),
-            clamp(class.base_max_mana),
-        )),
-        Component::Animated,
-        Component::Player(Player {
-            name: name.to_owned(),
-            ..Default::default()
-        }),
-        Component::Inventories,
-        Component::Actor(Actor::default()),
-    ])
+impl InstanceServer {
+    /// Initial state of the player character (components of its object template): the
+    /// class's object type with the template's default stats, class base stats and level.
+    fn player_blob(
+        &self,
+        character: &TicketCharacter,
+        class: &CharacterClass,
+        (grid_x, grid_y): (i32, i32),
+        washed_up: bool,
+    ) -> anyhow::Result<Vec<u8>> {
+        use poe_proto::entity::{Actor, Component, Life, Player, Positioned, Stats};
+        let template = ObjectTemplate::load(&self.data, &class.metadata_id)?;
+        let stats = poe_game::stats::character_defaults(&template, class, character.level);
+        let team = template
+            .component("Positioned")
+            .iter()
+            .find(|(k, _)| k == "team")
+            .and_then(|(_, v)| v.parse().ok())
+            .unwrap_or(0);
+        let pool = |id: &str| stats.get(id).max(1) as u32;
+        info!(
+            class = %class.name,
+            level = character.level,
+            maximum_life = stats.get("maximum_life"),
+            maximum_mana = stats.get("maximum_mana"),
+            stats = stats.0.len(),
+            "player stats"
+        );
+        Ok(entity::initial_state_blob(entity::ENTITY_IN_WAKE_ZONE, &[
+            Component::Positioned(Positioned {
+                grid_x,
+                grid_y,
+                // Team (low 15 bits), from the template's Positioned section.
+                unk_1e0: team,
+                ..Default::default()
+            }),
+            Component::Stats(Stats {
+                stats: stats.to_network(&self.stats),
+                ..Default::default()
+            }),
+            Component::Buffs,
+            Component::Life(Life::character(pool("maximum_life"), pool("maximum_mana"))),
+            Component::Animated(Some(class.ao_file.clone())),
+            Component::Player(Player {
+                name: character.name.clone(),
+                class: class.integer_id as u8,
+                washed_up,
+                ..Default::default()
+            }),
+            Component::Inventories,
+            Component::Actor(Actor::default()),
+        ]))
+    }
 }
