@@ -96,6 +96,23 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 - **HNC side channel**: both directions carry a byte stream encrypted with a second Salsa20 pair (see [../re/crypto.md](../re/crypto.md#hnc-side-channel)). Received bytes are decrypted and parsed (`0x1421c5360`): 0 = idle, 0xda..0xdd start a message, anything else throws ("HNC Protocol Violated"). The server answers every report with a PingReply whose bits are raw keystream, so they decrypt to idle zero bytes. Zero bits instead crash the client.
 
 ## Leaving the game (2026-10-14)
-- **Exit to character selection**: the client sends **C→S `0x0173`** (no body) and waits. The server closes the instance connection; the client returns to character selection and reconnects to the login server. The login screen log then shows "An unexpected disconnection occurred" (cosmetic).
-- **S→C `0x0174` ExitSession** (`u8, u32, u64` raw, constructor `0x14215df40`) is probably the proper reply: its handler broadcasts the `u32`/`u64` and sends the exit telemetry `0x355`. Sent with zeros, the client opens a new login connection but then waits for something, so it is not used yet.
-- **Exit to log in screen**, **Exit Path of Exile** and closing the window: the client sends `0x355` (telemetry) and closes the connection itself (logout routine `0x14211f540`, "FourLogOut"); the game exits with "Closing game gracefully".
+- **Exit to character selection**:
+  1. The client sends **C→S `0x0173`** (no body) and waits.
+  2. The server issues a resume ticket (`TicketRegistry::issue_resume`) and replies **S→C `0x0174` ExitSession**: `u8, u32 account id, u64 token` (the `u64` raw/little-endian; constructor `0x14215df40`, reader `0x14215e010`).
+  3. The client sends its exit telemetry (`0x355`), opens a new login connection and, after the key exchange, sends login **`0x0008` ResumeSession** with the same `u32`/`u64` instead of authenticating (see [login.md](login.md)).
+  4. The login server checks the ticket and answers with an AuthenticationResult. The client asks for the character list and shows character selection cleanly.
+
+  If the server only closes the connection, the client still reaches character selection, but logs "An unexpected disconnection occurred". With a zero ticket it opens the login connection and then waits.
+- **Exit to log in screen**, **Exit Path of Exile** and closing the window: the client sends `0x355` and closes the connection itself (logout routine `0x14211f540`, "FourLogOut"); the game exits with "Closing game gracefully".
+
+## Pause (2026-10-14)
+- **C→S `0x01ff` PauseRequest**: `u8, u8 paused` (class `0x1434e50f8`). Sent when the escape menu opens or closes in a solo game, and once (`00 00`) after entering an area.
+- **S→C `0x01fe` SetPause** (simulation message, reader `0x1421842a0`): simulation header, then `u8` (bit 0 → world +0x868 paused, bit 1 → +0x869). Applied by `0x142134240` through world vfunc +0x200 (`0x14168aaf0`). While +0x868 is set, pausable entities update with dt 0. With both bits set the client also applies its "Pause" audio state and shows "GAME PAUSED". The server answers every request with both bits equal to the request (the server simulation will honour it in M3).
+
+## Chat channels (2026-10-14)
+- **C→S `0x014c` ChatJoinRequest**: `u8, u16 channel (0xffff = any), u8 kind (0 global, 1 trade), u8, u8`. Sent for global and trade chat after entering an area.
+- **S→C `0x014d` ChatJoined** (constructor `0x14215cb50`, reader `0x14215cc30`, handler `0x142124bca`): `u8, u16 channel, u8 trade, u8`. Stores the channel in the session (trade +0x2738, global +0x2740) and ends the pending join.
+- Without it the chat box shows "Timeout while joining {global|trade} chat" (ClientStrings `ChatTimeoutMessage`, formatted by `0x1401b6940`). There is no chat server yet; the server answers every join with `[chat] default_channel`.
+
+## Splitting client messages
+Client messages have no length prefix. The instance server decodes the known messages one after another (`InstanceServer::handle_client_message`). Fixed-size messages that are not decoded yet are listed by name in `[client_body_sizes]` of `protocol/0.5.5e/instance.toml` and skipped. Anything else ends the batch, and the rest is logged.

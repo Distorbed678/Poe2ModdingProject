@@ -25,14 +25,15 @@ use poe_net::{Connection, DecodeError, KeyMaterial, StreamCipher, hexdump::hexdu
 use poe_proto::{
     Message, Protocol, entity,
     instance::{
-        AddInventory, AddObject, AreaInfo, CharacterState, EnableEncryption, Hello, InitialState,
-        Inventory, LocalPlayers, PingReply, PlayerEntity, PlayerState, SimulationHeader,
-        SimulationTick, TerrainHashes,
+        AddInventory, AddObject, AreaInfo, CharacterState, ChatJoinRequest, ChatJoined,
+        EnableEncryption, FrameReport, Hello, InitialState, Inventory, LocalPlayers, PauseRequest,
+        PingReply, PlayerEntity, PlayerState, SetPause, SimulationHeader, SimulationTick,
+        TerrainHashes,
     },
 };
 use rand::RngCore;
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{Instrument, info, warn};
+use tracing::{Instrument, debug, info, warn};
 
 /// State shared by all instance connections.
 pub struct InstanceServer {
@@ -168,28 +169,20 @@ impl InstanceServer {
                     }
                     let data = conn.buffer().to_vec();
                     conn.consume(data.len());
-                    let opcode = (data.len() >= 2).then(|| u16::from_be_bytes([data[0], data[1]]));
-                    match opcode {
-                        // Heartbeat (format being decoded).
-                        // Frame report: answer with a ping reply carrying idle HNC bytes.
-                        Some(0x1c) => {
-                            let mut bytes = [0u8; 4];
-                            hnc.apply(&mut bytes);
-                            let reply = PingReply {
-                                hnc: poe_proto::instance::hnc_bits(bytes),
-                                ..Default::default()
-                            };
-                            conn.send(&self.protocol.instance.encode(&reply)?).await?;
+                    // Client messages have no length prefix: decode the known ones in turn;
+                    // anything else ends the batch (logged).
+                    let mut rest = &data[..];
+                    while rest.len() >= 2 {
+                        let opcode = u16::from_be_bytes([rest[0], rest[1]]);
+                        let mut r = poe_net::Reader::new(&rest[2..]);
+                        match self.handle_client_message(&mut conn, &mut hnc, ticket.account_id, opcode, &mut r).await? {
+                            Handled::Continue => rest = &rest[2 + r.position()..],
+                            Handled::Unknown => {
+                                info!(len = rest.len(), "received\n{}", hexdump(rest));
+                                break;
+                            }
+                            Handled::Exit => return Ok(()),
                         }
-                        Some(0x173) => {
-                            // Closing the session is enough: the client returns to character
-                            // selection and reconnects to the login server. (Replying 0x174
-                            // ExitSession with zeros instead leaves it waiting on the new login
-                            // connection; its fields are not understood yet.)
-                            info!("client exits to character selection");
-                            return Ok(());
-                        }
-                        _ => info!(len = data.len(), "received\n{}", hexdump(&data)),
                     }
                 }
                 _ = ticker.tick() => conn.send(&tick).await?,
@@ -255,7 +248,96 @@ fn spawn_override() -> Option<(i32, i32)> {
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
+/// Outcome of handling one client message.
+enum Handled {
+    Continue,
+    /// Not a message the server decodes yet: the rest of the batch is skipped.
+    Unknown,
+    /// The session ends.
+    Exit,
+}
+
 impl InstanceServer {
+    /// One client message after the player entered the world (`r` is after the opcode).
+    async fn handle_client_message(
+        &self,
+        conn: &mut Connection,
+        hnc: &mut poe_net::Salsa20Stream,
+        account_id: u32,
+        opcode: u16,
+        r: &mut poe_net::Reader<'_>,
+    ) -> anyhow::Result<Handled> {
+        let table = &self.protocol.instance;
+        let Some(name) = table.name(poe_proto::Direction::Client, opcode) else {
+            return Ok(Handled::Unknown);
+        };
+        match name {
+            // Frame report: answer with a ping reply carrying idle HNC bytes.
+            FrameReport::NAME => {
+                FrameReport::decode(r)?;
+                let mut bytes = [0u8; 4];
+                hnc.apply(&mut bytes);
+                let reply = PingReply {
+                    hnc: poe_proto::instance::hnc_bits(bytes),
+                    ..Default::default()
+                };
+                conn.send(&table.encode(&reply)?).await?;
+            }
+            // Escape menu in a solo game: confirm with SetPause, which pauses the client's
+            // world. TODO(M3): pause the server simulation as well.
+            PauseRequest::NAME => {
+                let req = PauseRequest::decode(r)?;
+                info!(paused = req.paused, "pause request");
+                let reply = SetPause {
+                    paused: req.paused,
+                    flag_869: req.paused,
+                    ..Default::default()
+                };
+                conn.send(&table.encode(&reply)?).await?;
+            }
+            // Chat: every request joins channel 1 of the requested kind (no chat server yet).
+            ChatJoinRequest::NAME => {
+                let req = ChatJoinRequest::decode(r)?;
+                let channel = if req.channel == 0xffff {
+                    self.config.chat.default_channel
+                } else {
+                    req.channel
+                };
+                info!(kind = req.kind, channel, "chat join");
+                let reply = ChatJoined {
+                    unk_10: req.unk_0,
+                    channel,
+                    trade: req.kind != 0,
+                    unk_1c: req.unk_4,
+                };
+                conn.send(&table.encode(&reply)?).await?;
+            }
+            // Exit to character selection: hand the client a resume ticket (0x174). It then
+            // reconnects to the login server and presents it (login 0x08) instead of
+            // authenticating; the login server answers like a normal login.
+            "ExitRequest" => {
+                let resume = self.tickets.issue_resume(account_id);
+                info!("client exits to character selection");
+                let reply = poe_proto::instance::ExitSession {
+                    unk_10: 0,
+                    unk_20: resume.account_id,
+                    unk_18: resume.token,
+                };
+                conn.send(&table.encode(&reply)?).await?;
+                return Ok(Handled::Exit);
+            }
+            _ => match table.client_body_size(opcode) {
+                // Known size, not decoded yet: skip it.
+                Some(size) => {
+                    let body = r.bytes(size)?;
+                    debug!(opcode = format_args!("{opcode:#06x}"), ?body, "skipped");
+                }
+                None => return Ok(Handled::Unknown),
+            },
+        }
+        Ok(Handled::Continue)
+    }
+
     /// After the client generated the area: local player, inventories, the player entity,
     /// then InitialState (see Documentation/protocol/instance.md).
     async fn enter_world(
@@ -334,7 +416,18 @@ impl InstanceServer {
         // `frame_ms` is the length of each simulation frame.
         let initial = InitialState {
             frame_ms: self.config.instance.tick_ms as u32,
-            characters: vec![CharacterState::default()],
+            characters: vec![CharacterState {
+                flags: [
+                    0,
+                    if self.config.accounts.full_access {
+                        poe_proto::instance::CHARACTER_FULL_ACCESS
+                    } else {
+                        0
+                    },
+                    0,
+                ],
+                ..Default::default()
+            }],
             players: vec![PlayerState {
                 player_id: 1,
                 ..Default::default()

@@ -54,7 +54,10 @@ Known gaps (later milestones):
 ## M2.5 (2026-10-13, in progress)
 - **Start position** (done): the Riverbank start is on the shore beside the intro tree, inside the `Intro_Tree_01` tile. The DLL exports each sub-tile's canonical index (its position in the tile's own orientation). The server finds which of the 8 rotations/mirrors the tile was placed with, then maps the configured point (`[spawn.start_tiles.G1_1] point`, grid cells in the tile's own orientation) onto the map. Verified on a mirrored and a rotated placement.
 - **Delete characters** (done): `0x0c` DeleteCharacter → `0x0d` result 0 → a fresh `0x15` CharacterList (see [protocol/login.md](protocol/login.md)).
-- **Leaving the game** (done): exit to character selection (`0x173`, the server closes the session), exit to log in, exit game and closing the window all work without a crash.
-- **Heartbeat** (done): the client's `0x1c` frame reports are answered with `0x1d` ping replies carrying idle HNC bytes (HNC keys derived like the client does).
+- **Leaving the game** (done): exit to character selection now uses the resume ticket (`0x173` → `0x174` → login `0x08`), with no "unexpected disconnection". Exit to log in, exit game and closing the window all work without a crash.
+- **Heartbeats** (done): the login keep-alive (every 10 s) is answered with `0x01`. The instance frame reports (`0x1c`, about 10 per second) are answered with `0x1d` ping replies carrying idle HNC bytes (HNC keys derived like the client does).
+- **Pause** (done): `0x1ff` → `0x1fe` SetPause; the escape menu shows "GAME PAUSED" and the client world pauses.
+- **Chat** (done): `0x14c` join requests are answered with `0x14d` (channel `[chat] default_channel`); no more "Timeout while joining … chat".
+- **Full access** (done): InitialState CharacterState flags byte 1 bit 6 (`[accounts] full_access`); the escape menu no longer shows "Get Full Access".
 - **Play from Steam** (done): non-Steam shortcut instructions in [setup.md](setup.md#playing-from-steam-non-steam-game-shortcut).
 - Server-sent NPCs need their StateMachine/quest states (see [protocol/entities.md](protocol/entities.md)).

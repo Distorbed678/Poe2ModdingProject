@@ -75,6 +75,20 @@ impl Message for KeepAlive {
     }
 }
 
+/// S→C keep-alive reply (no body; the client's login factory maps 0x01 to the empty class
+/// `0x143506518`).
+#[derive(Debug, Clone, Copy)]
+pub struct KeepAliveReply;
+
+impl Message for KeepAliveReply {
+    const NAME: &'static str = "KeepAliveReply";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, _w: &mut Writer) {}
+    fn decode(_r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self)
+    }
+}
+
 /// Client authentication (serializer `0x1420e34f0`).
 #[derive(Debug, Clone)]
 pub struct Authenticate {
@@ -214,6 +228,31 @@ impl Message for DeleteCharacter {
         Ok(Self {
             name: r.astring()?,
             unk: r.array()?,
+        })
+    }
+}
+
+/// C→S: resume a session after leaving an instance for character selection. The client sends
+/// it on a new login connection, right after the key exchange, with the values the instance
+/// server gave in `0x174` ExitSession (instead of authenticating). Captured 2026-10-14:
+/// `00 08 | 00 00 00 01 | 88 77 66 55 44 33 22 11` for `u32` 1 and `u64` 0x1122334455667788.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumeSession {
+    pub account_id: u32,
+    /// Sent raw (little-endian), as the instance server wrote it.
+    pub token: u64,
+}
+
+impl Message for ResumeSession {
+    const NAME: &'static str = "ResumeSession";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u32(self.account_id).bytes(&self.token.to_le_bytes());
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            account_id: r.u32()?,
+            token: u64::from_le_bytes(r.array()?),
         })
     }
 }

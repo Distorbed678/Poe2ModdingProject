@@ -10,8 +10,8 @@ use poe_proto::{
     login::{
         Authenticate, AuthenticationResult, CharacterCreated, CharacterDetails, CharacterEntry,
         CharacterList, CreateCharacter, DeleteCharacter, DeleteCharacterResult, InstanceDetails,
-        KeepAlive, LeagueEntry, LeagueList, PlayCharacter, RequestCharacterDetails,
-        RequestCharacterList,
+        KeepAlive, KeepAliveReply, LeagueEntry, LeagueList, PlayCharacter, RequestCharacterDetails,
+        RequestCharacterList, ResumeSession,
     },
 };
 use poe_store::{Account, Character, NewCharacter};
@@ -29,6 +29,7 @@ enum ClientMessage {
     RequestCharacterDetails(RequestCharacterDetails),
     PlayCharacter(PlayCharacter),
     DeleteCharacter(DeleteCharacter),
+    ResumeSession(ResumeSession),
 }
 
 /// Reads one message of a known type (opcode checked against the table).
@@ -69,6 +70,7 @@ fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessag
             RequestCharacterDetails::decode(r).map(ClientMessage::RequestCharacterDetails)
         }
         Some(PlayCharacter::NAME) => PlayCharacter::decode(r).map(ClientMessage::PlayCharacter),
+        Some(ResumeSession::NAME) => ResumeSession::decode(r).map(ClientMessage::ResumeSession),
         Some(DeleteCharacter::NAME) => {
             DeleteCharacter::decode(r).map(ClientMessage::DeleteCharacter)
         }
@@ -101,7 +103,11 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
             }
         };
         match message {
-            ClientMessage::KeepAlive => debug!("keep-alive"),
+            ClientMessage::KeepAlive => {
+                debug!("keep-alive");
+                conn.send(&server.protocol.login.encode(&KeepAliveReply)?)
+                    .await?;
+            }
             ClientMessage::Authenticate(auth) => {
                 account = Some(authenticate(&server, &mut conn, auth).await?);
             }
@@ -117,6 +123,25 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 send_character_list(&server, &mut conn, req.account_id).await?;
                 conn.send(&server.protocol.login.encode(&league_list(&server))?)
                     .await?;
+            }
+            ClientMessage::ResumeSession(req) => {
+                let ticket = poe_cluster::ResumeTicket {
+                    account_id: req.account_id,
+                    token: req.token,
+                };
+                let resumed = server
+                    .tickets
+                    .redeem_resume(ticket)
+                    .then(|| server.store.account_by_id(req.account_id))
+                    .transpose()?
+                    .flatten();
+                let Some(resumed) = resumed else {
+                    warn!(account_id = req.account_id, "invalid resume ticket");
+                    return Ok(());
+                };
+                info!(account = %resumed.name, id = resumed.id, "session resumed");
+                send_authentication_result(&server, &mut conn, &resumed).await?;
+                account = Some(resumed);
             }
             ClientMessage::DeleteCharacter(req) => {
                 let Some(account) = &account else {
@@ -188,6 +213,15 @@ async fn authenticate(
         ticket_len = auth.ticket.len(),
         "authenticated"
     );
+    send_authentication_result(server, conn, &account).await?;
+    Ok(account)
+}
+
+async fn send_authentication_result(
+    server: &LoginServer,
+    conn: &mut Connection,
+    account: &Account,
+) -> anyhow::Result<()> {
     let reply = AuthenticationResult {
         account_id: account.id,
         result: 0,
@@ -197,7 +231,7 @@ async fn authenticate(
         account_name: account.name.clone(),
     };
     conn.send(&server.protocol.login.encode(&reply)?).await?;
-    Ok(account)
+    Ok(())
 }
 
 /// League list from `[[leagues]]` in the server config.

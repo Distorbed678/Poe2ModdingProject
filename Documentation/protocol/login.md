@@ -115,6 +115,10 @@ Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the selec
 2. **S→C `0x000d` DeleteCharacterResult**: `u16 result, u32` (class `0x143509d60`, shared with 0x0b/0x0f/0x44). The handler signals event +0xb88. The delete screen's callback (`0x140ed8710`) closes on result 0; any other code is looked up and shown as an error text. Until the reply arrives, the dialog shows "Waiting for response...".
 3. **S→C `0x0015` CharacterList**: the client keeps its old list after a delete and does not ask for a new one, so the server sends it.
 
+## Keep-alive and resuming (verified 2026-10-14)
+- The client keeps its login connection open while in game and sends **`0x0001` KeepAlive** (no body) every 10 seconds. The server answers with an empty `0x0001` (the factory maps it to the empty class `0x143506518`).
+- **C→S `0x0008` ResumeSession**: `u32 account id, u64 token` (raw). Sent on a new login connection right after the key exchange, after the instance server's `0x174` ExitSession ("Exit to character selection"; see [instance.md](instance.md#leaving-the-game-2026-10-14)). The server redeems the ticket (`TicketRegistry::redeem_resume`, single use) and answers like a login (AuthenticationResult). The client then requests the character list.
+
 ## Hand-off to the instance server
 | Message | Layout |
 |---|---|

@@ -84,6 +84,17 @@ impl Store for SqliteStore {
             .optional()?)
     }
 
+    fn account_by_id(&self, id: u32) -> Result<Option<Account>> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT id, login_key, name FROM accounts WHERE id = ?1",
+                params![id],
+                account_from_row,
+            )
+            .optional()?)
+    }
+
     fn create_account(&self, login_key: &str, name_prefix: &str) -> Result<Account> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
