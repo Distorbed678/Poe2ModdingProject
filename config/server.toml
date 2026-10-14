@@ -92,6 +92,9 @@ filler = ["fill", "blank"]
 # First visit plays the washed-up opening (new characters on the Riverbank).
 intro_areas = ["G1_1"]
 
-[spawn.start_tiles]
-# The washed-up intro of the Riverbank (the spawn is snapped to the nearest walkable cell).
-G1_1 = "Intro_Tree"
+# Start tile per area, and the start point inside it in the tile's own orientation (grid cells
+# from its corner); the spawn is then snapped to the nearest walkable cell.
+# The Riverbank: washed up on the shore beside the intro tree.
+[spawn.start_tiles.G1_1]
+tile = "Intro_Tree"
+point = [9, 33]

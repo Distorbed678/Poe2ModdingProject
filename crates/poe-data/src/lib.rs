@@ -9,6 +9,7 @@ mod dat;
 mod error;
 mod files;
 pub mod hash;
+pub mod rooms;
 mod schema;
 pub mod template;
 pub mod views;

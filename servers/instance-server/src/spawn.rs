@@ -4,8 +4,9 @@
 //! Dev bridge: the client DLL exports the layout it generated
 //! (`<layout_dir>/terrain_layout_<tile hash>.tsv`, matched with TerrainHashes: a
 //! `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path` per tile) and the server spawns the
-//! player near the centre of the area's configured start feature, or else of the playable
-//! tile nearest the map centre. Grid cells per tile: 23.
+//! player at the configured point of the area's start tile (mapped through the tile's
+//! rotation/mirroring in this layout, from the sub-tile indices the DLL exports), or else near
+//! the playable tile nearest the map centre. Grid cells per (sub-)tile: 23.
 //!
 //! The point is then snapped to the nearest walkable cell, using the client's cell grids
 //! (`terrain_grid_<tile hash>.bin`, layer 0 non-zero = walkable). Standing on a
@@ -13,15 +14,26 @@
 
 use std::{path::Path, time::Duration};
 
-use poe_config::SpawnConfig;
+use poe_config::{SpawnConfig, StartTile};
 use tracing::{info, warn};
 
 pub const GRID_PER_TILE: i32 = 23;
 
+/// One sub-tile of the layout (23 x 23 cells).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tile {
+    pub x: i32,
+    pub y: i32,
+    /// `.tdt` path of the tile this sub-tile belongs to.
+    pub path: String,
+    /// Index of this sub-tile in the tile's own orientation (row-major), from the DLL export.
+    pub sub: u32,
+}
+
 pub struct Layout {
     pub width: i32,
     pub height: i32,
-    pub tiles: Vec<(i32, i32, String)>,
+    pub tiles: Vec<Tile>,
 }
 
 impl Layout {
@@ -34,12 +46,13 @@ impl Layout {
         let (width, height) = (size.next()?.parse().ok()?, size.next()?.parse().ok()?);
         let tiles = lines
             .filter_map(|l| {
-                let mut f = l.splitn(3, '\t');
-                Some((
-                    f.next()?.parse().ok()?,
-                    f.next()?.parse().ok()?,
-                    f.next()?.to_owned(),
-                ))
+                let mut f = l.split('\t');
+                Some(Tile {
+                    x: f.next()?.parse().ok()?,
+                    y: f.next()?.parse().ok()?,
+                    path: f.next()?.to_owned(),
+                    sub: f.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+                })
             })
             .collect();
         Some(Self {
@@ -49,28 +62,125 @@ impl Layout {
         })
     }
 
-    /// Grid position: the centre of the configured start feature (features span several
-    /// tiles), else the centre of the playable tile nearest the map centre.
-    pub fn start(&self, start_tile: Option<&str>, filler: &[String]) -> Option<(i32, i32)> {
-        let half = GRID_PER_TILE / 2;
-        if let Some(name) = start_tile {
-            let hits: Vec<_> = self.tiles.iter().filter(|t| t.2.contains(name)).collect();
-            let n = hits.len() as i32;
-            if n > 0 {
-                let centre = |sum: i32| sum * GRID_PER_TILE / n + half;
-                return Some((
-                    centre(hits.iter().map(|t| t.0).sum()),
-                    centre(hits.iter().map(|t| t.1).sum()),
-                ));
+    /// Grid position: the configured point inside the area's start tile (or the tile's
+    /// centre), else the centre of the playable tile nearest the map centre.
+    pub fn start(&self, start: Option<&StartTile>, filler: &[String]) -> Option<(i32, i32)> {
+        if let Some(start) = start {
+            let hits: Vec<&Tile> = self
+                .tiles
+                .iter()
+                .filter(|t| t.path.contains(&start.tile))
+                .collect();
+            if !hits.is_empty() {
+                let placed = PlacedTile::fit(&hits);
+                let point = match (&placed, start.point) {
+                    (Some(p), Some([x, y])) => Some(p.to_map(x, y)),
+                    (None, Some(_)) => {
+                        warn!(tile = %start.tile, "start tile orientation not found; using its centre");
+                        None
+                    }
+                    _ => None,
+                };
+                return Some(point.unwrap_or_else(|| {
+                    let n = hits.len() as i32;
+                    let centre = |sum: i32| sum * GRID_PER_TILE / n + GRID_PER_TILE / 2;
+                    (
+                        centre(hits.iter().map(|t| t.x).sum()),
+                        centre(hits.iter().map(|t| t.y).sum()),
+                    )
+                }));
             }
         }
         let (cx, cy) = (self.width / 2, self.height / 2);
-        let (x, y, _) = self
+        let t = self
             .tiles
             .iter()
-            .filter(|t| !t.2.is_empty() && !filler.iter().any(|f| t.2.contains(f.as_str())))
-            .min_by_key(|t| (t.0 - cx).pow(2) + (t.1 - cy).pow(2))?;
-        Some((x * GRID_PER_TILE + half, y * GRID_PER_TILE + half))
+            .filter(|t| !t.path.is_empty() && !filler.iter().any(|f| t.path.contains(f.as_str())))
+            .min_by_key(|t| (t.x - cx).pow(2) + (t.y - cy).pow(2))?;
+        let half = GRID_PER_TILE / 2;
+        Some((t.x * GRID_PER_TILE + half, t.y * GRID_PER_TILE + half))
+    }
+}
+
+/// How a multi-sub-tile tile was placed: its corner in sub-tiles, its size on the map, and the
+/// rotation/mirroring (one of the 8 that map its sub-tiles' map positions to their canonical
+/// indices).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlacedTile {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub transform: u8,
+}
+
+impl PlacedTile {
+    /// Map-local (u, v) -> canonical (a, b) for transform `k` (continuous coordinates, map size
+    /// `w` x `h`); transforms 4..7 swap the axes.
+    fn forward(k: u8, (w, h): (f64, f64), (u, v): (f64, f64)) -> (f64, f64) {
+        match k {
+            0 => (u, v),
+            1 => (w - u, v),
+            2 => (u, h - v),
+            3 => (w - u, h - v),
+            4 => (v, u),
+            5 => (h - v, u),
+            6 => (v, w - u),
+            _ => (h - v, w - u),
+        }
+    }
+
+    /// Canonical (a, b) -> map-local (u, v).
+    fn inverse(k: u8, (w, h): (f64, f64), (a, b): (f64, f64)) -> (f64, f64) {
+        match k {
+            0 => (a, b),
+            1 => (w - a, b),
+            2 => (a, h - b),
+            3 => (w - a, h - b),
+            4 => (b, a),
+            5 => (b, h - a),
+            6 => (w - b, a),
+            _ => (w - b, h - a),
+        }
+    }
+
+    /// Finds the placement from the sub-tiles of one tile occurrence.
+    pub fn fit(tiles: &[&Tile]) -> Option<Self> {
+        let x = tiles.iter().map(|t| t.x).min()?;
+        let y = tiles.iter().map(|t| t.y).min()?;
+        let width = tiles.iter().map(|t| t.x).max()? - x + 1;
+        let height = tiles.iter().map(|t| t.y).max()? - y + 1;
+        let size = (width as f64, height as f64);
+        (0..8u8)
+            .find(|&k| {
+                let canonical_width = if k < 4 { width } else { height };
+                tiles.iter().all(|t| {
+                    let centre = ((t.x - x) as f64 + 0.5, (t.y - y) as f64 + 0.5);
+                    let (a, b) = Self::forward(k, size, centre);
+                    (b as i32) * canonical_width + a as i32 == t.sub as i32
+                })
+            })
+            .map(|transform| Self {
+                x,
+                y,
+                width,
+                height,
+                transform,
+            })
+    }
+
+    /// A point given in the tile's own orientation (grid cells from its corner) on the map.
+    pub fn to_map(&self, x: i32, y: i32) -> (i32, i32) {
+        let g = GRID_PER_TILE as f64;
+        let (u, v) = Self::inverse(
+            self.transform,
+            (self.width as f64, self.height as f64),
+            (x as f64 / g, y as f64 / g),
+        );
+        (
+            ((self.x as f64 + u) * g).round() as i32,
+            ((self.y as f64 + v) * g).round() as i32,
+        )
     }
 }
 
@@ -161,10 +271,7 @@ pub async fn from_client_layout(
     for _ in 0..30 {
         if let Ok(text) = std::fs::read_to_string(&path) {
             let layout = Layout::parse(&text)?;
-            let target = layout.start(
-                config.start_tiles.get(area).map(String::as_str),
-                &config.filler,
-            )?;
+            let target = layout.start(config.start_tiles.get(area), &config.filler)?;
             let grid_path =
                 Path::new(&config.layout_dir).join(format!("terrain_grid_{tile_hash}.bin"));
             let grid = std::fs::read(&grid_path).ok().and_then(|d| Grid::parse(&d));
@@ -196,12 +303,61 @@ mod tests {
 
     #[test]
     fn picks_configured_tile_then_playable() {
-        let text = "size\t4\t4\n0\t0\tMetadata/a/fill.tdt\n1\t1\tMetadata/a/Intro_Tree_01.tdt\n2\t1\tMetadata/a/Intro_Tree_01.tdt\n2\t2\tMetadata/a/ground.tdt\n3\t3\tMetadata/a/blank.tdt\n";
+        let text = "size\t4\t4\n0\t0\tMetadata/a/fill.tdt\t0\n1\t1\tMetadata/a/Intro_Tree_01.tdt\t0\n2\t1\tMetadata/a/Intro_Tree_01.tdt\t1\n2\t2\tMetadata/a/ground.tdt\t0\n3\t3\tMetadata/a/blank.tdt\t0\n";
         let layout = Layout::parse(text).unwrap();
         let filler = vec!["fill".to_owned(), "blank".to_owned()];
+        let tree = StartTile {
+            tile: "Intro_Tree".into(),
+            point: None,
+        };
         // Centre of tiles (1,1) and (2,1).
-        assert_eq!(layout.start(Some("Intro_Tree"), &filler), Some((45, 34)));
+        assert_eq!(layout.start(Some(&tree), &filler), Some((45, 34)));
         assert_eq!(layout.start(None, &filler), Some((57, 57)));
+        // A point in the tile's own orientation; identity placement here.
+        let tree = StartTile {
+            point: Some([30, 5]),
+            ..tree
+        };
+        assert_eq!(layout.start(Some(&tree), &filler), Some((53, 28)));
+    }
+
+    /// The Riverbank intro tree (6 x 6 sub-tiles) as placed for seed 3357350429: rows of
+    /// canonical indices run bottom-up (vertical mirror), see Documentation.
+    #[test]
+    fn fits_mirrored_tile() {
+        let tiles: Vec<Tile> = (0..6)
+            .flat_map(|v| {
+                (0..6).map(move |u| Tile {
+                    x: 12 + u,
+                    y: 45 + v,
+                    path: "Intro_Tree_01.tdt".into(),
+                    sub: ((5 - v) * 6 + u) as u32,
+                })
+            })
+            .collect();
+        let refs: Vec<&Tile> = tiles.iter().collect();
+        let p = PlacedTile::fit(&refs).unwrap();
+        assert_eq!(p.transform, 2);
+        assert_eq!(p.to_map(9, 33), (285, 1140));
+        // A rotated placement (90 degrees: canonical (a, b) at map (5 - b, a)).
+        let rotated: Vec<Tile> = (0..6)
+            .flat_map(|v| {
+                (0..6).map(move |u| Tile {
+                    x: u,
+                    y: v,
+                    path: String::new(),
+                    sub: ((5 - u) * 6 + v) as u32,
+                })
+            })
+            .collect();
+        let refs: Vec<&Tile> = rotated.iter().collect();
+        let p = PlacedTile::fit(&refs).unwrap();
+        let (a, b) = (9.0 / 23.0, 33.0 / 23.0);
+        let expect = (
+            ((6.0 - b) * 23.0_f64).round() as i32,
+            (a * 23.0_f64).round() as i32,
+        );
+        assert_eq!(p.to_map(9, 33), expect);
     }
 
     #[test]
