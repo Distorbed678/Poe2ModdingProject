@@ -44,6 +44,10 @@ pub fn init_all(config: &Config, main: &Module) {
     let f = &config.features;
     let trace = (f.trace_addresses.clone(), f.trace_limit);
     let dump_path = crate::exe_dir().join("object_types.txt");
+    dump_types::MOVEMENT_LOG.store(
+        f.movement_log || std::env::var_os("POE_HOOK_MOVEMENT_LOG").is_some(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let features: [(&str, bool, Box<dyn Fn(&Module) -> Result<(), String>>); 5] = [
         (
             "dump_object_types",

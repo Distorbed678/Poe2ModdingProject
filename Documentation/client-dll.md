@@ -69,4 +69,8 @@ Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the playe
 - Nothing goes to other windows. `SendInput` is not used, because it types into whatever window has focus.
 
 ### Movement log
-`dump_object_types` logs the player's world position at the start of each of its simulation updates (`frame #n dt world step grid`), and the Actor's WASD direction (+0x400) when it changes. See [protocol/movement.md](protocol/movement.md).
+With `dump_object_types`, plus `movement_log = true` or the `POE_HOOK_MOVEMENT_LOG` environment variable (which `tools/test-run.sh` sets), the DLL logs:
+- the player's world position at the start of each of its simulation updates (`frame #n dt world step grid`);
+- the Actor's WASD direction (+0x400) when it changes.
+
+It is off by default because it writes about 30 lines a second while moving. See [protocol/movement.md](protocol/movement.md).
