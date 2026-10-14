@@ -8,7 +8,9 @@
 //! Input, so `in:<vk>[:ms]` posts `WM_INPUT` with a marker handle that the hooked
 //! `GetRawInputData` turns into a keyboard record (and `GetKeyState` reports the key as held).
 //! `inmove:x,y` / `inclick:x,y` override `GetCursorPos` with that client position and post the
-//! mouse messages there. Nothing is sent to other windows and the real cursor never moves.
+//! mouse messages there. `indown:<vk>` / `inup:<vk>` press and release a Raw Input key
+//! separately and `wait:<ms>` pauses, so input can overlap (e.g. Escape while W is held).
+//! Nothing is sent to other windows and the real cursor never moves.
 //! The file is deleted once processed, so a test
 //! driver can send input at any time.
 
@@ -69,6 +71,26 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
                             PostMessageW(hwnd, WM_CLOSE, 0, 0);
                         },
                         None => log::warn!("close: no game window"),
+                    }
+                    continue;
+                }
+                // Raw Input key held down / released separately (to overlap with other input).
+                if let Some((kind, key)) = entry.split_once(':')
+                    && (kind == "indown" || kind == "inup")
+                {
+                    match (parse_num(key), game_window()) {
+                        (Some(vk), Some(hwnd)) => {
+                            raw_key(hwnd, vk as u16, kind == "inup");
+                            log::info!("raw input key {vk:#x} {kind}");
+                        }
+                        _ => log::warn!("poe-hook.keys: bad entry {entry:?}"),
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                if let Some(ms) = entry.strip_prefix("wait:") {
+                    if let Some(ms) = parse_num(ms) {
+                        std::thread::sleep(Duration::from_millis(ms));
                     }
                     continue;
                 }

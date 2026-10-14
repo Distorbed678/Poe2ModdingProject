@@ -431,6 +431,11 @@ async fn play_character(
             class_id: character.class_id,
             level: character.level,
             intro_done: character.intro_done,
+            // The saved position only applies to the area it was saved in.
+            location: character
+                .location
+                .filter(|_| area.id == character.area)
+                .map(|l| (l.seed, l.x, l.y)),
         },
         &area.id,
     );

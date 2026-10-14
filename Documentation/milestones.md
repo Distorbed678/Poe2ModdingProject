@@ -5,7 +5,7 @@
 | M0 | Foundation: repo, tools, workspace, config, data access, client DLL proxy, deploy tooling | done |
 | M1 | Login → character select/creation, league selection | done (league label colour TBD) |
 | M2 | Instance server transfer, first zone loads with the player | done (2026-10-13) |
-| M3 | Movement: WASD, click-to-move and dodge roll; save area and position on exit | – |
+| M3 | Movement: WASD, click-to-move and dodge roll; save area and position on exit | done (2026-10-14) |
 | M4 | Server-side terrain generation (reimplement the client generator) for collision | – |
 | M5 | Zone/instance transfer | – |
 | M6 | Inventory and items | – |
@@ -48,14 +48,16 @@ Key findings:
 - Spawn: a dev bridge until M4. The DLL exports the client's tile layout and cell grids; the server picks the start feature (`[spawn.start_tiles]`) and snaps to the nearest walkable cell.
 
 Known gaps (later milestones):
-- Movement: client input `0x63` (WASD direction) and clicks are not answered yet (M3).
+- Movement: done in M3 (see below).
 
-## M3 status (2026-10-14, in progress)
-- **WASD** (done): `0x63` → `0x64`; the server walks the same path. See [protocol/movement.md](protocol/movement.md).
-- **Click-to-move** (done): `0x1a5` UseSkill (Move) → `0x1c8` StartAction; the server's end cell matches the client's.
-- **Dodge roll** (in progress): the character gets `DodgeRollPlayer` in its Actor skill list; Space sends UseSkill, answered with StartAction.
-- **Pause** (done): `0x1ff` also pauses the server simulation.
-- **Save area and position** (to do).
+## M3 status (2026-10-14)
+All items work; details are in [protocol/movement.md](protocol/movement.md).
+- **WASD:** `0x63` → `0x64`. The server walks the same way, planning paths toward the WASD target.
+- **Click-to-move:** `0x1a5` UseSkill (Move) → `0x1c8` StartAction. It needs the client's click-to-move input mode.
+- **Dodge roll:** characters get `DodgeRollPlayer` (`[player] innate_skills`) in their Actor skill list, with its stats. Space sends UseSkill, answered with StartAction. The server simulates the measured roll.
+- **Pause:** `0x1ff` also pauses the server simulation.
+- **Save area and position:** area, terrain seed and cell are saved when the session ends and restored on the next login (same layout, same cell).
+- **Known limit:** near walls the server's approximate pathfinding can differ from the client's by a few cells. The client then snaps to the server's position on the next input. An exact pathfinding port comes with the server-side terrain (M4).
 
 ## M3 scope (agreed 2026-10-14)
 - WASD movement (client `0x63`).

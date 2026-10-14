@@ -54,7 +54,8 @@ To play:
 
 Notes:
 - The DLL config `GameFiles/poe-hook.toml` presses Enter 20 s after start (`auto_keys`, used by unattended tests). It just logs in; set `auto_keys = []` to turn it off.
-- Keep `dump_object_types = true`: the spawn position currently relies on the layout the DLL exports.
+- Keep `dump_object_types = true`: the spawn position and the server's movement collision currently rely on the layout and walkability grid the DLL exports.
+- Movement: WASD works in the default input mode. For click-to-move, pick the mouse input method in the game's options (in the config file: `user_input_mode=mouse_and_keyboard`). Space is the dodge roll in both modes.
 - After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
 
 ## Logs

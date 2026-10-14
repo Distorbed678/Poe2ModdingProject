@@ -2,7 +2,7 @@ use std::{path::Path, sync::Mutex};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::{Account, Character, NewCharacter, Result, Store, StoreError};
+use crate::{Account, Character, Location, NewCharacter, Result, Store, StoreError};
 
 /// Ordered schema migrations; `user_version` records how many were applied.
 const MIGRATIONS: &[&str] = &[
@@ -10,6 +10,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_characters.sql"),
     include_str!("../migrations/0003_character_area.sql"),
     include_str!("../migrations/0004_character_intro.sql"),
+    include_str!("../migrations/0005_character_location.sql"),
 ];
 
 pub struct SqliteStore {
@@ -66,11 +67,15 @@ fn character_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Character> {
         experience: r.get(7)?,
         area: r.get(8)?,
         intro_done: r.get(9)?,
+        location: match (r.get(10)?, r.get(11)?, r.get(12)?) {
+            (Some(seed), Some(x), Some(y)) => Some(Location { seed, x, y }),
+            _ => None,
+        },
     })
 }
 
-const CHARACTER_COLUMNS: &str =
-    "id, account_id, name, league, class_id, start_state, level, experience, area, intro_done";
+const CHARACTER_COLUMNS: &str = "id, account_id, name, league, class_id, start_state, level, \
+     experience, area, intro_done, seed, pos_x, pos_y";
 
 impl Store for SqliteStore {
     fn account_by_login_key(&self, login_key: &str) -> Result<Option<Account>> {
@@ -135,6 +140,26 @@ impl Store for SqliteStore {
         Ok(())
     }
 
+    fn save_location(
+        &self,
+        character_id: u32,
+        area: &str,
+        location: Option<Location>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE characters SET area = ?2, seed = ?3, pos_x = ?4, pos_y = ?5 WHERE id = ?1",
+            params![
+                character_id,
+                area,
+                location.map(|l| l.seed),
+                location.map(|l| l.x),
+                location.map(|l| l.y)
+            ],
+        )?;
+        Ok(())
+    }
+
     fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>> {
         let conn = self.conn.lock().unwrap();
         let inserted = conn.execute(
@@ -194,7 +219,17 @@ mod character_tests {
             ..new
         };
         assert!(store.create_character(&dup).unwrap().is_none());
-        assert_eq!(store.characters(a.id).unwrap(), vec![c]);
+        assert_eq!(store.characters(a.id).unwrap(), vec![c.clone()]);
+        // Locations are saved with the area.
+        assert_eq!(c.location, None);
+        let at = Location {
+            seed: 3357350429,
+            x: 285,
+            y: 1140,
+        };
+        store.save_location(c.id, "G1_1", Some(at)).unwrap();
+        let saved = &store.characters(a.id).unwrap()[0];
+        assert_eq!((saved.area.as_str(), saved.location), ("G1_1", Some(at)));
         // Deleting only touches the owner's character.
         assert!(!store.delete_character(a.id + 1, "Tester").unwrap());
         assert!(store.delete_character(a.id, "Tester").unwrap());
