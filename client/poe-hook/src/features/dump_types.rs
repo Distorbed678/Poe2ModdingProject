@@ -268,6 +268,7 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
             );
         }
         log_player_frame(entity, n, dt);
+        super::position_sync::report(entity, n as u32);
     }
 }
 
@@ -481,6 +482,7 @@ fn track_player(entity: usize) {
         use crate::mem::read;
         let start = std::time::Instant::now();
         let mut last = None;
+        let mut last_actions = String::new();
         while PLAYER.load(Ordering::SeqCst) == entity {
             std::thread::sleep(std::time::Duration::from_millis(20));
             let Some(comps) = read::<usize>(entity + 0x10) else {
@@ -498,6 +500,37 @@ fn track_player(entity: usize) {
                 read::<i32>(actor + 0x400).unwrap_or(0),
                 read::<i32>(actor + 0x404).unwrap_or(0),
             );
+            // Action slots (movement research): type (+0x120) and flags (+0x144) of each
+            // action pointer at Actor +0x220..+0x250, and the Actor's state bytes.
+            let slots: Vec<String> = (0x220..=0x250usize)
+                .step_by(8)
+                .filter_map(|o| {
+                    let a = read::<usize>(actor + o).filter(|&a| a > 0x10000)?;
+                    let ty = read::<u16>(a + 0x120)?;
+                    let fl = read::<u16>(a + 0x144).unwrap_or(0);
+                    let vt = read::<usize>(a).unwrap_or(0);
+                    let vt = MAIN
+                        .get()
+                        .map_or(vt, |m| if m.contains(vt) { m.to_ghidra(vt) } else { vt });
+                    Some(format!("+{o:#x}:{ty:#06x}/{fl:#x}/vt{vt:#x}"))
+                })
+                .collect();
+            let state = format!(
+                "2a0={:#x} 2a1={:#x} 2a2={:#x} 915={} 916={}",
+                read::<u8>(actor + 0x2a0).unwrap_or(0),
+                read::<u8>(actor + 0x2a1).unwrap_or(0),
+                read::<u8>(actor + 0x2a2).unwrap_or(0),
+                read::<u8>(actor + 0x915).unwrap_or(0),
+                read::<u8>(actor + 0x916).unwrap_or(0)
+            );
+            let summary = format!("{} {state}", slots.join(" "));
+            if summary != last_actions {
+                log::info!(
+                    "player actions t={}ms {summary}",
+                    start.elapsed().as_millis()
+                );
+                last_actions = summary;
+            }
             // Positions are logged per frame (log_player_frame); here only direction changes.
             if last.map(|l: (i32, i32, u32, u32, i32, i32)| (l.4, l.5)) != Some((now.4, now.5)) {
                 last = Some(now);

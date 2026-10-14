@@ -16,7 +16,8 @@ use std::{ffi::c_void, sync::OnceLock};
 use ilhook::x64::{CallbackOption, HookFlags, HookType, Hooker, Registers};
 use windows_sys::Win32::{
     Networking::WinSock::{
-        SOCKADDR, SOCKADDR_IN, SOCKET, SOCKET_ERROR, WSABUF, WSAECONNREFUSED, WSASetLastError,
+        SOCKADDR, SOCKADDR_IN, SOCKET, SOCKET_ERROR, WSABUF, WSAECONNREFUSED, WSAGetLastError,
+        WSASetLastError,
     },
     System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW},
 };
@@ -269,5 +270,15 @@ unsafe extern "win64" fn on_connect(regs: *mut Registers, original: usize, _: us
         )
     };
     let f: WsaConnectFn = unsafe { std::mem::transmute(original) };
-    unsafe { f(sock as SOCKET, name, len, a4, a5, a6, a7) as u32 as usize }
+    let ret = unsafe { f(sock as SOCKET, name, len, a4, a5, a6, a7) as u32 as usize };
+    if loopback && !name.is_null() && unsafe { (*name).sa_family } == 2 {
+        // Keep the connect's error code (non-blocking connects report WSAEWOULDBLOCK, which
+        // getsockname would overwrite).
+        let error = unsafe { WSAGetLastError() };
+        super::position_sync::record_connect(sock as SOCKET, unsafe {
+            &*(name as *const SOCKADDR_IN)
+        });
+        unsafe { WSASetLastError(error) };
+    }
+    ret
 }

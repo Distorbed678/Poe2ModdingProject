@@ -43,6 +43,13 @@ pub enum Motion {
         x: f32,
         y: f32,
     },
+    /// Sprint (after a dodge roll while the key is held): like [`Motion::Direction`], at
+    /// `scale` times the walking speed.
+    Sprint {
+        x: f32,
+        y: f32,
+        scale: f32,
+    },
     /// Walk to a cell (click-to-move), then stop.
     MoveTo {
         x: f32,
@@ -84,7 +91,10 @@ pub struct Mover {
 }
 
 /// Cells the pathfinder may expand per plan.
-const PATH_BUDGET: usize = 40_000;
+const PATH_BUDGET: usize = 8_000;
+/// WASD plans towards this many cells along the input (the client aims about 180 cells
+/// ahead; the first part of the path is what matters between re-plans).
+const WASD_LOOKAHEAD: f32 = 40.0;
 /// WASD paths are planned again every this many frames.
 const REPLAN_FRAMES: u32 = 6;
 
@@ -128,20 +138,8 @@ impl Mover {
     pub fn advance(&mut self, dt: f32, terrain: &dyn Walkable) {
         match self.motion {
             Motion::Idle => {}
-            Motion::Direction { x, y } => {
-                if x == 0.0 && y == 0.0 {
-                    self.motion = Motion::Idle;
-                    return;
-                }
-                if self.replan_in == 0 || self.path.is_empty() {
-                    let (cx, cy) = self.cell();
-                    let goal = (cx + x.round() as i32, cy + y.round() as i32);
-                    self.path = find_path(terrain, (cx, cy), goal, PATH_BUDGET);
-                    self.replan_in = REPLAN_FRAMES;
-                }
-                self.replan_in -= 1;
-                self.follow(self.speed * dt);
-            }
+            Motion::Direction { x, y } => self.walk_towards(x, y, 1.0, dt, terrain),
+            Motion::Sprint { x, y, scale } => self.walk_towards(x, y, scale, dt, terrain),
             Motion::MoveTo { x, y } => {
                 if self.path.is_empty() && self.replan_in == 0 {
                     let goal = (x.floor() as i32, y.floor() as i32);
@@ -219,6 +217,27 @@ impl Mover {
             }
         }
         0.0
+    }
+
+    /// Walks along a direction (WASD, sprint), planning towards a point ahead of the entity
+    /// every few frames.
+    fn walk_towards(&mut self, x: f32, y: f32, scale: f32, dt: f32, terrain: &dyn Walkable) {
+        if x == 0.0 && y == 0.0 {
+            self.motion = Motion::Idle;
+            return;
+        }
+        if self.replan_in == 0 || self.path.is_empty() {
+            let (cx, cy) = self.cell();
+            let len = (x * x + y * y).sqrt();
+            let goal = (
+                cx + (x / len * WASD_LOOKAHEAD).round() as i32,
+                cy + (y / len * WASD_LOOKAHEAD).round() as i32,
+            );
+            self.path = find_path(terrain, (cx, cy), goal, PATH_BUDGET);
+            self.replan_in = REPLAN_FRAMES;
+        }
+        self.replan_in -= 1;
+        self.follow(self.speed * scale * dt);
     }
 
     /// Walks `len` cells along the path (waypoints are cell centres). Returns whether there is

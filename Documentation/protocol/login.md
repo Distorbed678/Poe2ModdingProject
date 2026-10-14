@@ -77,7 +77,7 @@ Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatc
 | 4 | C→S | `0x0010` RequestCharacterDetails | `u32 account_id, u8 index`; sent automatically for the selected character |
 | 5 | S→C | `0x0011` CharacterDetails | same tail layout as the list; empty blob/pairs are accepted |
 | — | C→S | `0x0012` CreateCharacter | `astring name, astring league, u32 (1), u32, u32, wstring start_state, 32 bytes` |
-| — | S→C | `0x0016` CharacterCreated | `u32 account_id, u16 result (0 = ok), u16`; then a fresh CharacterList |
+| — | S→C | `0x0013` CharacterCreated | `u16 result (0 = ok), u8 notify, u32 account_id` (deserializer `0x14214ea70`); then a fresh CharacterList. On 0 the create screen (callback `0x140ed2ab0`) plays the creation scene, finds the new character **by name** in the list (`0x140ec8b20`) and sends PlayCharacter (`0x140ecee50`, "character_creation_done"), so a new character goes straight into the game. Before 2026-10-14 the server sent `0x0016`, which is a different message (handler `0x1420e8da6`, signal +0x288, meaning unknown): the first character still worked because the client fell back to the select screen, but a second character left the create screen stuck after Continue |
 
 ### CharacterList entry fields (confirmed so far)
 | Field | Meaning |
@@ -100,13 +100,14 @@ Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the selec
 |---|---|
 | +0xe0 bit 1 | hardcore (red text and banner) |
 | +0xe0 bit 2 | timed event (Events panel `0x1408b3dd0`; bits 3/4/5 gate on the start/end times) |
-| +0xe0 bit 7 | not offered in the character-select "Join" list |
-| +0xe1 bit 1 | **permanent league**: not offered in the "Join" list (`0x1406bee00`); copied to characters (+0x3ab). Set for Standard and Hardcore (`[[leagues]] permanent`) |
+| +0xe0 bit 7 | **permanent league**: gets a banner at character creation and is not offered in the character-select "Join" list. Set for Standard and Hardcore (`[[leagues]] permanent`) |
+| +0xe1 bit 1 | **variant** of the league named at +0x80 (Hardcore of Standard): no banner of its own and not in the "Join" list (`0x1406bee00`); copied to characters (+0x3ab). Config `[[leagues]] variant_of` |
 | +0xe1 bit 4 | entry faded (0.5 alpha) |
 | +0xe1 bits 5, 6 | extra confirmation warnings at character creation (`0x140ece3e0`) |
 | +0xe2 bit 2 | "green" variant / creation warning |
 
-- The character-select **"Join" list** (lower right) has one entry per league unless it is flagged permanent (+0xe1 bit 1) or hidden (+0xe0 bit 7), or its end time has passed. Before the fix Standard and Hardcore appeared there.
+- The character-select **"Join" list** (lower right) has one entry per league unless it has +0xe0 bit 7 or +0xe1 bit 1, or its end time has passed.
+- **Character creation** (second and later characters; the first goes straight to the class step) starts with a league step: "Choose a league by clicking on a banner below, then click OK". The banners are built by `0x140e7ca80`: one per entry with +0xe0 bit 7 and without +0xe1 bit 1. Variants are matched to their base banner by +0x80 = the base league's id (the Hardcore checkbox; +0xa0, probably SSF, and +0x60 are compared too). Creation needs a selected league (`0x140ece3e0`, screen +0x320 / +0x318). Until 2026-10-14 the server set +0xe1 bit 1 on both leagues, so there were no banners and the class step could not be reached.
 - The **league label** under a character is grey (`0xff676767`) for every non-hardcore league and dark red for hardcore (`0x1406b95f0`). Grey is normal.
 - The **league banner** comes from CharacterEntry **+0x4d = `LeagueFlag.dat` row + 1** (`0x140c7e460`). 0 or 1 give the grey event banner. The row's IsHC/IsSSF pick red or blue and the green variant. Config: `[[leagues]] flag = "StandardFlag"`.
 

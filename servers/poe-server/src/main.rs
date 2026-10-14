@@ -39,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
         seeds: Arc::new(instance_server::seeds::KnownSeeds::load(
             &config.instance.known_seeds,
         )),
+        reports: Default::default(),
     });
 
     tokio::try_join!(login.run(), instance.run())?;

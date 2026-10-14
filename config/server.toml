@@ -62,6 +62,7 @@ flag = "StandardFlag"
 id = "Hardcore"
 hardcore = true
 permanent = true
+variant_of = "Standard"
 flag = "HardcoreFlag"
 
 # Player inventories sent on instance entry (one per Inventories.dat row; the client's UI
@@ -107,5 +108,7 @@ default_channel = 1
 
 # Player characters: skills every character has (GrantedEffects ids, level 1). Basic actions
 # such as Move come from the class template and are not listed here.
+# New characters start in start_area (WorldAreas id) unless their start state has a hub area.
 [player]
 innate_skills = ["DodgeRollPlayer"]
+start_area = "G1_1"

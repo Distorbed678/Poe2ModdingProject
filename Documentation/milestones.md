@@ -6,6 +6,7 @@
 | M1 | Login → character select/creation, league selection | done (league label colour TBD) |
 | M2 | Instance server transfer, first zone loads with the player | done (2026-10-13) |
 | M3 | Movement: WASD, click-to-move and dodge roll; save area and position on exit | done (2026-10-14) |
+| M3.5 | Fixes before M4: movement lag, full dodge roll, sprint, second-character creation | done (2026-10-14), sprint partial |
 | M4 | Server-side terrain generation (reimplement the client generator) for collision | – |
 | M5 | Zone/instance transfer | – |
 | M6 | Inventory and items | – |
@@ -58,6 +59,13 @@ All items work; details are in [protocol/movement.md](protocol/movement.md).
 - **Pause:** `0x1ff` also pauses the server simulation.
 - **Save area and position:** area, terrain seed and cell are saved when the session ends and restored on the next login (same layout, same cell).
 - **Known limit:** near walls the server's approximate pathfinding can differ from the client's by a few cells. The client then snaps to the server's position on the next input. An exact pathfinding port comes with the server-side terrain (M4).
+
+## M3.5 status (2026-10-14)
+Details are in [protocol/movement.md](protocol/movement.md) and [protocol/login.md](protocol/login.md).
+- **Lag:** the client has no lag compensation to enable (the world is always lockstep). The lag came from the server: a slow A* (about 108 ms per frame in a debug build, now under 1 ms), client batches lost to the undecoded `0x1a8`, and snapping where the server's path differed from the client's. Fixed with the new A*, the `0x1a8` / `0x1aa` / `0x1cb` steering messages, and position sync (the DLL reports the client's position, a dev bridge until M4). Run the server with `--release` for play.
+- **Dodge roll:** input during a roll is held until the roll ends, instead of cutting it off, so the roll finishes.
+- **Sprint:** `0x2e6` / `0x2e7` are decoded and echoed. The client sprints briefly after a roll with Space held. A full sprint needs the buff system (M7): setting `is_sprinting` as a plain stat made the client drop its movement after the roll.
+- **Second character:** the create screen shows a league step for second and later characters. It was empty because Hardcore was sent as a separate league. It is now a variant of Standard (entry +0x80 = base league id, +0xe1 bit 1), shown as the Hardcore checkbox on the Standard banner. The create result is opcode `0x13` (the server sent `0x16`, a different message, so the screen stayed open after Continue). New characters are stored with their start area (`[player] start_area`). A new character now goes straight into the game.
 
 ## M3 scope (agreed 2026-10-14)
 - WASD movement (client `0x63`).

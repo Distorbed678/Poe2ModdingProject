@@ -79,3 +79,27 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14212eb60` | world constructor (+0x661 frame mode; in-game world created with 2 by `0x14100b7e9`) |
 | `0x141939e40` | `[NETWORKING] networking_type` option reader |
 | `0x142120b70` | game session update: frame reports, auto network-mode switch, world update |
+
+## Roll, sprint and steering (M3.5, 2026-10-14)
+| Address | What |
+|---|---|
+| `0x141b76c20` | end of a dodge roll: decides whether it carries on as a sprint |
+| `0x141e5d490` | Actor "is sprinting": Actor +0x915 or the stat `is_sprinting` |
+| `0x141e4de20` | movement reset / stat listener: stops Move when Actor +0x2a1 bit 2 is set |
+| `0x141aa90d0` | `dodge_roll_travel_distance` getter |
+| Actor +0x238 / +0x240 | current action (roll) / Move action slot (WASD walk); action type at action +0x120 |
+| Actor +0x2a2 bit 5 | sprint key held (set by S→C `0x2e7`) |
+
+## Character creation (2026-10-14)
+| Address | What |
+|---|---|
+| `0x14214fa60` | login incoming-packet factory (opcode → class); `0x13` CharacterCreated class `0x143509d00`, deserializer `0x14214ea70` |
+| `0x1420e81a5` | login dispatch switch (opcode − 2; byte table `0x1420e9954`, targets `0x1420e98e4`); `0x13` case `0x1420e895e` signals connection +0xb08 |
+| `0x140ec82e0` | create screen: connects to the login connection's signals (+0xb08 → `0x140ed2ab0`, +0x188 → league list `0x140ed49b0`) |
+| `0x140ece3e0` | create screen Continue/Create button (needs a selected league: +0x320, +0x318) |
+| `0x140ece810` | sends CreateCharacter (`0x1420e9b60`); do not hook its entry, the trace hook crashes |
+| `0x140ed2ab0` | create result callback (u16 result): 0 → +0x392, creation scene (`0x140ececc0`, sets +0x390); else error text |
+| `0x140ecf5d0` | create screen per-frame update: scene done with +0x390 and +0x392 → `0x140ecee50` |
+| `0x140ecee50` | "character_creation_done": finds the new character by name (`0x140ec8b20`), sends PlayCharacter (`0x1420e9e70`) |
+| `0x140ed4e50` | create screen key handler (Space skips the creation scene) |
+| `0x140e7ca80` | league banners at character creation (entries with +0xe0 bit 7, not variants; variants matched by +0x80) |

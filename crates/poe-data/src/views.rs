@@ -28,7 +28,8 @@ impl StartState {
                 .table("WorldAreas")?
                 .row(i)
                 .map(|r| r.str("Id"))
-                .transpose()?,
+                .transpose()?
+                .filter(|id| !id.is_empty()),
             None => None,
         };
         let Some(character) = row.row_ref("Character")? else {

@@ -25,6 +25,6 @@ DeleteCharacterResult = 0x000d
 AuthenticationResult = 0x0004
 CharacterDetails = 0x0011
 CharacterList = 0x0015
-CharacterCreated = 0x0016
+CharacterCreated = 0x0013
 InstanceDetails = 0x0014
 LeagueList = 0x001b

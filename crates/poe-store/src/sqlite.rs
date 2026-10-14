@@ -163,14 +163,16 @@ impl Store for SqliteStore {
     fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>> {
         let conn = self.conn.lock().unwrap();
         let inserted = conn.execute(
-            "INSERT INTO characters (account_id, name, league, class_id, start_state)
-             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(name) DO NOTHING",
+            "INSERT INTO characters (account_id, name, league, class_id, start_state, level, area)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(name) DO NOTHING",
             params![
                 new.account_id,
                 new.name,
                 new.league,
                 new.class_id,
-                new.start_state
+                new.start_state,
+                new.level,
+                new.area
             ],
         )?;
         if inserted == 0 {
@@ -212,7 +214,7 @@ mod character_tests {
             area: "G1_1".into(),
         };
         let c = store.create_character(&new).unwrap().expect("created");
-        assert_eq!(c.level, 1);
+        assert_eq!((c.level, c.area.as_str()), (1, "G1_1"));
         // Names are unique, case-insensitively.
         let dup = NewCharacter {
             name: "tester".into(),

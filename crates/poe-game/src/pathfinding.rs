@@ -4,17 +4,14 @@
 //! An approximation of the client's pathfinder (the client also walks around obstacles to
 //! reach a click or the WASD target); M4 replaces it with an exact port.
 
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use crate::movement::Walkable;
 
 #[derive(Copy, Clone, PartialEq)]
 struct Node {
     f: f32,
-    cell: (i32, i32),
+    index: u32,
 }
 
 impl Eq for Node {}
@@ -36,35 +33,57 @@ fn octile(a: (i32, i32), b: (i32, i32)) -> f32 {
     dx.max(dy) + (std::f32::consts::SQRT_2 - 1.0) * dx.min(dy)
 }
 
+/// Cells around the start and goal the search may visit (beyond the box they span).
+const MARGIN: i32 = 24;
+
 /// Path from `start` towards `goal` as waypoints (cells, excluding the start). When the goal
 /// cannot be reached within `budget` expanded cells, the path leads to the reachable cell
 /// closest to it. Empty when the start is the best cell.
+///
+/// The search runs on flat arrays over the box spanned by start and goal plus [`MARGIN`]
+/// cells, so a plan costs a few hundred microseconds even in debug builds.
 pub fn find_path(
     terrain: &dyn Walkable,
     start: (i32, i32),
     goal: (i32, i32),
     budget: usize,
 ) -> Vec<(i32, i32)> {
+    let x0 = start.0.min(goal.0) - MARGIN;
+    let y0 = start.1.min(goal.1) - MARGIN;
+    let w = (start.0.max(goal.0) + MARGIN - x0 + 1) as usize;
+    let h = (start.1.max(goal.1) + MARGIN - y0 + 1) as usize;
+    let index = |(x, y): (i32, i32)| -> Option<u32> {
+        let (lx, ly) = (x - x0, y - y0);
+        (lx >= 0 && ly >= 0 && (lx as usize) < w && (ly as usize) < h)
+            .then(|| (ly as usize * w + lx as usize) as u32)
+    };
+    let cell = |i: u32| ((i as usize % w) as i32 + x0, (i as usize / w) as i32 + y0);
+    let mut cost = vec![f32::INFINITY; w * h];
+    let mut came = vec![u32::MAX; w * h];
+    let start_i = index(start).expect("start in box");
+    cost[start_i as usize] = 0.0;
     let mut open = BinaryHeap::new();
-    let mut came: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
-    let mut cost: HashMap<(i32, i32), f32> = HashMap::new();
-    cost.insert(start, 0.0);
     open.push(Node {
         f: octile(start, goal),
-        cell: start,
+        index: start_i,
     });
-    let mut best = (octile(start, goal), start);
+    let mut best = (octile(start, goal), start_i);
     let mut expanded = 0;
-    while let Some(Node { cell, .. }) = open.pop() {
-        if cell == goal {
-            best = (0.0, cell);
+    while let Some(Node { f, index: i }) = open.pop() {
+        let here = cell(i);
+        let g = cost[i as usize];
+        // Stale heap entry.
+        if f > g + octile(here, goal) + 1e-3 {
+            continue;
+        }
+        if here == goal {
+            best = (0.0, i);
             break;
         }
         expanded += 1;
         if expanded > budget {
             break;
         }
-        let g = cost[&cell];
         for (dx, dy) in [
             (1, 0),
             (-1, 0),
@@ -75,15 +94,16 @@ pub fn find_path(
             (-1, 1),
             (-1, -1),
         ] {
-            let next = (cell.0 + dx, cell.1 + dy);
+            let next = (here.0 + dx, here.1 + dy);
+            let Some(ni) = index(next) else { continue };
             if !terrain.walkable(next.0, next.1) {
                 continue;
             }
             // No cutting corners past blocked cells.
             if dx != 0
                 && dy != 0
-                && (!terrain.walkable(cell.0 + dx, cell.1)
-                    || !terrain.walkable(cell.0, cell.1 + dy))
+                && (!terrain.walkable(here.0 + dx, here.1)
+                    || !terrain.walkable(here.0, here.1 + dy))
             {
                 continue;
             }
@@ -93,29 +113,28 @@ pub fn find_path(
                 1.0
             };
             let ng = g + step;
-            if cost.get(&next).is_none_or(|&c| ng < c) {
-                cost.insert(next, ng);
-                came.insert(next, cell);
+            if ng < cost[ni as usize] {
+                cost[ni as usize] = ng;
+                came[ni as usize] = i;
                 let h = octile(next, goal);
                 if h < best.0 {
-                    best = (h, next);
+                    best = (h, ni);
                 }
                 open.push(Node {
                     f: ng + h,
-                    cell: next,
+                    index: ni,
                 });
             }
         }
     }
-    let mut cells = vec![best.1];
-    while let Some(&prev) = came.get(cells.last().unwrap()) {
-        if prev == start {
-            break;
-        }
-        cells.push(prev);
-    }
-    if cells == [start] {
+    if best.1 == start_i {
         return Vec::new();
+    }
+    let mut cells = vec![cell(best.1)];
+    let mut i = came[best.1 as usize];
+    while i != start_i && i != u32::MAX {
+        cells.push(cell(i));
+        i = came[i as usize];
     }
     cells.reverse();
     smooth(terrain, start, &cells)

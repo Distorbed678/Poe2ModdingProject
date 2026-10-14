@@ -56,6 +56,9 @@ pub struct PlayerConfig {
     /// Granted effects (`GrantedEffects.Id`) every character has, e.g. `DodgeRollPlayer`.
     #[serde(default)]
     pub innate_skills: Vec<String>,
+    /// Area (`WorldAreas.Id`) for new characters whose start state names no hub area.
+    #[serde(default)]
+    pub start_area: Option<String>,
 }
 
 /// Chat channels. There is no chat server yet: join requests are answered so the client does
@@ -171,6 +174,14 @@ pub struct InstanceConfig {
     /// picks one for areas listed there, since some random seeds fail to generate.
     #[serde(default)]
     pub known_seeds: PathBuf,
+    /// Accept the client DLL's per-frame position reports (UDP on the instance port) and
+    /// follow them (movement dev bridge until the server simulates movement exactly, M4).
+    #[serde(default = "default_true")]
+    pub position_sync: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_tick_ms() -> u64 {
@@ -222,9 +233,14 @@ pub struct LeagueConfig {
     pub id: String,
     #[serde(default)]
     pub hardcore: bool,
-    /// Permanent league (Standard/Hardcore): not offered in the character select "Join" list.
+    /// Permanent league (Standard): has a banner at character creation and is not offered in
+    /// the character select "Join" list.
     #[serde(default)]
     pub permanent: bool,
+    /// Makes this league a variant (e.g. Hardcore) of another league: at character creation
+    /// it is an option on that league's banner instead of a banner of its own.
+    #[serde(default)]
+    pub variant_of: Option<String>,
     /// `LeagueFlag.Id` for the league's banner and icon (e.g. "StandardFlag").
     #[serde(default)]
     pub flag: Option<String>,

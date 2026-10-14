@@ -397,3 +397,37 @@ mod tests {
         assert_eq!(g.nearest_walkable((0, 4), 10), Some((6, 4)));
     }
 }
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    /// Times the simulation on a real exported grid (`POE_BENCH_GRID=<file> cargo test
+    /// -p instance-server bench_ -- --nocapture`).
+    #[test]
+    fn bench_wasd_on_real_grid() {
+        let Ok(path) = std::env::var("POE_BENCH_GRID") else {
+            return;
+        };
+        let grid = Grid::parse(&std::fs::read(path).unwrap()).unwrap();
+        let start = grid
+            .nearest_walkable((grid.cells_x / 2, grid.cells_y / 2), 800)
+            .unwrap();
+        for dir in [(127.0, 127.0), (180.0, 0.0), (-127.0, -127.0), (0.0, 180.0)] {
+            let mut m = poe_game::movement::Mover::at_cell(start, 37.0);
+            m.start(poe_game::movement::Motion::Direction { x: dir.0, y: dir.1 });
+            let t = std::time::Instant::now();
+            let mut worst = std::time::Duration::ZERO;
+            for _ in 0..300 {
+                let f = std::time::Instant::now();
+                m.advance(0.033, &grid);
+                worst = worst.max(f.elapsed());
+            }
+            println!(
+                "dir {dir:?}: 300 frames {:?}, worst frame {worst:?}, end {:?}",
+                t.elapsed(),
+                m.cell()
+            );
+        }
+    }
+}
