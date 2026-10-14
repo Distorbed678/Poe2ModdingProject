@@ -641,6 +641,216 @@ impl Message for PauseRequest {
     }
 }
 
+/// C→S: WASD movement input, sent when the pressed direction changes:
+/// `u8, varint x, varint y, u8[3]`. The vector is in grid axes with a length of about 180
+/// (W = (127, 127), D = (180, 0), S = (-127, -127)...); (0, 0) means stop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MoveDirection {
+    pub unk_0: u8,
+    pub x: i32,
+    pub y: i32,
+    pub unk_tail: [u8; 3],
+}
+
+impl Message for MoveDirection {
+    const NAME: &'static str = "MoveDirection";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_0)
+            .varint(self.x)
+            .varint(self.y)
+            .bytes(&self.unk_tail);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let unk_0 = r.u8()?;
+        let x = r.varint()?;
+        let y = r.varint()?;
+        let tail = r.bytes(3)?;
+        Ok(Self {
+            unk_0,
+            x,
+            y,
+            unk_tail: [tail[0], tail[1], tail[2]],
+        })
+    }
+}
+
+/// S→C simulation message: an entity's WASD movement (reader `0x141f6b0e0`, applied by the
+/// Actor component `0x142149640`): header, `varint dir x, varint dir y, varint grid x,
+/// varint grid y, u8`. With a non-zero direction the client first moves the entity to the
+/// given grid cell if it is elsewhere (snaps, or blends when close), then moves it in that
+/// direction every frame until a zero direction arrives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MoveDirectionUpdate {
+    pub header: SimulationHeader,
+    pub dir_x: i32,
+    pub dir_y: i32,
+    pub grid_x: i32,
+    pub grid_y: i32,
+    pub unk_30: bool,
+}
+
+impl Message for MoveDirectionUpdate {
+    const NAME: &'static str = "MoveDirectionUpdate";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.varint(self.dir_x)
+            .varint(self.dir_y)
+            .varint(self.grid_x)
+            .varint(self.grid_y)
+            .u8(self.unk_30 as u8);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            header: SimulationHeader::decode(r)?,
+            dir_x: r.varint()?,
+            dir_y: r.varint()?,
+            grid_x: r.varint()?,
+            grid_y: r.varint()?,
+            unk_30: r.u8()? != 0,
+        })
+    }
+}
+
+/// C→S: use a skill (class vtable `0x1434e5b40`, built by `0x14210f920`, body `0x141ecdd00`):
+/// `u8 local player, u32 skill id, u16 flags, u8, u8 target flags` (bit 3: a target entity
+/// follows), `[u32 target entity]`, `i32 x, i32 y`. Without a target entity the location is
+/// relative to the player's grid cell. Left click in click-to-move mode uses the Move skill
+/// (`0x20002909`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UseSkill {
+    pub player: u8,
+    pub skill: u32,
+    pub flags: u16,
+    pub unk_13: u8,
+    pub target_flags: u8,
+    pub target_entity: Option<u32>,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Message for UseSkill {
+    const NAME: &'static str = "UseSkill";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.player)
+            .u32(self.skill)
+            .u16(self.flags)
+            .u8(self.unk_13);
+        match self.target_entity {
+            Some(id) => w.u8(self.target_flags | 8).u32(id),
+            None => w.u8(self.target_flags & !8),
+        };
+        w.i32(self.x).i32(self.y);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let player = r.u8()?;
+        let skill = r.u32()?;
+        let flags = r.u16()?;
+        let unk_13 = r.u8()?;
+        let target_flags = r.u8()?;
+        let target_entity = if target_flags & 8 != 0 {
+            Some(r.u32()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            player,
+            skill,
+            flags,
+            unk_13,
+            target_flags,
+            target_entity,
+            x: r.i32()?,
+            y: r.i32()?,
+        })
+    }
+}
+
+/// C→S: the skill's input was released (e.g. the mouse button after a click-to-move):
+/// `u8 local player, u32 skill id, u8`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SkillReleased {
+    pub player: u8,
+    pub skill: u32,
+    pub unk: u8,
+}
+
+impl Message for SkillReleased {
+    const NAME: &'static str = "SkillReleased";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.player).u32(self.skill).u8(self.unk);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            player: r.u8()?,
+            skill: r.u32()?,
+            unk: r.u8()?,
+        })
+    }
+}
+
+/// S→C simulation message: an entity starts an action (reader `0x141f696b0`, applied by the
+/// Actor component `0x142149640`): header, `u16 flags` (bit 7: a `u32` target entity follows),
+/// `varint x, varint y` (the entity's grid cell when it starts), `varint target x, varint
+/// target y` (grid), `u32 skill id, u16 action id, u8`. The client creates the action from the
+/// actor's skill with that id (Move: walks to the target, DodgeRoll: rolls towards it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StartAction {
+    pub header: SimulationHeader,
+    pub flags: u16,
+    pub target_entity: Option<u32>,
+    pub grid_x: i32,
+    pub grid_y: i32,
+    pub target_x: i32,
+    pub target_y: i32,
+    pub skill: u32,
+    pub action_id: u16,
+    pub unk_3c: u8,
+}
+
+impl Message for StartAction {
+    const NAME: &'static str = "StartAction";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        match self.target_entity {
+            Some(id) => w.u16(self.flags | 0x80).u32(id),
+            None => w.u16(self.flags & !0x80),
+        };
+        w.varint(self.grid_x)
+            .varint(self.grid_y)
+            .varint(self.target_x)
+            .varint(self.target_y)
+            .u32(self.skill)
+            .u16(self.action_id)
+            .u8(self.unk_3c);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let header = SimulationHeader::decode(r)?;
+        let flags = r.u16()?;
+        let target_entity = if flags & 0x80 != 0 {
+            Some(r.u32()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            header,
+            flags: flags & !0x80,
+            target_entity,
+            grid_x: r.varint()?,
+            grid_y: r.varint()?,
+            target_x: r.varint()?,
+            target_y: r.varint()?,
+            skill: r.u32()?,
+            action_id: r.u16()?,
+            unk_3c: r.u8()?,
+        })
+    }
+}
+
 /// Ends a simulation frame (no body).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SimulationTick;

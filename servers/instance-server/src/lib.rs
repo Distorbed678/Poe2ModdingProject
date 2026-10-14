@@ -14,6 +14,7 @@ use poe_config::Config;
 use poe_game::stats::StatRegistry;
 use poe_store::Store;
 
+mod player;
 pub mod seeds;
 mod spawn;
 use poe_data::{
@@ -26,9 +27,9 @@ use poe_proto::{
     Message, Protocol, entity,
     instance::{
         AddInventory, AddObject, AreaInfo, CharacterState, ChatJoinRequest, ChatJoined,
-        EnableEncryption, FrameReport, Hello, InitialState, Inventory, LocalPlayers, PauseRequest,
-        PingReply, PlayerEntity, PlayerState, SetPause, SimulationHeader, SimulationTick,
-        TerrainHashes,
+        EnableEncryption, FrameReport, Hello, InitialState, Inventory, LocalPlayers, MoveDirection,
+        PauseRequest, PingReply, PlayerEntity, PlayerState, SetPause, SimulationHeader,
+        SimulationTick, SkillReleased, TerrainHashes, UseSkill,
     },
 };
 use rand::RngCore;
@@ -152,7 +153,8 @@ impl InstanceServer {
             }
         }
         .unwrap_or((0, 0));
-        self.enter_world(&mut conn, &ticket, spawn).await?;
+        let mut player = self.new_player(&ticket, spawn, hashes.hash_a)?;
+        self.enter_world(&mut conn, &ticket, &player).await?;
 
         // Simulation frames: each tick marker closes a frame of `tick_ms` (InitialState).
         let tick = self.protocol.instance.encode(&SimulationTick)?;
@@ -175,7 +177,7 @@ impl InstanceServer {
                     while rest.len() >= 2 {
                         let opcode = u16::from_be_bytes([rest[0], rest[1]]);
                         let mut r = poe_net::Reader::new(&rest[2..]);
-                        match self.handle_client_message(&mut conn, &mut hnc, ticket.account_id, opcode, &mut r).await? {
+                        match self.handle_client_message(&mut conn, &mut hnc, &mut player, ticket.account_id, opcode, &mut r).await? {
                             Handled::Continue => rest = &rest[2 + r.position()..],
                             Handled::Unknown => {
                                 info!(len = rest.len(), "received\n{}", hexdump(rest));
@@ -185,7 +187,10 @@ impl InstanceServer {
                         }
                     }
                 }
-                _ = ticker.tick() => conn.send(&tick).await?,
+                _ = ticker.tick() => {
+                    player.tick(self.config.instance.tick_ms as f32 / 1000.0);
+                    conn.send(&tick).await?
+                }
             }
         }
     }
@@ -216,6 +221,9 @@ impl InstanceServer {
         Ok(())
     }
 }
+
+/// Entity id of the (only) player in an instance.
+const PLAYER_ENTITY: u32 = 1;
 
 /// RE experiment: `POE_NPC=<metadata path>` adds that object as entity 2 next to the player
 /// with a zero blob (Positioned first). Objects with a StateMachine need their shared states
@@ -263,6 +271,7 @@ impl InstanceServer {
         &self,
         conn: &mut Connection,
         hnc: &mut poe_net::Salsa20Stream,
+        player: &mut player::Player,
         account_id: u32,
         opcode: u16,
         r: &mut poe_net::Reader<'_>,
@@ -283,11 +292,40 @@ impl InstanceServer {
                 };
                 conn.send(&table.encode(&reply)?).await?;
             }
+            // WASD: the server echoes the direction with its position of the player; the client
+            // then moves the player itself until the next change.
+            MoveDirection::NAME => {
+                let req = MoveDirection::decode(r)?;
+                let reply = player.on_move_direction(&req);
+                conn.send(&table.encode(&reply)?).await?;
+            }
+            // Skill use (click-to-move, dodge roll): start the action on the client.
+            UseSkill::NAME => {
+                let req = UseSkill::decode(r)?;
+                match player.on_use_skill(&req) {
+                    Some(action) => {
+                        debug!(?req, ?action, "skill use");
+                        conn.send(&table.encode(&action)?).await?;
+                    }
+                    None => info!(
+                        skill = format_args!("{:#010x}", req.skill),
+                        "use of unknown skill"
+                    ),
+                }
+            }
+            SkillReleased::NAME => {
+                let req = SkillReleased::decode(r)?;
+                debug!(
+                    skill = format_args!("{:#010x}", req.skill),
+                    "skill released"
+                );
+            }
             // Escape menu in a solo game: confirm with SetPause, which pauses the client's
-            // world. TODO(M3): pause the server simulation as well.
+            // world; the server simulation pauses with it.
             PauseRequest::NAME => {
                 let req = PauseRequest::decode(r)?;
                 info!(paused = req.paused, "pause request");
+                player.paused = req.paused;
                 let reply = SetPause {
                     paused: req.paused,
                     flag_869: req.paused,
@@ -338,16 +376,68 @@ impl InstanceServer {
         Ok(Handled::Continue)
     }
 
+    /// The player's server-side state: position, walking speed (class template
+    /// `Pathfinding.base_speed`, cells per second), the client's walkability grid and the
+    /// innate skills (`[player] innate_skills`).
+    fn new_player(
+        &self,
+        ticket: &Ticket,
+        spawn: (i32, i32),
+        tile_hash: u32,
+    ) -> anyhow::Result<player::Player> {
+        let Some(class) = CharacterClass::by_integer_id(&self.data, ticket.character.class_id)?
+        else {
+            anyhow::bail!("unknown class id {}", ticket.character.class_id);
+        };
+        let template = ObjectTemplate::load(&self.data, &class.metadata_id)?;
+        let speed = template
+            .component("Pathfinding")
+            .iter()
+            .find(|(k, _)| k == "base_speed")
+            .and_then(|(_, v)| v.parse::<f32>().ok())
+            .unwrap_or(37.0);
+        let grid = spawn::client_grid(&self.config.spawn, tile_hash);
+        let mut skills = Vec::new();
+        for (i, id) in self.config.player.innate_skills.iter().enumerate() {
+            match poe_data::views::GrantedSkill::find(&self.data, id, 1)? {
+                Some(granted) => skills.push(player::OwnedSkill {
+                    // Small ids, distinct from basic actions (0x2000xxxx) and item skills.
+                    id: i as u32 + 1,
+                    granted,
+                    id_name: id.clone(),
+                }),
+                None => warn!(skill = %id, "innate skill not in game data"),
+            }
+        }
+        let move_skill = poe_data::views::action_type_key(&self.data, "Move")?
+            .map(|k| player::BASIC_ACTION_SKILL | k as u32);
+        info!(
+            speed,
+            grid = grid.is_some(),
+            skills = skills.len(),
+            "player state"
+        );
+        Ok(player::Player::new(
+            PLAYER_ENTITY,
+            spawn,
+            speed,
+            grid,
+            skills,
+            move_skill,
+        ))
+    }
+
     /// After the client generated the area: local player, inventories, the player entity,
     /// then InitialState (see Documentation/protocol/instance.md).
     async fn enter_world(
         &self,
         conn: &mut Connection,
         ticket: &Ticket,
-        spawn: (i32, i32),
+        player: &player::Player,
     ) -> anyhow::Result<()> {
         let table = &self.protocol.instance;
         let character = &ticket.character;
+        let spawn = player.mover.cell();
         let players = LocalPlayers {
             unk: 0,
             players: vec![(0, character.name.clone())],
@@ -386,7 +476,7 @@ impl InstanceServer {
         if washed_up {
             self.store.set_intro_done(character.id)?;
         }
-        let entity_id = 1;
+        let entity_id = player.entity_id;
         let mut out = table.encode(&PlayerEntity {
             entity_id,
             ..Default::default()
@@ -404,7 +494,7 @@ impl InstanceServer {
                 ..Default::default()
             },
             type_key: class.object_type_key(),
-            blob: self.player_blob(character, &class, spawn, washed_up)?,
+            blob: self.player_blob(character, &class, player, washed_up)?,
         })?);
         if let Ok(path) = std::env::var("POE_NPC") {
             out.extend(npc_experiment(table, &path, spawn)?);
@@ -450,10 +540,11 @@ impl InstanceServer {
         &self,
         character: &TicketCharacter,
         class: &CharacterClass,
-        (grid_x, grid_y): (i32, i32),
+        player: &player::Player,
         washed_up: bool,
     ) -> anyhow::Result<Vec<u8>> {
         use poe_proto::entity::{Actor, Component, Life, Player, Positioned, Stats};
+        let (grid_x, grid_y) = player.mover.cell();
         let template = ObjectTemplate::load(&self.data, &class.metadata_id)?;
         let stats = poe_game::stats::character_defaults(&template, class, character.level);
         let team = template
@@ -495,7 +586,9 @@ impl InstanceServer {
                     ..Default::default()
                 }),
                 Component::Inventories,
-                Component::Actor(Actor::default()),
+                Component::Actor(Actor {
+                    skills: player.actor_skills(),
+                }),
             ],
         ))
     }

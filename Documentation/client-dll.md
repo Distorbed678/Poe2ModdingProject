@@ -60,3 +60,13 @@ Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the playe
 `dump_object_types` also logs, once per opcode, the caller of the game-session send (`0x14211f880`, packet +8 = opcode). It logs the caller of the raw stream writer (`0x142197e60`) the first time `00 1c` is written, plus the HNC cipher object (stream +0xd0). That is how the frame report and the HNC channel were found.
 
 `poe-hook.keys` also accepts `close`, which posts `WM_CLOSE` to the game window (like its X button).
+
+### Input injection for movement tests (2026-10-14)
+- The game reads WASD through Raw Input, so posted key messages do not move the player.
+- **`in:<vk>[:ms]`** posts `WM_INPUT` with a marker handle. The DLL hooks `GetRawInputData` (user32) to return a synthetic keyboard record for that handle, and `GetKeyState` reports the key as held meanwhile.
+- **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
+- **Plain keys (`0x20`)** are still posted messages. Space (dodge roll) is read that way.
+- Nothing goes to other windows. `SendInput` is not used, because it types into whatever window has focus.
+
+### Movement log
+`dump_object_types` logs the player's world position at the start of each of its simulation updates (`frame #n dt world step grid`), and the Actor's WASD direction (+0x400) when it changes. See [protocol/movement.md](protocol/movement.md).

@@ -46,6 +46,16 @@ pub struct Config {
     pub spawn: SpawnConfig,
     #[serde(default)]
     pub chat: ChatConfig,
+    #[serde(default)]
+    pub player: PlayerConfig,
+}
+
+/// Player characters.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PlayerConfig {
+    /// Granted effects (`GrantedEffects.Id`) every character has, e.g. `DodgeRollPlayer`.
+    #[serde(default)]
+    pub innate_skills: Vec<String>,
 }
 
 /// Chat channels. There is no chat server yet: join requests are answered so the client does

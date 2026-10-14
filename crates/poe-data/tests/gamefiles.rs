@@ -97,3 +97,20 @@ fn riverbank_entrance_room_points() {
     let p = room.point("default1").unwrap();
     assert_eq!((p.x, p.y), (146, 169));
 }
+
+#[test]
+fn movement_skills() {
+    let Some(data) = open() else { return };
+    use poe_data::views;
+    assert_eq!(views::action_type_key(&data, "Move").unwrap(), Some(10505));
+    let roll = views::GrantedSkill::find(&data, "DodgeRollPlayer", 1)
+        .unwrap()
+        .expect("DodgeRollPlayer");
+    assert_eq!(roll.effect_level_row, 899);
+    assert_eq!(roll.stat_set_rows, vec![905]);
+    assert_eq!(roll.action_type, Some(60748));
+    assert_eq!(
+        roll.constant_stat("dodge_roll_base_travel_distance"),
+        Some(46)
+    );
+}

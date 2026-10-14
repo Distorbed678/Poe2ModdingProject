@@ -59,3 +59,23 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x141f48c60` / `0x142122115` | S→C `0x1d` ping reply reader / handler |
 | `0x1421c50b0` | HNC bit queue: key material XOR table `0x142f10960` + swaps, Salsa20 pair |
 | `0x1421c5360` | HNC incoming byte parser ("HNC Protocol Violated") |
+
+## Movement and skills (2026-10-14)
+| Address | What |
+|---|---|
+| `0x14211f880` | game-session send (`packet->vtable[1](packet, stream)`); senders build the packet on the stack (opcode at +8) |
+| `0x142149640` | Actor component simulation handler: `0x64` WASD, `0x65`, `0x1c8` start action, `0x1c9`..`0x1ce`, `0x1d8`/`0x1d9` skill stats, `0x1f9`..`0x1fc`, `0x2e7`, `0x30e` action update, `0x316`..`0x324` |
+| `0x141f6b0e0` | S→C `0x64` MoveDirectionUpdate reader |
+| `0x141f696b0` | S→C `0x1c8` StartAction reader |
+| `0x141e4f9c0` | start WASD walking: a Move action (skill `0x20002909`) toward cell + input vector |
+| `0x141e89130` | create an action from an actor skill |
+| `0x14210f920` | C→S `0x1a5` UseSkill sender (vtable `0x1434e5b40`, body `0x141ecdd00`); `0x1a7`..`0x1ad` senders follow |
+| `0x14016e780` | C→S `0x2e6` sender (`u8 player, u8`) |
+| `0x14218a850` | Actor skill container reader; `0x14218afb0` skill list; `0x142188bd0` one skill |
+| `0x142683e50` / `0x142683b70` | skill effect reference reader (GrantedEffectsPerLevel row) / stat-set reference (GrantedEffectStatSetsPerLevel row) |
+| `0x1419970a0` / `0x141e25d50` | varuint / varint readers used in stat lists |
+| `0x141dcd020` | Pathfinding component constructor (+0x550 base speed, +0x55c multiplier) |
+| `0x141dcce20` | movement speed getter (base × movement_velocity_+permyriad × virtual_action_speed_+%) |
+| `0x14212eb60` | world constructor (+0x661 frame mode; in-game world created with 2 by `0x14100b7e9`) |
+| `0x141939e40` | `[NETWORKING] networking_type` option reader |
+| `0x142120b70` | game session update: frame reports, auto network-mode switch, world update |

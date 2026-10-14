@@ -257,6 +257,22 @@ impl Grid {
     }
 }
 
+/// Movement uses layer 0 of the client's grid directly (non-zero = walkable).
+impl poe_game::movement::Walkable for Grid {
+    fn walkable(&self, x: i32, y: i32) -> bool {
+        self.cell(0, x, y) != 0
+    }
+}
+
+/// What the server knows about the client's terrain: the walkability grid, if exported.
+pub fn client_grid(config: &SpawnConfig, tile_hash: u32) -> Option<Grid> {
+    if config.layout_dir.is_empty() {
+        return None;
+    }
+    let path = Path::new(&config.layout_dir).join(format!("terrain_grid_{tile_hash}.bin"));
+    std::fs::read(path).ok().and_then(|d| Grid::parse(&d))
+}
+
 /// Waits briefly for the layout the client exported for this terrain (by tile hash) and
 /// picks the start position.
 pub async fn from_client_layout(
