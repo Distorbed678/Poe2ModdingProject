@@ -39,7 +39,20 @@ pub struct Ticket {
     pub keys: [u8; 64],
 }
 
+/// Lets a client that leaves an instance for character selection log back in without
+/// credentials: the instance server sends it to the client (`0x174`), and the client presents
+/// it to the login server (`0x08`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResumeTicket {
+    pub account_id: u32,
+    pub token: u64,
+}
+
 pub trait TicketRegistry: Send + Sync {
+    /// Issues a single-use resume ticket for an account.
+    fn issue_resume(&self, account_id: u32) -> ResumeTicket;
+    /// Takes a resume ticket out of the registry; `true` if it was valid.
+    fn redeem_resume(&self, ticket: ResumeTicket) -> bool;
     /// Issues a ticket with a fresh id and keys.
     fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket;
     /// Takes a ticket out of the registry (single use).
@@ -53,6 +66,7 @@ pub trait TicketRegistry: Send + Sync {
 pub struct MemoryTickets {
     ttl: Duration,
     tickets: Mutex<HashMap<u32, (Instant, Ticket)>>,
+    resume: Mutex<HashMap<u64, (Instant, ResumeTicket)>>,
 }
 
 impl MemoryTickets {
@@ -60,6 +74,7 @@ impl MemoryTickets {
         Self {
             ttl,
             tickets: Mutex::new(HashMap::new()),
+            resume: Mutex::new(HashMap::new()),
         }
     }
 
@@ -70,6 +85,35 @@ impl MemoryTickets {
 }
 
 impl TicketRegistry for MemoryTickets {
+    fn issue_resume(&self, account_id: u32) -> ResumeTicket {
+        let mut rng = rand::rng();
+        let mut map = self.resume.lock().unwrap();
+        let ttl = self.ttl;
+        map.retain(|_, (at, _)| at.elapsed() < ttl);
+        let token = loop {
+            let token = rng.next_u64();
+            if token != 0 && !map.contains_key(&token) {
+                break token;
+            }
+        };
+        let ticket = ResumeTicket { account_id, token };
+        map.insert(token, (Instant::now(), ticket));
+        ticket
+    }
+
+    fn redeem_resume(&self, ticket: ResumeTicket) -> bool {
+        let mut map = self.resume.lock().unwrap();
+        let ttl = self.ttl;
+        map.retain(|_, (at, _)| at.elapsed() < ttl);
+        match map.get(&ticket.token) {
+            Some((_, t)) if *t == ticket => {
+                map.remove(&ticket.token);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket {
         let mut rng = rand::rng();
         let mut keys = [0u8; 64];
@@ -124,5 +168,14 @@ mod tests {
         assert_eq!(reg.pending().len(), 1);
         assert_eq!(reg.redeem(t.id), Some(t.clone()));
         assert_eq!(reg.redeem(t.id), None);
+    }
+
+    #[test]
+    fn resume_tickets_match_account_and_are_single_use() {
+        let reg = MemoryTickets::new(Duration::from_secs(60));
+        let t = reg.issue_resume(7);
+        assert!(!reg.redeem_resume(ResumeTicket { account_id: 8, ..t }));
+        assert!(reg.redeem_resume(t));
+        assert!(!reg.redeem_resume(t));
     }
 }

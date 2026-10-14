@@ -4,15 +4,29 @@
 
 [client]
 Hello = 0x000f
+# Not decoded yet (fixed sizes in [client_body_sizes]); seen after entering an area.
+Unknown0062 = 0x0062
+Unknown00bc = 0x00bc
+Unknown013d = 0x013d
+Unknown0221 = 0x0221
+Unknown023d = 0x023d
+Unknown02e8 = 0x02e8
+Unknown0351 = 0x0351
+Unknown0357 = 0x0357
 TerrainHashes = 0x009a
 # Frame report, about every 100 ms: u8 frames, u32 (HNC bits).
 FrameReport = 0x001c
 # Exit to character selection (no body).
 ExitRequest = 0x0173
+# Pause/resume request (escape menu in a solo game): u8, u8 paused.
+PauseRequest = 0x01ff
+# Join a chat channel (global/trade) after entering an area.
+ChatJoinRequest = 0x014c
 
 [server]
 EnableEncryption = 0x0011
 PingReply = 0x001d
+ChatJoined = 0x014d
 AreaInfo = 0x001e
 LocalPlayers = 0x0022
 InitialState = 0x0023
@@ -22,4 +36,16 @@ ExitSession = 0x0174
 # Simulation messages (second factory 0x142186aa0): queued per frame, applied by 0x142134240.
 SimulationTick = 0x02f4
 SimulationFrameValue = 0x02f5
+SetPause = 0x01fe
 AddObject = 0x02f7
+
+# Body sizes of client messages the server does not decode yet, so batches can be split.
+[client_body_sizes]
+Unknown0062 = 2
+Unknown00bc = 3
+Unknown013d = 1
+Unknown0221 = 1
+Unknown023d = 2
+Unknown02e8 = 2
+Unknown0351 = 1
+Unknown0357 = 1

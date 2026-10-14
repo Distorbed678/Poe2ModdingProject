@@ -217,6 +217,11 @@ unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
     let world = unsafe { (*regs).rcx } as usize;
     // Frame-mode worlds (the game world): log a few calls with dt and pause flags.
     if read::<u8>(world + 0x661).is_some_and(|m| m != 0) {
+        static PAUSE: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0xffff);
+        let flags = read::<u16>(world + 0x868).unwrap_or(0);
+        if PAUSE.swap(flags, Ordering::Relaxed) != flags {
+            log::info!("game world pause flags +0x868/+0x869 = {:#06x}", flags);
+        }
         static GAME: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = GAME.fetch_add(1, Ordering::Relaxed) + 1;
         if matches!(n, 1 | 2 | 3 | 30 | 300 | 3000) {

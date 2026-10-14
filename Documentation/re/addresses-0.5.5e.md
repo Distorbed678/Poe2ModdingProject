@@ -43,3 +43,19 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x141dfa320` | StateMachine reader (shared-state count check) |
 | `0x1426f2220` | GEAL script interpreter loop |
 | `0x140286850` | `Data/Balance/Hideouts.dat` table getter |
+
+## Session, chat, pause (2026-10-14)
+| Address | What |
+|---|---|
+| `0x14211f540` | logout routine ("FourLogOut"): 0 / 2 = exit to login / game, 1 = exit to character selection (sends `0x173`) |
+| `0x14215df40` / `0x14215e010` | S→C `0x174` ExitSession constructor / reader |
+| `0x1421842a0` | S→C `0x1fe` SetPause reader; applied via world vfunc +0x200 `0x14168aaf0` |
+| `0x14215cb50` / `0x14215cc30` / `0x142124bca` | S→C `0x14d` ChatJoined constructor / reader / handler |
+| `0x1401b6940` | chat join timeout message ("Timeout while joining {0} chat") |
+| `0x1402c4980` | escape menu construction ("Get Full Access" button when +0x3edc is clear) |
+| `0x1420edaa0` | InitialState CharacterState flags → local player (+0x3eca..+0x3ede) |
+| `0x140ed8710` | delete-character screen result callback |
+| `0x1421211e4` | `0x1c` frame report sender; `0x141f486f0` its serializer |
+| `0x141f48c60` / `0x142122115` | S→C `0x1d` ping reply reader / handler |
+| `0x1421c50b0` | HNC bit queue: key material XOR table `0x142f10960` + swaps, Salsa20 pair |
+| `0x1421c5360` | HNC incoming byte parser ("HNC Protocol Violated") |

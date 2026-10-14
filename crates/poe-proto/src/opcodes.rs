@@ -47,6 +47,10 @@ struct RawTable {
     client: HashMap<String, u16>,
     #[serde(default)]
     server: HashMap<String, u16>,
+    /// Body sizes (bytes after the opcode) of fixed-size client messages that are not
+    /// decoded yet, by name, so a stream of messages can be split without decoding them.
+    #[serde(default)]
+    client_body_sizes: HashMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -61,6 +65,7 @@ pub struct OpcodeTable {
     channel: String,
     client: Map,
     server: Map,
+    client_body_sizes: HashMap<u16, usize>,
 }
 
 impl OpcodeTable {
@@ -74,11 +79,23 @@ impl OpcodeTable {
             }
             map
         };
+        let client = build(raw.client);
+        let client_body_sizes = raw
+            .client_body_sizes
+            .iter()
+            .filter_map(|(name, size)| Some((*client.by_name.get(name)?, *size)))
+            .collect();
         Ok(Self {
             channel: channel.to_owned(),
-            client: build(raw.client),
+            client,
             server: build(raw.server),
+            client_body_sizes,
         })
+    }
+
+    /// Body size of a fixed-size client message listed in `[client_body_sizes]`.
+    pub fn client_body_size(&self, id: u16) -> Option<usize> {
+        self.client_body_sizes.get(&id).copied()
     }
 
     fn map(&self, direction: Direction) -> &Map {

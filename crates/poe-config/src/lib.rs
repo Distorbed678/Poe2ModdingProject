@@ -44,6 +44,29 @@ pub struct Config {
     pub inventories: InventoriesConfig,
     #[serde(default)]
     pub spawn: SpawnConfig,
+    #[serde(default)]
+    pub chat: ChatConfig,
+}
+
+/// Chat channels. There is no chat server yet: join requests are answered so the client does
+/// not report a timeout.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChatConfig {
+    /// Channel number given when the client asks for any channel.
+    #[serde(default = "default_chat_channel")]
+    pub default_channel: u16,
+}
+
+impl Default for ChatConfig {
+    fn default() -> Self {
+        Self {
+            default_channel: default_chat_channel(),
+        }
+    }
+}
+
+fn default_chat_channel() -> u16 {
+    1
 }
 
 /// Player start position (see `instance-server::spawn`). Until the server generates terrain
@@ -155,6 +178,14 @@ pub struct AccountsConfig {
     pub max_characters: u8,
     #[serde(default)]
     pub flags: [u8; 2],
+    /// Full game access (InitialState CharacterState flags byte 1 bit 6); without it the
+    /// in-game escape menu shows a "Get Full Access" button.
+    #[serde(default = "yes")]
+    pub full_access: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -238,9 +238,16 @@ pub struct CharacterState {
     pub pairs: Vec<(u32, u32)>,
     /// Wide string at +0x48.
     pub text: String,
-    /// Flag bytes at +0x68..+0x6a (bits copied to the client player, see the docs).
+    /// Flag bytes at +0x68..+0x6a, copied to the local player by `0x1420edaa0`: byte 0 bits
+    /// 0..5 -> +0x3eca..+0x3ed0, bits 6/7 and byte 1 bit 0 -> account mode +0x3ec4; byte 1
+    /// bit 1 -> +0x3ed1, bits 2..4 -> +0x3df8..+0x3dfa, bit 5 -> +0x3e32, bit 6 -> +0x3edc
+    /// ([`CHARACTER_FULL_ACCESS`]), bit 7 -> +0x3edd; byte 2 bit 0 -> +0x3ede.
     pub flags: [u8; 3],
 }
+
+/// [`CharacterState::flags`] byte 1 bit 6: full game access (the escape menu's "Get Full
+/// Access" button is only added when it is clear, `0x1402c4980`).
+pub const CHARACTER_FULL_ACCESS: u8 = 0x40;
 
 /// Per-player entry of [`InitialState`] (client entry size 0x68), matched by `player_id`
 /// against the id assigned with `0x24`.
@@ -458,6 +465,92 @@ impl Message for PingReply {
     }
 }
 
+/// C→S frame report, about every 100 ms (sender `0x1421211e4`, serializer `0x141f486f0`):
+/// frames processed since the last report (world +0x680, capped at 255), and 32 HNC bits
+/// (value bits 14..31, then 0..13).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrameReport {
+    pub frames: u8,
+    pub hnc: u32,
+}
+
+impl Message for FrameReport {
+    const NAME: &'static str = "FrameReport";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.frames).u32(self.hnc);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            frames: r.u8()?,
+            hnc: r.u32()?,
+        })
+    }
+}
+
+/// C→S request to join a chat channel, sent for global and trade chat after entering an
+/// area: `u8, u16 channel (0xffff = any), u8 kind (0 global, 1 trade), u8, u8`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChatJoinRequest {
+    pub unk_0: u8,
+    pub channel: u16,
+    pub kind: u8,
+    pub unk_4: u8,
+    pub unk_5: u8,
+}
+
+impl Message for ChatJoinRequest {
+    const NAME: &'static str = "ChatJoinRequest";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_0)
+            .u16(self.channel)
+            .u8(self.kind)
+            .u8(self.unk_4)
+            .u8(self.unk_5);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk_0: r.u8()?,
+            channel: r.u16()?,
+            kind: r.u8()?,
+            unk_4: r.u8()?,
+            unk_5: r.u8()?,
+        })
+    }
+}
+
+/// S→C chat channel joined (constructor `0x14215cb50`, reader `0x14215cc30`, handler
+/// `0x142124bca`): `u8 (+0x10), u16 channel (+0x1a), u8 trade (+0x18), u8 (+0x1c)`. Stores the
+/// channel in the session (trade +0x2738, global +0x2740) and ends the pending join; without
+/// it the client reports "Timeout while joining … chat".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChatJoined {
+    pub unk_10: u8,
+    pub channel: u16,
+    pub trade: bool,
+    pub unk_1c: u8,
+}
+
+impl Message for ChatJoined {
+    const NAME: &'static str = "ChatJoined";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_10)
+            .u16(self.channel)
+            .u8(self.trade as u8)
+            .u8(self.unk_1c);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk_10: r.u8()?,
+            channel: r.u16()?,
+            trade: r.u8()? != 0,
+            unk_1c: r.u8()?,
+        })
+    }
+}
+
 /// Packs 4 HNC stream bytes into the `u32` of [`PingReply`] (client bit order: value bits
 /// 9..31, then 0..8; each byte filled from its least significant bit).
 pub fn hnc_bits(bytes: [u8; 4]) -> u32 {
@@ -468,7 +561,10 @@ pub fn hnc_bits(bytes: [u8; 4]) -> u32 {
 
 /// S→C reply to the client's exit request (`0x173`, "Exit to character selection"):
 /// `u8, u32, u64` (constructor `0x14215df40`, reader `0x14215e010`). The handler broadcasts
-/// (`u32`, `u64`) to listeners (`0x1402f5e10`) and sends the exit telemetry (`0x355`).
+/// (`u32`, `u64`) to listeners (`0x1402f5e10`) and sends the exit telemetry (`0x355`). The
+/// client then reconnects to the login server and sends them back in login `0x08`
+/// ResumeSession (with zeros it sends nothing and waits): `unk_20` = account id,
+/// `unk_18` = resume token.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ExitSession {
     pub unk_10: u8,
@@ -490,6 +586,57 @@ impl Message for ExitSession {
             unk_10: r.u8()?,
             unk_20: r.u32()?,
             unk_18: u64::from_le_bytes(r.array()?),
+        })
+    }
+}
+
+/// S→C simulation message: world pause state (reader `0x1421842a0`, applied by
+/// `0x142134240` → world vfunc +0x200 `0x14168aaf0`): bit 0 -> world +0x868 (paused: pausable
+/// entities update with dt 0), bit 1 -> +0x869; with both set the client also applies its
+/// "Pause" audio state. Reply to the client's [`PauseRequest`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SetPause {
+    pub header: SimulationHeader,
+    pub paused: bool,
+    pub flag_869: bool,
+}
+
+impl Message for SetPause {
+    const NAME: &'static str = "SetPause";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u8(self.paused as u8 | (self.flag_869 as u8) << 1);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let header = SimulationHeader::decode(r)?;
+        let b = r.u8()?;
+        Ok(Self {
+            header,
+            paused: b & 1 != 0,
+            flag_869: b & 2 != 0,
+        })
+    }
+}
+
+/// C→S: the client asks to pause (escape menu opened, solo game) or resume: `u8, u8 paused`
+/// (class `0x1434e50f8`, fields +0x10 and +0x18). Sent as `00 00` after entering an area.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PauseRequest {
+    pub unk: u8,
+    pub paused: bool,
+}
+
+impl Message for PauseRequest {
+    const NAME: &'static str = "PauseRequest";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk).u8(self.paused as u8);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk: r.u8()?,
+            paused: r.u8()? != 0,
         })
     }
 }
