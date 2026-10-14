@@ -435,10 +435,16 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
 
 static MAIN: OnceLock<Module> = OnceLock::new();
 
+/// Per-frame player position logging (config `movement_log`).
+pub static MOVEMENT_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Movement research: the player's world position at the start of each of its updates
 /// (one per simulation frame), logged when it changed.
 fn log_player_frame(entity: usize, n: usize, dt: f32) {
     use crate::mem::read;
+    if !MOVEMENT_LOG.load(Ordering::Relaxed) {
+        return;
+    }
     static LAST: std::sync::Mutex<(u32, u32)> = std::sync::Mutex::new((0, 0));
     let Some(comps) = read::<usize>(entity + 0x10) else {
         return;
@@ -468,6 +474,9 @@ fn log_player_frame(entity: usize, n: usize, dt: f32) {
 /// Positioned (component 0) grid cell +0x444/+0x448 and world position +0x490/+0x494, and the
 /// Actor's (component 9) WASD direction +0x400/+0x404 as set by server message 0x64.
 fn track_player(entity: usize) {
+    if !MOVEMENT_LOG.load(Ordering::Relaxed) {
+        return;
+    }
     std::thread::spawn(move || {
         use crate::mem::read;
         let start = std::time::Instant::now();

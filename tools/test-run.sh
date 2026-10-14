@@ -9,7 +9,7 @@ name=$1; wait=${2:-12}
 log() { sed 's/\x1b\[[0-9;]*m//g' data/server-run.log; }
 start=$(log | wc -l)
 rm -f GameFiles/poe-hook.log GameFiles/terrain_layout*.tsv
-cargo xtask run-client > data/client-run.log 2>&1 &
+POE_HOOK_MOVEMENT_LOG=1 cargo xtask run-client > data/client-run.log 2>&1 &
 i=0
 until log | tail -n +"$start" | grep -q authenticated; do
     sleep 1; i=$((i+1)); [ $i -gt 90 ] && { echo "no login"; exit 1; }

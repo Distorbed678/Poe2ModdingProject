@@ -25,3 +25,6 @@ trace_limit = 20
 # Dump the client's object-type table (key -> metadata path) to object_types.txt the first
 # time the server's add-object message is applied (RE aid).
 dump_object_types = false
+# Log the player's position every simulation frame (movement research; or set the
+# POE_HOOK_MOVEMENT_LOG environment variable).
+movement_log = false
