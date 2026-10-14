@@ -1641,6 +1641,7 @@ name = "poe-cluster"
 version = "0.1.0"
 dependencies = [
  "rand 0.9.5",
+ "tokio",
 ]
 
 [[package]]

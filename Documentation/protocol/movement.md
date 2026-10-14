@@ -10,7 +10,8 @@ How the client moves the player and what the server sends back. Code:
 - The client's `[NETWORKING] networking_type` option (`auto`/`lockstep`/`predictive`, read by `0x141939e40`) is a PoE1 leftover. With `auto`, the session update (`0x142120b70`) only switches a world whose +0x661 is 3. Below 70 ms latency it picks 2, above 90 ms it picks 0.
 - So pressing W or clicking sends a request and nothing moves until the server answers.
 - The answer starts the movement on the client, which then moves the entity itself every simulation frame (`dt = frame_ms / 1000`, see [instance.md](instance.md)). It walks along paths from its own pathfinder, around walls, until the movement ends.
-- The server must simulate the same movement to know where the player is. Messages that carry a position (`0x64`, `0x1c8`) make the client snap to the server's position when its own differs.
+- The server must simulate the same movement to know where the player is. Messages that carry a position (`0x64`, `0x1c8`) make the client snap to the server's position only when its own is **46 cells or more** away (squared distance ≥ `0x844`: `0x142149640` for `0x64`, `0x141e41ae0` for `0x1c8`; the snap is `0x141ddb570` SetLocationForcedNoCallbacks). Closer than that, `0x64` only bends the walk direction, and `0x1c8` keeps the client's position.
+- **Frame playback** (`0x1421302c0`): the client plays received frames in real time with a speed factor (world +0x670). It plays at 1.01× with one spare frame queued, 1.5× with 2–29, 2× with 30–59 and 5× with 60 or more, and goes back to 1.0× once the queue is empty. The world never runs past the last received frame. So late frames freeze movement and bursts make it rush. The server sends one frame marker per tick from a steady timer, with `TCP_NODELAY` set.
 
 ## Walking speed
 - The Pathfinding component (constructor `0x141dcd020`) stores the template's `Pathfinding.base_speed` as a float at +0x550 and a multiplier of 1.0 at +0x55c.
@@ -24,7 +25,7 @@ How the client moves the player and what the server sends back. Code:
   - With a non-zero direction, the client first moves the entity to the given cell if it is elsewhere (`0x141ddb570`), then stores the direction (Actor +0x400) and starts walking (`0x141e4f9c0`).
   - A zero direction stops it, with no position check.
 - WASD walking is the basic **Move** action toward the current cell plus the input vector, in cells (`0x141e4f9c0`). So the client pathfinds around obstacles toward a point about 180 cells away, rather than sliding along walls.
-- The server answers every `0x63` with `0x64`: the same direction plus its own cell. While moving, it plans a path toward that far point and re-plans every 6 frames.
+- The server answers every `0x63` with `0x64`: the same direction plus its cell of the player (the client's reported one). It then moves straight in that direction (no terrain until M4) and follows the client's reports.
 
 ## Click-to-move
 - Click-to-move is an input mode: `user_input_mode=mouse_and_keyboard` in `poe2_production_Config.ini` (the other modes are `wasd`, `touch` and `gamepad`). In WASD mode, a click on the ground does not move the player.
@@ -33,6 +34,7 @@ How the client moves the player and what the server sends back. Code:
   - `[u32 target entity if target flags bit 3]`;
   - `i32 x, i32 y`. Without a target entity, the location is **relative to the player's cell**.
   - A left click uses the Move skill `0x20002909`.
+- **Held button:** while the button stays down, the client repeats `0x1a5` about every 70 ms with `target flags` bit 4 (`0x10`) set and the new relative cursor position. The server answers a repeat for the running action with **`0x1cb` UpdateActionTarget** (same action id, new target), not a new StartAction. Starting a new action each time (before 2026-10-14) made the client restart its Move every 70 ms and lose most of a frame's step each time (measured 1.23, 0.29, 1.23, 0.38 … cells per frame), which looked like constant hitching. If the client reports no running action (its Move ended, e.g. at a wall), a repeat starts a new one.
 - **C→S `0x1ad` SkillReleased** follows when the button is released: `u8 local player, u32 skill id, u8`.
 - **S→C `0x1c8` StartAction** (reader `0x141f696b0`, Actor handler `0x142149640`): header, then:
   - `u16 flags`, where bit 7 means a `u32` target entity follows;
@@ -56,7 +58,7 @@ How the client moves the player and what the server sends back. Code:
 - The server answers with StartAction for that skill and simulates the roll (`Motion::Roll`):
   - **Length:** 46 cells toward the target.
   - **Speed profile** (measured): it starts at about 3.9 cells per 33 ms frame, loses about 0.225 cells per frame every frame, then holds about 0.93 cells per frame. 46 cells take about 28 frames, driven by the roll animation on the client.
-  - **Walls:** the roll does not pathfind around them. It goes straight and slides along a wall (the clearance gradient gives the wall's direction), and stops when blocked.
+  - **Walls:** on the client the roll does not pathfind around them: it goes straight and slides along a wall. The server has no walls until M4 and takes the client's reported position.
 
 ## Steering a running skill
 - **C→S `0x1a8` UpdateSkillTarget**: `u8 local player, i32 dx, i32 dy, u32 skill`. Sent about every 70 ms while a roll (or sprint) runs, or a click is held, with the cursor position relative to the player's cell.
@@ -72,6 +74,8 @@ How the client moves the player and what the server sends back. Code:
 - **No lag compensation to turn on.** The world is always lockstep (above), and the client plays simulation frames as they arrive. `0x1d` PingReply only feeds the latency display. Lag therefore came from the server.
 - **Server frame time.** A debug build's A* (box-shaped search, heap allocations per node) took about 108 ms per 33 ms frame on the Riverbank grid, so the server fell behind. The A* now uses flat arrays over a box around start and goal (`MARGIN` 24 cells) with a node budget. It takes about 0.5 ms in a debug build and less in release. The server logs a warning when a frame takes longer than the tick. Run the server with `--release` for play.
 - **Dropped batches** (unknown `0x1a8`, above).
+- **No server collision (2026-10-14).** The server simulation no longer uses the client-exported walkability grid: no A* paths and no wall sliding. It moves in straight lines and takes the client's position from its reports, and relative input positions use the freshest report when the input arrives. Collision comes back with the server-side terrain (M4); the generic A* (`poe-game::pathfinding`) and the `Walkable` trait stay for that. The grid is still used to put a restored saved position on a walkable cell.
+- **Measured after the fixes:** WASD frames arrive every 33 ms with a constant step of 1.23 cells (37 cells/s), including direction changes; a held click is the same. The remaining irregularities are the client's own: it slides along walls and turns at corners (the WASD target is 180 cells away and the client pathfinds to it), and every ~12th logged frame is 29 ms / 1.08 cells, from its 1.01× playback with one spare frame.
 - **Position sync (dev bridge until M4).** The server's pathfinding and collision only approximate the client's, so positions drifted near walls (up to about 20 cells after a roll along a wall), and the client snapped back on the next server position. The client DLL now reports the player's position every frame (`position_sync`, see [client-dll.md](../client-dll.md#position-sync)). The instance server (`servers/instance-server/src/sync.rs`) listens for these reports on its own port (UDP, loopback only) and takes the client's position while reports are fresh (250 ms). It also uses the reported action to know when the client's roll ended. Without reports (option `[instance] position_sync = false`, or a non-local client) it falls back to its own simulation.
 
 ## Sprint
@@ -81,7 +85,7 @@ How the client moves the player and what the server sends back. Code:
 - **Status: partial.** With the echo alone, the client starts a short sprint after the roll and falls back to walking. Setting `is_sprinting` and the speed bonus as stats (**S→C `0x1d3` StatsUpdate**: header, `u8 set, varuint n, n × (varuint key, varint value)`; **S→C `0x1d8` SkillStatsUpdate**: header, `u32 skill, u8 container, varuint n, pairs`) makes the sprint run at the right speed, but the client then drops its Move action right after the roll (`0x141e4de20` stops Move when Actor +0x2a1 bit 2 is set), and restarting it from the server only stutters. Sprinting on the official servers is most likely a buff with these stats. Full sprint therefore waits for the buff system (M7). The messages are decoded and kept, and the server simulates a sprint only when no client reports arrive.
 
 ## Accuracy (until M4)
-The server walks A* paths on the client-exported grid (layer 0: a 0–5 clearance field, 0 = wall). In the open, the server's end cells equal the client's: clicks to within a cell, rolls to within a cell. Near walls the client's pathfinder keeps a little more distance and slides differently, so positions can drift by a few cells (up to about 20 after a roll along a wall). The client then snaps to the server's position when the next input is answered. An exact port of the client's pathfinding and collision belongs with the server-side terrain (M4).
+The server has no terrain until M4: it moves in straight lines and follows the client's position reports, so it agrees with the client wherever reports arrive. Without reports (`[instance] position_sync = false`) its position drifts from the client's near walls, and the client snaps back only if the difference reaches 46 cells. Until 2026-10-14 the server walked A* paths on the client-exported grid (layer 0, a 0–5 clearance field); that was removed at the user's request, and an exact port of the client's pathfinding and collision belongs with the server-side terrain (M4).
 
 ## Pause
 `0x1ff` PauseRequest also pauses the server simulation (`Player::paused`). Nothing moves on either side while the escape menu is open in a solo game.
@@ -96,7 +100,8 @@ Verified: with D held, Escape after 0.7 s, Escape again 2 s later, then D releas
 ## Test tooling
 - **`poe-hook.keys` entries `indown:<vk>` / `inup:<vk>` / `wait:<ms>`:** hold a key while other input arrives.
 - **`poe-hook.keys` entries `in:<vk>[:ms]`:** a synthetic Raw Input key (`WM_INPUT`, answered by the hooked `GetRawInputData`, with `GetKeyState` reporting the key held). WASD is read this way.
-- **`inclick:x,y` / `inmove:x,y`:** override `GetCursorPos` and post mouse messages.
+- **`inclick:x,y` / `inmove:x,y`:** override `GetCursorPos` and post mouse messages. **`inpress:x,y` / `inrelease:x,y`** hold and release the left button (held click-to-move); `GetKeyState(VK_LBUTTON)` reports it held.
+- Click-to-move needs `user_input_mode=mouse_and_keyboard` in the test prefix's `poe2_production_Config.ini` (edit it only while the client is closed: the client rewrites it on exit).
 - **Posted keys (`0x20`):** reach the input bindings that are read from window messages, such as Space for dodge roll.
 - Nothing is sent to other windows. `SendInput` is not used, because it goes to whatever window has focus.
 - The DLL's `dump_object_types` logs the player's world position at every simulation frame (`frame #n … step … grid`) when `movement_log` is on (or `POE_HOOK_MOVEMENT_LOG` is set), and the WASD direction (Actor +0x400) and action slots when they change.

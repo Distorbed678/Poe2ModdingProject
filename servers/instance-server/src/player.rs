@@ -7,7 +7,7 @@
 //! movement here, frame by frame, so it knows where the player is.
 
 use poe_data::views::GrantedSkill;
-use poe_game::movement::{Motion, Mover, Open, Walkable};
+use poe_game::movement::{Motion, Mover, Open};
 use poe_proto::{
     entity::Skill,
     instance::{
@@ -16,8 +16,6 @@ use poe_proto::{
     },
 };
 use tracing::{debug, info};
-
-use crate::spawn::Grid;
 
 /// A skill the server gave the character.
 pub struct OwnedSkill {
@@ -33,6 +31,7 @@ pub struct OwnedSkill {
 pub enum Reply {
     Direction(MoveDirectionUpdate),
     Start(StartAction),
+    Target(UpdateActionTarget),
     Sprint(SprintState),
 }
 
@@ -53,8 +52,6 @@ enum Pending {
 pub struct Player {
     pub entity_id: u32,
     pub mover: Mover,
-    /// The client's walkability grid (dev bridge until the server has terrain, M4).
-    pub grid: Option<Grid>,
     pub skills: Vec<OwnedSkill>,
     /// Skill id of the basic Move action (`0x20000000 | ActionTypes key`).
     pub move_skill: Option<u32>,
@@ -82,6 +79,9 @@ pub struct Player {
 
 /// Roll length when the skill does not list `dodge_roll_base_travel_distance`.
 const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
+/// UseSkill `target_flags` bit 4: the input is held and the use repeats (about every 70 ms,
+/// e.g. a held click-to-move); it re-aims the running action.
+const TARGET_REPEAT: u8 = 0x10;
 /// Basic-action skill ids are this plus the action type key.
 pub const BASIC_ACTION_SKILL: u32 = 0x2000_0000;
 /// Simulation header order key: apply after all entities have updated in the frame (used for
@@ -93,14 +93,12 @@ impl Player {
         entity_id: u32,
         cell: (i32, i32),
         speed: f32,
-        grid: Option<Grid>,
         skills: Vec<OwnedSkill>,
         move_skill: Option<u32>,
     ) -> Self {
         Self {
             entity_id,
             mover: Mover::at_cell(cell, speed),
-            grid,
             skills,
             move_skill,
             paused: false,
@@ -191,11 +189,9 @@ impl Player {
             return Vec::new();
         }
         let was = self.mover.motion;
-        let terrain: &dyn Walkable = match &self.grid {
-            Some(g) => g,
-            None => &Open,
-        };
-        self.mover.advance(dt, terrain);
+        // No collision until the server has the terrain (M4): the simulation moves in straight
+        // lines and takes the client's position from its reports.
+        self.mover.advance(dt, &Open);
         let mut out = Vec::new();
         if self.in_roll {
             if self.roll_over() {
@@ -356,6 +352,21 @@ impl Player {
     /// A skill use: Move (click-to-move) or one of the character's skills (dodge roll).
     /// Returns the action to start on the client; `None` if the skill is not known or the use
     /// waits for a roll to end.
+    /// A skill use from the client: held input repeats the use for the running action, which
+    /// only gets a new target (`0x1cb`). Starting it again each time made the client restart
+    /// its Move action every 70 ms and lose most of a frame's step each time.
+    pub fn on_skill_input(&mut self, req: &UseSkill) -> Option<Reply> {
+        let client_idle = self.client.is_some_and(|c| c.action == 0 && c.action2 == 0);
+        if req.target_flags & TARGET_REPEAT != 0
+            && !self.rolling()
+            && !client_idle
+            && let Some(current) = self.current.filter(|c| c.skill == req.skill)
+        {
+            return Some(Reply::Target(self.retarget(current, req.x, req.y)));
+        }
+        self.on_use_skill(req).map(Reply::Start)
+    }
+
     pub fn on_use_skill(&mut self, req: &UseSkill) -> Option<StartAction> {
         if self.rolling() {
             // Moves wait for the roll to end (the latest one wins); a second roll is ignored.
@@ -427,12 +438,17 @@ impl Player {
     /// moves its own target and tells the client (in lockstep it does not apply it itself).
     pub fn on_update_target(&mut self, req: &UpdateSkillTarget) -> Option<UpdateActionTarget> {
         let current = self.current.filter(|c| c.skill == req.skill)?;
+        Some(self.retarget(current, req.x, req.y))
+    }
+
+    /// Re-aims the running action at a location relative to the player's cell.
+    fn retarget(&mut self, current: Current, rx: i32, ry: i32) -> UpdateActionTarget {
         let (cx, cy) = self.mover.cell();
-        let (tx, ty) = (cx + req.x, cy + req.y);
+        let (tx, ty) = (cx + rx, cy + ry);
         match &mut self.mover.motion {
-            Motion::Roll { x, y, .. } | Motion::Sprint { x, y, .. } if req.x != 0 || req.y != 0 => {
-                *x = req.x as f32;
-                *y = req.y as f32;
+            Motion::Roll { x, y, .. } | Motion::Sprint { x, y, .. } if rx != 0 || ry != 0 => {
+                *x = rx as f32;
+                *y = ry as f32;
                 self.roll_dir = (*x, *y);
             }
             Motion::MoveTo { .. } => {
@@ -443,12 +459,12 @@ impl Player {
             }
             _ => {}
         }
-        Some(UpdateActionTarget {
+        UpdateActionTarget {
             header: self.header(),
             action_id: current.action_id,
             x: tx,
             y: ty,
-        })
+        }
     }
 
     /// The sprint key: echoed to the client. Releasing it ends a sprint.
@@ -486,7 +502,7 @@ mod tests {
             id_name: "DodgeRollPlayer".into(),
             stats: Vec::new(),
         };
-        Player::new(1, (100, 100), 37.0, None, vec![roll], Some(0x2000_2909))
+        Player::new(1, (100, 100), 37.0, vec![roll], Some(0x2000_2909))
     }
 
     fn use_skill(skill: u32, x: i32, y: i32) -> UseSkill {
@@ -508,6 +524,26 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn held_click_retargets_the_running_move() {
+        let mut p = player();
+        let Some(Reply::Start(a)) = p.on_skill_input(&use_skill(0x2000_2909, 30, 0)) else {
+            panic!("the first use starts the move");
+        };
+        // The held button repeats the use with target flag 0x10: same action, new target.
+        let held = UseSkill {
+            target_flags: 0x10,
+            ..use_skill(0x2000_2909, 30, 5)
+        };
+        let Some(Reply::Target(t)) = p.on_skill_input(&held) else {
+            panic!("a repeat re-aims the running move");
+        };
+        assert_eq!((t.action_id, t.x, t.y), (a.action_id, 130, 105));
+        // Once the move has ended, a repeat starts a new one.
+        run_until_idle(&mut p);
+        assert!(matches!(p.on_skill_input(&held), Some(Reply::Start(_))));
     }
 
     #[test]

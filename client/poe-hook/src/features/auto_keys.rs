@@ -11,7 +11,8 @@
 //! mouse messages there. `indown:<vk>` / `inup:<vk>` press and release a Raw Input key
 //! separately, `down:<vk>` / `up:<vk>` do the same for posted keys (Space) and `wait:<ms>`
 //! pauses, so input can overlap (e.g. Escape while W is held). `text:<chars>` posts one
-//! `WM_CHAR` per character (typing a character name).
+//! `WM_CHAR` per character (typing a character name). `inpress:x,y` / `inrelease:x,y` hold and
+//! release the left button there (held click-to-move).
 //! Nothing is sent to other windows and the real cursor never moves.
 //! The file is deleted once processed, so a test
 //! driver can send input at any time.
@@ -142,6 +143,20 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
                     match (parse_num(key), parse_num(hold)) {
                         (Some(vk), Some(ms)) => input_key(vk as u16, ms),
                         _ => log::warn!("poe-hook.keys: bad entry {entry:?}"),
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                // Left button held / released at a position (held click-to-move).
+                if let Some((kind, pos)) = entry.split_once(':')
+                    && (kind == "inpress" || kind == "inrelease")
+                {
+                    match pos
+                        .split_once(',')
+                        .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
+                    {
+                        Some((x, y)) => input_button(x, y, kind == "inpress"),
+                        None => log::warn!("poe-hook.keys: bad entry {entry:?}"),
                     }
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
@@ -483,6 +498,34 @@ fn input_mouse(x: i32, y: i32, click: bool) {
         }
     }
     log::info!("cursor at {x},{y} (screen {},{}) click={click}", p.x, p.y);
+}
+
+/// Left button down (held, also reported by `GetKeyState`) or up at a client position.
+fn input_button(x: i32, y: i32, down: bool) {
+    let Some(hwnd) = game_window() else {
+        log::warn!("inpress: no game window");
+        return;
+    };
+    let mut p = POINT { x, y };
+    unsafe { ClientToScreen(hwnd, &mut p) };
+    CURSOR_X.store(p.x, Ordering::Relaxed);
+    CURSOR_Y.store(p.y, Ordering::Relaxed);
+    CURSOR_SET.store(true, Ordering::Relaxed);
+    const VK_LBUTTON: usize = 1;
+    HELD[VK_LBUTTON].store(down, Ordering::Relaxed);
+    let pos = ((y as u32 & 0xffff) << 16 | x as u32 & 0xffff) as LPARAM;
+    unsafe {
+        PostMessageW(hwnd, WM_MOUSEMOVE, if down { 0x0001 } else { 0 }, pos);
+        if down {
+            PostMessageW(hwnd, WM_LBUTTONDOWN, 0x0001 /* MK_LBUTTON */, pos);
+        } else {
+            PostMessageW(hwnd, WM_LBUTTONUP, 0, pos);
+        }
+    }
+    log::info!(
+        "left button {} at {x},{y}",
+        if down { "down" } else { "up" }
+    );
 }
 
 fn press(vk: u16, hold_ms: u64) {

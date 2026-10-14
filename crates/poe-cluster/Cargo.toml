@@ -8,3 +8,4 @@ publish.workspace = true
 
 [dependencies]
 rand.workspace = true
+tokio.workspace = true

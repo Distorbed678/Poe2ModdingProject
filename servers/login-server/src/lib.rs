@@ -22,6 +22,8 @@ pub struct LoginServer {
     pub store: Arc<dyn Store>,
     pub data: Arc<GameData>,
     pub tickets: Arc<dyn TicketRegistry>,
+    /// Lets an instance server close an account's login connection when it leaves the game.
+    pub sessions: Arc<dyn poe_cluster::LoginSessions>,
 }
 
 impl LoginServer {

@@ -708,6 +708,54 @@ impl Message for PauseRequest {
     }
 }
 
+/// C→S `0x1b`: the client leaves the game ("Exit to log in screen" or quitting; logout
+/// routine `0x14211f540` with 0 or 2): `u8, u8` (both 0 so far, same class as PauseRequest).
+/// Sent after [`ExitReport`], then the client closes the connection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LeaveGame {
+    pub unk_0: u8,
+    pub unk_1: u8,
+}
+
+impl Message for LeaveGame {
+    const NAME: &'static str = "LeaveGame";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_0).u8(self.unk_1);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk_0: r.u8()?,
+            unk_1: r.u8()?,
+        })
+    }
+}
+
+/// C→S `0x355`: client statistics sent when it leaves an instance (`0x14211fad0`;
+/// serializer `0x141f479b0`): `u8, u16 length, length bytes` (a little-endian `u16` 6 and
+/// a 0x360-byte block, not decoded).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExitReport {
+    pub unk: u8,
+    pub data: Vec<u8>,
+}
+
+impl Message for ExitReport {
+    const NAME: &'static str = "ExitReport";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk).u16(self.data.len() as u16).bytes(&self.data);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let unk = r.u8()?;
+        let len = r.u16()? as usize;
+        Ok(Self {
+            unk,
+            data: r.bytes(len)?.to_vec(),
+        })
+    }
+}
+
 /// C→S: WASD movement input, sent when the pressed direction changes:
 /// `u8, varint x, varint y, u8[3]`. The vector is in grid axes with a length of about 180
 /// (W = (127, 127), D = (180, 0), S = (-127, -127)...); (0, 0) means stop.

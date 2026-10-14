@@ -70,6 +70,7 @@ Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the playe
 - **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
 - **Plain keys (`0x20`)** are still posted messages. Space (dodge roll) is read that way.
 - **`text:<chars>`** posts one `WM_CHAR` per character, for text boxes such as the character name.
+- **`inpress:x,y` / `inrelease:x,y`** hold and release the left button at a client position (held click-to-move); the hooked `GetKeyState` reports `VK_LBUTTON` held meanwhile.
 - Before each batch the DLL posts `WM_ACTIVATEAPP(1)`: the game ignores input while it thinks it is in the background, and this changes only its own flag, not the real focus.
 - **`0x77` (F8)** takes a game screenshot into the test prefix's `My Games/Path of Exile 2/Screenshots`, which shows the game even when its window is not visible.
 - Nothing goes to other windows. `SendInput` is not used, because it types into whatever window has focus.
