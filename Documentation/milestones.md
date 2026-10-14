@@ -50,5 +50,8 @@ Key findings:
 Known gaps (later milestones):
 - Movement: client input `0x63` (WASD direction) and clicks are not answered yet (M3).
 - Heartbeat `0x1c` (about 10 Hz) is not answered; the client stays connected anyway.
-- Returning characters start at the intro start feature; under the intro tree they are hidden by its canopy. Proper start positions (waypoints, area transitions) come with M4/M5.
+- Proper start positions for areas other than the Riverbank (waypoints, area transitions) come with M4/M5.
+
+## M2.5 (2026-10-13, in progress)
+- **Start position** (done): the Riverbank start is on the shore beside the intro tree, inside the `Intro_Tree_01` tile. The DLL exports each sub-tile's canonical index (its position in the tile's own orientation). The server finds which of the 8 rotations/mirrors the tile was placed with, then maps the configured point (`[spawn.start_tiles.G1_1] point`, grid cells in the tile's own orientation) onto the map. Verified on a mirrored and a rotated placement.
 - Server-sent NPCs need their StateMachine/quest states (see [protocol/entities.md](protocol/entities.md)).

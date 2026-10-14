@@ -81,3 +81,19 @@ fn ranger_template_resolves_through_ao() {
             .any(|(k, v)| k == "team" && v == "1")
     );
 }
+
+#[test]
+fn riverbank_entrance_room_points() {
+    let Some(data) = open() else { return };
+    let room = poe_data::rooms::Room::load(
+        &data,
+        "Metadata/Terrain/Gallows/Act1/1_1/Rooms/entrance_intro.arm",
+    )
+    .unwrap();
+    assert_eq!(room.name, "entrance");
+    assert_eq!((room.width, room.height), (45, 54));
+    let tree = room.slot("intro_feature").unwrap();
+    assert_eq!((tree.x, tree.y, tree.width, tree.height), (30, 36, 6, 6));
+    let p = room.point("default1").unwrap();
+    assert_eq!((p.x, p.y), (146, 169));
+}

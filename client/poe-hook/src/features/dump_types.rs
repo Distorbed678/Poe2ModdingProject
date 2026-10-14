@@ -284,15 +284,36 @@ unsafe fn export_layout(world: usize) {
     ) else {
         return;
     };
+    // Tile record (0x38 bytes): +0 -> the sub-tile entry in the tile object's array (0x38
+    // bytes each, in the tile's own orientation, row-major), +8 -> tile object (+8: .tdt path).
+    // A tile object's array start is the lowest sub-tile pointer among its records, so
+    // (q0 - start) / 0x38 is the sub-tile's canonical index; with the map position it gives the
+    // tile's rotation/mirroring.
+    let record = |x: usize, y: usize| tiles + (y * w as usize + x) * 0x38;
+    let mut starts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            if let (Some(q0), Some(t)) =
+                (read::<usize>(record(x, y)), read::<usize>(record(x, y) + 8))
+            {
+                let e = starts.entry(t).or_insert(q0);
+                *e = (*e).min(q0);
+            }
+        }
+    }
     let mut out = format!("size\t{w}\t{h}\n");
     for y in 0..h as usize {
         for x in 0..w as usize {
-            // Tile record +8 -> tile object, whose +8 is the .tdt path (see terrain_tiles.txt).
-            let path = read::<usize>(tiles + (y * w as usize + x) * 0x38 + 8)
+            let t = read::<usize>(record(x, y) + 8);
+            let path = t
                 .and_then(|t| read::<usize>(t + 8))
                 .and_then(|p| wide_string(p, 200))
                 .unwrap_or_default();
-            out += &format!("{x}\t{y}\t{path}\n");
+            let sub = match (read::<usize>(record(x, y)), t.and_then(|t| starts.get(&t))) {
+                (Some(q0), Some(&start)) => (q0 - start) / 0x38,
+                _ => 0,
+            };
+            out += &format!("{x}\t{y}\t{path}\t{sub}\n");
         }
     }
     unsafe { export_grids(terrain, w as usize, h as usize, tile_hash) };

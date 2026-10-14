@@ -57,13 +57,24 @@ pub struct SpawnConfig {
     /// Substrings of tile paths that are never playable (map filler).
     #[serde(default)]
     pub filler: Vec<String>,
-    /// Per `WorldAreas.Id`: a substring of the start tile's path.
+    /// Per `WorldAreas.Id`: the tile the player starts on.
     #[serde(default)]
-    pub start_tiles: std::collections::BTreeMap<String, String>,
+    pub start_tiles: std::collections::BTreeMap<String, StartTile>,
     /// Areas whose first visit plays the "washed up" opening (Player flag); without it the
     /// intro area stays covered in grey fog.
     #[serde(default)]
     pub intro_areas: Vec<String>,
+}
+
+/// Start tile of an area: a substring of the tile's path, and optionally the start point in the
+/// tile's own (unrotated) orientation, in grid cells from its corner (23 cells per sub-tile).
+/// The server finds how the tile was rotated/mirrored in the generated layout and maps the
+/// point; without it the player starts at the tile's centre.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StartTile {
+    pub tile: String,
+    #[serde(default)]
+    pub point: Option<[i32; 2]>,
 }
 
 /// Player inventories created on instance entry. Slots come from `Inventories.dat`; grid
