@@ -227,21 +227,68 @@ impl Player {
     }
 }
 
-/// Reader `0x1416d8090` (body `0x142147180`). Only the all-zero form (48 bytes) is known.
-#[derive(Debug, Clone, PartialEq)]
+/// Reader `0x1416d8090` (body `0x142147180`):
+/// - 3 × (`u8`, `u8`, `u32` length + UTF-16 string) (18 bytes when empty);
+/// - sub-reader `0x142149390`: `u8` flags, then (initial state) the skill container
+///   (`0x14218a850`): `u8` skill count + [`Skill`]s, `u8` count + 12-byte entries, `u8` count
+///   + bytes, `u32` count + entries;
+/// - the rest (flags, action state) is sent as zeros (22 bytes).
+///
+/// Skills the template's `basic_action`s grant (Move, Interaction...) exist on the client
+/// without being sent; granted effects such as dodge roll have to be listed here.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Actor {
-    pub raw: Vec<u8>,
-}
-
-impl Default for Actor {
-    fn default() -> Self {
-        Self { raw: vec![0; 48] }
-    }
+    pub skills: Vec<Skill>,
 }
 
 impl Actor {
     fn encode(&self, w: &mut Writer) {
-        w.bytes(&self.raw);
+        w.bytes(&[0; 18]);
+        // Sub-reader flags, then the skill container.
+        w.u8(0);
+        w.u8(self.skills.len() as u8);
+        for skill in &self.skills {
+            skill.encode(w);
+        }
+        w.u8(0).u8(0).u32_le(0);
+        w.bytes(&[0; 22]);
+    }
+}
+
+/// One skill of an actor (reader `0x142188bd0`; all integers little-endian):
+/// `u32 id, u8 slot, effect, u8 flags (bit 0: u32 parent object, u32), u8 supports count +
+/// (effect, u32)[], u32, u32, u32, u8, stat list` (varuint count + (varuint stat, varint
+/// value)[]), one more stat list per additional stat set, a minion block when the granted
+/// effect has a MinionType, then `u8` (non-zero: one more stat list).
+///
+/// The effect (`0x142683e50`): `u8, u32 GrantedEffectsPerLevel row`, then a stat-set reference
+/// (`0x142683b70`: `u8 b, [u8 if b], u32 GrantedEffectStatSetsPerLevel row`) for the base stat
+/// set and one per additional stat set.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Skill {
+    /// Skill instance id: the id use requests (`0x1a5`) and actions (`0x1c8`) refer to.
+    /// Basic actions use `0x20000000 | action type`.
+    pub id: u32,
+    /// `GrantedEffectsPerLevel` row.
+    pub effect_level_row: u32,
+    /// `GrantedEffectStatSetsPerLevel` rows: the base stat set, then the additional ones.
+    pub stat_set_rows: Vec<u32>,
+}
+
+impl Skill {
+    fn encode(&self, w: &mut Writer) {
+        w.u32_le(self.id).u8(0);
+        w.u8(0).u32_le(self.effect_level_row);
+        for &row in &self.stat_set_rows {
+            w.u8(0).u32_le(row);
+        }
+        // Flags, supports, three u32s and a u8.
+        w.u8(0).u8(0).u32_le(0).u32_le(0).u32_le(0).u8(0);
+        // Stat lists: the base one and one per additional stat set (all empty).
+        for _ in 0..self.stat_set_rows.len().max(1) {
+            w.varuint(0);
+        }
+        w.u8(0);
     }
 }
 

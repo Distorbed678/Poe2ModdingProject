@@ -13,7 +13,8 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 | [protocol/framing.md](protocol/framing.md) | Wire format: encodings, framing, encryption |
 | [protocol/login.md](protocol/login.md) | Login protocol messages |
 | [protocol/instance.md](protocol/instance.md) | Instance protocol: opening sequence, area info, inventories, spawn |
-| [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components) |
+| [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components, actor skills) |
+| [protocol/movement.md](protocol/movement.md) | Lockstep movement: WASD, click-to-move, skills and dodge roll |
 | [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the DLL bypass |
 | [re/findings-2026-10-13.md](re/findings-2026-10-13.md) | Offline analysis: live-log comparison, client packet classes, rendering/spawn notes |
 | [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Reverse-engineering findings (Ghidra addresses) for 0.5.5e |

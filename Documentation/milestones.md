@@ -50,6 +50,13 @@ Key findings:
 Known gaps (later milestones):
 - Movement: client input `0x63` (WASD direction) and clicks are not answered yet (M3).
 
+## M3 status (2026-10-14, in progress)
+- **WASD** (done): `0x63` → `0x64`; the server walks the same path. See [protocol/movement.md](protocol/movement.md).
+- **Click-to-move** (done): `0x1a5` UseSkill (Move) → `0x1c8` StartAction; the server's end cell matches the client's.
+- **Dodge roll** (in progress): the character gets `DodgeRollPlayer` in its Actor skill list; Space sends UseSkill, answered with StartAction.
+- **Pause** (done): `0x1ff` also pauses the server simulation.
+- **Save area and position** (to do).
+
 ## M3 scope (agreed 2026-10-14)
 - WASD movement (client `0x63`).
 - Click-to-move.

@@ -260,13 +260,14 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
     let entity = (unsafe { (*regs).rcx } as usize).wrapping_sub(0x58);
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
         let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
+        let dt = f32::from_bits(unsafe { (*regs).xmm1 } as u32);
         if matches!(n, 1 | 10 | 100 | 1000) {
-            let dt = f32::from_bits(unsafe { (*regs).xmm1 } as u32);
             log::info!(
                 "player entity tick #{n} dt={dt} (edx {:#x})",
                 unsafe { (*regs).rdx } as u32
             );
         }
+        log_player_frame(entity, n, dt);
     }
 }
 
@@ -434,6 +435,78 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
 
 static MAIN: OnceLock<Module> = OnceLock::new();
 
+/// Movement research: the player's world position at the start of each of its updates
+/// (one per simulation frame), logged when it changed.
+fn log_player_frame(entity: usize, n: usize, dt: f32) {
+    use crate::mem::read;
+    static LAST: std::sync::Mutex<(u32, u32)> = std::sync::Mutex::new((0, 0));
+    let Some(comps) = read::<usize>(entity + 0x10) else {
+        return;
+    };
+    let Some(pos) = read::<usize>(comps) else {
+        return;
+    };
+    let (x, y) = (
+        read::<f32>(pos + 0x490).unwrap_or(0.0),
+        read::<f32>(pos + 0x494).unwrap_or(0.0),
+    );
+    let mut last = LAST.lock().unwrap();
+    if *last != (x.to_bits(), y.to_bits()) {
+        let (lx, ly) = (f32::from_bits(last.0), f32::from_bits(last.1));
+        *last = (x.to_bits(), y.to_bits());
+        log::info!(
+            "frame #{n} dt={dt} world ({x:.3}, {y:.3}) step ({:.3}, {:.3}) grid ({}, {})",
+            x - lx,
+            y - ly,
+            read::<i32>(pos + 0x444).unwrap_or(0),
+            read::<i32>(pos + 0x448).unwrap_or(0)
+        );
+    }
+}
+
+/// Movement research: logs the player's position whenever it changes (polled every 20 ms):
+/// Positioned (component 0) grid cell +0x444/+0x448 and world position +0x490/+0x494, and the
+/// Actor's (component 9) WASD direction +0x400/+0x404 as set by server message 0x64.
+fn track_player(entity: usize) {
+    std::thread::spawn(move || {
+        use crate::mem::read;
+        let start = std::time::Instant::now();
+        let mut last = None;
+        while PLAYER.load(Ordering::SeqCst) == entity {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let Some(comps) = read::<usize>(entity + 0x10) else {
+                return;
+            };
+            let (Some(pos), Some(actor)) = (read::<usize>(comps), read::<usize>(comps + 9 * 8))
+            else {
+                return;
+            };
+            let now = (
+                read::<i32>(pos + 0x444).unwrap_or(0),
+                read::<i32>(pos + 0x448).unwrap_or(0),
+                read::<f32>(pos + 0x490).unwrap_or(0.0).to_bits(),
+                read::<f32>(pos + 0x494).unwrap_or(0.0).to_bits(),
+                read::<i32>(actor + 0x400).unwrap_or(0),
+                read::<i32>(actor + 0x404).unwrap_or(0),
+            );
+            // Positions are logged per frame (log_player_frame); here only direction changes.
+            if last.map(|l: (i32, i32, u32, u32, i32, i32)| (l.4, l.5)) != Some((now.4, now.5)) {
+                last = Some(now);
+                log::info!(
+                    "player t={}ms grid ({}, {}) world ({:.2}, {:.2}) wasd ({}, {})",
+                    start.elapsed().as_millis(),
+                    now.0,
+                    now.1,
+                    f32::from_bits(now.2),
+                    f32::from_bits(now.3),
+                    now.4,
+                    now.5
+                );
+            }
+        }
+    });
+}
+
 /// Logs each component of the entity being deserialized: object address, vtable and the
 /// component's initial-state reader (vtable +0x98), as Ghidra addresses.
 unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
@@ -450,6 +523,7 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         if id == 1 {
             PLAYER.store(entity, Ordering::SeqCst);
             PLAYER_UPDATES.store(0, Ordering::SeqCst);
+            track_player(entity);
             // State flags a few seconds later (+0x8c bit 3: in the wake/update set).
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(5));

@@ -177,3 +177,115 @@ pub fn stat_key(data: &GameData, id: &str) -> Result<Option<u32>> {
     let table = data.table("Stats")?;
     Ok(table.find_index_by_str("Id", id)?.map(|i| i as u32 + 1))
 }
+
+/// 16-bit key of an `ActionTypes` row (its second column) by id, e.g. `Move` = 10505. The
+/// client names actions by this key; basic-action skills have the id `0x20000000 | key`.
+pub fn action_type_key(data: &GameData, id: &str) -> Result<Option<u16>> {
+    let table = data.table("ActionTypes")?;
+    let Some(row) = table.find_by_str("Id", id)? else {
+        return Ok(None);
+    };
+    Ok(row.get_index(1)?.as_int().map(|v| v as u16))
+}
+
+/// A granted effect (skill) at a level, as the client references it in an actor's skill list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantedSkill {
+    /// `GrantedEffects` row.
+    pub effect: usize,
+    /// `GrantedEffectsPerLevel` row for the level.
+    pub effect_level_row: u32,
+    /// `GrantedEffectStatSetsPerLevel` rows: the base stat set, then the additional ones.
+    pub stat_set_rows: Vec<u32>,
+    /// `ActionTypes` key of the skill's action (through `ActiveSkills.ActionType`).
+    pub action_type: Option<u16>,
+    /// Constant stats of the base stat set (`GrantedEffectStatSets.ConstantStats` ids and
+    /// values), e.g. `dodge_roll_base_travel_distance`.
+    pub constant_stats: Vec<(String, i64)>,
+}
+
+impl GrantedSkill {
+    pub fn constant_stat(&self, id: &str) -> Option<i64> {
+        self.constant_stats
+            .iter()
+            .find(|(k, _)| k == id)
+            .map(|&(_, v)| v)
+    }
+}
+
+impl GrantedSkill {
+    /// Looks up a granted effect by id (e.g. `"DodgeRollPlayer"`) at a level.
+    pub fn find(data: &GameData, id: &str, level: i64) -> Result<Option<Self>> {
+        let effects = data.table("GrantedEffects")?;
+        let Some(effect) = effects.find_index_by_str("Id", id)? else {
+            return Ok(None);
+        };
+        let row = effects.row(effect).expect("row from index");
+        let per_level = data.table("GrantedEffectsPerLevel")?;
+        let Some(effect_level_row) = per_level.rows().position(|r| {
+            r.row_ref("GrantedEffect").ok().flatten() == Some(effect)
+                && r.int("Level").ok() == Some(level)
+        }) else {
+            return Ok(None);
+        };
+        let mut stat_sets: Vec<usize> = row.row_ref("StatSet")?.into_iter().collect();
+        let mut constant_stats = Vec::new();
+        if let Some(set) = stat_sets.first().and_then(|&i| {
+            data.table("GrantedEffectStatSets").ok().and_then(|t| {
+                t.row(i)
+                    .map(|r| (r.get("ConstantStats"), r.get("ConstantStatsValues")))
+            })
+        }) && let (Ok(ids), Ok(values)) = set
+            && let (Some(ids), Some(values)) = (ids.as_list(), values.as_list())
+        {
+            let stats = data.table("Stats")?;
+            for (id, value) in ids.iter().zip(values) {
+                if let (Some(row), Some(value)) =
+                    (id.as_row().and_then(|i| stats.row(i)), value.as_int())
+                {
+                    constant_stats.push((row.str("Id")?, value));
+                }
+            }
+        }
+        if let Some(list) = row.get("AdditionalStatSets")?.as_list() {
+            stat_sets.extend(list.iter().filter_map(|v| v.as_row()));
+        }
+        let sets_per_level = data.table("GrantedEffectStatSetsPerLevel")?;
+        let mut stat_set_rows = Vec::new();
+        for set in stat_sets {
+            let Some(i) = sets_per_level.rows().position(|r| {
+                r.row_ref("StatSet").ok().flatten() == Some(set)
+                    && r.int("GemLevel").ok() == Some(level)
+            }) else {
+                return Ok(None);
+            };
+            stat_set_rows.push(i as u32);
+        }
+        let action_type = match row.row_ref("ActiveSkill")? {
+            Some(skill) => match data
+                .table("ActiveSkills")?
+                .row(skill)
+                .map(|r| r.row_ref("ActionType"))
+                .transpose()?
+                .flatten()
+            {
+                Some(t) => data
+                    .table("ActionTypes")?
+                    .row(t)
+                    .map(|r| r.get_index(1))
+                    .transpose()?
+                    .and_then(|v| v.as_int())
+                    .map(|v| v as u16),
+                None => None,
+            },
+            None => None,
+        };
+        Ok(Some(Self {
+            effect,
+            effect_level_row: effect_level_row as u32,
+            stat_set_rows,
+            action_type,
+            constant_stats,
+        }))
+    }
+}

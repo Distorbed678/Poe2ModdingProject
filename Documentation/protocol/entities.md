@@ -28,7 +28,7 @@ Components in order, with their readers. Sizes are measured with every flag and 
 | 6 | Player | `0x141dcf320` | 39 + 2×name | `u32 len + UTF-16LE name, u8 class (PlayerClass +0x158), u32 (0x141dd11e0), u32 (+0x1d0), u32 (+0x1d4), u16 (+0x200), u16 (+0x202), u16 n + (u8, u64)[n], u16 n + (u8, u64)[n], u8[5], u16, u16 (two Hideouts.dat keys), u8 flags (bit 0: "WashedUp" intro, bit 1, bit 2, bit 3), u8, u8, varuint n + u32[n], u8 n + entries` |
 | 7 | PlayerClass | – | 0 | |
 | 8 | Inventories | `0x141d82a40` | 2 | `u8 n + (u8 slot, inventory ref 0x1426c3f60)[n], u8 k + u32[k]` |
-| 9 | Actor | `0x1416d8090` → `0x142147180` | 40–48 | partly decoded: 3 × (2 values, string), sub-reader `0x142149390`, flags (`0x14214c4e0`), 4 × (u8 flags + up to 3 × u32), `u32` (+0x4bc); flags bit 1 wstring, bit 2 `u8` (`0x141e52b90`), bit 3 `u32` (+0x230, then stat 0x77a `actor_scale_+%` is read); if a component's +0x1e0 < 1, `u16 animation, u8, u32` (current animation). Zeros work |
+| 9 | Actor | `0x1416d8090` → `0x142147180` | 48 + skills | partly decoded: 3 × (`u8`, `u8`, `u32` length + UTF-16 string), sub-reader `0x142149390` (`u8` flags, then the [skill list](#actor-skills)), flags (`0x14214c4e0`), 4 × (u8 flags + up to 3 × u32), `u32` (+0x4bc); flags bit 1 wstring, bit 2 `u8` (`0x141e52b90`), bit 3 `u32` (+0x230, then stat 0x77a `actor_scale_+%` is read); if a component's +0x1e0 < 1, `u16 animation, u8, u32` (current animation). Zeros work |
 
 Status: with these sections plus the inventories and InitialState from [instance.md](instance.md) (including its frame length), the player is drawn with the class's model and default stats, in town and in the washed-up intro.
 
@@ -38,3 +38,26 @@ Serialized components: Positioned, Animated, InteractionAction (`0x141d81300`), 
 StateMachine: `u8 shared-state count, u8 second count, then per shared state (flag +0x2c in the type) varint value + u8 flags, per second-kind entry u32 + u8`. The counts must equal the number of states the template defines (`define_shared_state`), else "Number of shared states is different on client and server! Delta: N". Example: `Una` defines `visible`, so `[1, 0, 1, 0]`.
 
 Spawning `Una` that way gets through the readers but crashes in the client's script interpreter (`0x1426f2220`, null bytecode). Its states are per-player quest flags, which the server does not send yet. Client-only types (doodads such as `EzomyteCivilianMale01`) are rejected: "Unknown object type serialized by server".
+
+## Actor skills
+The Actor component's skill container (`0x14218a850`, read after the sub-reader's flags byte; all integers little-endian):
+1. `u8` skill count, then that many skills (`0x14218afb0` → `0x142188bd0`).
+2. `u8` count + (`u32` ActiveSkills row, `u32`, `u32`) entries.
+3. `u8` count + `u8` entries.
+4. `u32` count + (`u32` skill id, `u32 n`, `n` × 4 × `u32`) entries.
+
+One skill:
+
+| Field | Notes |
+|---|---|
+| `u32` id | skill instance id; use requests (`0x1a5`) and actions (`0x1c8`) refer to it |
+| `u8` slot | bits 6–7 and 0–5 select a weapon set / item slot; 0 = the character |
+| effect | `u8, u32 GrantedEffectsPerLevel row`, then a stat-set reference (`u8 b, [u8 if b], u32 GrantedEffectStatSetsPerLevel row`) for the base stat set and one per `GrantedEffects.AdditionalStatSets` entry (`0x142683e50`, `0x142683b70`) |
+| `u8` flags | bit 0: `u32 parent object, u32` follow |
+| `u8` count | supports: (effect, `u32`) each |
+| `u32, u32, u32, u8` | |
+| stat lists | `varuint count` + (`varuint stat key`, `varint value`) pairs: the base stat set's, then one per additional stat set |
+| minion block | only when the granted effect has a `MinionType` |
+| `u8` | non-zero: one more stat list |
+
+The table rows are resolved with `poe_data::views::GrantedSkill` (DodgeRollPlayer level 1: GrantedEffectsPerLevel 899, GrantedEffectStatSetsPerLevel 905). Skills that come from the template's `basic_action` list (Move, Interaction, ...) are not listed.

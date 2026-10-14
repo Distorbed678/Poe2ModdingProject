@@ -104,3 +104,8 @@ point = [9, 33]
 # Chat: no chat server yet; global/trade join requests are answered with this channel.
 [chat]
 default_channel = 1
+
+# Player characters: skills every character has (GrantedEffects ids, level 1). Basic actions
+# such as Move come from the class template and are not listed here.
+[player]
+innate_skills = ["DodgeRollPlayer"]

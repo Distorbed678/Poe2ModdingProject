@@ -22,6 +22,13 @@ ExitRequest = 0x0173
 PauseRequest = 0x01ff
 # Join a chat channel (global/trade) after entering an area.
 ChatJoinRequest = 0x014c
+# WASD input (direction vector; zero = stop).
+MoveDirection = 0x0063
+# Skill use (click-to-move uses the Move skill) and release of its input.
+UseSkill = 0x01a5
+SkillReleased = 0x01ad
+# Not decoded yet: u8 player, u8 (sent when Space is pressed/released).
+Unknown02e6 = 0x02e6
 
 [server]
 EnableEncryption = 0x0011
@@ -38,6 +45,10 @@ SimulationTick = 0x02f4
 SimulationFrameValue = 0x02f5
 SetPause = 0x01fe
 AddObject = 0x02f7
+# Entity WASD movement (direction + grid position), handled by the Actor component.
+MoveDirectionUpdate = 0x0064
+# An entity starts an action (skill id, target), handled by the Actor component.
+StartAction = 0x01c8
 
 # Body sizes of client messages the server does not decode yet, so batches can be split.
 [client_body_sizes]
@@ -47,5 +58,6 @@ Unknown013d = 1
 Unknown0221 = 1
 Unknown023d = 2
 Unknown02e8 = 2
+Unknown02e6 = 2
 Unknown0351 = 1
 Unknown0357 = 1
