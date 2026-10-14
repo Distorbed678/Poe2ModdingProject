@@ -33,6 +33,9 @@ movement_trace = "data/movement-trace.tsv"
 # its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
 # See Documentation/protocol/movement.md#lag-m35.
 turn_cell = "natural"
+# Hold a turn back by up to one frame when that lands it nearer a cell centre (smaller
+# snaps at turns, some turns 33 ms later).
+turn_timing = true
 
 [database]
 path = "data/server.sqlite"

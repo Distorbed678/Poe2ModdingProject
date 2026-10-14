@@ -188,6 +188,10 @@ pub struct InstanceConfig {
     /// centre) or "natural" (the cell the client would reach in that frame).
     #[serde(default = "default_turn_cell")]
     pub turn_cell: String,
+    /// Hold a turn back by up to one frame when that puts the player nearer its path (the
+    /// client puts it on a cell centre at every turn).
+    #[serde(default)]
+    pub turn_timing: bool,
 }
 
 fn default_turn_cell() -> String {

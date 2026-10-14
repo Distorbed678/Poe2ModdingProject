@@ -86,6 +86,10 @@ pub struct Player {
     /// the tick being built, or the next one for input answered between ticks).
     pub apply_frame: i64,
     pub turn_cell: TurnCell,
+    /// Hold a turn back by a frame when that places the player nearer its path (`turn`).
+    pub turn_timing: bool,
+    /// A held-back turn and the frame it goes out in.
+    pending_turn: Option<(MoveDirection, i64)>,
     /// Length of a simulation frame in seconds (`tick_ms`).
     pub frame_seconds: f32,
     /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
@@ -140,6 +144,9 @@ struct Turn {
     dir: (f32, f32),
 }
 
+/// A turn is held back a frame only if that puts it this much (cells) nearer a cell centre.
+const TURN_TIMING_MARGIN: f32 = 0.1;
+
 /// Most frames a position is predicted ahead (beyond that the report is too old to trust).
 const MAX_LEAD_FRAMES: i64 = 4;
 /// Length of a WASD direction vector (W = (127, 127), D = (180, 0)).
@@ -190,6 +197,8 @@ impl Player {
             apply_frame: 0,
             frame_seconds: 0.033,
             turn_cell: TurnCell::Heading,
+            turn_timing: false,
+            pending_turn: None,
             walkable: None,
             frame_offset: None,
             in_roll: false,
@@ -314,6 +323,13 @@ impl Player {
             self.mover.advance(dt, &Open);
         }
         let mut out = Vec::new();
+        // A turn held back for a better frame (`turn`) goes out in the frame it was meant for.
+        if let Some((req, frame)) = self.pending_turn
+            && self.apply_frame >= frame
+        {
+            self.pending_turn = None;
+            out.push(Reply::Direction(self.start_direction(&req)));
+        }
         if self.in_roll {
             if self.roll_over() {
                 self.in_roll = false;
@@ -445,7 +461,7 @@ impl Player {
             }
             return None;
         }
-        Some(self.start_direction(req))
+        self.turn(*req)
     }
 
     /// The player's cell for a message that starts a movement heading `dir`.
@@ -528,6 +544,26 @@ impl Player {
         ((self.mover.x + v.0 * n, self.mover.y + v.1 * n), v)
     }
 
+    /// A walk direction change. With `turn_timing`, a turn may be held back by one frame: the
+    /// client is put on the centre of the cell it gets, so the turn goes out in whichever of
+    /// the next two frames puts that centre nearer the client's path (a later input in the
+    /// meantime replaces it). Stops and turns from standing still go out at once.
+    fn turn(&mut self, req: MoveDirection) -> Option<MoveDirectionUpdate> {
+        self.pending_turn = None;
+        let moving = self.velocity.0.hypot(self.velocity.1) > 0.3;
+        if self.turn_timing && self.client.is_some() && moving && (req.x != 0 || req.y != 0) {
+            let off_centre = |(x, y): (f32, f32)| (x.floor() + 0.5 - x).hypot(y.floor() + 0.5 - y);
+            let (now, _) = self.predict(self.apply_frame);
+            let (next, _) = self.predict(self.apply_frame + 1);
+            if off_centre(next) + TURN_TIMING_MARGIN < off_centre(now) {
+                debug!(dir = ?(req.x, req.y), "turn held back a frame");
+                self.pending_turn = Some((req, self.apply_frame + 1));
+                return None;
+            }
+        }
+        Some(self.start_direction(&req))
+    }
+
     fn start_direction(&mut self, req: &MoveDirection) -> MoveDirectionUpdate {
         self.current = None;
         self.mover.start(if req.x == 0 && req.y == 0 {
@@ -608,7 +644,7 @@ impl Player {
                 y: dir.1,
                 ..Default::default()
             };
-            return vec![Reply::Direction(self.start_direction(&walk))];
+            return self.turn(walk).map(Reply::Direction).into_iter().collect();
         }
         self.held_dir = None;
         self.held_target = None;
@@ -926,6 +962,41 @@ mod tests {
             flags: 0,
             at: std::time::Instant::now(),
         })
+    }
+
+    #[test]
+    fn turn_timing_holds_a_turn_for_a_frame_nearer_a_cell_centre() {
+        let mut p = player();
+        p.turn_timing = true;
+        p.turn_cell = TurnCell::Natural;
+        let at = |frame, y| crate::sync::ClientReport {
+            frame,
+            x: 100.5,
+            y,
+            action: 0,
+            action2: 0x2909,
+            flags: 0,
+            at: std::time::Instant::now(),
+        };
+        // Walking +y at 1.233 cells per frame; reports for frames 1 and 2 have arrived.
+        p.apply_report(Some(at(1, 100.667)));
+        p.apply_report(Some(at(2, 101.9)));
+        p.observe_frames(2);
+        p.apply_frame = 3;
+        // At the end of frame 3 the player would be at y 103.13 (0.37 off a centre), at the
+        // end of frame 4 at 104.37 (0.13 off): the turn waits for frame 4.
+        let turn = MoveDirection {
+            x: 180,
+            ..Default::default()
+        };
+        assert!(p.on_move_direction(&turn).is_none());
+        p.apply_frame = 3;
+        assert!(p.tick(0.033).is_empty());
+        p.apply_frame = 4;
+        let out = p.tick(0.033);
+        assert!(
+            matches!(&out[..], [Reply::Direction(d)] if (d.dir_x, d.grid_x, d.grid_y) == (180, 100, 104))
+        );
     }
 
     #[test]
