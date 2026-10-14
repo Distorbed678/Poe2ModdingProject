@@ -21,13 +21,13 @@ use poe_data::{
     template::ObjectTemplate,
     views::{CharacterClass, InventorySlot, WorldArea},
 };
-use poe_net::{Connection, DecodeError, KeyMaterial, hexdump::hexdump};
+use poe_net::{Connection, DecodeError, KeyMaterial, StreamCipher, hexdump::hexdump};
 use poe_proto::{
     Message, Protocol, entity,
     instance::{
         AddInventory, AddObject, AreaInfo, CharacterState, EnableEncryption, Hello, InitialState,
-        Inventory, LocalPlayers, PlayerEntity, PlayerState, SimulationHeader, SimulationTick,
-        TerrainHashes,
+        Inventory, LocalPlayers, PingReply, PlayerEntity, PlayerState, SimulationHeader,
+        SimulationTick, TerrainHashes,
     },
 };
 use rand::RngCore;
@@ -112,6 +112,8 @@ impl InstanceServer {
             Box::new(keys.client_to_server()),
             Box::new(keys.server_to_client()),
         );
+        // HNC side channel (see PingReply): server-to-client keystream for idle bytes.
+        let mut hnc = KeyMaterial(self.protocol.hnc.derive(&ticket.keys)).server_to_client();
 
         self.send_area(&mut conn, &ticket).await?;
 
@@ -164,12 +166,31 @@ impl InstanceServer {
                         info!("client disconnected");
                         return Ok(());
                     }
-                    let data = conn.buffer();
-                    if !data.starts_with(&[0x00, 0x1c]) {
-                        info!(len = data.len(), "received\n{}", hexdump(data));
+                    let data = conn.buffer().to_vec();
+                    conn.consume(data.len());
+                    let opcode = (data.len() >= 2).then(|| u16::from_be_bytes([data[0], data[1]]));
+                    match opcode {
+                        // Heartbeat (format being decoded).
+                        // Frame report: answer with a ping reply carrying idle HNC bytes.
+                        Some(0x1c) => {
+                            let mut bytes = [0u8; 4];
+                            hnc.apply(&mut bytes);
+                            let reply = PingReply {
+                                hnc: poe_proto::instance::hnc_bits(bytes),
+                                ..Default::default()
+                            };
+                            conn.send(&self.protocol.instance.encode(&reply)?).await?;
+                        }
+                        Some(0x173) => {
+                            // Closing the session is enough: the client returns to character
+                            // selection and reconnects to the login server. (Replying 0x174
+                            // ExitSession with zeros instead leaves it waiting on the new login
+                            // connection; its fields are not understood yet.)
+                            info!("client exits to character selection");
+                            return Ok(());
+                        }
+                        _ => info!(len = data.len(), "received\n{}", hexdump(&data)),
                     }
-                    let n = data.len();
-                    conn.consume(n);
                 }
                 _ = ticker.tick() => conn.send(&tick).await?,
             }

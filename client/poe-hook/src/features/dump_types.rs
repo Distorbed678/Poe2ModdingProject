@@ -58,6 +58,10 @@ const ENTITY_TICK: usize = 0x141e7d7f0;
 /// Game update vfunc (`this, ?, f32 xmm2, f32 dt xmm3`): adds dt to this +0x17cc, which the
 /// world update (`0x14169c0b0`) takes (and zeroes) as the frame-mode dt.
 const GAME_UPDATE: usize = 0x14167ea40;
+/// Game session send (`session, packet`): packet +8 is the u16 opcode.
+const SESSION_SEND: usize = 0x14211f880;
+/// Raw stream write (`stream, data, len`).
+const STREAM_WRITE: usize = 0x142197e60;
 static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
@@ -97,6 +101,8 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
         ),
         (ENTITY_TICK, on_entity_tick),
         (GAME_UPDATE, on_game_update),
+        (SESSION_SEND, on_session_send),
+        (STREAM_WRITE, on_stream_write),
     ] {
         let hooker = Hooker::new(
             main.from_ghidra(addr),
@@ -124,6 +130,67 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
 
 fn begin_components(entity: usize) -> usize {
     crate::mem::read::<usize>(entity + 0x10).unwrap_or(0)
+}
+
+unsafe extern "win64" fn on_stream_write(regs: *mut Registers, _: usize) {
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let r = unsafe { &*regs };
+    if r.r8 != 2 || crate::mem::read::<[u8; 2]>(r.rdx as usize) != Some([0, 0x1c]) {
+        return;
+    }
+    if DONE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let Some(m) = MAIN.get() else { return };
+    let refs: Vec<String> = crate::module::stack_refs(m, r.rsp as usize, 16)
+        .into_iter()
+        .map(|a| format!("{a:#x}"))
+        .collect();
+    log::info!("stream write 00 1c: {}", refs.join(" "));
+    // HNC side channel: stream +0xd0 -> bit queue whose +0 is the cipher object.
+    use crate::mem::read;
+    let hnc = read::<usize>(r.rcx as usize + 0xd0).unwrap_or(0);
+    let cipher = read::<usize>(hnc).unwrap_or(0);
+    let vt = read::<usize>(cipher).unwrap_or(0);
+    let g = |a: usize| if m.contains(a) { m.to_ghidra(a) } else { a };
+    let slots: Vec<String> = (0..6)
+        .map(|i| format!("{:#x}", g(read::<usize>(vt + i * 8).unwrap_or(0))))
+        .collect();
+    let head: Vec<String> = (0..12)
+        .map(|i| format!("{:x}", read::<usize>(cipher + i * 8).unwrap_or(0)))
+        .collect();
+    log::info!(
+        "  hnc {hnc:#x} cipher {cipher:#x} vtable {:#x} slots [{}] head [{}] stream+0x252={:?}",
+        g(vt),
+        slots.join(" "),
+        head.join(" "),
+        read::<u8>(r.rcx as usize + 0x252)
+    );
+}
+
+unsafe extern "win64" fn on_session_send(regs: *mut Registers, _: usize) {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+    let Some(m) = MAIN.get() else { return };
+    let r = unsafe { &*regs };
+    let Some(op) = crate::mem::read::<u16>(r.rdx as usize + 8) else {
+        return;
+    };
+    let mut seen = SEEN.lock().unwrap();
+    if seen.contains(&op) {
+        return;
+    }
+    seen.push(op);
+    let refs: Vec<String> = crate::module::stack_refs(m, r.rsp as usize, 12)
+        .into_iter()
+        .map(|a| format!("{a:#x}"))
+        .collect();
+    let vt = crate::mem::read::<usize>(r.rdx as usize).unwrap_or(0);
+    log::info!(
+        "session send opcode {op:#06x} vtable {:#x}: {}",
+        if m.contains(vt) { m.to_ghidra(vt) } else { vt },
+        refs.join(" ")
+    );
 }
 
 unsafe extern "win64" fn on_game_update(regs: *mut Registers, _: usize) {

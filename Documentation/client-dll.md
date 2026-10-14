@@ -55,3 +55,8 @@ Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the playe
 `terrain_layout_<tile hash>.tsv`: a `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path<TAB>sub` per sub-tile (23×23 cells).
 
 `sub` is the sub-tile's index in its tile's own orientation, row-major. It comes from the tile record's +0 pointer, which points into the tile object's sub-tile array (0x38 bytes per entry); the lowest such pointer per tile object is the array start. From `sub` and the map position, the server recovers how the tile was rotated or mirrored (`instance-server::spawn::PlacedTile`).
+
+### Send tracing (2026-10-14)
+`dump_object_types` also logs, once per opcode, the caller of the game-session send (`0x14211f880`, packet +8 = opcode). It logs the caller of the raw stream writer (`0x142197e60`) the first time `00 1c` is written, plus the HNC cipher object (stream +0xd0). That is how the frame report and the HNC channel were found.
+
+`poe-hook.keys` also accepts `close`, which posts `WM_CLOSE` to the game window (like its X button).

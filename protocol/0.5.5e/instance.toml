@@ -5,14 +5,20 @@
 [client]
 Hello = 0x000f
 TerrainHashes = 0x009a
+# Frame report, about every 100 ms: u8 frames, u32 (HNC bits).
+FrameReport = 0x001c
+# Exit to character selection (no body).
+ExitRequest = 0x0173
 
 [server]
 EnableEncryption = 0x0011
+PingReply = 0x001d
 AreaInfo = 0x001e
 LocalPlayers = 0x0022
 InitialState = 0x0023
 PlayerEntity = 0x0024
 AddInventory = 0x00df
+ExitSession = 0x0174
 # Simulation messages (second factory 0x142186aa0): queued per frame, applied by 0x142134240.
 SimulationTick = 0x02f4
 SimulationFrameValue = 0x02f5

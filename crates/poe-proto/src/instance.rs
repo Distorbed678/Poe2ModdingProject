@@ -154,6 +154,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hnc_bit_order() {
+        // Stream bit 0 lands on value bit 9; stream bit 23 on value bit 0.
+        assert_eq!(hnc_bits([1, 0, 0, 0]), 1 << 9);
+        assert_eq!(hnc_bits([0, 0, 0x80, 0]), 1 << 0);
+        assert_eq!(hnc_bits([0, 0, 0, 0x80]), 1 << 8);
+        assert_eq!(hnc_bits([0, 0, 0x40, 0]), 1 << 31);
+    }
+
+    #[test]
     fn hello_matches_capture() {
         // Captured 2026-10-13 (body after the 0x000f opcode).
         let bytes = [
@@ -419,6 +428,69 @@ impl Message for SimulationFrameValue {
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self { value: r.u8()? })
+    }
+}
+
+/// S→C ping reply to the client's frame report (`0x1c`): `u16, u16, u32` (reader
+/// `0x141f48c60`). The handler (`0x142122115`) derives the latency display from the first
+/// `u16`. All 32 bits of the `u32` carry the HNC side channel: bits 9..31 then 0..8, packed
+/// least significant bit first into bytes that the client decrypts with its HNC cipher. An idle
+/// channel decrypts to zero bytes, so the server sends raw keystream ([`hnc_bits`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PingReply {
+    pub unk_18: u16,
+    pub unk_1a: u16,
+    pub hnc: u32,
+}
+
+impl Message for PingReply {
+    const NAME: &'static str = "PingReply";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u16(self.unk_18).u16(self.unk_1a).u32(self.hnc);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk_18: r.u16()?,
+            unk_1a: r.u16()?,
+            hnc: r.u32()?,
+        })
+    }
+}
+
+/// Packs 4 HNC stream bytes into the `u32` of [`PingReply`] (client bit order: value bits
+/// 9..31, then 0..8; each byte filled from its least significant bit).
+pub fn hnc_bits(bytes: [u8; 4]) -> u32 {
+    let stream = u32::from_le_bytes(bytes);
+    // Stream bit k (k < 23) -> value bit 9 + k; stream bit 23 + k (k < 9) -> value bit k.
+    ((stream & 0x7f_ffff) << 9) | (stream >> 23)
+}
+
+/// S→C reply to the client's exit request (`0x173`, "Exit to character selection"):
+/// `u8, u32, u64` (constructor `0x14215df40`, reader `0x14215e010`). The handler broadcasts
+/// (`u32`, `u64`) to listeners (`0x1402f5e10`) and sends the exit telemetry (`0x355`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExitSession {
+    pub unk_10: u8,
+    pub unk_20: u32,
+    pub unk_18: u64,
+}
+
+impl Message for ExitSession {
+    const NAME: &'static str = "ExitSession";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        // The u64 is read raw (no byte swap).
+        w.u8(self.unk_10)
+            .u32(self.unk_20)
+            .bytes(&self.unk_18.to_le_bytes());
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            unk_10: r.u8()?,
+            unk_20: r.u32()?,
+            unk_18: u64::from_le_bytes(r.array()?),
+        })
     }
 }
 
