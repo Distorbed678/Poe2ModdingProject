@@ -175,3 +175,93 @@ impl Player {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn player() -> Player {
+        let roll = OwnedSkill {
+            id: 1,
+            granted: GrantedSkill {
+                effect: 25,
+                effect_level_row: 899,
+                stat_set_rows: vec![905],
+                action_type: Some(60748),
+                constant_stats: vec![("dodge_roll_base_travel_distance".into(), 46)],
+                implicit_stats: Vec::new(),
+            },
+            id_name: "DodgeRollPlayer".into(),
+            stats: Vec::new(),
+        };
+        Player::new(1, (100, 100), 37.0, None, vec![roll], Some(0x2000_2909))
+    }
+
+    fn use_skill(skill: u32, x: i32, y: i32) -> UseSkill {
+        UseSkill {
+            skill,
+            unk_13: 0xff,
+            x,
+            y,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn click_to_move_targets_relative_cells() {
+        let mut p = player();
+        let a = p.on_use_skill(&use_skill(0x2000_2909, 10, -5)).unwrap();
+        assert_eq!((a.grid_x, a.grid_y), (100, 100));
+        assert_eq!((a.target_x, a.target_y), (110, 95));
+        assert_eq!((a.action_id, a.unk_3c), (1, 0xff));
+        for _ in 0..30 {
+            p.tick(0.033);
+        }
+        assert_eq!(p.mover.cell(), (110, 95));
+        assert!(!p.mover.is_moving());
+        // Action ids increase.
+        assert_eq!(
+            p.on_use_skill(&use_skill(0x2000_2909, 1, 0))
+                .unwrap()
+                .action_id,
+            2
+        );
+    }
+
+    #[test]
+    fn unknown_skills_are_ignored() {
+        assert!(player().on_use_skill(&use_skill(0x1234, 1, 1)).is_none());
+    }
+
+    #[test]
+    fn roll_uses_the_travel_distance_and_pauses() {
+        let mut p = player();
+        p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
+        assert!(matches!(p.mover.motion, Motion::Roll { remaining, .. } if remaining == 46.0));
+        p.paused = true;
+        p.tick(0.033);
+        assert_eq!(p.mover.cell(), (100, 100));
+        p.paused = false;
+        while p.mover.is_moving() {
+            p.tick(0.033);
+        }
+        assert_eq!(p.mover.cell(), (100, 146));
+    }
+
+    #[test]
+    fn wasd_echoes_the_direction_with_the_cell() {
+        let mut p = player();
+        let r = p.on_move_direction(&MoveDirection {
+            x: 180,
+            ..Default::default()
+        });
+        assert_eq!((r.dir_x, r.dir_y, r.grid_x, r.grid_y), (180, 0, 100, 100));
+        for _ in 0..10 {
+            p.tick(0.033);
+        }
+        let r = p.on_move_direction(&MoveDirection::default());
+        assert_eq!((r.dir_x, r.grid_y), (0, 100));
+        assert!(r.grid_x > 110);
+        assert!(!p.mover.is_moving());
+    }
+}

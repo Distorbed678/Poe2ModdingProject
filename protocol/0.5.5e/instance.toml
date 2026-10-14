@@ -29,6 +29,8 @@ UseSkill = 0x01a5
 SkillReleased = 0x01ad
 # Not decoded yet: u8 player, u8 (sent when Space is pressed/released).
 Unknown02e6 = 0x02e6
+# Not decoded yet: u8 player (sent with a dodge roll's UseSkill; sender 0x14210fd56).
+Unknown01ac = 0x01ac
 
 [server]
 EnableEncryption = 0x0011
@@ -59,5 +61,6 @@ Unknown0221 = 1
 Unknown023d = 2
 Unknown02e8 = 2
 Unknown02e6 = 2
+Unknown01ac = 1
 Unknown0351 = 1
 Unknown0357 = 1

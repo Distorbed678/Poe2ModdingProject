@@ -107,7 +107,7 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 
 ## Pause (2026-10-14)
 - **C→S `0x01ff` PauseRequest**: `u8, u8 paused` (class `0x1434e50f8`). Sent when the escape menu opens or closes in a solo game, and once (`00 00`) after entering an area.
-- **S→C `0x01fe` SetPause** (simulation message, reader `0x1421842a0`): simulation header, then `u8` (bit 0 → world +0x868 paused, bit 1 → +0x869). Applied by `0x142134240` through world vfunc +0x200 (`0x14168aaf0`). While +0x868 is set, pausable entities update with dt 0. With both bits set the client also applies its "Pause" audio state and shows "GAME PAUSED". The server answers every request with both bits equal to the request (the server simulation will honour it in M3).
+- **S→C `0x01fe` SetPause** (simulation message, reader `0x1421842a0`): simulation header, then `u8` (bit 0 → world +0x868 paused, bit 1 → +0x869). Applied by `0x142134240` through world vfunc +0x200 (`0x14168aaf0`). While +0x868 is set, pausable entities update with dt 0. With both bits set the client also applies its "Pause" audio state and shows "GAME PAUSED". The server answers every request with both bits equal to the request, and pauses its own simulation while paused (see [movement.md](movement.md#pause)).
 
 ## Chat channels (2026-10-14)
 - **C→S `0x014c` ChatJoinRequest**: `u8, u16 channel (0xffff = any), u8 kind (0 global, 1 trade), u8, u8`. Sent for global and trade chat after entering an area.

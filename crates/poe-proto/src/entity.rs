@@ -324,4 +324,31 @@ mod tests {
         assert_eq!(size(&Component::Inventories), 2);
         assert_eq!(size(&Component::Actor(Actor::default())), 48);
     }
+
+    #[test]
+    fn actor_skill_layout() {
+        let skill = Skill {
+            id: 1,
+            effect_level_row: 899,
+            stat_set_rows: vec![905],
+            stats: vec![(0x457d, 46)],
+        };
+        let mut w = Writer::new();
+        skill.encode(&mut w);
+        let mut expect = vec![1, 0, 0, 0, 0]; // id, slot
+        expect.extend([0, 0x83, 0x03, 0, 0]); // effect: u8, GrantedEffectsPerLevel 899
+        expect.extend([0, 0x89, 0x03, 0, 0]); // stat set: u8, row 905
+        expect.extend([0; 2 + 12 + 1]); // flags, supports, 3 x u32, u8
+        expect.extend([1, 0xc0, 0x45, 0x7d, 46]); // stats: count, key (varuint), value
+        expect.push(0);
+        assert_eq!(w.as_slice(), expect);
+        // The skill count sits after the 18-byte prefix and the sub-reader flags.
+        let actor = Actor {
+            skills: vec![skill],
+        };
+        let mut w = Writer::new();
+        actor.encode(&mut w);
+        assert_eq!(w.as_slice()[19], 1);
+        assert_eq!(w.len(), 48 + expect.len());
+    }
 }

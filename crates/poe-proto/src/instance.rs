@@ -162,6 +162,73 @@ mod tests {
         assert_eq!(hnc_bits([0, 0, 0x40, 0]), 1 << 31);
     }
 
+    fn decode_all<M: Message>(bytes: &[u8]) -> M {
+        let mut r = Reader::new(bytes);
+        let m = M::decode(&mut r).unwrap();
+        assert!(r.is_empty(), "trailing bytes");
+        m
+    }
+
+    #[test]
+    fn move_direction_matches_capture() {
+        // Captured 2026-10-14 (bodies after the 0x0063 opcode): W, then release; D; S.
+        let w: MoveDirection = decode_all(&[0x00, 0x80, 0x7f, 0x80, 0x7f, 0, 0, 0]);
+        assert_eq!((w.x, w.y), (127, 127));
+        let stop: MoveDirection = decode_all(&[0, 0, 0, 0, 0, 0]);
+        assert_eq!((stop.x, stop.y), (0, 0));
+        let d: MoveDirection = decode_all(&[0x00, 0x80, 0xb4, 0x00, 0, 0, 0]);
+        assert_eq!((d.x, d.y), (180, 0));
+        let s: MoveDirection = decode_all(&[0x00, 0xbf, 0x81, 0xbf, 0x81, 0, 0, 0]);
+        assert_eq!((s.x, s.y), (-127, -127));
+    }
+
+    #[test]
+    fn use_skill_matches_capture() {
+        // Click-to-move (Move skill), captured 2026-10-14 after the 0x01a5 opcode.
+        let u: UseSkill = decode_all(&[
+            0x00, 0x20, 0x00, 0x29, 0x09, 0x04, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x2e, 0xff,
+            0xff, 0xff, 0xd3,
+        ]);
+        assert_eq!(u.skill, 0x2000_2909);
+        assert_eq!((u.flags, u.unk_13, u.target_entity), (0x0400, 0xff, None));
+        assert_eq!((u.x, u.y), (46, -45));
+        let r: SkillReleased = decode_all(&[0x00, 0x20, 0x00, 0x29, 0x09, 0x00]);
+        assert_eq!(r.skill, 0x2000_2909);
+    }
+
+    #[test]
+    fn movement_messages_round_trip() {
+        let start = StartAction {
+            header: SimulationHeader {
+                entity_id: 1,
+                ..Default::default()
+            },
+            flags: 0,
+            target_entity: Some(7),
+            grid_x: 285,
+            grid_y: 1140,
+            target_x: 331,
+            target_y: -5,
+            skill: 1,
+            action_id: 3,
+            unk_3c: 0xff,
+        };
+        let mut w = Writer::new();
+        start.encode(&mut w);
+        assert_eq!(decode_all::<StartAction>(w.as_slice()), start);
+        let update = MoveDirectionUpdate {
+            header: start.header,
+            dir_x: -127,
+            dir_y: 127,
+            grid_x: 285,
+            grid_y: 1140,
+            unk_30: false,
+        };
+        let mut w = Writer::new();
+        update.encode(&mut w);
+        assert_eq!(decode_all::<MoveDirectionUpdate>(w.as_slice()), update);
+    }
+
     #[test]
     fn hello_matches_capture() {
         // Captured 2026-10-13 (body after the 0x000f opcode).
