@@ -194,6 +194,54 @@ impl Message for RequestCharacterList {
     }
 }
 
+/// C→S: delete a character (sent after the confirmation dialog). Captured 2026-10-14:
+/// `00 0c | 00 08 "deleteme" | 01 00 00 00 01`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeleteCharacter {
+    /// Byte string (`u16` length).
+    pub name: String,
+    /// Trailing bytes, not decoded yet (`01 00 00 00 01` in the capture).
+    pub unk: [u8; 5],
+}
+
+impl Message for DeleteCharacter {
+    const NAME: &'static str = "DeleteCharacter";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.astring(&self.name).bytes(&self.unk);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            name: r.astring()?,
+            unk: r.array()?,
+        })
+    }
+}
+
+/// S→C reply to [`DeleteCharacter`] (class `0x143509d60`, shared with 0x0b/0x0f/0x44: `u16`
+/// at +0x14, then `u32` at +0x10). Signals event +0xb88, which the delete screen
+/// (`0x140ed8710`) handles: `result` 0 closes it as deleted, anything else is shown as an
+/// error (text looked up by code).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeleteCharacterResult {
+    pub result: u16,
+    pub unk: u32,
+}
+
+impl Message for DeleteCharacterResult {
+    const NAME: &'static str = "DeleteCharacterResult";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u16(self.result).u32(self.unk);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            result: r.u16()?,
+            unk: r.u32()?,
+        })
+    }
+}
+
 /// One character in [`CharacterList`] (entry reader `0x1427164c0`, 0x58-byte client struct).
 /// Field names after `name` are provisional until their meaning is confirmed in the UI code;
 /// the comments give the client struct offsets.

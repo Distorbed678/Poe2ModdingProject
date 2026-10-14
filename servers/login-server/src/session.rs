@@ -9,8 +9,9 @@ use poe_proto::{
     Direction, Message, Protocol,
     login::{
         Authenticate, AuthenticationResult, CharacterCreated, CharacterDetails, CharacterEntry,
-        CharacterList, CreateCharacter, InstanceDetails, KeepAlive, LeagueEntry, LeagueList,
-        PlayCharacter, RequestCharacterDetails, RequestCharacterList,
+        CharacterList, CreateCharacter, DeleteCharacter, DeleteCharacterResult, InstanceDetails,
+        KeepAlive, LeagueEntry, LeagueList, PlayCharacter, RequestCharacterDetails,
+        RequestCharacterList,
     },
 };
 use poe_store::{Account, Character, NewCharacter};
@@ -27,6 +28,7 @@ enum ClientMessage {
     CreateCharacter(CreateCharacter),
     RequestCharacterDetails(RequestCharacterDetails),
     PlayCharacter(PlayCharacter),
+    DeleteCharacter(DeleteCharacter),
 }
 
 /// Reads one message of a known type (opcode checked against the table).
@@ -67,6 +69,9 @@ fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessag
             RequestCharacterDetails::decode(r).map(ClientMessage::RequestCharacterDetails)
         }
         Some(PlayCharacter::NAME) => PlayCharacter::decode(r).map(ClientMessage::PlayCharacter),
+        Some(DeleteCharacter::NAME) => {
+            DeleteCharacter::decode(r).map(ClientMessage::DeleteCharacter)
+        }
         _ => Err(DecodeError::Invalid {
             offset: at,
             what: "unknown login opcode",
@@ -112,6 +117,23 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 send_character_list(&server, &mut conn, req.account_id).await?;
                 conn.send(&server.protocol.login.encode(&league_list(&server))?)
                     .await?;
+            }
+            ClientMessage::DeleteCharacter(req) => {
+                let Some(account) = &account else {
+                    warn!("delete character before authentication");
+                    continue;
+                };
+                let deleted = server.store.delete_character(account.id, &req.name)?;
+                info!(name = %req.name, deleted, unk = ?req.unk, "delete character");
+                // Result 0 closes the delete screen; the code is otherwise shown as an error.
+                // TODO: the error code for "no such character" is not known yet.
+                let result = DeleteCharacterResult {
+                    result: if deleted { 0 } else { 1 },
+                    unk: 0,
+                };
+                conn.send(&server.protocol.login.encode(&result)?).await?;
+                // The client keeps its list until it gets a new one (it does not ask).
+                send_character_list(&server, &mut conn, account.id).await?;
             }
             ClientMessage::CreateCharacter(create) => {
                 let Some(account) = &account else {
