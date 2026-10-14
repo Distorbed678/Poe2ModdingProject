@@ -62,6 +62,8 @@ pub trait Store: Send + Sync {
     fn characters(&self, account_id: u32) -> Result<Vec<Character>>;
     /// Creates a character; `Ok(None)` if the name is already taken.
     fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>>;
+    /// Deletes an account's character by name; `Ok(false)` if there is none.
+    fn delete_character(&self, account_id: u32, name: &str) -> Result<bool>;
     /// Marks the start area's intro as played.
     fn set_intro_done(&self, character_id: u32) -> Result<()>;
 }

@@ -7,6 +7,7 @@
 KeepAlive = 0x0001
 KeyExchange = 0x0002
 Authenticate = 0x0005
+DeleteCharacter = 0x000c
 PlayCharacter = 0x000e
 RequestCharacterDetails = 0x0010
 CreateCharacter = 0x0012
@@ -17,6 +18,7 @@ RequestCharacterListAlt = 0x0046
 
 [server]
 KeyExchange = 0x0002
+DeleteCharacterResult = 0x000d
 AuthenticationResult = 0x0004
 CharacterDetails = 0x0011
 CharacterList = 0x0015

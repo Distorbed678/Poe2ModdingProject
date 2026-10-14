@@ -110,6 +110,11 @@ Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the selec
 - The **league label** under a character is grey (`0xff676767`) for every non-hardcore league and dark red for hardcore (`0x1406b95f0`). Grey is normal.
 - The **league banner** comes from CharacterEntry **+0x4d = `LeagueFlag.dat` row + 1** (`0x140c7e460`). 0 or 1 give the grey event banner. The row's IsHC/IsSSF pick red or blue and the green variant. Config: `[[leagues]] flag = "StandardFlag"`.
 
+## Deleting a character (verified 2026-10-14)
+1. **C→S `0x000c` DeleteCharacter**, sent after the confirmation dialog: `astring name` (`u16` byte length + bytes), then 5 bytes not decoded yet (`01 00 00 00 01` when deleting the first of two characters).
+2. **S→C `0x000d` DeleteCharacterResult**: `u16 result, u32` (class `0x143509d60`, shared with 0x0b/0x0f/0x44). The handler signals event +0xb88. The delete screen's callback (`0x140ed8710`) closes on result 0; any other code is looked up and shown as an error text. Until the reply arrives, the dialog shows "Waiting for response...".
+3. **S→C `0x0015` CharacterList**: the client keeps its old list after a delete and does not ask for a new one, so the server sends it.
+
 ## Hand-off to the instance server
 | Message | Layout |
 |---|---|

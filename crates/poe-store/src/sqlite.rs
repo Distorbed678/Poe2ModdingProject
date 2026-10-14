@@ -147,6 +147,15 @@ impl Store for SqliteStore {
             character_from_row,
         )?))
     }
+
+    fn delete_character(&self, account_id: u32, name: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute(
+            "DELETE FROM characters WHERE account_id = ?1 AND name = ?2",
+            params![account_id, name],
+        )?;
+        Ok(deleted > 0)
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +184,11 @@ mod character_tests {
         };
         assert!(store.create_character(&dup).unwrap().is_none());
         assert_eq!(store.characters(a.id).unwrap(), vec![c]);
+        // Deleting only touches the owner's character.
+        assert!(!store.delete_character(a.id + 1, "Tester").unwrap());
+        assert!(store.delete_character(a.id, "Tester").unwrap());
+        assert!(store.characters(a.id).unwrap().is_empty());
+        assert!(!store.delete_character(a.id, "Tester").unwrap());
     }
 }
 
