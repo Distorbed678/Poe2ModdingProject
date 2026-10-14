@@ -6,15 +6,16 @@
 //! server next sends a position. With these reports the server knows where the client really
 //! is and sends that, so nothing snaps.
 //!
-//! Transport: one UDP datagram per frame to the last loopback address the game connected to
-//! (the instance server's TCP port; the server listens for UDP on the same port), so it only
-//! ever goes to a local server. Payload (little-endian, 24 bytes):
+//! Transport: one UDP datagram per frame to the game's loopback connection to the instance
+//! server (`position_sync_port`; the server listens for UDP on the same port), so it only ever
+//! goes to a local server. Without a configured port, the last loopback connection is used,
+//! which breaks when the game later connects to another local service. Payload (little-endian, 24 bytes):
 //! `b"PSY1", u16 our TCP port of that connection, u16 flags, u32 frame counter, f32 grid x,
 //! f32 grid y, u16 current action type, u16 second action type`.
 
 use std::sync::{
     Mutex,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering},
 };
 
 use windows_sys::Win32::Networking::WinSock::{
@@ -23,18 +24,34 @@ use windows_sys::Win32::Networking::WinSock::{
 };
 
 pub static ENABLED: AtomicBool = AtomicBool::new(false);
+/// The instance server's port (0: any loopback connection).
+pub static PORT: AtomicU16 = AtomicU16::new(0);
 
-/// Last loopback connection: destination and our local port.
-static TARGET: Mutex<Option<(SOCKADDR_IN, u16)>> = Mutex::new(None);
+/// Last loopback connection: destination, socket and our local port (0 until known).
+static TARGET: Mutex<Option<(SOCKADDR_IN, SOCKET, u16)>> = Mutex::new(None);
 static SOCK: AtomicUsize = AtomicUsize::new(INVALID_SOCKET);
 
 /// Called by the connect hook for loopback connections, after the connect call.
 pub fn record_connect(sock: SOCKET, dest: &SOCKADDR_IN) {
+    let wanted = PORT.load(Ordering::Relaxed);
+    if wanted != 0 && u16::from_be(dest.sin_port) != wanted {
+        return;
+    }
+    // The game connects non-blocking: under Wine the local port can still be 0 here, so it
+    // is looked up again when reporting until it is known.
+    let port = local_port(sock);
+    log::info!(
+        "position sync: target port {} (local port {port}, socket {sock:#x})",
+        u16::from_be(dest.sin_port)
+    );
+    *TARGET.lock().unwrap() = Some((*dest, sock, port));
+}
+
+fn local_port(sock: SOCKET) -> u16 {
     let mut local: SOCKADDR_IN = unsafe { std::mem::zeroed() };
     let mut len = size_of::<SOCKADDR_IN>() as i32;
     let ok = unsafe { getsockname(sock, &mut local as *mut _ as *mut SOCKADDR, &mut len) } == 0;
-    let port = if ok { u16::from_be(local.sin_port) } else { 0 };
-    *TARGET.lock().unwrap() = Some((*dest, port));
+    if ok { u16::from_be(local.sin_port) } else { 0 }
 }
 
 /// One report for the player entity (from the per-frame entity tick).
@@ -42,9 +59,22 @@ pub fn report(entity: usize, frame: u32) {
     if !ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    let Some((dest, local_port)) = *TARGET.lock().unwrap() else {
-        return;
+    let (dest, local_port) = {
+        let mut target = TARGET.lock().unwrap();
+        let Some((dest, sock, port)) = target.as_mut() else {
+            return;
+        };
+        if *port == 0 {
+            *port = local_port(*sock);
+            if *port != 0 {
+                log::info!("position sync: local port {} (resolved late)", *port);
+            }
+        }
+        (*dest, *port)
     };
+    if local_port == 0 {
+        return;
+    }
     use crate::mem::read;
     let Some(comps) = read::<usize>(entity + 0x10) else {
         return;

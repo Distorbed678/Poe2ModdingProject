@@ -31,7 +31,6 @@ pub struct OwnedSkill {
 pub enum Reply {
     Direction(MoveDirectionUpdate),
     Start(StartAction),
-    Target(UpdateActionTarget),
     Sprint(SprintState),
 }
 
@@ -64,10 +63,18 @@ pub struct Player {
     pending: Option<Pending>,
     /// The WASD direction currently held.
     wasd: (i32, i32),
+    /// Held click-to-move: the walk direction last sent, and the last cursor offset.
+    held_dir: Option<(i32, i32)>,
+    held_target: Option<(i32, i32)>,
     /// The sprint key (Space) is held.
     sprint_held: bool,
     /// The client's latest position report (movement dev bridge, [`crate::sync`]).
     client: Option<crate::sync::ClientReport>,
+    /// Reports have arrived in this session: from then on the client's last report is the
+    /// player's state, also while reports pause.
+    synced: bool,
+    /// The last call had a fresh report (for logging).
+    fresh: bool,
     /// A dodge roll is running (from its StartAction until it ends).
     in_roll: bool,
     /// The client has reported the roll action since it started.
@@ -80,8 +87,19 @@ pub struct Player {
 /// Roll length when the skill does not list `dodge_roll_base_travel_distance`.
 const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
 /// UseSkill `target_flags` bit 4: the input is held and the use repeats (about every 70 ms,
-/// e.g. a held click-to-move); it re-aims the running action.
+/// e.g. a held click-to-move).
 const TARGET_REPEAT: u8 = 0x10;
+/// Length of a WASD direction vector (W = (127, 127), D = (180, 0)).
+const WASD_LENGTH: f32 = 180.0;
+/// A held click closer than this (|dx| + |dy| cells) to the player stops the walk.
+const HELD_STOP_CELLS: i32 = 3;
+
+/// Whether two walk directions are within about 8 degrees.
+fn same_direction(a: (i32, i32), b: (i32, i32)) -> bool {
+    let dot = (a.0 * b.0 + a.1 * b.1) as f32;
+    let len = ((a.0 * a.0 + a.1 * a.1) as f32).sqrt() * ((b.0 * b.0 + b.1 * b.1) as f32).sqrt();
+    len > 0.0 && dot / len > 0.99
+}
 /// Basic-action skill ids are this plus the action type key.
 pub const BASIC_ACTION_SKILL: u32 = 0x2000_0000;
 /// Simulation header order key: apply after all entities have updated in the frame (used for
@@ -107,8 +125,12 @@ impl Player {
             current: None,
             pending: None,
             wasd: (0, 0),
+            held_dir: None,
+            held_target: None,
             sprint_held: false,
             client: None,
+            synced: false,
+            fresh: false,
             in_roll: false,
             roll_seen: false,
             roll_frames: 0,
@@ -119,23 +141,38 @@ impl Player {
     /// The client's latest report (or `None` without fresh reports): the server takes the
     /// client's position, so positions it sends match the client's.
     pub fn apply_report(&mut self, report: Option<crate::sync::ClientReport>) {
-        if let Some(r) = report {
-            let changed = self
-                .client
-                .is_none_or(|c| (c.action, c.action2, c.flags) != (r.action, r.action2, r.flags));
-            if changed {
-                debug!(
-                    action = format_args!("{:#06x}", r.action),
-                    action2 = format_args!("{:#06x}", r.action2),
-                    flags = format_args!("{:#x}", r.flags),
-                    cell = ?r.cell(),
-                    "client action"
-                );
-            }
-            self.mover.x = r.x;
-            self.mover.y = r.y;
+        if report.is_some() != self.fresh {
+            debug!(cell = ?self.mover.cell(), "client reports {}", if report.is_some() { "arriving" } else { "paused" });
+            self.fresh = report.is_some();
         }
-        self.client = report;
+        let Some(r) = report else {
+            // Keep the last report once synced: the client is where it last said.
+            if !self.synced {
+                self.client = None;
+            }
+            return;
+        };
+        let changed = self
+            .client
+            .is_none_or(|c| (c.action, c.action2, c.flags) != (r.action, r.action2, r.flags));
+        if changed {
+            debug!(
+                action = format_args!("{:#06x}", r.action),
+                action2 = format_args!("{:#06x}", r.action2),
+                flags = format_args!("{:#x}", r.flags),
+                cell = ?r.cell(),
+                "client action"
+            );
+        }
+        self.mover.x = r.x;
+        self.mover.y = r.y;
+        self.synced = true;
+        self.client = Some(r);
+    }
+
+    /// Client position reports have arrived in this session.
+    pub fn synced(&self) -> bool {
+        self.synced
     }
 
     /// The skills to list in the player entity's Actor component.
@@ -190,8 +227,11 @@ impl Player {
         }
         let was = self.mover.motion;
         // No collision until the server has the terrain (M4): the simulation moves in straight
-        // lines and takes the client's position from its reports.
-        self.mover.advance(dt, &Open);
+        // lines. Without terrain it would walk through walls, so once reports have arrived the
+        // player is only ever where the client last reported it.
+        if !self.synced {
+            self.mover.advance(dt, &Open);
+        }
         let mut out = Vec::new();
         if self.in_roll {
             if self.roll_over() {
@@ -352,19 +392,77 @@ impl Player {
     /// A skill use: Move (click-to-move) or one of the character's skills (dodge roll).
     /// Returns the action to start on the client; `None` if the skill is not known or the use
     /// waits for a roll to end.
-    /// A skill use from the client: held input repeats the use for the running action, which
-    /// only gets a new target (`0x1cb`). Starting it again each time made the client restart
-    /// its Move action every 70 ms and lose most of a frame's step each time.
-    pub fn on_skill_input(&mut self, req: &UseSkill) -> Option<Reply> {
-        let client_idle = self.client.is_some_and(|c| c.action == 0 && c.action2 == 0);
-        if req.target_flags & TARGET_REPEAT != 0
-            && !self.rolling()
-            && !client_idle
-            && let Some(current) = self.current.filter(|c| c.skill == req.skill)
-        {
-            return Some(Reply::Target(self.retarget(current, req.x, req.y)));
+    /// A skill use from the client. A held click-to-move repeats the Move use about every
+    /// 70 ms (target flag `0x10`). The client re-aims only the action in its first slot with
+    /// `0x1cb`, not a Move, and a new StartAction restarts the Move and costs most of a
+    /// frame's step. So while the button is held the player walks like WASD (`0x64` toward
+    /// the cursor, sent when the direction changes), and on release the Move goes to the last
+    /// cursor point ([`Player::on_skill_released`]).
+    pub fn on_skill_input(&mut self, req: &UseSkill) -> Vec<Reply> {
+        let repeat = req.target_flags & TARGET_REPEAT != 0;
+        if repeat && Some(req.skill) == self.move_skill && !self.rolling() {
+            self.held_target = Some((req.x, req.y));
+            // The cursor on the player: stop walking.
+            if req.x.abs() + req.y.abs() < HELD_STOP_CELLS {
+                return match self.held_dir.take() {
+                    Some(_) => vec![Reply::Direction(
+                        self.start_direction(&MoveDirection::default()),
+                    )],
+                    None => Vec::new(),
+                };
+            }
+            let len = ((req.x * req.x + req.y * req.y) as f32).sqrt();
+            let dir = (
+                (req.x as f32 * WASD_LENGTH / len).round() as i32,
+                (req.y as f32 * WASD_LENGTH / len).round() as i32,
+            );
+            let client_idle = self.client.is_some_and(|c| c.action == 0 && c.action2 == 0);
+            if let Some(prev) = self.held_dir
+                && !client_idle
+                && same_direction(prev, dir)
+            {
+                return Vec::new();
+            }
+            self.held_dir = Some(dir);
+            let walk = MoveDirection {
+                x: dir.0,
+                y: dir.1,
+                ..Default::default()
+            };
+            return vec![Reply::Direction(self.start_direction(&walk))];
         }
-        self.on_use_skill(req).map(Reply::Start)
+        self.held_dir = None;
+        self.held_target = None;
+        self.on_use_skill(req)
+            .map(Reply::Start)
+            .into_iter()
+            .collect()
+    }
+
+    /// The skill's input was released: a held click-to-move stops walking and goes to the last
+    /// cursor point (the stop also clears the client's walk direction, which it would
+    /// otherwise resume after the Move).
+    pub fn on_skill_released(&mut self, skill: u32) -> Vec<Reply> {
+        let target = self.held_target.take();
+        if Some(skill) != self.move_skill || self.held_dir.take().is_none() {
+            return Vec::new();
+        }
+        let mut out = vec![Reply::Direction(
+            self.start_direction(&MoveDirection::default()),
+        )];
+        if let Some((x, y)) = target
+            && x.abs() + y.abs() >= HELD_STOP_CELLS
+        {
+            let release = UseSkill {
+                skill,
+                unk_13: 0xff,
+                x,
+                y,
+                ..Default::default()
+            };
+            out.extend(self.start_skill(&release).map(Reply::Start));
+        }
+        out
     }
 
     pub fn on_use_skill(&mut self, req: &UseSkill) -> Option<StartAction> {
@@ -527,23 +625,29 @@ mod tests {
     }
 
     #[test]
-    fn held_click_retargets_the_running_move() {
+    fn held_click_walks_like_wasd_and_ends_at_the_cursor() {
         let mut p = player();
-        let Some(Reply::Start(a)) = p.on_skill_input(&use_skill(0x2000_2909, 30, 0)) else {
-            panic!("the first use starts the move");
-        };
-        // The held button repeats the use with target flag 0x10: same action, new target.
-        let held = UseSkill {
+        let first = p.on_skill_input(&use_skill(0x2000_2909, 30, 0));
+        assert!(matches!(&first[..], [Reply::Start(_)]));
+        let held = |x, y| UseSkill {
             target_flags: 0x10,
-            ..use_skill(0x2000_2909, 30, 5)
+            ..use_skill(0x2000_2909, x, y)
         };
-        let Some(Reply::Target(t)) = p.on_skill_input(&held) else {
-            panic!("a repeat re-aims the running move");
-        };
-        assert_eq!((t.action_id, t.x, t.y), (a.action_id, 130, 105));
-        // Once the move has ended, a repeat starts a new one.
-        run_until_idle(&mut p);
-        assert!(matches!(p.on_skill_input(&held), Some(Reply::Start(_))));
+        // Repeats walk toward the cursor (direction scaled like WASD)...
+        let r = p.on_skill_input(&held(30, 0));
+        assert!(matches!(&r[..], [Reply::Direction(d)] if (d.dir_x, d.dir_y) == (180, 0)));
+        // ...but only when the direction changes.
+        assert!(p.on_skill_input(&held(31, 1)).is_empty());
+        let r = p.on_skill_input(&held(0, 20));
+        assert!(matches!(&r[..], [Reply::Direction(d)] if (d.dir_x, d.dir_y) == (0, 180)));
+        // Release: stop the walk, then move to the last cursor point.
+        let r = p.on_skill_released(0x2000_2909);
+        assert!(matches!(&r[..],
+            [Reply::Direction(d), Reply::Start(a)]
+                if (d.dir_x, d.dir_y) == (0, 0) && (a.target_x, a.target_y) == (100, 120)));
+        // A plain click release does nothing.
+        p.on_skill_input(&use_skill(0x2000_2909, 5, 5));
+        assert!(p.on_skill_released(0x2000_2909).is_empty());
     }
 
     #[test]

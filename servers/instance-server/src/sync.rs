@@ -71,7 +71,9 @@ const FRESH: Duration = Duration::from_millis(250);
 
 impl ClientReports {
     pub fn insert(&self, port: u16, report: ClientReport) {
-        self.latest.lock().unwrap().insert(port, report);
+        if self.latest.lock().unwrap().insert(port, report).is_none() {
+            info!(port, "client position reports started");
+        }
     }
 
     /// The latest report from the client on `port`, if recent.

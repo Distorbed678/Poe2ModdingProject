@@ -43,6 +43,9 @@ pub struct FeatureConfig {
     /// With `dump_object_types`: report the player's position and action to the local
     /// instance server every frame (movement dev bridge until M4, see position_sync.rs).
     pub position_sync: bool,
+    /// The instance server's port: only connections to it become the report target (0: the
+    /// last loopback connection). Set by `cargo xtask deploy-client` from `server.toml`.
+    pub position_sync_port: u16,
     /// Keys posted to the game window for unattended tests: `[[ms_after_load, vk], ...]`
     /// (e.g. 0x0D Enter to log in and play, 0x2C PrintScreen for an in-game screenshot).
     pub auto_keys: Vec<(u64, u16)>,
@@ -61,6 +64,7 @@ impl Default for FeatureConfig {
             dump_object_types: false,
             movement_log: false,
             position_sync: true,
+            position_sync_port: 0,
             auto_keys: Vec::new(),
         }
     }

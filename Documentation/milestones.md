@@ -66,7 +66,8 @@ Details are in [protocol/movement.md](protocol/movement.md) and [protocol/login.
 - **Dodge roll:** input during a roll is held until the roll ends, instead of cutting it off, so the roll finishes.
 - **Sprint:** `0x2e6` / `0x2e7` are decoded and echoed. The client sprints briefly after a roll with Space held. A full sprint needs the buff system (M7): setting `is_sprinting` as a plain stat made the client drop its movement after the roll.
 - **Follow-up fixes (2026-10-14, after play-testing):**
-  - **Held click-to-move hitch:** a held button repeats UseSkill every ~70 ms (target flag `0x10`); the server answered each with a new StartAction, so the client restarted its Move and lost most of every other step. Repeats now re-aim the running action (`0x1cb`).
+  - **Held click-to-move hitch:** a held button repeats UseSkill every ~70 ms (target flag `0x10`); the server answered each with a new StartAction, so the client restarted its Move and lost most of every other step. `0x1cb` cannot re-aim a Move, so a held click now walks like WASD (`0x64` toward the cursor) and ends with a Move to the last cursor point.
+  - **Teleports / invisible walls** after the collision removal: when reports were missing, the server's wall-less simulation drifted and the client snapped at 46+ cells. Reports now go only to the instance port, and once they arrive the server never moves the player on its own.
   - **Server collision removed** at the user's request: no walkability grid, A* or wall sliding in the server simulation until M4 (the grid only places a restored position).
   - **Exit to log in screen** went to character selection: the client sends `0x355` + `0x1b` and shows the log-in screen only when its login connection is closed. The server now decodes both and closes the login connection on `0x1b`.
   - WASD measured smooth (steady 33 ms frames, constant 1.23-cell steps). The remaining unevenness comes from the client itself (sliding along walls, corners).

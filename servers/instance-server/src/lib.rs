@@ -224,6 +224,10 @@ impl InstanceServer {
         let mut ticker =
             tokio::time::interval(Duration::from_millis(self.config.instance.tick_ms.max(1)));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Without position reports the server only has its own simulation, which has no
+        // terrain yet: positions drift and the client snaps when they are 46+ cells apart.
+        let report_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut warned = !self.config.instance.position_sync;
         // Not decoded yet: log the client's decrypted messages (heartbeat 0x1c is skipped).
         loop {
             tokio::select! {
@@ -256,6 +260,14 @@ impl InstanceServer {
                 _ = ticker.tick() => {
                     let frame = std::time::Instant::now();
                     player.apply_report(self.reports.fresh(client_port));
+                    if !warned && !player.synced() && frame > report_deadline {
+                        warned = true;
+                        warn!(
+                            client_port,
+                            "no position reports from the client (poe-hook position_sync): \
+                             movement uses the server simulation and can snap"
+                        );
+                    }
                     let replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
                     let mut out = Vec::new();
                     for reply in &replies {
@@ -343,7 +355,6 @@ impl InstanceServer {
         Ok(match reply {
             player::Reply::Direction(m) => table.encode(m)?,
             player::Reply::Start(m) => table.encode(m)?,
-            player::Reply::Target(m) => table.encode(m)?,
             player::Reply::Sprint(m) => table.encode(m)?,
         })
     }
@@ -416,23 +427,31 @@ impl InstanceServer {
             // Skill use (click-to-move, dodge roll): start the action on the client.
             UseSkill::NAME => {
                 let req = UseSkill::decode(r)?;
-                match player.on_skill_input(&req) {
-                    Some(reply) => {
-                        debug!(?req, ?reply, "skill use");
-                        conn.send(&self.encode_reply(&reply)?).await?;
-                    }
-                    None => debug!(
-                        skill = format_args!("{:#010x}", req.skill),
-                        "skill use not started (unknown skill, or waiting for a roll to end)"
-                    ),
+                let replies = player.on_skill_input(&req);
+                debug!(?req, ?replies, "skill use");
+                let mut out = Vec::new();
+                for reply in &replies {
+                    out.extend(self.encode_reply(reply)?);
+                }
+                if !out.is_empty() {
+                    conn.send(&out).await?;
                 }
             }
             SkillReleased::NAME => {
                 let req = SkillReleased::decode(r)?;
+                let replies = player.on_skill_released(req.skill);
                 debug!(
                     skill = format_args!("{:#010x}", req.skill),
+                    ?replies,
                     "skill released"
                 );
+                let mut out = Vec::new();
+                for reply in &replies {
+                    out.extend(self.encode_reply(reply)?);
+                }
+                if !out.is_empty() {
+                    conn.send(&out).await?;
+                }
             }
             // Escape menu in a solo game: confirm with SetPause, which pauses the client's
             // world; the server simulation pauses with it.
