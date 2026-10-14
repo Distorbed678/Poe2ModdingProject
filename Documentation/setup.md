@@ -30,6 +30,7 @@ cargo xtask revert-client   # restores GameFiles/ to the original state
 - Writes a single UTF-16LE gateway entry, built from `[gateway]`/`[login]` in `config/server.toml`.
 - Copies the DLL to `GameFiles/version.dll`.
 - Copies `client/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
+- Sets `position_sync_port` in that file's `[features]` to `[instance] public_port`, so position reports go to the instance server.
 - Writes `steam_appid.txt`.
 
 `run-client` uses its own Proton prefix (`Tools/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`.

@@ -129,8 +129,37 @@ fn deploy_client(root: &Path, config: &Config, build: bool) -> Result<()> {
     if !hook_cfg.exists() {
         copy(&root.join("client/poe-hook").join(HOOK_CONFIG), &hook_cfg)?;
     }
+    // Position reports go to the instance server's port only.
+    set_hook_feature(
+        &hook_cfg,
+        "position_sync_port",
+        &config.instance.public_port.to_string(),
+    )?;
     std::fs::write(game.join(STEAM_APPID_FILE), STEAM_APPID)?;
     println!("deployed to {}", game.display());
+    Ok(())
+}
+
+/// Sets `key = value` in the `[features]` table of the installed `poe-hook.toml`, keeping the
+/// rest of the file (the user's settings).
+fn set_hook_feature(path: &Path, key: &str, value: &str) -> Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let line = format!("{key} = {value}");
+    let is_key = |l: &str| {
+        l.split('=')
+            .next()
+            .is_some_and(|k| k.trim() == key && l.contains('='))
+    };
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    if let Some(i) = lines.iter().position(|l| is_key(l)) {
+        lines[i] = line;
+    } else if let Some(i) = lines.iter().position(|l| l.trim() == "[features]") {
+        lines.insert(i + 1, line);
+    } else {
+        lines.push("[features]".into());
+        lines.push(line);
+    }
+    std::fs::write(path, lines.join("\n") + "\n")?;
     Ok(())
 }
 

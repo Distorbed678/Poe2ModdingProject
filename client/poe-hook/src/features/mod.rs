@@ -63,6 +63,7 @@ pub fn init_all(config: &Config, main: &Module) {
     let trace = (addresses, f.trace_limit.max(200));
     let dump_path = crate::exe_dir().join("object_types.txt");
     position_sync::ENABLED.store(f.position_sync, std::sync::atomic::Ordering::Relaxed);
+    position_sync::PORT.store(f.position_sync_port, std::sync::atomic::Ordering::Relaxed);
     dump_types::MOVEMENT_LOG.store(
         f.movement_log || std::env::var_os("POE_HOOK_MOVEMENT_LOG").is_some(),
         std::sync::atomic::Ordering::Relaxed,
