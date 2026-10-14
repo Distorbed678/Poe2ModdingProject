@@ -29,9 +29,10 @@ known_seeds = "data/terrain-vectors.tsv"
 # Movement trace (dev): client position reports, inputs and movement replies as TSV
 # (Documentation/protocol/movement.md#movement-trace). Empty to turn it off.
 movement_trace = "data/movement-trace.tsv"
-# Cell sent with a turn: "own" (re-aim only, like the real server), "heading" (a cell one
-# step along the new heading; the client is put on its centre) or "natural".
-turn_cell = "own"
+# Cell sent with a turn: "natural" (the cell the client reaches in that frame; it is put on
+# its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
+# See Documentation/protocol/movement.md#lag-m35.
+turn_cell = "natural"
 
 [database]
 path = "data/server.sqlite"

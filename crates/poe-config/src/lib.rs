@@ -191,7 +191,7 @@ pub struct InstanceConfig {
 }
 
 fn default_turn_cell() -> String {
-    "own".into()
+    "natural".into()
 }
 
 fn default_true() -> bool {

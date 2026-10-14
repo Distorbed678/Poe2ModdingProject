@@ -57,6 +57,8 @@ def main():
         pm, sm = math.hypot(*p), math.hypot(*s)
         if pm < 0.5:
             continue  # not walking before
+        if c[5] == "0xed4c" and dot > 0.9:
+            continue  # a dodge roll slowing down at its end
         dot = (p[0] * s[0] + p[1] * s[1]) / (pm * sm) if sm > 0 else 1.0
         if sm < 0.6 or dot < -0.2:
             recent = [o for o in outs if o[1] == c[1] and c[0] - 250 <= o[0] <= c[0] and o[2] == "out-dir"]

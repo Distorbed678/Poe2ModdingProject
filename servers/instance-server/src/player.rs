@@ -77,6 +77,11 @@ pub struct Player {
     fresh: bool,
     /// The client's movement per frame, from its last two reports.
     velocity: (f32, f32),
+    /// Client frame of the older of those two reports.
+    velocity_from: u32,
+    /// The last walk direction sent: until reports show the walk, the client's position is
+    /// predicted from it (the reports around a placement do not show the walking speed).
+    last_turn: Option<Turn>,
     /// The frame in which a message sent now applies on the client (set by the session:
     /// the tick being built, or the next one for input answered between ticks).
     pub apply_frame: i64,
@@ -107,11 +112,11 @@ const TARGET_REPEAT: u8 = 0x10;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TurnCell {
     /// The client's own cell when the turn applies: it only re-aims its walk.
-    #[default]
     Own,
     /// A cell one normal step along the new heading: the client is put on its centre.
     Heading,
     /// The cell the client would reach in that frame.
+    #[default]
     Natural,
 }
 
@@ -119,10 +124,20 @@ impl TurnCell {
     pub fn parse(s: &str) -> Self {
         match s {
             "heading" => Self::Heading,
-            "natural" => Self::Natural,
-            _ => Self::Own,
+            "own" => Self::Own,
+            _ => Self::Natural,
         }
     }
+}
+
+/// A walk direction sent to the client: at the end of `frame` (server frame numbers) the
+/// client is at `at` (the centre of the cell sent) and walks on along `dir` (unit, or zero
+/// for a stop) at walking speed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Turn {
+    frame: i64,
+    at: (f32, f32),
+    dir: (f32, f32),
 }
 
 /// Most frames a position is predicted ahead (beyond that the report is too old to trust).
@@ -170,6 +185,8 @@ impl Player {
             synced: false,
             fresh: false,
             velocity: (0.0, 0.0),
+            velocity_from: 0,
+            last_turn: None,
             apply_frame: 0,
             frame_seconds: 0.033,
             turn_cell: TurnCell::Heading,
@@ -222,6 +239,7 @@ impl Player {
         self.velocity = match self.client {
             Some(c) if r.frame > c.frame && r.frame - c.frame <= 4 => {
                 let n = (r.frame - c.frame) as f32;
+                self.velocity_from = c.frame;
                 ((r.x - c.x) / n, (r.y - c.y) / n)
             }
             Some(c) if r.frame == c.frame => self.velocity,
@@ -440,19 +458,11 @@ impl Player {
     /// A cell from the last report pulled the player back at every turn; the nearest cell made
     /// steps up to 0.7 cells too long or short.
     fn send_cell(&self, dir: Option<(f32, f32)>) -> (i32, i32) {
-        let Some(r) = self.client else {
+        if self.client.is_none() {
             return self.mover.cell();
-        };
-        // Frames from the report to the end of the frame the message applies in.
-        let lead = match self.frame_offset {
-            Some(o) => (self.apply_frame - (r.frame as i64 + o)).clamp(1, MAX_LEAD_FRAMES),
-            None => 1,
-        } as f32;
-        let (vx, vy) = self.velocity;
-        let start = (
-            self.mover.x + vx * (lead - 1.0),
-            self.mover.y + vy * (lead - 1.0),
-        );
+        }
+        // Where the client is when the frame begins, and where it would be at its end.
+        let (start, (vx, vy)) = self.predict(self.apply_frame - 1);
         let natural = ((start.0 + vx).floor() as i32, (start.1 + vy).floor() as i32);
         match self.turn_cell {
             TurnCell::Own => return (start.0.floor() as i32, start.1.floor() as i32),
@@ -495,6 +505,29 @@ impl Player {
         best.0
     }
 
+    /// The client's position at the end of server frame `f` and its velocity then: from the
+    /// last walk direction sent while the reports do not yet show it, else from the latest
+    /// report and the measured velocity.
+    fn predict(&self, f: i64) -> ((f32, f32), (f32, f32)) {
+        let Some(r) = self.client else {
+            return ((self.mover.x, self.mover.y), (0.0, 0.0));
+        };
+        let offset = self.frame_offset.unwrap_or(0);
+        let report_frame = r.frame as i64 + offset;
+        if let Some(t) = self.last_turn
+            && f >= t.frame
+            && (self.velocity_from as i64 + offset) < t.frame
+        {
+            let walk = self.mover.speed * self.frame_seconds;
+            let v = (t.dir.0 * walk, t.dir.1 * walk);
+            let n = (f - t.frame) as f32;
+            return ((t.at.0 + v.0 * n, t.at.1 + v.1 * n), v);
+        }
+        let n = (f - report_frame).clamp(0, MAX_LEAD_FRAMES) as f32;
+        let v = self.velocity;
+        ((self.mover.x + v.0 * n, self.mover.y + v.1 * n), v)
+    }
+
     fn start_direction(&mut self, req: &MoveDirection) -> MoveDirectionUpdate {
         self.current = None;
         self.mover.start(if req.x == 0 && req.y == 0 {
@@ -507,6 +540,24 @@ impl Player {
         });
         let (grid_x, grid_y) = self.send_cell(Some((req.x as f32, req.y as f32)));
         debug!(dir = ?(req.x, req.y), cell = ?(grid_x, grid_y), "move direction");
+        if self.client.is_some() {
+            let len = (req.x as f32).hypot(req.y as f32);
+            self.last_turn = Some(if len > 0.0 {
+                Turn {
+                    frame: self.apply_frame,
+                    at: (grid_x as f32 + 0.5, grid_y as f32 + 0.5),
+                    dir: (req.x as f32 / len, req.y as f32 / len),
+                }
+            } else {
+                // A stop has no position: the client halts about where it is.
+                let (at, _) = self.predict(self.apply_frame);
+                Turn {
+                    frame: self.apply_frame,
+                    at,
+                    dir: (0.0, 0.0),
+                }
+            });
+        }
         MoveDirectionUpdate {
             header: self.header(),
             dir_x: req.x,
@@ -647,6 +698,8 @@ impl Player {
             skill: req.skill,
         });
         let (cx, cy) = self.send_cell(Some(((tx - cx) as f32, (ty - cy) as f32)));
+        // Actions (click-to-move, rolls) move differently: predict from reports again.
+        self.last_turn = None;
         Some(StartAction {
             header: self.header(),
             flags: 0,
