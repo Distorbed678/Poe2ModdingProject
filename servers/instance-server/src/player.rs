@@ -21,6 +21,8 @@ pub struct OwnedSkill {
     pub id: u32,
     pub granted: GrantedSkill,
     pub id_name: String,
+    /// The skill's stats as (network key, value), sent in its Actor entry.
+    pub stats: Vec<(u32, i32)>,
 }
 
 pub struct Player {
@@ -36,8 +38,6 @@ pub struct Player {
     next_action: u16,
 }
 
-/// Dodge roll speed in cells per second (measured on the client; see movement.md).
-const ROLL_SPEED: f32 = 92.0;
 /// Roll length when the skill does not list `dodge_roll_base_travel_distance`.
 const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
 /// Basic-action skill ids are this plus the action type key.
@@ -71,6 +71,7 @@ impl Player {
                 id: s.id,
                 effect_level_row: s.granted.effect_level_row,
                 stat_set_rows: s.granted.stat_set_rows.clone(),
+                stats: s.stats.clone(),
             })
             .collect()
     }
@@ -150,11 +151,11 @@ impl Player {
             self.mover.start(if dx == 0.0 && dy == 0.0 {
                 Motion::Idle
             } else {
-                Motion::Dash {
+                Motion::Roll {
                     x: dx,
                     y: dy,
                     remaining: distance,
-                    speed: ROLL_SPEED,
+                    elapsed: 0.0,
                 }
             });
         } else {

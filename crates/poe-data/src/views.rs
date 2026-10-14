@@ -202,6 +202,8 @@ pub struct GrantedSkill {
     /// Constant stats of the base stat set (`GrantedEffectStatSets.ConstantStats` ids and
     /// values), e.g. `dodge_roll_base_travel_distance`.
     pub constant_stats: Vec<(String, i64)>,
+    /// Implicit (flag) stats of the base stat set (`GrantedEffectStatSets.ImplicitStats`).
+    pub implicit_stats: Vec<String>,
 }
 
 impl GrantedSkill {
@@ -230,20 +232,29 @@ impl GrantedSkill {
         };
         let mut stat_sets: Vec<usize> = row.row_ref("StatSet")?.into_iter().collect();
         let mut constant_stats = Vec::new();
-        if let Some(set) = stat_sets.first().and_then(|&i| {
-            data.table("GrantedEffectStatSets").ok().and_then(|t| {
-                t.row(i)
-                    .map(|r| (r.get("ConstantStats"), r.get("ConstantStatsValues")))
-            })
-        }) && let (Ok(ids), Ok(values)) = set
-            && let (Some(ids), Some(values)) = (ids.as_list(), values.as_list())
-        {
+        let mut implicit_stats = Vec::new();
+        if let Some(&base) = stat_sets.first() {
+            let sets = data.table("GrantedEffectStatSets")?;
             let stats = data.table("Stats")?;
-            for (id, value) in ids.iter().zip(values) {
-                if let (Some(row), Some(value)) =
-                    (id.as_row().and_then(|i| stats.row(i)), value.as_int())
-                {
-                    constant_stats.push((row.str("Id")?, value));
+            if let Some(set) = sets.row(base) {
+                let ids = set.get("ConstantStats")?;
+                let values = set.get("ConstantStatsValues")?;
+                if let (Some(ids), Some(values)) = (ids.as_list(), values.as_list()) {
+                    for (id, value) in ids.iter().zip(values) {
+                        if let (Some(row), Some(value)) =
+                            (id.as_row().and_then(|i| stats.row(i)), value.as_int())
+                        {
+                            constant_stats.push((row.str("Id")?, value));
+                        }
+                    }
+                }
+                if let Some(ids) = set.get("ImplicitStats")?.as_list() {
+                    for row in ids
+                        .iter()
+                        .filter_map(|v| v.as_row().and_then(|i| stats.row(i)))
+                    {
+                        implicit_stats.push(row.str("Id")?);
+                    }
                 }
             }
         }
@@ -286,6 +297,7 @@ impl GrantedSkill {
             stat_set_rows,
             action_type,
             constant_stats,
+            implicit_stats,
         }))
     }
 }

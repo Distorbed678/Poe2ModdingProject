@@ -262,6 +262,10 @@ impl poe_game::movement::Walkable for Grid {
     fn walkable(&self, x: i32, y: i32) -> bool {
         self.cell(0, x, y) != 0
     }
+
+    fn clearance(&self, x: i32, y: i32) -> u8 {
+        self.cell(0, x, y)
+    }
 }
 
 /// What the server knows about the client's terrain: the walkability grid, if exported.
