@@ -32,8 +32,30 @@ cargo xtask revert-client   # restores GameFiles/ to the original state
 - Copies `client/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
 - Writes `steam_appid.txt`.
 
-`run-client` uses its own Proton prefix (`Tools/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`. If launching through the script fails because of Steam integration, add `GameFiles/PathOfExileSteam.exe` to Steam as a non-Steam game with these launch options:
-`WINEDLLOVERRIDES="version=n,b" %command%`
+`run-client` uses its own Proton prefix (`Tools/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`.
+
+## Playing from Steam (non-Steam game shortcut)
+One-time setup, after `cargo xtask deploy-client`:
+1. In Steam: **Games → Add a Non-Steam Game to My Library… → Browse…** and select `<repo>/GameFiles/PathOfExileSteam.exe`. Click **Add Selected Programs**.
+2. In the library, right-click the new entry → **Properties…**:
+   - **Shortcut**: optionally rename it, e.g. "PoE2 Private Server". Set **Start in** to `"<repo>/GameFiles/"`.
+   - **Launch options**:
+     ```
+     SteamAppId=2694490 SteamGameId=2694490 WINEDLLOVERRIDES="version=n,b" %command%
+     ```
+     `version=n,b` loads our `version.dll` (the hook) instead of Wine's. The app id makes the Steam API start as Path of Exile 2, which you own.
+   - **Compatibility**: tick **Force the use of a specific Steam Play compatibility tool** and pick **Proton Experimental**.
+
+   Steam creates a separate Proton prefix for the shortcut (`steamapps/compatdata/<shortcut id>`); the official install's `compatdata/2694490` is never used.
+
+To play:
+1. Start the server from the repo: `cargo run --release -p poe-server` (leave it running; Ctrl+C stops it).
+2. Launch the shortcut from Steam. The login screen shows "Local Server"; log in and play.
+
+Notes:
+- The DLL config `GameFiles/poe-hook.toml` presses Enter 20 s after start (`auto_keys`, used by unattended tests). It just logs in; set `auto_keys = []` to turn it off.
+- Keep `dump_object_types = true`: the spawn position currently relies on the layout the DLL exports.
+- After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
 
 ## Logs
 - Client: `GameFiles/logs/Client.txt`.

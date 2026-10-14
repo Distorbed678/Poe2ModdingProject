@@ -89,3 +89,13 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
   - `POE_NPC=<metadata path>`: also add that object as entity 2 next to the player (zero blob; e.g. `Metadata/MiscellaneousObjects/Waypoint`).
 - The DLL's `dump_object_types` feature also logs, per spawned entity, its components and the blob span each component reader consumes.
 
+
+## Frame reports and ping replies (2026-10-14)
+- **C→S `0x001c` FrameReport**, every 100 ms (500 ms while idle, `0x1421211e4`): `u8 frames` (world +0x680, the frames processed since the last report, capped at 255), then `u32`. All 32 bits of the `u32` are HNC side-channel bits (serializer `0x141f486f0`: value bits 14..31, then 0..13).
+- **S→C `0x001d` PingReply**: `u16, u16, u32` (reader `0x141f48c60`). The handler (`0x142122115`) updates the latency estimate (session +0x2260) from the first `u16`. The `u32` carries 32 HNC bits: value bits 9..31, then 0..8, filling bytes least significant bit first.
+- **HNC side channel**: both directions carry a byte stream encrypted with a second Salsa20 pair (see [../re/crypto.md](../re/crypto.md#hnc-side-channel)). Received bytes are decrypted and parsed (`0x1421c5360`): 0 = idle, 0xda..0xdd start a message, anything else throws ("HNC Protocol Violated"). The server answers every report with a PingReply whose bits are raw keystream, so they decrypt to idle zero bytes. Zero bits instead crash the client.
+
+## Leaving the game (2026-10-14)
+- **Exit to character selection**: the client sends **C→S `0x0173`** (no body) and waits. The server closes the instance connection; the client returns to character selection and reconnects to the login server. The login screen log then shows "An unexpected disconnection occurred" (cosmetic).
+- **S→C `0x0174` ExitSession** (`u8, u32, u64` raw, constructor `0x14215df40`) is probably the proper reply: its handler broadcasts the `u32`/`u64` and sends the exit telemetry `0x355`. Sent with zeros, the client opens a new login connection but then waits for something, so it is not used yet.
+- **Exit to log in screen**, **Exit Path of Exile** and closing the window: the client sends `0x355` (telemetry) and closes the connection itself (logout routine `0x14211f540`, "FourLogOut"); the game exits with "Closing game gracefully".

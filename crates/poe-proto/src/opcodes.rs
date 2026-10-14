@@ -135,14 +135,49 @@ impl OpcodeTable {
 pub struct Protocol {
     pub login: OpcodeTable,
     pub instance: OpcodeTable,
+    /// HNC side-channel key derivation (`hnc.toml`).
+    pub hnc: HncKeys,
+}
+
+/// How the client derives the HNC side channel's key material from the session's.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct HncKeys {
+    /// 64 bytes, hex.
+    pub key_xor: String,
+    /// Byte pairs swapped after the XOR, in order.
+    pub swaps: Vec<[usize; 2]>,
+}
+
+impl HncKeys {
+    /// The HNC key material for a session's key material.
+    pub fn derive(&self, session: &[u8; 64]) -> [u8; 64] {
+        let mut out = *session;
+        let xor = self.key_xor.as_bytes();
+        for (i, b) in out.iter_mut().enumerate() {
+            let hex = std::str::from_utf8(&xor[i * 2..i * 2 + 2]).unwrap_or("00");
+            *b ^= u8::from_str_radix(hex, 16).unwrap_or(0);
+        }
+        for [a, b] in &self.swaps {
+            out.swap(*a, *b);
+        }
+        out
+    }
 }
 
 impl Protocol {
-    /// Loads `<dir>/login.toml` and `<dir>/instance.toml`.
+    /// Loads `<dir>/login.toml`, `<dir>/instance.toml` and `<dir>/hnc.toml`.
     pub fn load(dir: &Path) -> Result<Self, ProtocolError> {
+        let path = dir.join("hnc.toml");
+        let text = std::fs::read_to_string(&path).map_err(|source| ProtocolError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let hnc: HncKeys =
+            toml::from_str(&text).map_err(|source| ProtocolError::Parse { path, source })?;
         Ok(Self {
             login: load_table(dir, "login")?,
             instance: load_table(dir, "instance")?,
+            hnc,
         })
     }
 }
@@ -171,6 +206,10 @@ mod tests {
         let p = Protocol::load(&dir).unwrap();
         let id = p.login.id(Direction::Client, "KeyExchange").unwrap();
         assert_eq!(p.login.name(Direction::Client, id), Some("KeyExchange"));
+        assert_eq!(p.hnc.key_xor.len(), 128);
+        // XOR with zeros gives the table, then the swaps apply.
+        let k = p.hnc.derive(&[0; 64]);
+        assert_eq!(k[0x15], 0xe5);
     }
 
     #[test]

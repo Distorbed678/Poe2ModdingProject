@@ -38,4 +38,11 @@ The IV offset formula is `((is_client ^ 1) + 2) * 16` for the first instance and
   - Wipes memory with a MurmurHash-based PRNG afterwards.
   - This is anti-cheat style. Our server does not need to send modules unless the client requires one later.
 - `0x142bc20e0` / `0x142bc2250`: a ChaCha-based CSPRNG in the memory allocator. Not network related.
-- The "HNC Protocol Violated" string (`0x1435130b8`) relates to a separate instance-time check (TBD).
+- The "HNC Protocol Violated" string (`0x1435130b8`) belongs to the HNC side channel below.
+
+## HNC side channel
+The instance EnableEncryption handler (`0x14212203e`) creates two cipher pairs from the 64-byte key material in `InstanceDetails` +0x38:
+1. The packet ciphers (`0x14212aa90` → `0x14219f3b0`).
+2. The HNC bit queue at stream +0xd0 (`0x14212ab00` → `0x1421c50b0`). Its key material is the session material XORed with a 64-byte table (`0x142f10960`), then six byte pairs are swapped; the Salsa20 key/IV split is the same as for the packets (is_client = 1). The table and swaps are in `protocol/0.5.5e/hnc.toml` (`HncKeys::derive`).
+
+The client's outgoing HNC bytes ride in `0x1c` frame reports, the server's in `0x1d` ping replies (bit layouts in [../protocol/instance.md](../protocol/instance.md)). An idle stream is zero bytes; the server sends keystream bytes (encrypted zeros). Verified 2026-10-14: the client accepts them for minutes, while all-zero bits crash it.

@@ -3,7 +3,8 @@
 //!
 //! Afterwards it polls `poe-hook.keys` next to the exe: each whitespace-separated entry is a
 //! virtual key, optionally with a hold time in ms (`0x0d`, `87`, `0x57:800`), or a left click
-//! at client coordinates (`click:1280,720`). The file is deleted once processed, so a test
+//! at client coordinates (`click:1280,720`), or `close` (WM_CLOSE, like the window's X button).
+//! The file is deleted once processed, so a test
 //! driver can send input at any time.
 
 use std::time::{Duration, Instant};
@@ -12,8 +13,8 @@ use windows_sys::Win32::{
     Foundation::{HWND, LPARAM},
     System::Threading::GetCurrentProcessId,
     UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_KEYDOWN, WM_KEYUP,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE, WM_KEYDOWN,
+        WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     },
 };
 
@@ -35,6 +36,16 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
             };
             let _ = std::fs::remove_file(&file);
             for entry in text.split_whitespace() {
+                if entry == "close" {
+                    match game_window() {
+                        Some(hwnd) => unsafe {
+                            log::info!("posting WM_CLOSE");
+                            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                        },
+                        None => log::warn!("close: no game window"),
+                    }
+                    continue;
+                }
                 if let Some(pos) = entry.strip_prefix("click:") {
                     match pos
                         .split_once(',')

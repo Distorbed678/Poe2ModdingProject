@@ -49,10 +49,12 @@ Key findings:
 
 Known gaps (later milestones):
 - Movement: client input `0x63` (WASD direction) and clicks are not answered yet (M3).
-- Heartbeat `0x1c` (about 10 Hz) is not answered; the client stays connected anyway.
 - Proper start positions for areas other than the Riverbank (waypoints, area transitions) come with M4/M5.
 
 ## M2.5 (2026-10-13, in progress)
 - **Start position** (done): the Riverbank start is on the shore beside the intro tree, inside the `Intro_Tree_01` tile. The DLL exports each sub-tile's canonical index (its position in the tile's own orientation). The server finds which of the 8 rotations/mirrors the tile was placed with, then maps the configured point (`[spawn.start_tiles.G1_1] point`, grid cells in the tile's own orientation) onto the map. Verified on a mirrored and a rotated placement.
 - **Delete characters** (done): `0x0c` DeleteCharacter → `0x0d` result 0 → a fresh `0x15` CharacterList (see [protocol/login.md](protocol/login.md)).
+- **Leaving the game** (done): exit to character selection (`0x173`, the server closes the session), exit to log in, exit game and closing the window all work without a crash.
+- **Heartbeat** (done): the client's `0x1c` frame reports are answered with `0x1d` ping replies carrying idle HNC bytes (HNC keys derived like the client does).
+- **Play from Steam** (done): non-Steam shortcut instructions in [setup.md](setup.md#playing-from-steam-non-steam-game-shortcut).
 - Server-sent NPCs need their StateMachine/quest states (see [protocol/entities.md](protocol/entities.md)).
