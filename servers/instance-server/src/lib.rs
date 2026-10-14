@@ -59,6 +59,16 @@ impl InstanceServer {
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
         let listener = TcpListener::bind(self.config.instance.bind).await?;
         info!(addr = %self.config.instance.bind, "instance server listening");
+        let trace_path = &self.config.instance.movement_trace;
+        if !trace_path.as_os_str().is_empty() {
+            match sync::MovementTrace::open(trace_path) {
+                Ok(t) => {
+                    info!(path = %trace_path.display(), "movement trace on");
+                    self.reports.set_trace(Arc::new(t));
+                }
+                Err(e) => warn!(path = %trace_path.display(), "movement trace: {e}"),
+            }
+        }
         if self.config.instance.position_sync {
             let reports = self.reports.clone();
             let addr = self.config.instance.bind;
@@ -176,11 +186,13 @@ impl InstanceServer {
         }
         .unwrap_or((0, 0));
         let mut player = self.new_player(&ticket, spawn)?;
+        player.walkable = spawn::client_grid(&self.config.spawn, hashes.hash_a);
+        player.frame_seconds = self.config.instance.tick_ms as f32 / 1000.0;
         if saved.is_some() {
             // Same layout, so the saved cell is normally walkable; otherwise use the nearest
             // open spot.
-            if let Some(grid) = spawn::client_grid(&self.config.spawn, hashes.hash_a)
-                && !poe_game::movement::Walkable::walkable(&grid, spawn.0, spawn.1)
+            if let Some(grid) = &player.walkable
+                && !poe_game::movement::Walkable::walkable(grid, spawn.0, spawn.1)
                 && let Some(cell) = grid.nearest_walkable(spawn, 50)
             {
                 player.mover.place(cell);
@@ -197,6 +209,9 @@ impl InstanceServer {
             player.apply_report(Some(r));
         }
         self.reports.forget(client_port);
+        if let Some(t) = self.reports.trace() {
+            t.flush();
+        }
         // Save where the character is, however the session ended.
         let (x, y) = player.mover.cell();
         let location = poe_store::Location { seed, x, y };
@@ -228,6 +243,7 @@ impl InstanceServer {
         // terrain yet: positions drift and the client snaps when they are 46+ cells apart.
         let report_deadline = std::time::Instant::now() + Duration::from_secs(5);
         let mut warned = !self.config.instance.position_sync;
+        let mut ticks: u64 = 0;
         // Not decoded yet: log the client's decrypted messages (heartbeat 0x1c is skipped).
         loop {
             tokio::select! {
@@ -239,15 +255,18 @@ impl InstanceServer {
                     let data = conn.buffer().to_vec();
                     conn.consume(data.len());
                     // Input positions are relative to where the client is now: take its
-                    // latest report rather than the one from the last tick.
+                    // latest report rather than the one from the last tick. Replies apply in
+                    // the frame after the last tick marker sent.
                     player.apply_report(self.reports.fresh(client_port));
+                    player.observe_frames(ticks as i64);
+                    player.apply_frame = ticks as i64 + 1;
                     // Client messages have no length prefix: decode the known ones in turn;
                     // anything else ends the batch (logged).
                     let mut rest = &data[..];
                     while rest.len() >= 2 {
                         let opcode = u16::from_be_bytes([rest[0], rest[1]]);
                         let mut r = poe_net::Reader::new(&rest[2..]);
-                        match self.handle_client_message(conn, hnc, player, ticket.account_id, opcode, &mut r).await? {
+                        match self.handle_client_message(conn, hnc, player, ticket.account_id, client_port, opcode, &mut r).await? {
                             Handled::Continue => rest = &rest[2 + r.position()..],
                             Handled::Unknown => {
                                 info!(len = rest.len(), "received\n{}", hexdump(rest));
@@ -259,7 +278,17 @@ impl InstanceServer {
                 }
                 _ = ticker.tick() => {
                     let frame = std::time::Instant::now();
+                    ticks += 1;
+                    if let Some(t) = self.reports.trace() {
+                        t.line(client_port, "tick", format_args!("{ticks}"));
+                        if ticks.is_multiple_of(30) {
+                            t.flush();
+                        }
+                    }
                     player.apply_report(self.reports.fresh(client_port));
+                    // `ticks - 1` markers are out; this tick's replies apply in frame `ticks`.
+                    player.observe_frames(ticks as i64 - 1);
+                    player.apply_frame = ticks as i64;
                     if !warned && !player.synced() && frame > report_deadline {
                         warned = true;
                         warn!(
@@ -271,7 +300,7 @@ impl InstanceServer {
                     let replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
                     let mut out = Vec::new();
                     for reply in &replies {
-                        out.extend(self.encode_reply(reply)?);
+                        out.extend(self.encode_reply(client_port, reply)?);
                     }
                     out.extend_from_slice(&tick);
                     conn.send(&out).await?;
@@ -350,7 +379,29 @@ fn spawn_override() -> Option<(i32, i32)> {
 }
 
 impl InstanceServer {
-    fn encode_reply(&self, reply: &player::Reply) -> anyhow::Result<Vec<u8>> {
+    fn trace(&self, port: u16, kind: &str, fields: std::fmt::Arguments<'_>) {
+        if let Some(t) = self.reports.trace() {
+            t.line(port, kind, fields);
+        }
+    }
+
+    fn encode_reply(&self, port: u16, reply: &player::Reply) -> anyhow::Result<Vec<u8>> {
+        match reply {
+            player::Reply::Direction(m) => self.trace(
+                port,
+                "out-dir",
+                format_args!("{}\t{}\t{}\t{}", m.dir_x, m.dir_y, m.grid_x, m.grid_y),
+            ),
+            player::Reply::Start(m) => self.trace(
+                port,
+                "out-start",
+                format_args!(
+                    "{}\t{}\t{}\t{}\t{:#x}\t{}",
+                    m.grid_x, m.grid_y, m.target_x, m.target_y, m.skill, m.action_id
+                ),
+            ),
+            player::Reply::Sprint(m) => self.trace(port, "out-sprint", format_args!("{}", m.held)),
+        }
         let table = &self.protocol.instance;
         Ok(match reply {
             player::Reply::Direction(m) => table.encode(m)?,
@@ -371,12 +422,14 @@ enum Handled {
 
 impl InstanceServer {
     /// One client message after the player entered the world (`r` is after the opcode).
+    #[allow(clippy::too_many_arguments)]
     async fn handle_client_message(
         &self,
         conn: &mut Connection,
         hnc: &mut poe_net::Salsa20Stream,
         player: &mut player::Player,
         account_id: u32,
+        port: u16,
         opcode: u16,
         r: &mut poe_net::Reader<'_>,
     ) -> anyhow::Result<Handled> {
@@ -400,14 +453,26 @@ impl InstanceServer {
             // then moves the player itself until the next change.
             MoveDirection::NAME => {
                 let req = MoveDirection::decode(r)?;
+                self.trace(port, "in-dir", format_args!("{}\t{}", req.x, req.y));
                 if let Some(reply) = player.on_move_direction(&req) {
-                    conn.send(&table.encode(&reply)?).await?;
+                    let reply = player::Reply::Direction(reply);
+                    conn.send(&self.encode_reply(port, &reply)?).await?;
                 }
             }
             // Steering a running skill (roll/sprint towards the cursor, held click).
             UpdateSkillTarget::NAME => {
                 let req = UpdateSkillTarget::decode(r)?;
+                self.trace(
+                    port,
+                    "in-target",
+                    format_args!("{}\t{}\t{:#x}", req.x, req.y, req.skill),
+                );
                 if let Some(reply) = player.on_update_target(&req) {
+                    self.trace(
+                        port,
+                        "out-target",
+                        format_args!("{}\t{}\t{}", reply.action_id, reply.x, reply.y),
+                    );
                     conn.send(&table.encode(&reply)?).await?;
                 }
             }
@@ -418,20 +483,29 @@ impl InstanceServer {
             // The sprint key, echoed; a roll that ends while it is held becomes a sprint.
             SprintInput::NAME => {
                 let req = SprintInput::decode(r)?;
+                self.trace(port, "in-sprint", format_args!("{}", req.held));
                 let mut out = Vec::new();
                 for reply in player.on_sprint_input(&req) {
-                    out.extend(self.encode_reply(&reply)?);
+                    out.extend(self.encode_reply(port, &reply)?);
                 }
                 conn.send(&out).await?;
             }
             // Skill use (click-to-move, dodge roll): start the action on the client.
             UseSkill::NAME => {
                 let req = UseSkill::decode(r)?;
+                self.trace(
+                    port,
+                    "in-skill",
+                    format_args!(
+                        "{:#x}\t{}\t{}\t{}",
+                        req.skill, req.target_flags, req.x, req.y
+                    ),
+                );
                 let replies = player.on_skill_input(&req);
                 debug!(?req, ?replies, "skill use");
                 let mut out = Vec::new();
                 for reply in &replies {
-                    out.extend(self.encode_reply(reply)?);
+                    out.extend(self.encode_reply(port, reply)?);
                 }
                 if !out.is_empty() {
                     conn.send(&out).await?;
@@ -439,6 +513,7 @@ impl InstanceServer {
             }
             SkillReleased::NAME => {
                 let req = SkillReleased::decode(r)?;
+                self.trace(port, "in-release", format_args!("{:#x}", req.skill));
                 let replies = player.on_skill_released(req.skill);
                 debug!(
                     skill = format_args!("{:#010x}", req.skill),
@@ -447,7 +522,7 @@ impl InstanceServer {
                 );
                 let mut out = Vec::new();
                 for reply in &replies {
-                    out.extend(self.encode_reply(reply)?);
+                    out.extend(self.encode_reply(port, reply)?);
                 }
                 if !out.is_empty() {
                     conn.send(&out).await?;

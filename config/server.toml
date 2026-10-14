@@ -26,6 +26,9 @@ tick_ms = 33
 # Terrain seeds known to generate (dev bridge until server-side generation, M4); some random
 # seeds fail in the client. Extracted from a live Client.txt by tools/re/clientlog_terrain.py.
 known_seeds = "data/terrain-vectors.tsv"
+# Movement trace (dev): client position reports, inputs and movement replies as TSV
+# (Documentation/protocol/movement.md#movement-trace). Empty to turn it off.
+movement_trace = "data/movement-trace.tsv"
 
 [database]
 path = "data/server.sqlite"

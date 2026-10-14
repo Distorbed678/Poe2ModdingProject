@@ -8,8 +8,12 @@
 
 use std::{
     collections::HashMap,
+    fmt::Arguments,
+    fs::File,
+    io::{BufWriter, Write},
     net::SocketAddr,
-    sync::Mutex,
+    path::Path,
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -64,13 +68,66 @@ impl ClientReport {
 #[derive(Default)]
 pub struct ClientReports {
     latest: Mutex<HashMap<u16, ClientReport>>,
+    trace: OnceLock<Arc<MovementTrace>>,
+}
+
+/// Movement trace (dev, `[instance] movement_trace`): one TSV line per client position
+/// report, movement input and movement reply, so a play session can be analysed afterwards.
+/// Columns: milliseconds since the trace was opened, client TCP port, kind, then fields.
+pub struct MovementTrace {
+    start: Instant,
+    out: Mutex<BufWriter<File>>,
+}
+
+impl MovementTrace {
+    pub fn open(path: &Path) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        let mut out = BufWriter::new(file);
+        writeln!(out, "# trace opened (ms, client port, kind, fields)")?;
+        Ok(Self {
+            start: Instant::now(),
+            out: Mutex::new(out),
+        })
+    }
+
+    pub fn line(&self, port: u16, kind: &str, fields: Arguments<'_>) {
+        let ms = self.start.elapsed().as_secs_f64() * 1000.0;
+        let mut out = self.out.lock().unwrap();
+        let _ = writeln!(out, "{ms:.1}\t{port}\t{kind}\t{fields}");
+    }
+
+    pub fn flush(&self) {
+        let _ = self.out.lock().unwrap().flush();
+    }
 }
 
 /// Reports older than this are ignored (the client stopped sending, e.g. paused or gone).
 const FRESH: Duration = Duration::from_millis(250);
 
 impl ClientReports {
+    /// Turns on the movement trace.
+    pub fn set_trace(&self, trace: Arc<MovementTrace>) {
+        let _ = self.trace.set(trace);
+    }
+
+    pub fn trace(&self) -> Option<&MovementTrace> {
+        self.trace.get().map(|t| &**t)
+    }
+
     pub fn insert(&self, port: u16, report: ClientReport) {
+        if let Some(t) = self.trace() {
+            t.line(
+                port,
+                "report",
+                format_args!(
+                    "{}\t{:.3}\t{:.3}\t{:#06x}\t{:#06x}\t{:#x}",
+                    report.frame, report.x, report.y, report.action, report.action2, report.flags
+                ),
+            );
+        }
         if self.latest.lock().unwrap().insert(port, report).is_none() {
             info!(port, "client position reports started");
         }
