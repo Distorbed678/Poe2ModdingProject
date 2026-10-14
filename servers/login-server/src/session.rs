@@ -90,8 +90,17 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
     }
     // Account authenticated on this connection.
     let mut account: Option<Account> = None;
+    // Changes when the account leaves the game (instance `0x1b`, see `LoginSessions`).
+    let mut logout: Option<tokio::sync::watch::Receiver<u64>> = None;
     loop {
-        let message = match conn.decode(|r| decode_client(&server.protocol, r)).await {
+        let decoded = tokio::select! {
+            d = conn.decode(|r| decode_client(&server.protocol, r)) => d,
+            () = logged_out(&mut logout) => {
+                info!("account left the game: closing the login connection");
+                return Ok(());
+            }
+        };
+        let message = match decoded {
             Ok(Some(m)) => m,
             Ok(None) => {
                 info!("client disconnected");
@@ -109,7 +118,9 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                     .await?;
             }
             ClientMessage::Authenticate(auth) => {
-                account = Some(authenticate(&server, &mut conn, auth).await?);
+                let a = authenticate(&server, &mut conn, auth).await?;
+                logout = Some(server.sessions.subscribe(a.id));
+                account = Some(a);
             }
             ClientMessage::RequestCharacterList(req) => {
                 if account.as_ref().map(|a| a.id) != Some(req.account_id) {
@@ -141,6 +152,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 };
                 info!(account = %resumed.name, id = resumed.id, "session resumed");
                 send_authentication_result(&server, &mut conn, &resumed).await?;
+                logout = Some(server.sessions.subscribe(resumed.id));
                 account = Some(resumed);
             }
             ClientMessage::DeleteCharacter(req) => {
@@ -189,6 +201,16 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
             }
         }
     }
+}
+
+/// Resolves when the account logs out; never without an account.
+async fn logged_out(logout: &mut Option<tokio::sync::watch::Receiver<u64>>) {
+    if let Some(rx) = logout
+        && rx.changed().await.is_ok()
+    {
+        return;
+    }
+    std::future::pending().await
 }
 
 async fn authenticate(

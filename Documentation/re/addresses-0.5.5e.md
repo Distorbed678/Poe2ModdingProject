@@ -103,3 +103,14 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x140ecee50` | "character_creation_done": finds the new character by name (`0x140ec8b20`), sends PlayCharacter (`0x1420e9e70`) |
 | `0x140ed4e50` | create screen key handler (Space skips the creation scene) |
 | `0x140e7ca80` | league banners at character creation (entries with +0xe0 bit 7, not variants; variants matched by +0x80) |
+
+## Frame playback, snapping and leaving the game (2026-10-14)
+| Address | What |
+|---|---|
+| `0x1421302c0` | lockstep frame playback: speed factor world +0x670 (1.01× with 1 spare frame, 1.5× with 2–29, 2× with 30–59, 5× with ≥60, back to 1.0 when drained) |
+| `0x141ddb570` | SetLocationForcedNoCallbacks (moves an entity to a cell) |
+| `0x142149640` (`0x1421497ae`) | `0x64` handler: snaps only when the server cell is ≥46 cells away (distance² ≥ `0x844`), else bends the walk direction |
+| `0x141e41ae0` (`0x141e41ba0`) | StartAction apply: same 46-cell snap threshold |
+| `0x1402c76b0` | escape menu buttons: +0x2f0 exit to log in screen (logout 0), +0x2f8 exit game (`0x140eac930`, logout 2 + WM_CLOSE), +0x300 exit to character selection (logout 1) |
+| `0x14211fad0` | sends `0x355` ExitReport (once per session) |
+| `0x141f479b0` | `0x355` serializer: `u8, u16 len, bytes` |

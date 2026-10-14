@@ -103,7 +103,9 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
   4. The login server checks the ticket and answers with an AuthenticationResult. The client asks for the character list and shows character selection cleanly.
 
   If the server only closes the connection, the client still reaches character selection, but logs "An unexpected disconnection occurred". With a zero ticket it opens the login connection and then waits.
-- **Exit to log in screen**, **Exit Path of Exile** and closing the window: the client sends `0x355` and closes the connection itself (logout routine `0x14211f540`, "FourLogOut"); the game exits with "Closing game gracefully".
+- **Exit to log in screen** and **Exit Path of Exile** (escape menu `0x1402c76b0`; logout routine `0x14211f540`, "FourLogOut", with 0 or 2): the client sends **C→S `0x355` ExitReport** (`u8, u16 length, length bytes` of statistics; serializer `0x141f479b0`), then **C→S `0x1b` LeaveGame** (`u8, u8`, both 0), and closes the connection itself. "Exit Path of Exile" then closes the window ("Closing game gracefully").
+  - The client keeps its **login connection** open during play (the official log shows later instance hand-offs arriving on it). After leaving the game it shows the log-in screen only if that connection is gone; otherwise it asks for the character list on it and shows character selection.
+  - So on `0x1b` the instance server ends the account's login connection (`poe_cluster::LoginSessions`), and the client returns to the log-in screen. Verified 2026-10-14: log-in screen, logging in again, and exit to character selection afterwards all work. Before this, `0x355` was not decoded, so the `0x1b` behind it in the same batch was never seen and "Exit to log in screen" led to character selection.
 
 ## Pause (2026-10-14)
 - **C→S `0x01ff` PauseRequest**: `u8, u8 paused` (class `0x1434e50f8`). Sent when the escape menu opens or closes in a solo game, and once (`00 00`) after entering an area.

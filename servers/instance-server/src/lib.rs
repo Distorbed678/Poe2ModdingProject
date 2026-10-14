@@ -28,10 +28,10 @@ use poe_proto::{
     Message, Protocol, entity,
     instance::{
         AddInventory, AddObject, AreaInfo, CharacterState, ChatJoinRequest, ChatJoined,
-        EnableEncryption, FrameReport, Hello, InitialState, Inventory, LocalPlayers, MoveDirection,
-        PauseRequest, PingReply, PlayerEntity, PlayerState, SetPause, SimulationHeader,
-        SimulationTick, SkillReleased, SprintInput, TerrainHashes, UpdateSkillTarget,
-        UpdateSkillTargetEntity, UseSkill,
+        EnableEncryption, ExitReport, FrameReport, Hello, InitialState, Inventory, LeaveGame,
+        LocalPlayers, MoveDirection, PauseRequest, PingReply, PlayerEntity, PlayerState, SetPause,
+        SimulationHeader, SimulationTick, SkillReleased, SprintInput, TerrainHashes,
+        UpdateSkillTarget, UpdateSkillTargetEntity, UseSkill,
     },
 };
 use rand::RngCore;
@@ -51,6 +51,8 @@ pub struct InstanceServer {
     pub seeds: Arc<seeds::KnownSeeds>,
     /// Client position reports (movement dev bridge, see [`sync`]).
     pub reports: Arc<sync::ClientReports>,
+    /// Ends the account's login connection when the client leaves the game.
+    pub sessions: Arc<dyn poe_cluster::LoginSessions>,
 }
 
 impl InstanceServer {
@@ -173,12 +175,12 @@ impl InstanceServer {
             }
         }
         .unwrap_or((0, 0));
-        let mut player = self.new_player(&ticket, spawn, hashes.hash_a)?;
+        let mut player = self.new_player(&ticket, spawn)?;
         if saved.is_some() {
             // Same layout, so the saved cell is normally walkable; otherwise use the nearest
             // open spot.
-            if let Some(grid) = &player.grid
-                && !poe_game::movement::Walkable::walkable(grid, spawn.0, spawn.1)
+            if let Some(grid) = spawn::client_grid(&self.config.spawn, hashes.hash_a)
+                && !poe_game::movement::Walkable::walkable(&grid, spawn.0, spawn.1)
                 && let Some(cell) = grid.nearest_walkable(spawn, 50)
             {
                 player.mover.place(cell);
@@ -232,6 +234,9 @@ impl InstanceServer {
                     }
                     let data = conn.buffer().to_vec();
                     conn.consume(data.len());
+                    // Input positions are relative to where the client is now: take its
+                    // latest report rather than the one from the last tick.
+                    player.apply_report(self.reports.fresh(client_port));
                     // Client messages have no length prefix: decode the known ones in turn;
                     // anything else ends the batch (logged).
                     let mut rest = &data[..];
@@ -338,6 +343,7 @@ impl InstanceServer {
         Ok(match reply {
             player::Reply::Direction(m) => table.encode(m)?,
             player::Reply::Start(m) => table.encode(m)?,
+            player::Reply::Target(m) => table.encode(m)?,
             player::Reply::Sprint(m) => table.encode(m)?,
         })
     }
@@ -410,10 +416,10 @@ impl InstanceServer {
             // Skill use (click-to-move, dodge roll): start the action on the client.
             UseSkill::NAME => {
                 let req = UseSkill::decode(r)?;
-                match player.on_use_skill(&req) {
-                    Some(action) => {
-                        debug!(?req, ?action, "skill use");
-                        conn.send(&table.encode(&action)?).await?;
+                match player.on_skill_input(&req) {
+                    Some(reply) => {
+                        debug!(?req, ?reply, "skill use");
+                        conn.send(&self.encode_reply(&reply)?).await?;
                     }
                     None => debug!(
                         skill = format_args!("{:#010x}", req.skill),
@@ -472,6 +478,17 @@ impl InstanceServer {
                 conn.send(&table.encode(&reply)?).await?;
                 return Ok(Handled::Exit);
             }
+            ExitReport::NAME => {
+                let report = ExitReport::decode(r)?;
+                debug!(len = report.data.len(), "exit report");
+            }
+            // "Exit to log in screen" or quitting: the client closes the connection next. Its
+            // login connection must close too, or it returns to character selection on it.
+            LeaveGame::NAME => {
+                LeaveGame::decode(r)?;
+                info!("client leaves the game");
+                self.sessions.logout(account_id);
+            }
             _ => match table.client_body_size(opcode) {
                 // Known size, not decoded yet: skip it.
                 Some(size) => {
@@ -485,14 +502,9 @@ impl InstanceServer {
     }
 
     /// The player's server-side state: position, walking speed (class template
-    /// `Pathfinding.base_speed`, cells per second), the client's walkability grid and the
-    /// innate skills (`[player] innate_skills`).
-    fn new_player(
-        &self,
-        ticket: &Ticket,
-        spawn: (i32, i32),
-        tile_hash: u32,
-    ) -> anyhow::Result<player::Player> {
+    /// `Pathfinding.base_speed`, cells per second) and the innate skills
+    /// (`[player] innate_skills`).
+    fn new_player(&self, ticket: &Ticket, spawn: (i32, i32)) -> anyhow::Result<player::Player> {
         let Some(class) = CharacterClass::by_integer_id(&self.data, ticket.character.class_id)?
         else {
             anyhow::bail!("unknown class id {}", ticket.character.class_id);
@@ -504,7 +516,6 @@ impl InstanceServer {
             .find(|(k, _)| k == "base_speed")
             .and_then(|(_, v)| v.parse::<f32>().ok())
             .unwrap_or(37.0);
-        let grid = spawn::client_grid(&self.config.spawn, tile_hash);
         let mut skills = Vec::new();
         for (i, id) in self.config.player.innate_skills.iter().enumerate() {
             match poe_data::views::GrantedSkill::find(&self.data, id, 1)? {
@@ -547,13 +558,8 @@ impl InstanceServer {
         }
         let move_skill = poe_data::views::action_type_key(&self.data, "Move")?
             .map(|k| player::BASIC_ACTION_SKILL | k as u32);
-        info!(
-            speed,
-            grid = grid.is_some(),
-            skills = skills.len(),
-            "player state"
-        );
-        let mut player = player::Player::new(PLAYER_ENTITY, spawn, speed, grid, skills, move_skill);
+        info!(speed, skills = skills.len(), "player state");
+        let mut player = player::Player::new(PLAYER_ENTITY, spawn, speed, skills, move_skill);
         // Sprint speed (dodge roll held), from the class template.
         if let Some(bonus) = template
             .component("Stats")

@@ -18,6 +18,14 @@ TerrainHashes = 0x009a
 FrameReport = 0x001c
 # Exit to character selection (no body).
 ExitRequest = 0x0173
+# Leaving the game ("Exit to log in screen", quitting): u8, u8. Follows ExitReport.
+LeaveGame = 0x001b
+# Statistics sent when leaving an instance: u8, u16 length, bytes.
+ExitReport = 0x0355
+# Not decoded yet (sizes from single-message batches, 2026-10-14).
+Unknown0016 = 0x0016
+Unknown00fe = 0x00fe
+Unknown0200 = 0x0200
 # Pause/resume request (escape menu in a solo game): u8, u8 paused.
 PauseRequest = 0x01ff
 # Join a chat channel (global/trade) after entering an area.
@@ -73,4 +81,7 @@ Unknown023d = 2
 Unknown02e8 = 2
 Unknown01ac = 1
 Unknown0351 = 1
+Unknown0016 = 5
+Unknown00fe = 2
+Unknown0200 = 2
 Unknown0357 = 1

@@ -4,7 +4,8 @@
 //! client where to connect. The instance server redeems the ticket to learn who connected,
 //! which character and area to load, and which keys encrypt the stream. [`TicketRegistry`]
 //! is a trait so a networked implementation can replace [`MemoryTickets`] when the servers
-//! run as separate processes.
+//! run as separate processes. [`LoginSessions`] lets an instance server end an account's
+//! login connection (the same split applies).
 
 use std::{
     collections::HashMap,
@@ -13,6 +14,7 @@ use std::{
 };
 
 use rand::RngCore;
+use tokio::sync::watch;
 
 /// The character being handed off (what the instance server needs to spawn it).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,5 +182,61 @@ mod tests {
         assert!(!reg.redeem_resume(ResumeTicket { account_id: 8, ..t }));
         assert!(reg.redeem_resume(t));
         assert!(!reg.redeem_resume(t));
+    }
+}
+
+/// Login connections by account. The client keeps its login connection open while in game;
+/// leaving the game ("Exit to log in screen" or quitting) sends instance `0x1b`, and the
+/// client shows the log-in screen only if that connection is gone (otherwise it goes back to
+/// character selection on it). So the instance server ends the account's login session here.
+pub trait LoginSessions: Send + Sync {
+    /// Called by a login connection once its account is known; the receiver changes when the
+    /// account logs out.
+    fn subscribe(&self, account_id: u32) -> watch::Receiver<u64>;
+    /// Ends the account's login connections.
+    fn logout(&self, account_id: u32);
+}
+
+/// In-process [`LoginSessions`].
+#[derive(Default)]
+pub struct MemorySessions {
+    accounts: Mutex<HashMap<u32, watch::Sender<u64>>>,
+}
+
+impl LoginSessions for MemorySessions {
+    fn subscribe(&self, account_id: u32) -> watch::Receiver<u64> {
+        self.accounts
+            .lock()
+            .unwrap()
+            .entry(account_id)
+            .or_insert_with(|| watch::channel(0).0)
+            .subscribe()
+    }
+
+    fn logout(&self, account_id: u32) {
+        if let Some(tx) = self.accounts.lock().unwrap().get(&account_id) {
+            tx.send_modify(|n| *n += 1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn logout_reaches_the_accounts_connections_only() {
+        let sessions = MemorySessions::default();
+        let mut a = sessions.subscribe(1);
+        let b = sessions.subscribe(2);
+        sessions.logout(1);
+        assert!(a.has_changed().unwrap());
+        assert!(!b.has_changed().unwrap());
+        a.changed().await.unwrap();
+        // A connection subscribed after a logout is not ended by it.
+        let late = sessions.subscribe(1);
+        assert!(!late.has_changed().unwrap());
+        sessions.logout(3);
+        assert!(!b.has_changed().unwrap());
     }
 }
