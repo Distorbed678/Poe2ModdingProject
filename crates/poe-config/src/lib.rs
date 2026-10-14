@@ -178,6 +178,10 @@ pub struct InstanceConfig {
     /// follow them (movement dev bridge until the server simulates movement exactly, M4).
     #[serde(default = "default_true")]
     pub position_sync: bool,
+    /// Movement trace (dev): every client position report, movement input and movement reply
+    /// is appended to this TSV file, for analysing a play session. Empty: off.
+    #[serde(default)]
+    pub movement_trace: PathBuf,
 }
 
 fn default_true() -> bool {

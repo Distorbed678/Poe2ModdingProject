@@ -77,6 +77,17 @@ pub struct Player {
     fresh: bool,
     /// The client's movement per frame, from its last two reports.
     velocity: (f32, f32),
+    /// The frame in which a message sent now applies on the client (set by the session:
+    /// the tick being built, or the next one for input answered between ticks).
+    pub apply_frame: i64,
+    /// Length of a simulation frame in seconds (`tick_ms`).
+    pub frame_seconds: f32,
+    /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
+    /// (the server has no collision until M4).
+    pub walkable: Option<crate::spawn::Grid>,
+    /// Server frames sent minus the client's frame number when its report arrives (the
+    /// smallest seen; 0 so far).
+    frame_offset: Option<i64>,
     /// A dodge roll is running (from its StartAction until it ends).
     in_roll: bool,
     /// The client has reported the roll action since it started.
@@ -91,11 +102,8 @@ const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
 /// UseSkill `target_flags` bit 4: the input is held and the use repeats (about every 70 ms,
 /// e.g. a held click-to-move).
 const TARGET_REPEAT: u8 = 0x10;
-/// Frames between the client's latest position report and the frame in which a message sent
-/// now applies on the client (measured 2026-10-14: one). Positions in `0x64`/`0x1c8` are
-/// predicted this far ahead: the client starts the new movement from the cell it is given, so a
-/// cell from the last report pulled it back by one step at every direction change.
-const APPLY_LEAD_FRAMES: f32 = 1.0;
+/// Most frames a position is predicted ahead (beyond that the report is too old to trust).
+const MAX_LEAD_FRAMES: i64 = 4;
 /// Length of a WASD direction vector (W = (127, 127), D = (180, 0)).
 const WASD_LENGTH: f32 = 180.0;
 /// A held click closer than this (|dx| + |dy| cells) to the player stops the walk.
@@ -139,6 +147,10 @@ impl Player {
             synced: false,
             fresh: false,
             velocity: (0.0, 0.0),
+            apply_frame: 0,
+            frame_seconds: 0.033,
+            walkable: None,
+            frame_offset: None,
             in_roll: false,
             roll_seen: false,
             roll_frames: 0,
@@ -148,6 +160,17 @@ impl Player {
 
     /// The client's latest report (or `None` without fresh reports): the server takes the
     /// client's position, so positions it sends match the client's.
+    /// Notes that the client's report for its latest frame arrived after `sent` server frames
+    /// (lockstep: the client cannot play a frame before it was sent).
+    pub fn observe_frames(&mut self, sent: i64) {
+        if let Some(r) = self.client.filter(|_| self.fresh) {
+            let offset = sent - r.frame as i64;
+            if self.frame_offset.is_none_or(|o| offset < o) {
+                self.frame_offset = Some(offset);
+            }
+        }
+    }
+
     pub fn apply_report(&mut self, report: Option<crate::sync::ClientReport>) {
         if report.is_some() != self.fresh {
             debug!(cell = ?self.mover.cell(), "client reports {}", if report.is_some() { "arriving" } else { "paused" });
@@ -357,7 +380,7 @@ impl Player {
             if self.client.is_some() {
                 // The client keeps WASD input during a roll and walks (or sprints) on when the
                 // roll ends, so it gets the direction now, with its own cell.
-                let (grid_x, grid_y) = self.send_cell();
+                let (grid_x, grid_y) = self.send_cell(Some((req.x as f32, req.y as f32)));
                 return Some(MoveDirectionUpdate {
                     header: self.header(),
                     dir_x: req.x,
@@ -383,16 +406,64 @@ impl Player {
         Some(self.start_direction(req))
     }
 
-    /// The player's cell for a message that starts a movement: where the client will be when it
-    /// applies the message (its last report moved on by its velocity), else the simulation's.
-    fn send_cell(&self) -> (i32, i32) {
-        if self.client.is_none() {
+    /// The player's cell for a message that starts a movement heading `dir`.
+    ///
+    /// In the frame the message applies (`apply_frame`), the client puts the player on the
+    /// centre of the given cell (`0x142149640` / `0x141e41ae0`: a cell other than its own is set
+    /// as its position), then walks on from there in the next frame. So that frame's step is
+    /// from where the client is when the frame begins to that centre. The cell is chosen to make
+    /// it look like a normal step: about the client's speed long and along the new heading.
+    /// A cell from the last report pulled the player back at every turn; the nearest cell made
+    /// steps up to 0.7 cells too long or short.
+    fn send_cell(&self, dir: Option<(f32, f32)>) -> (i32, i32) {
+        let Some(r) = self.client else {
             return self.mover.cell();
+        };
+        // Frames from the report to the end of the frame the message applies in.
+        let lead = match self.frame_offset {
+            Some(o) => (self.apply_frame - (r.frame as i64 + o)).clamp(1, MAX_LEAD_FRAMES),
+            None => 1,
+        } as f32;
+        let (vx, vy) = self.velocity;
+        let start = (
+            self.mover.x + vx * (lead - 1.0),
+            self.mover.y + vy * (lead - 1.0),
+        );
+        let natural = ((start.0 + vx).floor() as i32, (start.1 + vy).floor() as i32);
+        // Standing still, the first frame would only go to the centre of the player's own cell
+        // (a dead frame): step to a neighbouring cell at walking speed instead.
+        let speed = match vx.hypot(vy) {
+            s if s > 0.3 => s,
+            _ => self.mover.speed * self.frame_seconds,
+        };
+        let Some((dx, dy)) = dir.filter(|d| d.0.hypot(d.1) > 0.0) else {
+            return natural;
+        };
+        let len = dx.hypot(dy);
+        let (dx, dy) = (dx / len, dy / len);
+        let cost = |(cx, cy): (i32, i32)| {
+            let (sx, sy) = (cx as f32 + 0.5 - start.0, cy as f32 + 0.5 - start.1);
+            let step = sx.hypot(sy);
+            if step < 1e-3 {
+                return f32::MAX;
+            }
+            (step - speed).abs() + speed * (1.0 - (sx * dx + sy * dy) / step)
+        };
+        let (bx, by) = (start.0.floor() as i32, start.1.floor() as i32);
+        let mut best = (natural, cost(natural));
+        for cy in by - 2..=by + 2 {
+            for cx in bx - 2..=bx + 2 {
+                let walkable = self
+                    .walkable
+                    .as_ref()
+                    .is_none_or(|g| poe_game::movement::Walkable::walkable(g, cx, cy));
+                let c = cost((cx, cy));
+                if walkable && c < best.1 {
+                    best = ((cx, cy), c);
+                }
+            }
         }
-        (
-            (self.mover.x + self.velocity.0 * APPLY_LEAD_FRAMES).floor() as i32,
-            (self.mover.y + self.velocity.1 * APPLY_LEAD_FRAMES).floor() as i32,
-        )
+        best.0
     }
 
     fn start_direction(&mut self, req: &MoveDirection) -> MoveDirectionUpdate {
@@ -405,7 +476,7 @@ impl Player {
                 y: req.y as f32,
             }
         });
-        let (grid_x, grid_y) = self.send_cell();
+        let (grid_x, grid_y) = self.send_cell(Some((req.x as f32, req.y as f32)));
         debug!(dir = ?(req.x, req.y), cell = ?(grid_x, grid_y), "move direction");
         MoveDirectionUpdate {
             header: self.header(),
@@ -546,7 +617,7 @@ impl Player {
             action_id,
             skill: req.skill,
         });
-        let (cx, cy) = self.send_cell();
+        let (cx, cy) = self.send_cell(Some(((tx - cx) as f32, (ty - cy) as f32)));
         Some(StartAction {
             header: self.header(),
             flags: 0,
@@ -788,9 +859,10 @@ mod tests {
         }
         p.apply_report(report(103.5, 139.5, 0));
         let out = p.tick(0.033);
-        // The waiting click starts from the client's cell, at the start of the next frame.
+        // The waiting click starts at the start of the next frame, from the client's position:
+        // standing still, its first step goes to the neighbouring cell toward the target.
         assert!(matches!(&out[..], [Reply::Start(a)]
-            if a.header.unk_14 == 0 && (a.grid_x, a.grid_y) == (103, 139)
+            if a.header.unk_14 == 0 && (a.grid_x, a.grid_y) == (104, 139)
                 && (a.target_x, a.target_y) == (123, 139)));
     }
 
