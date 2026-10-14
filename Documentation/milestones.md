@@ -5,7 +5,7 @@
 | M0 | Foundation: repo, tools, workspace, config, data access, client DLL proxy, deploy tooling | done |
 | M1 | Login → character select/creation, league selection | done (league label colour TBD) |
 | M2 | Instance server transfer, first zone loads with the player | done (2026-10-13) |
-| M3 | Movement (WASD and click-to-move) | – |
+| M3 | Movement: WASD, click-to-move and dodge roll; save area and position on exit | – |
 | M4 | Server-side terrain generation (reimplement the client generator) for collision | – |
 | M5 | Zone/instance transfer | – |
 | M6 | Inventory and items | – |
@@ -49,6 +49,13 @@ Key findings:
 
 Known gaps (later milestones):
 - Movement: client input `0x63` (WASD direction) and clicks are not answered yet (M3).
+
+## M3 scope (agreed 2026-10-14)
+- WASD movement (client `0x63`).
+- Click-to-move.
+- Dodge roll.
+- Save each character's area and position on exit, and restore them on the next login.
+- Pause (`0x1ff`) also stops the server simulation.
 - Proper start positions for areas other than the Riverbank (waypoints, area transitions) come with M4/M5.
 
 ## M2.5 (2026-10-13, in progress)
