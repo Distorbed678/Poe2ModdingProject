@@ -75,6 +75,8 @@ pub struct Player {
     synced: bool,
     /// The last call had a fresh report (for logging).
     fresh: bool,
+    /// The client's movement per frame, from its last two reports.
+    velocity: (f32, f32),
     /// A dodge roll is running (from its StartAction until it ends).
     in_roll: bool,
     /// The client has reported the roll action since it started.
@@ -89,6 +91,11 @@ const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
 /// UseSkill `target_flags` bit 4: the input is held and the use repeats (about every 70 ms,
 /// e.g. a held click-to-move).
 const TARGET_REPEAT: u8 = 0x10;
+/// Frames between the client's latest position report and the frame in which a message sent
+/// now applies on the client (measured 2026-10-14: one). Positions in `0x64`/`0x1c8` are
+/// predicted this far ahead: the client starts the new movement from the cell it is given, so a
+/// cell from the last report pulled it back by one step at every direction change.
+const APPLY_LEAD_FRAMES: f32 = 1.0;
 /// Length of a WASD direction vector (W = (127, 127), D = (180, 0)).
 const WASD_LENGTH: f32 = 180.0;
 /// A held click closer than this (|dx| + |dy| cells) to the player stops the walk.
@@ -131,6 +138,7 @@ impl Player {
             client: None,
             synced: false,
             fresh: false,
+            velocity: (0.0, 0.0),
             in_roll: false,
             roll_seen: false,
             roll_frames: 0,
@@ -164,6 +172,14 @@ impl Player {
                 "client action"
             );
         }
+        self.velocity = match self.client {
+            Some(c) if r.frame > c.frame && r.frame - c.frame <= 4 => {
+                let n = (r.frame - c.frame) as f32;
+                ((r.x - c.x) / n, (r.y - c.y) / n)
+            }
+            Some(c) if r.frame == c.frame => self.velocity,
+            _ => (0.0, 0.0),
+        };
         self.mover.x = r.x;
         self.mover.y = r.y;
         self.synced = true;
@@ -338,10 +354,10 @@ impl Player {
     pub fn on_move_direction(&mut self, req: &MoveDirection) -> Option<MoveDirectionUpdate> {
         self.wasd = (req.x, req.y);
         if self.rolling() {
-            if let Some(c) = self.client {
+            if self.client.is_some() {
                 // The client keeps WASD input during a roll and walks (or sprints) on when the
                 // roll ends, so it gets the direction now, with its own cell.
-                let (grid_x, grid_y) = c.cell();
+                let (grid_x, grid_y) = self.send_cell();
                 return Some(MoveDirectionUpdate {
                     header: self.header(),
                     dir_x: req.x,
@@ -367,6 +383,18 @@ impl Player {
         Some(self.start_direction(req))
     }
 
+    /// The player's cell for a message that starts a movement: where the client will be when it
+    /// applies the message (its last report moved on by its velocity), else the simulation's.
+    fn send_cell(&self) -> (i32, i32) {
+        if self.client.is_none() {
+            return self.mover.cell();
+        }
+        (
+            (self.mover.x + self.velocity.0 * APPLY_LEAD_FRAMES).floor() as i32,
+            (self.mover.y + self.velocity.1 * APPLY_LEAD_FRAMES).floor() as i32,
+        )
+    }
+
     fn start_direction(&mut self, req: &MoveDirection) -> MoveDirectionUpdate {
         self.current = None;
         self.mover.start(if req.x == 0 && req.y == 0 {
@@ -377,7 +405,7 @@ impl Player {
                 y: req.y as f32,
             }
         });
-        let (grid_x, grid_y) = self.mover.cell();
+        let (grid_x, grid_y) = self.send_cell();
         debug!(dir = ?(req.x, req.y), cell = ?(grid_x, grid_y), "move direction");
         MoveDirectionUpdate {
             header: self.header(),
@@ -518,6 +546,7 @@ impl Player {
             action_id,
             skill: req.skill,
         });
+        let (cx, cy) = self.send_cell();
         Some(StartAction {
             header: self.header(),
             flags: 0,
