@@ -182,6 +182,16 @@ pub struct InstanceConfig {
     /// is appended to this TSV file, for analysing a play session. Empty: off.
     #[serde(default)]
     pub movement_trace: PathBuf,
+    /// Which cell a turn (`0x64`/`0x1c8`) is sent with: "own" (the client's cell when the
+    /// turn applies: the client only re-aims its walk, as with a server that simulates it
+    /// exactly), "heading" (a cell one step along the new heading: the client is put on its
+    /// centre) or "natural" (the cell the client would reach in that frame).
+    #[serde(default = "default_turn_cell")]
+    pub turn_cell: String,
+}
+
+fn default_turn_cell() -> String {
+    "own".into()
 }
 
 fn default_true() -> bool {

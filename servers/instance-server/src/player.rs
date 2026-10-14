@@ -80,6 +80,7 @@ pub struct Player {
     /// The frame in which a message sent now applies on the client (set by the session:
     /// the tick being built, or the next one for input answered between ticks).
     pub apply_frame: i64,
+    pub turn_cell: TurnCell,
     /// Length of a simulation frame in seconds (`tick_ms`).
     pub frame_seconds: f32,
     /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
@@ -102,6 +103,28 @@ const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
 /// UseSkill `target_flags` bit 4: the input is held and the use repeats (about every 70 ms,
 /// e.g. a held click-to-move).
 const TARGET_REPEAT: u8 = 0x10;
+/// Which cell a turn is sent with (`[instance] turn_cell`, see [`Player::send_cell`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurnCell {
+    /// The client's own cell when the turn applies: it only re-aims its walk.
+    #[default]
+    Own,
+    /// A cell one normal step along the new heading: the client is put on its centre.
+    Heading,
+    /// The cell the client would reach in that frame.
+    Natural,
+}
+
+impl TurnCell {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "heading" => Self::Heading,
+            "natural" => Self::Natural,
+            _ => Self::Own,
+        }
+    }
+}
+
 /// Most frames a position is predicted ahead (beyond that the report is too old to trust).
 const MAX_LEAD_FRAMES: i64 = 4;
 /// Length of a WASD direction vector (W = (127, 127), D = (180, 0)).
@@ -149,6 +172,7 @@ impl Player {
             velocity: (0.0, 0.0),
             apply_frame: 0,
             frame_seconds: 0.033,
+            turn_cell: TurnCell::Heading,
             walkable: None,
             frame_offset: None,
             in_roll: false,
@@ -430,6 +454,11 @@ impl Player {
             self.mover.y + vy * (lead - 1.0),
         );
         let natural = ((start.0 + vx).floor() as i32, (start.1 + vy).floor() as i32);
+        match self.turn_cell {
+            TurnCell::Own => return (start.0.floor() as i32, start.1.floor() as i32),
+            TurnCell::Natural => return natural,
+            TurnCell::Heading => {}
+        }
         // Standing still, the first frame would only go to the centre of the player's own cell
         // (a dead frame): step to a neighbouring cell at walking speed instead.
         let speed = match vx.hypot(vy) {

@@ -188,6 +188,7 @@ impl InstanceServer {
         let mut player = self.new_player(&ticket, spawn)?;
         player.walkable = spawn::client_grid(&self.config.spawn, hashes.hash_a);
         player.frame_seconds = self.config.instance.tick_ms as f32 / 1000.0;
+        player.turn_cell = player::TurnCell::parse(&self.config.instance.turn_cell);
         if saved.is_some() {
             // Same layout, so the saved cell is normally walkable; otherwise use the nearest
             // open spot.
