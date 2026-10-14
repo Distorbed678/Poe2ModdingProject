@@ -273,6 +273,10 @@ pub struct Skill {
     pub effect_level_row: u32,
     /// `GrantedEffectStatSetsPerLevel` rows: the base stat set, then the additional ones.
     pub stat_set_rows: Vec<u32>,
+    /// The base stat set's stats as (network key, value). The client takes skill stats from
+    /// here, not from the tables: without `dodge_roll_base_travel_distance` a dodge roll logs
+    /// "Trying to do pathfinding action movement with base travel distance <= 0" and stays.
+    pub stats: Vec<(u32, i32)>,
 }
 
 impl Skill {
@@ -284,8 +288,12 @@ impl Skill {
         }
         // Flags, supports, three u32s and a u8.
         w.u8(0).u8(0).u32_le(0).u32_le(0).u32_le(0).u8(0);
-        // Stat lists: the base one and one per additional stat set (all empty).
-        for _ in 0..self.stat_set_rows.len().max(1) {
+        // Stat lists: the base one, then one per additional stat set (empty).
+        w.varuint(self.stats.len() as u32);
+        for &(key, value) in &self.stats {
+            w.varuint(key).varint(value);
+        }
+        for _ in 1..self.stat_set_rows.len() {
             w.varuint(0);
         }
         w.u8(0);

@@ -49,7 +49,17 @@ How the client moves the player and what the server sends back. Code:
   - Its ids are 1, 2, … (small ids, distinct from basic actions and item skills; item skills have the top bits `100`).
   - The first area also has `DodgeRollPlayerTutorial`.
 - Pressing **Space** (`use_dodge_roll`) sends **`0x1a5` UseSkill** with the dodge roll's skill id and the cursor position (relative). It also sends `0x1ac` (`u8 local player`) and `0x2e6` (`u8 local player, u8`: 1 on press, 0 on release).
-- The server answers with StartAction for that skill and moves the player `dodge_roll_base_travel_distance` (46) cells toward the target. Roll speed is not measured yet.
+- **Skill stats come from the server.** The client reads a skill's stats from the stat list in its Actor entry, not from the tables, and it reads the *computed* stats.
+  - The roll's length is `dodge_roll_travel_distance` (`0x141aa90d0`: stat key `0x57fa` × (1 + `movement_velocity_+permyriad`)).
+  - Without it the client logs "Trying to do pathfinding action movement with base travel distance <= 0" (`0x141b8be20`) and does not roll.
+  - The server sends the stat set's constant stats and its implicit stats (as 1). There is no stat calculator yet (M7), so each `..._base_...` stat is also sent under its name without `base_` (`dodge_roll_base_travel_distance` 46 → `dodge_roll_travel_distance` 46).
+- The server answers with StartAction for that skill and simulates the roll (`Motion::Roll`):
+  - **Length:** 46 cells toward the target.
+  - **Speed profile** (measured): it starts at about 3.9 cells per 33 ms frame, loses about 0.225 cells per frame every frame, then holds about 0.93 cells per frame. 46 cells take about 28 frames, driven by the roll animation on the client.
+  - **Walls:** the roll does not pathfind around them. It goes straight and slides along a wall (the clearance gradient gives the wall's direction), and stops when blocked.
+
+## Accuracy (until M4)
+The server walks A* paths on the client-exported grid (layer 0: a 0–5 clearance field, 0 = wall). In the open, the server's end cells equal the client's: clicks to within a cell, rolls to within a cell. Near walls the client's pathfinder keeps a little more distance and slides differently, so positions can drift by a few cells (up to about 20 after a roll along a wall). The client then snaps to the server's position when the next input is answered. An exact port of the client's pathfinding and collision belongs with the server-side terrain (M4).
 
 ## Pause
 `0x1ff` PauseRequest also pauses the server simulation (`Player::paused`). Nothing moves on either side while the escape menu is open in a solo game.

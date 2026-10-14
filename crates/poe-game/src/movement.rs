@@ -17,6 +17,12 @@ use crate::pathfinding::find_path;
 /// Which grid cells an entity can stand on.
 pub trait Walkable {
     fn walkable(&self, x: i32, y: i32) -> bool;
+
+    /// Distance-to-wall value of a cell (0 = blocked; the client's grid has 0..5), used to
+    /// find which way a wall runs.
+    fn clearance(&self, x: i32, y: i32) -> u8 {
+        self.walkable(x, y) as u8
+    }
 }
 
 /// Everything is walkable (no terrain data).
@@ -42,13 +48,25 @@ pub enum Motion {
         x: f32,
         y: f32,
     },
-    /// Fixed-length dash along a direction (dodge roll): `remaining` cells at `speed`.
-    Dash {
+    /// Dodge roll: `remaining` cells towards a direction, along a path, with the roll's speed
+    /// profile ([`roll_speed`]); `elapsed` seconds since it started.
+    Roll {
         x: f32,
         y: f32,
         remaining: f32,
-        speed: f32,
+        elapsed: f32,
     },
+}
+
+/// Dodge roll speed (cells per second) `t` seconds into the roll, measured on the client
+/// (33 ms frames): it starts at about 3.9 cells per frame, loses about 0.225 cells per frame
+/// every frame and then holds about 0.93 cells per frame until the travel distance is covered
+/// (46 cells take about 28 frames). The client drives it from the roll animation.
+pub fn roll_speed(t: f32) -> f32 {
+    const START: f32 = 117.6;
+    const DECELERATION: f32 = 206.6;
+    const MIN: f32 = 28.2;
+    (START - DECELERATION * t).max(MIN)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,30 +153,72 @@ impl Mover {
                     self.start(Motion::Idle);
                 }
             }
-            Motion::Dash {
+            Motion::Roll {
                 x,
                 y,
                 remaining,
-                speed,
+                elapsed,
             } => {
-                let step = (speed * dt).min(remaining);
+                let step = (roll_speed(elapsed) * dt).min(remaining);
                 let moved = match unit(x, y) {
-                    Some((ux, uy)) => self.step(ux, uy, step, terrain),
-                    None => false,
+                    Some((ux, uy)) => self.slide(ux, uy, step, terrain),
+                    None => 0.0,
                 };
                 let remaining = remaining - step;
-                self.motion = if moved && remaining > 1e-3 {
-                    Motion::Dash {
+                self.motion = if moved > 1e-3 && remaining > 1e-3 {
+                    Motion::Roll {
                         x,
                         y,
                         remaining,
-                        speed,
+                        elapsed: elapsed + dt,
                     }
                 } else {
                     Motion::Idle
                 };
             }
         }
+    }
+
+    /// Moves `len` cells along a unit vector; when the next cell is blocked, moves along the
+    /// wall instead (the direction minus its component into the wall, the wall's normal
+    /// taken from the clearance gradient). Returns the distance moved.
+    fn slide(&mut self, ux: f32, uy: f32, len: f32, terrain: &dyn Walkable) -> f32 {
+        let free = |x: f32, y: f32| terrain.walkable(x.floor() as i32, y.floor() as i32);
+        let (nx, ny) = (self.x + ux * len, self.y + uy * len);
+        if free(nx, ny) {
+            self.x = nx;
+            self.y = ny;
+            return len;
+        }
+        let (cx, cy) = self.cell();
+        let c = |x: i32, y: i32| terrain.clearance(x, y) as f32;
+        // Gradient over a 5-cell span (points away from the wall).
+        let gx = c(cx + 2, cy) - c(cx - 2, cy);
+        let gy = c(cx, cy + 2) - c(cx, cy - 2);
+        let mut tangent = None;
+        if let Some((gx, gy)) = unit(gx, gy) {
+            let into = ux * gx + uy * gy;
+            if into < 0.0 {
+                tangent = unit(ux - into * gx, uy - into * gy);
+            }
+        }
+        let candidates = tangent
+            .into_iter()
+            .chain([(ux.signum(), 0.0), (0.0, uy.signum())]);
+        for (tx, ty) in candidates {
+            if tx == 0.0 && ty == 0.0 || tx * ux + ty * uy <= 0.0 {
+                continue;
+            }
+            // Along the wall only the part of the motion that goes that way.
+            let along = len * (tx * ux + ty * uy);
+            let (nx, ny) = (self.x + tx * along, self.y + ty * along);
+            if free(nx, ny) {
+                self.x = nx;
+                self.y = ny;
+                return along;
+            }
+        }
+        0.0
     }
 
     /// Walks `len` cells along the path (waypoints are cell centres). Returns whether there is
@@ -183,24 +243,6 @@ impl Mover {
             }
         }
         !self.path.is_empty()
-    }
-
-    /// Moves `len` cells along the unit vector, sliding along an axis when the target cell is
-    /// blocked. Returns whether the entity moved.
-    fn step(&mut self, ux: f32, uy: f32, len: f32, terrain: &dyn Walkable) -> bool {
-        let candidates = [(ux, uy), (ux.signum() * ux.abs(), 0.0), (0.0, uy)];
-        for (cx, cy) in candidates {
-            if cx == 0.0 && cy == 0.0 {
-                continue;
-            }
-            let (nx, ny) = (self.x + cx * len, self.y + cy * len);
-            if terrain.walkable(nx.floor() as i32, ny.floor() as i32) {
-                self.x = nx;
-                self.y = ny;
-                return true;
-            }
-        }
-        false
     }
 }
 
@@ -255,18 +297,21 @@ mod tests {
     }
 
     #[test]
-    fn dash_covers_its_length() {
+    fn roll_covers_its_length() {
         let mut m = Mover::at_cell((0, 0), 37.0);
-        m.start(Motion::Dash {
+        m.start(Motion::Roll {
             x: 0.0,
             y: 1.0,
-            remaining: 20.0,
-            speed: 60.0,
+            remaining: 46.0,
+            elapsed: 0.0,
         });
-        for _ in 0..30 {
+        let mut frames = 0;
+        while m.is_moving() {
             m.advance(0.033, &Open);
+            frames += 1;
         }
-        assert!((m.y - 20.5).abs() < 1e-3);
-        assert_eq!(m.motion, Motion::Idle);
+        assert!((m.y - 46.5).abs() < 0.6, "{}", m.y);
+        // The client takes about 28 frames.
+        assert!((26..=30).contains(&frames), "{frames}");
     }
 }

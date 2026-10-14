@@ -400,12 +400,40 @@ impl InstanceServer {
         let mut skills = Vec::new();
         for (i, id) in self.config.player.innate_skills.iter().enumerate() {
             match poe_data::views::GrantedSkill::find(&self.data, id, 1)? {
-                Some(granted) => skills.push(player::OwnedSkill {
-                    // Small ids, distinct from basic actions (0x2000xxxx) and item skills.
-                    id: i as u32 + 1,
-                    granted,
-                    id_name: id.clone(),
-                }),
+                Some(granted) => {
+                    // The stat set's constant stats, and its implicit (flag) stats as 1. The
+                    // client reads computed stats (e.g. `dodge_roll_travel_distance`), which
+                    // the server derives from the base ones; until there is a stat calculator
+                    // (M7), each `..._base_...` stat is also sent under its name without
+                    // `base_` when that stat exists.
+                    let mut named: Vec<(String, i32)> = granted
+                        .constant_stats
+                        .iter()
+                        .map(|(k, v)| (k.clone(), *v as i32))
+                        .chain(granted.implicit_stats.iter().map(|k| (k.clone(), 1)))
+                        .collect();
+                    let derived: Vec<(String, i32)> = named
+                        .iter()
+                        .filter(|(k, _)| k.contains("base_"))
+                        .map(|(k, v)| (k.replacen("base_", "", 1), *v))
+                        .collect();
+                    named.extend(derived);
+                    let mut stats = Vec::new();
+                    for (stat, value) in &named {
+                        if let Some(key) = poe_data::views::stat_key(&self.data, stat)? {
+                            stats.push((key, *value));
+                        } else if !stat.contains("base_") {
+                            debug!(%stat, "skill stat not in Stats.dat");
+                        }
+                    }
+                    skills.push(player::OwnedSkill {
+                        // Small ids, distinct from basic actions (0x2000xxxx) and item skills.
+                        id: i as u32 + 1,
+                        granted,
+                        id_name: id.clone(),
+                        stats,
+                    })
+                }
                 None => warn!(skill = %id, "innate skill not in game data"),
             }
         }
