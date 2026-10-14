@@ -24,6 +24,8 @@ pub struct TicketCharacter {
     pub level: u32,
     /// The start area's intro has been played (otherwise new characters wash up).
     pub intro_done: bool,
+    /// Where the character left the game in the ticket's area: (terrain seed, grid x, grid y).
+    pub location: Option<(u32, i32, i32)>,
 }
 
 /// A pending hand-off to an instance server.
@@ -158,6 +160,7 @@ mod tests {
     fn tickets_are_single_use() {
         let reg = MemoryTickets::new(Duration::from_secs(60));
         let character = TicketCharacter {
+            location: None,
             id: 2,
             name: "test".into(),
             class_id: 2,

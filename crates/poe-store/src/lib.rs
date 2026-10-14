@@ -40,6 +40,16 @@ pub struct Character {
     pub area: String,
     /// The start area's intro (washed-up opening) has been played.
     pub intro_done: bool,
+    /// Where the character left the game in `area`, if it has been in the game.
+    pub location: Option<Location>,
+}
+
+/// A position in an area's layout: the terrain seed (the layout) and the grid cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Location {
+    pub seed: u32,
+    pub x: i32,
+    pub y: i32,
 }
 
 /// Fields supplied when creating a character.
@@ -67,4 +77,11 @@ pub trait Store: Send + Sync {
     fn delete_character(&self, account_id: u32, name: &str) -> Result<bool>;
     /// Marks the start area's intro as played.
     fn set_intro_done(&self, character_id: u32) -> Result<()>;
+    /// Saves the area the character is in and where (when it leaves the game).
+    fn save_location(
+        &self,
+        character_id: u32,
+        area: &str,
+        location: Option<Location>,
+    ) -> Result<()>;
 }

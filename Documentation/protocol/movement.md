@@ -64,7 +64,15 @@ The server walks A* paths on the client-exported grid (layer 0: a 0–5 clearanc
 ## Pause
 `0x1ff` PauseRequest also pauses the server simulation (`Player::paused`). Nothing moves on either side while the escape menu is open in a solo game.
 
+Verified: with D held, Escape after 0.7 s, Escape again 2 s later, then D released 0.7 s after that. The client stopped for the 2 s, and both sides ended one cell apart, (330, 1106) on the server and (331, 1105) on the client.
+
+## Saved location
+- When a session ends (exit to character selection, log out, closing the game or a dropped connection), the instance server stores the character's area, the area's terrain seed and its grid cell. The fields are `poe_store::Location`, in migration `0005_character_location.sql`.
+- On the next login into that area, the login server puts the location in the ticket. The instance server sends the same seed, so the layout is the same, and spawns the player on the saved cell (or the nearest walkable cell if it is blocked).
+- Characters that have never been in the game still start at the area's start position.
+
 ## Test tooling
+- **`poe-hook.keys` entries `indown:<vk>` / `inup:<vk>` / `wait:<ms>`:** hold a key while other input arrives.
 - **`poe-hook.keys` entries `in:<vk>[:ms]`:** a synthetic Raw Input key (`WM_INPUT`, answered by the hooked `GetRawInputData`, with `GetKeyState` reporting the key held). WASD is read this way.
 - **`inclick:x,y` / `inmove:x,y`:** override `GetCursorPos` and post mouse messages.
 - **Posted keys (`0x20`):** reach the input bindings that are read from window messages, such as Space for dodge roll.
