@@ -250,16 +250,19 @@ fn league_list(server: &LoginServer) -> LeagueList {
                 id: l.id.clone(),
                 name: l.id.clone(),
                 text_60: l.id.clone(),
-                text_80: l.id.clone(),
+                // A variant names its base league here (`0x140e7ca80` groups variants under
+                // the base league's banner at character creation).
+                text_80: l.variant_of.clone().unwrap_or_else(|| l.id.clone()),
                 text_a0: l.id.clone(),
                 time_d0: 0,
                 time_d8: 0,
                 time_c8: 0,
-                // +0xe0 bit 1: hardcore. +0xe1 bit 1: permanent (character select skips the
-                // league in its "Join" list; set for Standard/Hardcore).
+                // +0xe0 bit 1: hardcore; bit 7: not offered in the "Join" list (permanent
+                // leagues). +0xe1 bit 1: a variant of another league. Character creation makes
+                // a banner for every league with +0xe0 bit 7 that is not a variant.
                 raw_e0: [
-                    if l.hardcore { 0x02 } else { 0 },
-                    if l.permanent { 0x02 } else { 0 },
+                    if l.hardcore { 0x02 } else { 0 } | if l.permanent { 0x80 } else { 0 },
+                    if l.variant_of.is_some() { 0x02 } else { 0 },
                     0,
                 ],
                 flag_c0: 0,
@@ -374,7 +377,11 @@ async fn create_character(
                 class_id: start.class_id,
                 start_state: start.id.clone(),
                 level: start.level,
-                area: start.hub_area.clone().unwrap_or_default(),
+                area: start
+                    .hub_area
+                    .clone()
+                    .or_else(|| server.config.player.start_area.clone())
+                    .unwrap_or_default(),
             };
             let created = server.store.create_character(&new)?;
             match &created {
@@ -385,9 +392,9 @@ async fn create_character(
         }
     };
     let result = CharacterCreated {
-        account_id: account.id,
         result: if created.is_some() { 0 } else { 1 },
-        unk_16: 0,
+        notify: false,
+        account_id: account.id,
     };
     conn.send(&server.protocol.login.encode(&result)?).await?;
     if created.is_some() {

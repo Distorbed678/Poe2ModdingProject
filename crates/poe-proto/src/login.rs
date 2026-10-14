@@ -570,28 +570,33 @@ impl Message for CreateCharacter {
     }
 }
 
-/// Character creation result (deserializer `0x14214dd00`, handler `0x1420e8da6`, which
-/// forwards all three fields to its listeners). Provisional: the meaning of the fields is
-/// inferred, see `Documentation/protocol/login.md`.
+/// Character creation result, opcode `0x13` (class `0x143509d00`, deserializer
+/// `0x14214ea70`; login dispatch case `0x1420e895e` signals the create screen's callback
+/// `0x140ed2ab0`). On result 0 the screen plays the creation scene, then looks the new
+/// character up by name in the character list and sends PlayCharacter (`0x140ecee50`).
+/// Any other result is shown as an error text.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CharacterCreated {
-    pub account_id: u32,
-    /// 0 = success.
+    /// 0 = success, otherwise a refusal code (looked up as an error text).
     pub result: u16,
-    pub unk_16: u16,
+    /// When set, the client also shows a notification for the local player; keep clear.
+    pub notify: bool,
+    pub account_id: u32,
 }
 
 impl Message for CharacterCreated {
     const NAME: &'static str = "CharacterCreated";
     const DIRECTION: Direction = Direction::Server;
     fn encode(&self, w: &mut Writer) {
-        w.u32(self.account_id).u16(self.result).u16(self.unk_16);
+        w.u16(self.result)
+            .u8(self.notify as u8)
+            .u32(self.account_id);
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
-            account_id: r.u32()?,
             result: r.u16()?,
-            unk_16: r.u16()?,
+            notify: r.u8()? != 0,
+            account_id: r.u32()?,
         })
     }
 }

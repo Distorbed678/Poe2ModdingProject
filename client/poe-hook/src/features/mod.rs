@@ -9,6 +9,7 @@ mod crypto_bypass;
 mod dump_types;
 mod exit_trace;
 mod net_trace;
+mod position_sync;
 mod trace_calls;
 
 use crate::{config::Config, module::Module};
@@ -26,6 +27,12 @@ pub fn init_early(config: &Config, main: &Module) {
     report("net_hooks", f.net_trace || f.block_external, || {
         net_trace::init(main, options)
     });
+    // Before the game creates its window.
+    report(
+        "window_title",
+        std::env::var_os("POE_HOOK_WINDOW_TITLE").is_some(),
+        auto_keys::init_window_title,
+    );
 }
 
 fn report(name: &str, enabled: bool, init: impl FnOnce() -> Result<(), String>) {
@@ -42,8 +49,20 @@ fn report(name: &str, enabled: bool, init: impl FnOnce() -> Result<(), String>) 
 /// The remaining features, enabled from a background thread.
 pub fn init_all(config: &Config, main: &Module) {
     let f = &config.features;
-    let trace = (f.trace_addresses.clone(), f.trace_limit);
+    // POE_HOOK_TRACE (comma-separated Ghidra addresses) adds to `trace_addresses` (RE tests).
+    let mut addresses = f.trace_addresses.clone();
+    if let Ok(extra) = std::env::var("POE_HOOK_TRACE") {
+        addresses.extend(
+            extra
+                .split(',')
+                .map(|a| a.trim().to_owned())
+                .filter(|a| !a.is_empty()),
+        );
+    }
+    let tracing = !addresses.is_empty();
+    let trace = (addresses, f.trace_limit.max(200));
     let dump_path = crate::exe_dir().join("object_types.txt");
+    position_sync::ENABLED.store(f.position_sync, std::sync::atomic::Ordering::Relaxed);
     dump_types::MOVEMENT_LOG.store(
         f.movement_log || std::env::var_os("POE_HOOK_MOVEMENT_LOG").is_some(),
         std::sync::atomic::Ordering::Relaxed,
@@ -56,7 +75,7 @@ pub fn init_all(config: &Config, main: &Module) {
         ),
         (
             "trace_calls",
-            !f.trace_addresses.is_empty(),
+            tracing,
             Box::new(move |m| trace_calls::init(m, &trace.0, trace.1)),
         ),
         ("crash_log", f.crash_log, Box::new(crash::init)),

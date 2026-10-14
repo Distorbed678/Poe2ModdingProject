@@ -48,7 +48,7 @@ How the client moves the player and what the server sends back. Code:
 - **Other skills**, dodge roll included, must be in the Actor component's skill list (see [entities.md](entities.md#actor-skills)). The server gives every character `[player] innate_skills`, which defaults to `DodgeRollPlayer`.
   - Its ids are 1, 2, … (small ids, distinct from basic actions and item skills; item skills have the top bits `100`).
   - The first area also has `DodgeRollPlayerTutorial`.
-- Pressing **Space** (`use_dodge_roll`) sends **`0x1a5` UseSkill** with the dodge roll's skill id and the cursor position (relative). It also sends `0x1ac` (`u8 local player`) and `0x2e6` (`u8 local player, u8`: 1 on press, 0 on release).
+- Pressing **Space** (`use_dodge_roll`) sends **`0x1a5` UseSkill** with the dodge roll's skill id and the cursor position (relative). It also sends `0x1ac` (`u8 local player`, ignored) and `0x2e6` SprintInput (see [Sprint](#sprint)).
 - **Skill stats come from the server.** The client reads a skill's stats from the stat list in its Actor entry, not from the tables, and it reads the *computed* stats.
   - The roll's length is `dodge_roll_travel_distance` (`0x141aa90d0`: stat key `0x57fa` × (1 + `movement_velocity_+permyriad`)).
   - Without it the client logs "Trying to do pathfinding action movement with base travel distance <= 0" (`0x141b8be20`) and does not roll.
@@ -57,6 +57,28 @@ How the client moves the player and what the server sends back. Code:
   - **Length:** 46 cells toward the target.
   - **Speed profile** (measured): it starts at about 3.9 cells per 33 ms frame, loses about 0.225 cells per frame every frame, then holds about 0.93 cells per frame. 46 cells take about 28 frames, driven by the roll animation on the client.
   - **Walls:** the roll does not pathfind around them. It goes straight and slides along a wall (the clearance gradient gives the wall's direction), and stops when blocked.
+
+## Steering a running skill
+- **C→S `0x1a8` UpdateSkillTarget**: `u8 local player, i32 dx, i32 dy, u32 skill`. Sent about every 70 ms while a roll (or sprint) runs, or a click is held, with the cursor position relative to the player's cell.
+- **C→S `0x1aa` UpdateSkillTargetEntity**: `u8 local player, u32 entity, u32 skill` (the same, aimed at an entity).
+- **S→C `0x1cb` UpdateActionTarget** (simulation message): header, `u16 action id, i32 x, i32 y` (absolute cells). The server answers each `0x1a8` for the running action with it and steers its own simulation the same way.
+- Unknown client messages end the parse of their whole batch (there is no length prefix), so before `0x1a8` was decoded, a `0x1a5` in the same batch was lost. That was one cause of the input lag.
+
+## Input during a roll
+- The client keeps WASD and clicks during a roll and sends them, but it only acts on them once the roll ends. If the server answered them immediately (a Move StartAction), the roll was cut off halfway.
+- The server now keeps the latest input while the roll runs (`Pending`) and starts it when the roll ends. A held WASD direction is sent with the client's own cell, so nothing snaps.
+
+## Lag (M3.5)
+- **No lag compensation to turn on.** The world is always lockstep (above), and the client plays simulation frames as they arrive. `0x1d` PingReply only feeds the latency display. Lag therefore came from the server.
+- **Server frame time.** A debug build's A* (box-shaped search, heap allocations per node) took about 108 ms per 33 ms frame on the Riverbank grid, so the server fell behind. The A* now uses flat arrays over a box around start and goal (`MARGIN` 24 cells) with a node budget. It takes about 0.5 ms in a debug build and less in release. The server logs a warning when a frame takes longer than the tick. Run the server with `--release` for play.
+- **Dropped batches** (unknown `0x1a8`, above).
+- **Position sync (dev bridge until M4).** The server's pathfinding and collision only approximate the client's, so positions drifted near walls (up to about 20 cells after a roll along a wall), and the client snapped back on the next server position. The client DLL now reports the player's position every frame (`position_sync`, see [client-dll.md](../client-dll.md#position-sync)). The instance server (`servers/instance-server/src/sync.rs`) listens for these reports on its own port (UDP, loopback only) and takes the client's position while reports are fresh (250 ms). It also uses the reported action to know when the client's roll ended. Without reports (option `[instance] position_sync = false`, or a non-local client) it falls back to its own simulation.
+
+## Sprint
+- Holding Space after a dodge roll makes the character sprint (`sprint_movement_speed_+%` = 50 in the character templates, after `dodge_roll_sprint_minimum_time_ms`).
+- **C→S `0x2e6` SprintInput**: `u8 local player, u8 held` (1 on press, 0 on release). **S→C `0x2e7` SprintState**: header + `u8 held`. The server echoes it, which sets Actor +0x2a2 bit 5 (key held) on the client.
+- The client decides at the end of a roll whether it carries on as a sprint (`0x141b76c20`). Its "is sprinting" check (`0x141e5d490`) reads Actor +0x915 or the stat `is_sprinting`.
+- **Status: partial.** With the echo alone, the client starts a short sprint after the roll and falls back to walking. Setting `is_sprinting` and the speed bonus as stats (**S→C `0x1d3` StatsUpdate**: header, `u8 set, varuint n, n × (varuint key, varint value)`; **S→C `0x1d8` SkillStatsUpdate**: header, `u32 skill, u8 container, varuint n, pairs`) makes the sprint run at the right speed, but the client then drops its Move action right after the roll (`0x141e4de20` stops Move when Actor +0x2a1 bit 2 is set), and restarting it from the server only stutters. Sprinting on the official servers is most likely a buff with these stats. Full sprint therefore waits for the buff system (M7). The messages are decoded and kept, and the server simulates a sprint only when no client reports arrive.
 
 ## Accuracy (until M4)
 The server walks A* paths on the client-exported grid (layer 0: a 0–5 clearance field, 0 = wall). In the open, the server's end cells equal the client's: clicks to within a cell, rolls to within a cell. Near walls the client's pathfinder keeps a little more distance and slides differently, so positions can drift by a few cells (up to about 20 after a roll along a wall). The client then snaps to the server's position when the next input is answered. An exact port of the client's pathfinding and collision belongs with the server-side terrain (M4).
@@ -77,4 +99,4 @@ Verified: with D held, Escape after 0.7 s, Escape again 2 s later, then D releas
 - **`inclick:x,y` / `inmove:x,y`:** override `GetCursorPos` and post mouse messages.
 - **Posted keys (`0x20`):** reach the input bindings that are read from window messages, such as Space for dodge roll.
 - Nothing is sent to other windows. `SendInput` is not used, because it goes to whatever window has focus.
-- The DLL's `dump_object_types` logs the player's world position at every simulation frame (`frame #n … step … grid`) and the WASD direction (Actor +0x400) when it changes.
+- The DLL's `dump_object_types` logs the player's world position at every simulation frame (`frame #n … step … grid`) when `movement_log` is on (or `POE_HOOK_MOVEMENT_LOG` is set), and the WASD direction (Actor +0x400) and action slots when they change.

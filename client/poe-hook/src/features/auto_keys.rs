@@ -9,7 +9,9 @@
 //! `GetRawInputData` turns into a keyboard record (and `GetKeyState` reports the key as held).
 //! `inmove:x,y` / `inclick:x,y` override `GetCursorPos` with that client position and post the
 //! mouse messages there. `indown:<vk>` / `inup:<vk>` press and release a Raw Input key
-//! separately and `wait:<ms>` pauses, so input can overlap (e.g. Escape while W is held).
+//! separately, `down:<vk>` / `up:<vk>` do the same for posted keys (Space) and `wait:<ms>`
+//! pauses, so input can overlap (e.g. Escape while W is held). `text:<chars>` posts one
+//! `WM_CHAR` per character (typing a character name).
 //! Nothing is sent to other windows and the real cursor never moves.
 //! The file is deleted once processed, so a test
 //! driver can send input at any time.
@@ -39,8 +41,8 @@ use windows_sys::Win32::{
         },
         WindowsAndMessaging::{
             EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, RI_KEY_BREAK,
-            RI_KEY_MAKE, WM_CLOSE, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
-            WM_MOUSEMOVE,
+            RI_KEY_MAKE, WM_ACTIVATEAPP, WM_CHAR, WM_CLOSE, WM_INPUT, WM_KEYDOWN, WM_KEYUP,
+            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
         },
     },
 };
@@ -63,6 +65,13 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
                 continue;
             };
             let _ = std::fs::remove_file(&file);
+            // The game ignores input while it thinks it is in the background (its window
+            // procedure tracks WM_ACTIVATEAPP: "[WINDOW] Lost focus"). Tell it it is active;
+            // this does not change which window really has the focus.
+            if let Some(hwnd) = game_window() {
+                unsafe { PostMessageW(hwnd, WM_ACTIVATEAPP, 1, 0) };
+                std::thread::sleep(Duration::from_millis(50));
+            }
             for entry in text.split_whitespace() {
                 if entry == "close" {
                     match game_window() {
@@ -86,6 +95,40 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
                         _ => log::warn!("poe-hook.keys: bad entry {entry:?}"),
                     }
                     std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                // Posted key held down / released separately (Space: dodge roll, then sprint).
+                if let Some((kind, key)) = entry.split_once(':')
+                    && (kind == "down" || kind == "up")
+                {
+                    match (parse_num(key), game_window()) {
+                        (Some(vk), Some(hwnd)) => unsafe {
+                            let up = kind == "up";
+                            HELD[vk as usize & 0xff].store(!up, Ordering::Relaxed);
+                            if up {
+                                PostMessageW(hwnd, WM_KEYUP, vk as usize, 0xc000_0001u32 as LPARAM);
+                            } else {
+                                PostMessageW(hwnd, WM_KEYDOWN, vk as usize, 1);
+                            }
+                            log::info!("posted key {vk:#x} {kind}");
+                        },
+                        _ => log::warn!("poe-hook.keys: bad entry {entry:?}"),
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                // Text for an input box (character name): one WM_CHAR per character.
+                if let Some(text) = entry.strip_prefix("text:") {
+                    match game_window() {
+                        Some(hwnd) => {
+                            for c in text.encode_utf16() {
+                                unsafe { PostMessageW(hwnd, WM_CHAR, c as usize, 1) };
+                                std::thread::sleep(Duration::from_millis(40));
+                            }
+                            log::info!("typed {text:?}");
+                        }
+                        None => log::warn!("text: no game window"),
+                    }
                     continue;
                 }
                 if let Some(ms) = entry.strip_prefix("wait:") {
@@ -164,6 +207,116 @@ static CURSOR_Y: AtomicI32 = AtomicI32::new(0);
 
 fn pending() -> &'static Mutex<HashMap<usize, Raw>> {
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Window title for test clients (`POE_HOOK_WINDOW_TITLE`, set by `tools/test-run.sh`), so a
+/// desktop rule can keep them off the user's screen (see Documentation/client-dll.md).
+static WINDOW_TITLE: OnceLock<Vec<u16>> = OnceLock::new();
+
+type CreateWindowExWFn = unsafe extern "system" fn(
+    u32,
+    *const u16,
+    *const u16,
+    u32,
+    i32,
+    i32,
+    i32,
+    i32,
+    usize,
+    usize,
+    usize,
+    *const core::ffi::c_void,
+) -> usize;
+
+/// Replaces the title of the game's windows with the test title.
+unsafe extern "win64" fn on_create_window(
+    regs: *mut Registers,
+    original: usize,
+    _: usize,
+) -> usize {
+    let r = unsafe { &*regs };
+    let title = match WINDOW_TITLE.get() {
+        Some(t) if r.r8 != 0 => t.as_ptr(),
+        _ => r.r8 as *const u16,
+    };
+    let f: CreateWindowExWFn = unsafe { std::mem::transmute(original) };
+    unsafe {
+        f(
+            r.rcx as u32,
+            r.rdx as *const u16,
+            title,
+            r.r9 as u32,
+            r.get_stack(5) as i32,
+            r.get_stack(6) as i32,
+            r.get_stack(7) as i32,
+            r.get_stack(8) as i32,
+            r.get_stack(9) as usize,
+            r.get_stack(10) as usize,
+            r.get_stack(11) as usize,
+            r.get_stack(12) as *const core::ffi::c_void,
+        )
+    }
+}
+
+type SetWindowTextWFn = unsafe extern "system" fn(usize, *const u16) -> i32;
+
+unsafe extern "win64" fn on_set_window_text(
+    regs: *mut Registers,
+    original: usize,
+    _: usize,
+) -> usize {
+    let r = unsafe { &*regs };
+    let title = WINDOW_TITLE
+        .get()
+        .map_or(r.rdx as *const u16, |t| t.as_ptr());
+    let f: SetWindowTextWFn = unsafe { std::mem::transmute(original) };
+    unsafe { f(r.rcx as usize, title) as usize }
+}
+
+/// Test clients: give the game window `POE_HOOK_WINDOW_TITLE` as its title (installed at
+/// load, before the game creates its window).
+pub fn init_window_title() -> Result<(), String> {
+    let Ok(title) = std::env::var("POE_HOOK_WINDOW_TITLE") else {
+        return Ok(());
+    };
+    WINDOW_TITLE
+        .set(title.encode_utf16().chain([0]).collect())
+        .ok();
+    hook_user32(&[
+        (b"CreateWindowExW\0", on_create_window),
+        (b"SetWindowTextW\0", on_set_window_text),
+    ])?;
+    log::info!("test client window title: {title}");
+    Ok(())
+}
+
+fn hook_user32(hooks: &[(&[u8], ilhook::x64::RetnRoutine)]) -> Result<(), String> {
+    let user32 = unsafe {
+        let name: Vec<u16> = "user32.dll\0".encode_utf16().collect();
+        let mut h = GetModuleHandleW(name.as_ptr());
+        if h.is_null() {
+            h = windows_sys::Win32::System::LibraryLoader::LoadLibraryW(name.as_ptr());
+        }
+        h
+    };
+    if user32.is_null() {
+        return Err("user32.dll not loaded".into());
+    }
+    for &(name, routine) in hooks {
+        let display = String::from_utf8_lossy(&name[..name.len() - 1]).into_owned();
+        let addr = unsafe { GetProcAddress(user32, name.as_ptr()) }
+            .ok_or_else(|| format!("{display} not exported"))? as usize;
+        let hooker = Hooker::new(
+            addr,
+            HookType::Retn(routine),
+            CallbackOption::None,
+            0,
+            HookFlags::empty(),
+        );
+        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {display}: {e:?}"))?;
+        Box::leak(Box::new(point));
+    }
+    Ok(())
 }
 
 fn hook_input() -> Result<(), String> {

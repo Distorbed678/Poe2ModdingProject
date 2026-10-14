@@ -918,6 +918,204 @@ impl Message for StartAction {
     }
 }
 
+/// C→S: new target for a running skill, relative to the player's cell (sender `0x14210fbb0`):
+/// `u8 local player, i32 x, i32 y, u32 skill id`. Sent about every 70 ms while a skill's input
+/// is held, e.g. a dodge roll or sprint steering towards the cursor. In lockstep the client
+/// does not apply it itself; the server answers with [`UpdateActionTarget`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UpdateSkillTarget {
+    pub player: u8,
+    pub x: i32,
+    pub y: i32,
+    pub skill: u32,
+}
+
+impl Message for UpdateSkillTarget {
+    const NAME: &'static str = "UpdateSkillTarget";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.player).i32(self.x).i32(self.y).u32(self.skill);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            player: r.u8()?,
+            x: r.i32()?,
+            y: r.i32()?,
+            skill: r.u32()?,
+        })
+    }
+}
+
+/// C→S: new target entity for a running skill: `u8 local player, u32 entity, u32 skill id`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UpdateSkillTargetEntity {
+    pub player: u8,
+    pub entity: u32,
+    pub skill: u32,
+}
+
+impl Message for UpdateSkillTargetEntity {
+    const NAME: &'static str = "UpdateSkillTargetEntity";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.player).u32(self.entity).u32(self.skill);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            player: r.u8()?,
+            entity: r.u32()?,
+            skill: r.u32()?,
+        })
+    }
+}
+
+/// S→C simulation message: new target location of an entity's current action (reader
+/// `0x141f69c60`, Actor handler case `0x1cb`): header, `u16 action id, i32 x, i32 y`
+/// (absolute grid cell). Applied when the id matches the running action.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UpdateActionTarget {
+    pub header: SimulationHeader,
+    pub action_id: u16,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Message for UpdateActionTarget {
+    const NAME: &'static str = "UpdateActionTarget";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u16(self.action_id).i32(self.x).i32(self.y);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            header: SimulationHeader::decode(r)?,
+            action_id: r.u16()?,
+            x: r.i32()?,
+            y: r.i32()?,
+        })
+    }
+}
+
+/// C→S: the sprint/dodge key (Space) went down or up (sender `0x14016e780`):
+/// `u8 local player, u8 held`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SprintInput {
+    pub player: u8,
+    pub held: bool,
+}
+
+impl Message for SprintInput {
+    const NAME: &'static str = "SprintInput";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.player).u8(self.held as u8);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            player: r.u8()?,
+            held: r.u8()? != 0,
+        })
+    }
+}
+
+/// S→C simulation message: whether the entity's sprint key is held (reader `0x141dcb170`,
+/// Actor vfunc +0x3d8 `0x141e5c070`: Actor +0x2a2 bit 5). A dodge roll that ends while it is
+/// set turns into a sprint (`0x141b76c20`); clearing it ends the sprint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SprintState {
+    pub header: SimulationHeader,
+    pub held: bool,
+}
+
+impl Message for SprintState {
+    const NAME: &'static str = "SprintState";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u8(self.held as u8);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            header: SimulationHeader::decode(r)?,
+            held: r.u8()? != 0,
+        })
+    }
+}
+
+/// S→C simulation message: an entity's stats change (reader `0x141f6dce0`, Stats component
+/// handler `0x142181f20` case `0x1d3`): header, `u8 set` (0 = the entity's own stats), varuint
+/// count, then (varuint stat key, varint value) pairs. Keys are `Stats.dat` row + 1.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatsUpdate {
+    pub header: SimulationHeader,
+    pub set: u8,
+    pub stats: Vec<(u32, i32)>,
+}
+
+impl Message for StatsUpdate {
+    const NAME: &'static str = "StatsUpdate";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u8(self.set).varuint(self.stats.len() as u32);
+        for &(key, value) in &self.stats {
+            w.varuint(key).varint(value);
+        }
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let header = SimulationHeader::decode(r)?;
+        let set = r.u8()?;
+        let n = r.varuint()?;
+        let mut stats = Vec::new();
+        for _ in 0..n {
+            stats.push((r.varuint()?, r.varint()?));
+        }
+        Ok(Self { header, set, stats })
+    }
+}
+
+/// S→C simulation message: stats of one of an actor's skills change (reader `0x141f6aa80`,
+/// Actor handler case `0x1d8`): header, `u32 skill id, u8 stat container` (0 = the skill's own
+/// stats), varuint count, then (varuint stat key, varint value) pairs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SkillStatsUpdate {
+    pub header: SimulationHeader,
+    pub skill: u32,
+    pub container: u8,
+    pub stats: Vec<(u32, i32)>,
+}
+
+impl Message for SkillStatsUpdate {
+    const NAME: &'static str = "SkillStatsUpdate";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u32(self.skill)
+            .u8(self.container)
+            .varuint(self.stats.len() as u32);
+        for &(key, value) in &self.stats {
+            w.varuint(key).varint(value);
+        }
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let header = SimulationHeader::decode(r)?;
+        let skill = r.u32()?;
+        let container = r.u8()?;
+        let n = r.varuint()?;
+        let mut stats = Vec::new();
+        for _ in 0..n {
+            stats.push((r.varuint()?, r.varint()?));
+        }
+        Ok(Self {
+            header,
+            skill,
+            container,
+            stats,
+        })
+    }
+}
+
 /// Ends a simulation frame (no body).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SimulationTick;

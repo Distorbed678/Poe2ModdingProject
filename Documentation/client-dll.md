@@ -20,6 +20,9 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 | `net_trace` | on | Inline hooks on ws2_32 `send`/`WSASend`/`recv`/`WSARecv`/`connect`/`WSAConnect`. Logs payload prefixes and game addresses on the stack. |
 | `net_trace_dump_bytes` | 256 | Bytes of payload shown per call. |
 | `block_external` | on | Refuses connections to non-loopback addresses, so the client does not reach official services (shop, telemetry, uploads). |
+| `position_sync` | on | Reports the player's position and actions to the instance server every frame (see [Position sync](#position-sync)). |
+| `movement_log` | off | Per-frame movement log (see [Movement log](#movement-log)). |
+| `trace_addresses` | `[]` | "Logging breakpoints": Ghidra addresses whose calls are logged with the argument registers and the game call stack (`trace_calls`, up to `trace_limit` hits each). The `POE_HOOK_TRACE` environment variable (comma-separated) adds addresses without editing `GameFiles/`. Hook only at function starts or instruction boundaries that `ilhook` can relocate: a bad spot crashes the client (it did at `0x140ece810`). |
 
 Note: the game's own login/instance TCP traffic does not go through these ws2_32 exports (it is invisible to `net_trace`). The libcurl HTTPS traffic does go through them. The server-side hexdump (`RUST_LOG=poe_net=trace`) shows decrypted game traffic.
 
@@ -66,6 +69,9 @@ Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the playe
 - **`in:<vk>[:ms]`** posts `WM_INPUT` with a marker handle. The DLL hooks `GetRawInputData` (user32) to return a synthetic keyboard record for that handle, and `GetKeyState` reports the key as held meanwhile.
 - **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
 - **Plain keys (`0x20`)** are still posted messages. Space (dodge roll) is read that way.
+- **`text:<chars>`** posts one `WM_CHAR` per character, for text boxes such as the character name.
+- Before each batch the DLL posts `WM_ACTIVATEAPP(1)`: the game ignores input while it thinks it is in the background, and this changes only its own flag, not the real focus.
+- **`0x77` (F8)** takes a game screenshot into the test prefix's `My Games/Path of Exile 2/Screenshots`, which shows the game even when its window is not visible.
 - Nothing goes to other windows. `SendInput` is not used, because it types into whatever window has focus.
 
 ### Movement log
@@ -74,3 +80,9 @@ With `dump_object_types`, plus `movement_log = true` or the `POE_HOOK_MOVEMENT_L
 - the Actor's WASD direction (+0x400) when it changes.
 
 It is off by default because it writes about 30 lines a second while moving. See [protocol/movement.md](protocol/movement.md).
+
+## Position sync
+`position_sync` (on by default) sends one UDP datagram per player simulation frame. It goes to the last loopback address the game connected to over TCP, which is the instance server; the server listens for UDP on the same port. So reports only ever go to a local server. Payload, 24 bytes little-endian: `b"PSY1", u16 local TCP port of that connection, u16 Actor +0x2a2 flags, u32 frame counter, f32 grid x, f32 grid y, u16 action type at Actor +0x238, u16 action type at +0x240`. The server keys reports by the TCP port. The connect hook records the connection and restores `WSAGetLastError` afterwards: the game checks it after a non-blocking `connect`, and changing it broke the login. This is a dev bridge for M3.5 until the server simulates movement exactly (M4); see [protocol/movement.md](protocol/movement.md#lag-m35).
+
+## Test window title
+With `POE_HOOK_WINDOW_TITLE=<title>` in the environment (set by `tools/test-run.sh`), the DLL hooks `CreateWindowExW`/`SetWindowTextW` so the game window gets that title. A desktop rule can then match the test client, for example a KWin rule that moves the window to another virtual desktop without focus, so unattended tests do not cover the screen. No rule is installed by the project.

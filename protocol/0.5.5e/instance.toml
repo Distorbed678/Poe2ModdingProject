@@ -27,8 +27,11 @@ MoveDirection = 0x0063
 # Skill use (click-to-move uses the Move skill) and release of its input.
 UseSkill = 0x01a5
 SkillReleased = 0x01ad
-# Not decoded yet: u8 player, u8 (sent when Space is pressed/released).
-Unknown02e6 = 0x02e6
+# Running skill's new target (relative cell / entity) while its input is held.
+UpdateSkillTarget = 0x01a8
+UpdateSkillTargetEntity = 0x01aa
+# Sprint/dodge key down or up: u8 player, u8 held.
+SprintInput = 0x02e6
 # Not decoded yet: u8 player (sent with a dodge roll's UseSkill; sender 0x14210fd56).
 Unknown01ac = 0x01ac
 
@@ -51,6 +54,14 @@ AddObject = 0x02f7
 MoveDirectionUpdate = 0x0064
 # An entity starts an action (skill id, target), handled by the Actor component.
 StartAction = 0x01c8
+# New target location of an entity's current action.
+UpdateActionTarget = 0x01cb
+# An entity's sprint key state (dodge roll -> sprint).
+SprintState = 0x02e7
+# An entity's stats change (Stats component).
+StatsUpdate = 0x01d3
+# Stats of one of an actor's skills change.
+SkillStatsUpdate = 0x01d8
 
 # Body sizes of client messages the server does not decode yet, so batches can be split.
 [client_body_sizes]
@@ -60,7 +71,6 @@ Unknown013d = 1
 Unknown0221 = 1
 Unknown023d = 2
 Unknown02e8 = 2
-Unknown02e6 = 2
 Unknown01ac = 1
 Unknown0351 = 1
 Unknown0357 = 1

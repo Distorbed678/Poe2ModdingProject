@@ -40,6 +40,9 @@ pub struct FeatureConfig {
     /// With `dump_object_types`: log the player's position every simulation frame (movement
     /// research; also enabled by the `POE_HOOK_MOVEMENT_LOG` environment variable).
     pub movement_log: bool,
+    /// With `dump_object_types`: report the player's position and action to the local
+    /// instance server every frame (movement dev bridge until M4, see position_sync.rs).
+    pub position_sync: bool,
     /// Keys posted to the game window for unattended tests: `[[ms_after_load, vk], ...]`
     /// (e.g. 0x0D Enter to log in and play, 0x2C PrintScreen for an in-game screenshot).
     pub auto_keys: Vec<(u64, u16)>,
@@ -57,6 +60,7 @@ impl Default for FeatureConfig {
             trace_limit: 20,
             dump_object_types: false,
             movement_log: false,
+            position_sync: true,
             auto_keys: Vec::new(),
         }
     }
