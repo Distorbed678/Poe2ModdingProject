@@ -62,6 +62,16 @@ Plaintext of every login and instance message, read inside the client (no cipher
 ### Vulkan capture notes
 The game resolves some functions (instance and device creation) before the loader's export patch is in place, so the loader takes the instance from `vkCreateWin32SurfaceKHR`, the physical device from the surface queries, the device from `vkCreateSwapchainKHR` and a present-capable queue family from `vkGetPhysicalDeviceSurfaceSupportKHR`.
 
+## Using it on official servers (read-only)
+1. `cargo xtask deploy-client --official`: the original gateway list goes back into `GameFiles/`, and `poe-hook.toml` gets `mode = "official"`.
+2. Start Steam, then `cargo xtask run-client` (the GameFiles copy in its own Proton prefix; the Steam install is never touched). The GameFiles copy must be the same build as the live game; after a patch, update GameFiles first.
+3. Play. The overlay shows `OFFICIAL: read-only`. Packets, logs and snapshots go to `GameFiles/logs/poe-hook/<session>/`; the coverage counts official messages separately.
+4. `cargo xtask deploy-client` switches back to our server.
+
+Compare a capture with one from our server: `Tools/pyenv/bin/python tools/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`.
+
+Risk: the DLL is a third-party module inside the official client, even if it only observes. It can be detected (the client can also load server-delivered code modules, see [re/crypto.md](re/crypto.md#other-crypto-in-the-binary)), and it is against the game's terms; there is some risk to the account.
+
 ## Modes and the read-only latch
 `mode` in `poe-hook.toml` (set by `cargo xtask deploy-client [--official]`):
 - `private` (default): our server. Crypto bypass on, external connections refused.
