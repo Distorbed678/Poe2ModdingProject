@@ -74,7 +74,20 @@ pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
                 unsafe { PostMessageW(hwnd, WM_ACTIVATEAPP, 1, 0) };
                 std::thread::sleep(Duration::from_millis(50));
             }
-            for entry in text.split_whitespace() {
+            // `text:` takes the rest of its line (spaces included); other entries are separated by
+            // whitespace.
+            let entries: Vec<&str> = text
+                .lines()
+                .flat_map(|line| {
+                    let line = line.trim();
+                    if line.starts_with("text:") {
+                        vec![line]
+                    } else {
+                        line.split_whitespace().collect()
+                    }
+                })
+                .collect();
+            for entry in entries {
                 if entry == "close" {
                     match game_window() {
                         Some(hwnd) => unsafe {

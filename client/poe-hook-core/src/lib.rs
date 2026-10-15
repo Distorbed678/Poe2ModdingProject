@@ -22,6 +22,7 @@ mod host;
 mod inspect;
 mod minimap;
 mod net_trace;
+mod notes;
 mod overlay;
 mod packets;
 mod position_sync;

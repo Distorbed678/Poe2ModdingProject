@@ -9,6 +9,7 @@ mod hooks_tab;
 mod inspect_tab;
 mod log_tab;
 mod minimap_tab;
+mod notes_tab;
 mod packets_tab;
 mod protocol_tab;
 mod scanner_tab;
@@ -106,6 +107,9 @@ impl App {
                     }
                     if let Some(_t) = ui.tab_item("Protocol") {
                         self.protocol.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Notes") {
+                        notes_tab::draw(ui);
                     }
                     if let Some(_t) = ui.tab_item("Coverage") {
                         self.coverage.draw(ui);

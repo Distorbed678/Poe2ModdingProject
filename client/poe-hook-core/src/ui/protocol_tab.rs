@@ -15,6 +15,9 @@ pub struct ProtocolView {
     /// Snapshot of the per-opcode data, refreshed every second.
     ops: Vec<(Key, OpInfo)>,
     refreshed: Option<std::time::Instant>,
+    /// Note editor for the selected opcode (and which opcode it was loaded for).
+    note: String,
+    note_for: Option<Key>,
 }
 
 impl ProtocolView {
@@ -25,6 +28,8 @@ impl ProtocolView {
             selected: None,
             ops: Vec::new(),
             refreshed: None,
+            note: String::new(),
+            note_for: None,
         }
     }
 
@@ -72,7 +77,12 @@ impl ProtocolView {
                         continue;
                     }
                     let key = (*c, *d, *op);
-                    let label = format!("{line} ({})##{c:?}{d:?}{op}", info.count);
+                    let mark = if crate::notes::has_opcode_note(*c, *d, *op) {
+                        " *"
+                    } else {
+                        ""
+                    };
+                    let label = format!("{line} ({}){mark}##{c:?}{d:?}{op}", info.count);
                     if ui
                         .selectable_config(label)
                         .selected(self.selected == Some(key))
@@ -86,7 +96,23 @@ impl ProtocolView {
         ui.child_window("proto_detail")
             .size([0.0, height])
             .border(true)
-            .build(ui, || self.detail(ui));
+            .build(ui, || {
+                if let Some(key) = self.selected {
+                    if self.note_for != Some(key) {
+                        self.note = crate::notes::opcode_note(key.0, key.1, key.2);
+                        self.note_for = Some(key);
+                    }
+                    ui.text("Your note on this opcode (what you think it does):");
+                    ui.input_text_multiline("##proto_note", &mut self.note, [-1.0, 54.0])
+                        .build();
+                    if ui.button("Save note##proto") {
+                        crate::notes::set_opcode_note(key.0, key.1, key.2, &self.note);
+                        crate::ui::notice(format!("Note saved for {:#06x}", key.2));
+                    }
+                    ui.separator();
+                }
+                self.detail(ui)
+            });
     }
 
     fn detail(&self, ui: &Ui) {
