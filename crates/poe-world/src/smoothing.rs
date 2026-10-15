@@ -239,6 +239,13 @@ pub struct LEdge {
     pub virtual_edge: bool,
     /// (min, max) width (`+0x80`/`+0x84`).
     pub width: (i32, i32),
+    /// Chirality (`+0x41`).
+    pub chirality: bool,
+    /// Virtual end points per end (`+0x4c`/`+0x5c`, flags `+0x48`/`+0x49`).
+    pub vends: [Option<[Pos; 2]>; 2],
+    /// Split already (`+0x6d`) / ends fixed (`+0x4a`).
+    pub split: bool,
+    pub fixed: bool,
 }
 
 /// The graph between routing and tile placement.
@@ -573,6 +580,41 @@ pub fn smooth(g: &mut LayoutGraph) {
     for _ in 0..5 {
         if !round_all(g) {
             break;
+        }
+    }
+}
+
+/// `0x1420b3bd0` repeated up to 5 times while it changes something.
+pub fn round_corners(g: &mut LayoutGraph) {
+    for _ in 0..5 {
+        if !round_all(g) {
+            break;
+        }
+    }
+}
+
+/// `0x1420bd5f0`: a node's edges moved to the first slots.
+pub fn compact_slots(g: &mut LayoutGraph) {
+    for n in &mut g.nodes {
+        let edges: Vec<usize> = n.slots.iter().flatten().copied().collect();
+        n.slots = [None; 4];
+        for (k, e) in edges.into_iter().enumerate() {
+            n.slots[k] = Some(e);
+        }
+    }
+}
+
+/// `0x1420b6660`: each edge gets a point one step out of its end nodes along the end offsets.
+pub fn add_end_points(g: &mut LayoutGraph) {
+    for e in 0..g.edges.len() {
+        let [o0, o1] = g.edges[e].offsets;
+        if o0 != (0, 0) {
+            let p = g.nodes[g.edges[e].from].pos;
+            g.edges[e].points.insert(0, (p.0 + o0.0, p.1 + o0.1));
+        }
+        if o1 != (0, 0) {
+            let p = g.nodes[g.edges[e].to].pos;
+            g.edges[e].points.push((p.0 + o1.0, p.1 + o1.1));
         }
     }
 }

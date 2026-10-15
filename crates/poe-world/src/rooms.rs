@@ -43,6 +43,9 @@ pub struct EdgeType {
     /// The name starts with "Wildcard" (flag 0x80): such edges take no side.
     pub wildcard: bool,
     pub virtual_edge: bool,
+    /// A virtual edge's two split edge types (lower case) and their chirality flags (flag
+    /// bits 0 and 1).
+    pub splits: [(String, bool); 2],
 }
 
 impl EdgeType {
@@ -64,7 +67,18 @@ impl EdgeType {
             .map(|l| l.split_whitespace().filter_map(|v| v.parse().ok()).collect())
             .unwrap_or_default();
         let virtual_edge = lines.next().is_some_and(|l| l == "virtual");
+        let mut splits: [(String, bool); 2] = Default::default();
+        if virtual_edge {
+            for s in splits.iter_mut() {
+                let t = lines.next().map(tokens).unwrap_or_default();
+                *s = (
+                    t.first().map(|p| norm(p)).unwrap_or_default(),
+                    t.get(1).is_some_and(|v| v != "0"),
+                );
+            }
+        }
         Self {
+            splits,
             wildcard: name.starts_with("Wildcard"),
             name,
             grounds: [g0, g1],
