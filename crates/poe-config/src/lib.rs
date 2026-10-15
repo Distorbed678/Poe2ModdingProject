@@ -207,6 +207,21 @@ pub struct InstanceConfig {
     /// (teleport, movement switches). Loopback only.
     #[serde(default = "default_true")]
     pub debug_link: bool,
+    /// Terrain seed sweep (research, M5): a file of `<WorldAreas.Id> <seed> [count]` lines.
+    /// Each instance session generates the next listed area/seed instead of the character's
+    /// area, records the client's hashes in `sweep_results` and ends (the client then logs in
+    /// again; `tools/re/sweep_drive.py`). A second AreaInfo on one connection crashes the
+    /// client, hence one layout per session. The client DLL's area export records each layout.
+    /// `POE_SWEEP` overrides it. Empty: off.
+    #[serde(default)]
+    pub sweep: PathBuf,
+    /// Where the sweep appends `area, seed, tile hash, doodad hash` lines.
+    #[serde(default = "default_sweep_results")]
+    pub sweep_results: PathBuf,
+}
+
+fn default_sweep_results() -> PathBuf {
+    "data/sweep-results.tsv".into()
 }
 
 fn default_cursor_to_grid() -> [f32; 6] {

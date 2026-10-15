@@ -30,6 +30,7 @@ mod protocol;
 mod scanner;
 mod snapshot;
 mod symbols;
+mod terrain_tools;
 mod timing;
 mod trace_calls;
 mod ui;
@@ -146,6 +147,10 @@ fn start_features(config: &Config, main: &Module) {
     let dump_path = poe_hook_shared::exe_dir().join("object_types.txt");
     report("dump_object_types", f.dump_object_types, || {
         dump_types::init(main, dump_path)
+    });
+    let generator_trace = f.generator_trace || std::env::var_os("POE_HOOK_GEN_TRACE").is_some();
+    report("area_export", f.area_export || generator_trace, || {
+        terrain_tools::init(main, f.area_export, generator_trace)
     });
     report("trace_calls", !addresses.is_empty(), || {
         trace_calls::init(main, &addresses, f.trace_limit.max(200))

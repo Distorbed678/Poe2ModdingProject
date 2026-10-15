@@ -7,7 +7,7 @@
 //!    ticket's key material,
 //! 3. server `AreaInfo` (area + seed): the client generates the terrain and loads the area.
 
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use poe_cluster::{Ticket, TicketCharacter, TicketRegistry};
 use poe_config::Config;
@@ -143,28 +143,56 @@ impl InstanceServer {
         // HNC side channel (see PingReply): server-to-client keystream for idle bytes.
         let mut hnc = KeyMaterial(self.protocol.hnc.derive(&ticket.keys)).server_to_client();
 
-        let seed = self.send_area(&mut conn, &ticket).await?;
+        // Terrain seed sweep: this session generates the next listed layout only.
+        let sweep = sweep_list(&self.config.instance.sweep).and_then(|list| {
+            let i = SWEEP_NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let entry = list.get(i).cloned()?;
+            Some((i, list.len(), entry))
+        });
+        let seed = match &sweep {
+            Some((_, _, (area, seed))) => {
+                conn.send(&self.area_info_command(&format!("{area} {seed}"), &ticket)?)
+                    .await?;
+                *seed
+            }
+            None => self.send_area(&mut conn, &ticket).await?,
+        };
 
-        let hashes_op = self
-            .protocol
-            .instance
-            .id(TerrainHashes::DIRECTION, TerrainHashes::NAME)?;
-        let hashes = conn
-            .decode(|r| {
-                let at = r.position();
-                if r.u16()? != hashes_op {
-                    return Err(DecodeError::Invalid {
-                        offset: at,
-                        what: "expected TerrainHashes",
-                    });
+        let hashes = match &sweep {
+            // A layout the client cannot generate never gets an answer.
+            Some((_, _, (area, seed))) => {
+                match tokio::time::timeout(Duration::from_secs(60), self.await_hashes(&mut conn))
+                    .await
+                {
+                    Ok(h) => h?,
+                    Err(_) => {
+                        self.record_sweep(area, *seed, None);
+                        warn!(area, seed, "terrain sweep: no hashes within 60 s");
+                        return Ok(());
+                    }
                 }
-                TerrainHashes::decode(r)
-            })
-            .await?;
+            }
+            None => self.await_hashes(&mut conn).await?,
+        };
         let Some(hashes) = hashes else {
             info!("client disconnected during terrain generation");
             return Ok(());
         };
+        if let Some((i, n, (area, seed))) = sweep {
+            self.record_sweep(&area, seed, Some(&hashes));
+            info!(
+                entry = i + 1,
+                of = n,
+                area,
+                seed,
+                tile_hash = hashes.hash_a,
+                "terrain sweep entry done"
+            );
+            if i + 1 == n {
+                info!("terrain sweep finished");
+            }
+            return Ok(());
+        }
         // hash_a is the tile hash, hash_b the doodad hash (as in the client log).
         info!(
             unk = hashes.unk,
@@ -305,8 +333,26 @@ impl InstanceServer {
                         );
                     }
                     let mut replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
+                    let mut extra = Vec::new();
                     if self.config.instance.debug_link {
                         for command in self.reports.take_commands(client_port) {
+                            // `area <WorldAreas.Id> <seed>`: a new AreaInfo on this connection
+                            // (terrain research: the client generates that layout).
+                            if let Some(args) = command.strip_prefix("area ") {
+                                let result = match self.area_info_command(args, ticket) {
+                                    Ok(bytes) => {
+                                        extra.extend(bytes);
+                                        "ok".to_string()
+                                    }
+                                    Err(e) => e.to_string(),
+                                };
+                                info!(%command, %result, "dev command");
+                                self.reports.send_debug(
+                                    client_port,
+                                    &format!("ack\t{command}\t{result}\n"),
+                                );
+                                continue;
+                            }
                             let (result, reply) = self.dev_command(player, &command);
                             info!(%command, %result, "dev command");
                             replies.extend(reply);
@@ -320,7 +366,7 @@ impl InstanceServer {
                             );
                         }
                     }
-                    let mut out = Vec::new();
+                    let mut out = extra;
                     for reply in &replies {
                         out.extend(self.encode_reply(client_port, reply)?);
                     }
@@ -364,6 +410,67 @@ impl InstanceServer {
             }
             _ => ("unknown command".into(), Vec::new()),
         }
+    }
+
+    /// Waits for the client's TerrainHashes (sent after it generated the area).
+    async fn await_hashes(&self, conn: &mut Connection) -> anyhow::Result<Option<TerrainHashes>> {
+        let hashes_op = self
+            .protocol
+            .instance
+            .id(TerrainHashes::DIRECTION, TerrainHashes::NAME)?;
+        Ok(conn
+            .decode(|r| {
+                let at = r.position();
+                if r.u16()? != hashes_op {
+                    return Err(DecodeError::Invalid {
+                        offset: at,
+                        what: "expected TerrainHashes",
+                    });
+                }
+                TerrainHashes::decode(r)
+            })
+            .await?)
+    }
+
+    /// Appends a sweep result line (`area, seed, tile hash, doodad hash`).
+    fn record_sweep(&self, area: &str, seed: u32, hashes: Option<&TerrainHashes>) {
+        use std::io::Write;
+        let path = &self.config.instance.sweep_results;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        let line = match hashes {
+            Some(h) => format!("{area}\t{seed}\t{}\t{}\n", h.hash_a, h.hash_b),
+            None => format!("{area}\t{seed}\tFAILED\t\n"),
+        };
+        let written = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .and_then(|mut f| f.write_all(line.as_bytes()));
+        if let Err(e) = written {
+            warn!(path = %path.display(), "sweep results: {e}");
+        }
+    }
+
+    /// The `area <id> <seed>` dev command's AreaInfo message.
+    fn area_info_command(&self, args: &str, ticket: &Ticket) -> anyhow::Result<Vec<u8>> {
+        let mut words = args.split_whitespace();
+        let (Some(id), Some(seed)) = (words.next(), words.next()) else {
+            anyhow::bail!("usage: area <WorldAreas.Id> <seed>");
+        };
+        let Some(area) = WorldArea::find(&self.data, id)? else {
+            anyhow::bail!("no area {id}");
+        };
+        let msg = AreaInfo {
+            instance_id: rand::random(),
+            area_hash: area.hash16,
+            league: ticket.character.league.clone(),
+            seed: seed.parse()?,
+            ..Default::default()
+        };
+        info!(area = %area.id, seed = msg.seed, "dev: sending area");
+        Ok(self.protocol.instance.encode(&msg)?)
     }
 
     /// Sends the area; returns the terrain seed (a saved location's seed when the character
@@ -944,6 +1051,41 @@ impl InstanceServer {
             ],
         ))
     }
+}
+
+/// Next sweep entry (shared by all sessions of this server process).
+static SWEEP_NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The sweep list (`<WorldAreas.Id> <seed> [count]` lines, `#` comments); `POE_SWEEP`
+/// overrides the configured path. None when off or unreadable.
+fn sweep_list(configured: &std::path::Path) -> Option<Vec<(String, u32)>> {
+    let path = std::env::var_os("POE_SWEEP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| configured.to_path_buf());
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            warn!(path = %path.display(), "sweep list: {e}");
+            return None;
+        }
+    };
+    let mut list = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let w: Vec<&str> = line.split_whitespace().collect();
+        let (Some(area), Some(Ok(seed))) = (w.first(), w.get(1).map(|s| s.parse::<u32>())) else {
+            warn!(line, "sweep list: bad line");
+            continue;
+        };
+        let count = w.get(2).and_then(|c| c.parse::<u32>().ok()).unwrap_or(1);
+        list.extend((0..count).map(|i| (area.to_string(), seed.wrapping_add(i))));
+    }
+    Some(list)
 }
 
 /// The local player index the server gives the character (official servers use 1).

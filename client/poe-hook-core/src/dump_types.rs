@@ -399,6 +399,22 @@ pub(crate) unsafe fn export_layout(world: usize) {
 /// `terrain_grid_<tile hash>.bin`: `b"PWG1"`, u32 cells_x, u32 cells_y, u32 bytes_per_row,
 /// u32 layer count, then each layer's bytes.
 unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
+    let Some(out) = grid_bytes(terrain, w, h) else {
+        return;
+    };
+    let (cells_x, cells_y) = (w * 23, h * 23);
+    let path = poe_hook_shared::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
+    match std::fs::write(&path, out) {
+        Ok(()) => log::info!(
+            "exported {cells_x}x{cells_y} cell grids to {}",
+            path.display()
+        ),
+        Err(e) => log::error!("grid export: {e}"),
+    }
+}
+
+/// The four cell grids in the `PWG1` format (see [`export_grids`]).
+pub(crate) fn grid_bytes(terrain: usize, w: usize, h: usize) -> Option<Vec<u8>> {
     use poe_hook_shared::mem::read;
     let (cells_x, cells_y) = (w * 23, h * 23);
     let bytes_per_row = cells_x.div_ceil(2);
@@ -408,26 +424,21 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
         out.extend_from_slice(&(v as u32).to_le_bytes());
     }
     for off in [0xd0, 0xe8, 0x100, 0x118] {
-        let (Some(b), Some(e)) = (
-            read::<usize>(terrain + off),
-            read::<usize>(terrain + off + 8),
-        ) else {
-            return;
-        };
-        if e - b != bytes_per_row * cells_y || !poe_hook_shared::mem::readable(b, e - b) {
-            log::warn!("grid at terrain+{off:#x}: unexpected size {:#x}", e - b);
-            return;
+        let (b, e) = (
+            read::<usize>(terrain + off)?,
+            read::<usize>(terrain + off + 8)?,
+        );
+        if e.checked_sub(b)? != bytes_per_row * cells_y || !poe_hook_shared::mem::readable(b, e - b)
+        {
+            log::warn!(
+                "grid at terrain+{off:#x}: unexpected size {:#x}",
+                e.wrapping_sub(b)
+            );
+            return None;
         }
         out.extend_from_slice(unsafe { std::slice::from_raw_parts(b as *const u8, e - b) });
     }
-    let path = poe_hook_shared::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
-    match std::fs::write(&path, out) {
-        Ok(()) => log::info!(
-            "exported {cells_x}x{cells_y} cell grids to {}",
-            path.display()
-        ),
-        Err(e) => log::error!("grid export: {e}"),
-    }
+    Some(out)
 }
 
 static MAIN: OnceLock<Module> = OnceLock::new();

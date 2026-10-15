@@ -28,6 +28,7 @@ Renamed from terrain generation, which moves to M5 (later milestones shift by on
 - Done: loader/core split with hot reload, read-only latch and official deploy, dear-imgui-rs overlay (Status, Log, Packets, Coverage, Timing, Game log, Player, Entities, Watches, Features), packet capture with redaction and files, snapshots, `tools/re/packets_diff.py`. Details in [client-dll.md](client-dll.md).
 - Not tried yet: an official session (the user plays it).
 - Found with the minimap (2026-10-14), for M5: the player walked onto a cell where grid 0 (`terrain+0xd0`) is 0 while grids 1-3 are 5; grid 1 shows one connected open area around the player. The server's spawn code treats grid 0 non-zero as walkable; grid 1 is the likelier walkability grid. Check before building collision.
+- M5 tooling (2026-10-15, [re/terrain.md](re/terrain.md)): area export with hash self-check (tile and doodad hashes recomputed from the export match the client on every area tried), generator trace (every RNG draw and phase), walkability probe, generator-object dump, and a seed sweep (server `[instance] sweep` + `tools/re/sweep_drive.py`).
 - Found by the capture, left for later (server unchanged on request): the instance opening is two messages, `0x000f` Hello (u32) and `0x000e` (12 bytes, u32 ticket, u32, u8); the server reads them as one.
 
 ## M0 checklist

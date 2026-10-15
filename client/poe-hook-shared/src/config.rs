@@ -75,6 +75,12 @@ pub struct FeatureConfig {
     /// (e.g. 0x0D Enter to log in and play). Also `POE_HOOK_AUTO_KEYS="20000:13,..."`.
     /// Never in read-only mode.
     pub auto_keys: Vec<(u64, u16)>,
+    /// Terrain research (M5): export each generated area (layout, grids, generator objects,
+    /// walkability probe) to `<session>/areas/`. Read-only, so also on official servers.
+    pub area_export: bool,
+    /// Log every terrain RNG draw and generator phase (`generator_trace.tsv` in the area
+    /// export). Large; also enabled by the `POE_HOOK_GEN_TRACE` environment variable.
+    pub generator_trace: bool,
 }
 
 impl Default for FeatureConfig {
@@ -93,6 +99,8 @@ impl Default for FeatureConfig {
             position_sync: true,
             position_sync_port: 0,
             auto_keys: Vec::new(),
+            area_export: true,
+            generator_trace: false,
         }
     }
 }
