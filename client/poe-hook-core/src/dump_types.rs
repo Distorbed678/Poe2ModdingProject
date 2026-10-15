@@ -199,6 +199,9 @@ unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
     let world = unsafe { (*regs).rcx } as usize;
     // Frame-mode worlds (the game world): log a few calls with dt and pause flags.
     if read::<u8>(world + 0x661).is_some_and(|m| m != 0) {
+        if let Some(frames) = read::<u64>(world + 0x6a8) {
+            crate::timing::record(crate::timing::Series::Backlog, frames as f32);
+        }
         static PAUSE: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0xffff);
         let flags = read::<u16>(world + 0x868).unwrap_or(0);
         if PAUSE.swap(flags, Ordering::Relaxed) != flags {
@@ -249,6 +252,7 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
     {
         PLAYER.store(entity, Ordering::SeqCst);
         log::info!("player entity {entity:#x} found from its frame tick");
+        crate::entities::adopt(entity, 1);
         track_player(entity);
     }
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
@@ -283,6 +287,7 @@ type LoadAreaFn =
 /// passed through.
 unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at: usize) -> usize {
     let _guard = crate::hooks::enter();
+    crate::entities::clear();
     let r = unsafe { &*regs };
     let f: LoadAreaFn = unsafe { std::mem::transmute(original) };
     let ret = unsafe {
@@ -570,6 +575,7 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         let end = *((entity + 0x18) as *const usize);
         let count = (end.saturating_sub(begin)) / 8;
         let id = *((entity + 0x88) as *const u32);
+        crate::entities::register(entity, id);
         if id == 1 {
             PLAYER.store(entity, Ordering::SeqCst);
             PLAYER_UPDATES.store(0, Ordering::SeqCst);
@@ -929,8 +935,9 @@ unsafe fn wide(ptr: usize) -> String {
 unsafe extern "win64" fn on_lookup(regs: *mut Registers, _: usize) {
     let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
-    log::info!("object type lookup key={:#010x}", r.r8 as u32);
-    if DONE.swap(true, Ordering::SeqCst) {
+    log::debug!("object type lookup key={:#010x}", r.r8 as u32);
+    crate::entities::set_last_key(r.r8 as u32);
+    if crate::entities::types_known() {
         return;
     }
     unsafe {
@@ -938,21 +945,30 @@ unsafe extern "win64" fn on_lookup(regs: *mut Registers, _: usize) {
         let vec = *registry as *const usize;
         let (begin, end) = (*vec, *vec.add(1));
         let count = (end - begin) / ENTRY_SIZE;
-        let Some(path) = OUT.get() else { return };
-        let Ok(mut f) = std::fs::File::create(path) else {
-            return;
-        };
+        let mut types = Vec::with_capacity(count);
         for i in 0..count {
             let e = begin + i * ENTRY_SIZE;
-            let key = *(e as *const u32);
-            let name = wide(*((e + 8) as *const usize));
-            let _ = writeln!(f, "{key:#010x}\t{name}");
+            types.push((*(e as *const u32), wide(*((e + 8) as *const usize))));
         }
-        log::info!("dumped {count} object types to {}", path.display());
+        if !DONE.swap(true, Ordering::SeqCst)
+            && let Some(path) = OUT.get()
+            && let Ok(mut f) = std::fs::File::create(path)
+        {
+            for (key, name) in &types {
+                let _ = writeln!(f, "{key:#010x}\t{name}");
+            }
+            log::info!("dumped {count} object types to {}", path.display());
+        }
+        crate::entities::set_types(types);
     }
 }
 
 /// The player entity (0 until known).
 pub fn player() -> usize {
     PLAYER.load(Ordering::Relaxed)
+}
+
+/// The game module (set when the research hooks start).
+pub fn main_module() -> Option<Module> {
+    MAIN.get().copied()
 }
