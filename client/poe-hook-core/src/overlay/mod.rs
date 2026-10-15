@@ -89,7 +89,8 @@ fn create_context() -> imgui::Context {
             .join("imgui.ini"),
     ));
     let size = (16.0 * cfg.scale).round();
-    match imgui::StbTrueTypeFontData::from_slice(include_bytes!("../../assets/DejaVuSansMono.ttf")) {
+    match imgui::StbTrueTypeFontData::from_slice(include_bytes!("../../assets/DejaVuSansMono.ttf"))
+    {
         Ok(data) => {
             ctx.font_atlas()
                 .add_font(&[imgui::FontSource::stb_truetype_with_size(data, size)]);
@@ -113,10 +114,12 @@ pub fn present(queue: u64, info: *const c_void) -> u64 {
     let Some(state) = crate::host::vulkan() else {
         return 0;
     };
-    let swapchains = unsafe {
-        std::slice::from_raw_parts(info.p_swapchains, info.swapchain_count as usize)
-    };
-    let Some(i) = swapchains.iter().position(|s| s.as_raw() == state.swapchain) else {
+    let swapchains =
+        unsafe { std::slice::from_raw_parts(info.p_swapchains, info.swapchain_count as usize) };
+    let Some(i) = swapchains
+        .iter()
+        .position(|s| s.as_raw() == state.swapchain)
+    else {
         return 0;
     };
     let image_index = unsafe { *info.p_image_indices.add(i) };
@@ -251,7 +254,14 @@ fn frame(
     let result = o.gpu.draw(image_index, &wait, &mut o.ctx, |device, cmd| {
         if let (Some(request), Some((image, usage, format))) = (shot, image) {
             capture = crate::snapshot::record_copy(
-                device, &memory, cmd, image, usage, format, [w, h], request,
+                device,
+                &memory,
+                cmd,
+                image,
+                usage,
+                format,
+                [w, h],
+                request,
             );
         }
     });

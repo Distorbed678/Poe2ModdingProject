@@ -6,11 +6,14 @@ use imgui::{Io, Key, MouseButton};
 use windows_sys::Win32::{
     Foundation::{HWND, RECT},
     UI::{
-        Input::{GetRawInputData, HRAWINPUT, RAWINPUTHEADER, RID_HEADER, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE},
+        Input::{
+            GetRawInputData, HRAWINPUT, RAWINPUTHEADER, RID_HEADER, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
+        },
         WindowsAndMessaging::{
-            DefWindowProcW, GetClientRect, WM_CHAR, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK,
-            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-            WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+            DefWindowProcW, GetClientRect, WM_CHAR, WM_INPUT, WM_KEYDOWN, WM_KEYUP,
+            WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
+            WM_SYSKEYDOWN, WM_SYSKEYUP,
         },
     },
 };
@@ -46,9 +49,15 @@ fn mouse_pos(hwnd: isize, lparam: isize) -> [f32; 2] {
     let x = (lparam & 0xffff) as i16 as f32;
     let y = ((lparam >> 16) & 0xffff) as i16 as f32;
     let mut r: RECT = unsafe { std::mem::zeroed() };
-    let (w, h) = (EXTENT.0.load(Ordering::Relaxed), EXTENT.1.load(Ordering::Relaxed));
+    let (w, h) = (
+        EXTENT.0.load(Ordering::Relaxed),
+        EXTENT.1.load(Ordering::Relaxed),
+    );
     if unsafe { GetClientRect(hwnd as HWND, &mut r) } != 0 && r.right > 0 && r.bottom > 0 && w > 0 {
-        [x * w as f32 / r.right as f32, y * h as f32 / r.bottom as f32]
+        [
+            x * w as f32 / r.right as f32,
+            y * h as f32 / r.bottom as f32,
+        ]
     } else {
         [x, y]
     }
@@ -110,7 +119,11 @@ pub fn window_message(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> Op
             if let Some(k) = map_key(wparam) {
                 push(Event::Key(k, key_down));
             }
-            for (vk, m) in [(0x11, Key::ModCtrl), (0x10, Key::ModShift), (0x12, Key::ModAlt)] {
+            for (vk, m) in [
+                (0x11, Key::ModCtrl),
+                (0x10, Key::ModShift),
+                (0x12, Key::ModAlt),
+            ] {
                 if wparam == vk {
                     push(Event::Key(m, key_down));
                 }

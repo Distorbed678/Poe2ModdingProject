@@ -2,6 +2,7 @@
 //! short notices. Each tab keeps its own state in [`App`].
 
 mod log_tab;
+mod packets_tab;
 mod status_tab;
 
 use std::{
@@ -33,12 +34,14 @@ pub fn state_text() -> String {
 
 pub struct App {
     log: log_tab::LogView,
+    packets: packets_tab::PacketsView,
 }
 
 impl App {
     pub fn new() -> Self {
         Self {
             log: log_tab::LogView::new(),
+            packets: packets_tab::PacketsView::new(),
         }
     }
 
@@ -63,6 +66,9 @@ impl App {
                     }
                     if let Some(_t) = ui.tab_item("Log") {
                         self.log.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Packets") {
+                        self.packets.draw(ui);
                     }
                 }
                 let _ = toggle;
@@ -111,7 +117,11 @@ fn notices(ui: &Ui) {
     if list.is_empty() {
         return;
     }
-    let longest = list.iter().max_by_key(|s| s.len()).cloned().unwrap_or_default();
+    let longest = list
+        .iter()
+        .max_by_key(|s| s.len())
+        .cloned()
+        .unwrap_or_default();
     ui.window("##notices")
         .position(centred(ui, &longest, 44.0), Condition::Always)
         .flags(

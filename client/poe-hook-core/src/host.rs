@@ -54,11 +54,7 @@ pub fn logs_since<F: FnMut(&LogRecord)>(since: u64, mut visit: F) -> u64 {
     extern "C" fn trampoline<F: FnMut(&LogRecord)>(ctx: *mut c_void, record: &LogRecord) {
         unsafe { (*(ctx as *mut F))(record) }
     }
-    (api().logs_since)(
-        since,
-        &mut visit as *mut _ as *mut c_void,
-        trampoline::<F>,
-    )
+    (api().logs_since)(since, &mut visit as *mut _ as *mut c_void, trampoline::<F>)
 }
 
 struct Facade;

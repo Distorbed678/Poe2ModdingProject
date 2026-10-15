@@ -72,8 +72,9 @@ impl Gpu {
                 get_instance_proc_addr: gipa,
             })
         };
-        let instance =
-            unsafe { ash::Instance::load(entry.static_fn(), vk::Instance::from_raw(state.instance)) };
+        let instance = unsafe {
+            ash::Instance::load(entry.static_fn(), vk::Instance::from_raw(state.instance))
+        };
         let device =
             unsafe { ash::Device::load(instance.fp_v1_0(), vk::Device::from_raw(state.device)) };
         let swapchain_fn = ash::khr::swapchain::Device::new(&instance, &device);
@@ -100,8 +101,9 @@ impl Gpu {
         for cmd in cmds {
             let fence = unsafe { device.create_fence(&vk::FenceCreateInfo::default(), None) }
                 .map_err(vkerr("fence"))?;
-            let done = unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
-                .map_err(vkerr("semaphore"))?;
+            let done =
+                unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
+                    .map_err(vkerr("semaphore"))?;
             slots.push(Slot {
                 cmd,
                 fence,
@@ -175,7 +177,9 @@ impl Gpu {
         if self.renderer.is_none() {
             let srgb = matches!(
                 format,
-                vk::Format::B8G8R8A8_SRGB | vk::Format::R8G8B8A8_SRGB | vk::Format::A8B8G8R8_SRGB_PACK32
+                vk::Format::B8G8R8A8_SRGB
+                    | vk::Format::R8G8B8A8_SRGB
+                    | vk::Format::A8B8G8R8_SRGB_PACK32
             );
             let config = AshRendererConfig::with_render_pass(
                 self.device.clone(),
@@ -189,8 +193,10 @@ impl Gpu {
                 ..Default::default()
             });
             self.renderer = Some(
-                unsafe { AshRenderer::with_default_allocator(&self.instance, self.physical, config, ctx) }
-                    .map_err(|e| format!("renderer: {e}"))?,
+                unsafe {
+                    AshRenderer::with_default_allocator(&self.instance, self.physical, config, ctx)
+                }
+                .map_err(|e| format!("renderer: {e}"))?,
             );
         }
         log::info!(
@@ -340,7 +346,8 @@ impl Gpu {
                 d.wait_for_fences(&[slot.fence], true, FENCE_TIMEOUT_NS)
                     .map_err(vkerr("wait fence"))?;
             }
-            d.reset_fences(&[slot.fence]).map_err(vkerr("reset fence"))?;
+            d.reset_fences(&[slot.fence])
+                .map_err(vkerr("reset fence"))?;
             d.reset_command_buffer(slot.cmd, vk::CommandBufferResetFlags::empty())
                 .map_err(vkerr("reset cmd"))?;
             d.begin_command_buffer(
@@ -394,13 +401,17 @@ impl Gpu {
 
     /// Releases retired textures whose last frame has finished.
     fn complete_retirements(&mut self) {
-        let Some(renderer) = &mut self.renderer else { return };
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
         let device = &self.device;
         self.retirements.retain(|(batch, fence)| {
             if unsafe { device.get_fence_status(*fence) } != Ok(true) {
                 return true;
             }
-            if let Err(e) = unsafe { renderer.complete_texture_retirements_with_fences(*batch, &[*fence]) } {
+            if let Err(e) =
+                unsafe { renderer.complete_texture_retirements_with_fences(*batch, &[*fence]) }
+            {
                 log::warn!("overlay: texture retirement: {e}");
             }
             false
@@ -409,7 +420,12 @@ impl Gpu {
 
     /// Waits until no overlay frame is in flight.
     pub fn wait_idle(&self) {
-        let fences: Vec<vk::Fence> = self.slots.iter().filter(|s| s.used).map(|s| s.fence).collect();
+        let fences: Vec<vk::Fence> = self
+            .slots
+            .iter()
+            .filter(|s| s.used)
+            .map(|s| s.fence)
+            .collect();
         if !fences.is_empty() {
             let _ = unsafe { self.device.wait_for_fences(&fences, true, FENCE_TIMEOUT_NS) };
         }
@@ -417,7 +433,11 @@ impl Gpu {
 
     /// The game is destroying `swapchain`: release what refers to its images.
     pub fn release(&mut self, swapchain: u64) {
-        if self.target.as_ref().is_some_and(|t| t.swapchain == swapchain) {
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|t| t.swapchain == swapchain)
+        {
             self.wait_idle();
             self.drop_target();
         }

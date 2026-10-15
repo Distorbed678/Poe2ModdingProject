@@ -24,9 +24,8 @@ fn utc_offset_ms() -> i64 {
             GetLocalTime(&mut local);
             GetSystemTime(&mut utc);
         }
-        let minutes = |t: &windows_sys::Win32::Foundation::SYSTEMTIME| {
-            t.wHour as i64 * 60 + t.wMinute as i64
-        };
+        let minutes =
+            |t: &windows_sys::Win32::Foundation::SYSTEMTIME| t.wHour as i64 * 60 + t.wMinute as i64;
         let mut diff = minutes(&local) - minutes(&utc);
         if diff > 12 * 60 {
             diff -= 24 * 60;
@@ -54,7 +53,13 @@ pub fn hex_lines(data: &[u8]) -> String {
         let hex: Vec<String> = chunk.iter().map(|b| format!("{b:02x}")).collect();
         let ascii: String = chunk
             .iter()
-            .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+            .map(|&b| {
+                if (0x20..0x7f).contains(&b) {
+                    b as char
+                } else {
+                    '.'
+                }
+            })
             .collect();
         out.push_str(&format!("{:04x}  {:<47}  {ascii}\n", i * 16, hex.join(" ")));
     }

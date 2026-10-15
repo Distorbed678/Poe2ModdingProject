@@ -39,7 +39,7 @@ pub fn init(main: &Module) -> Result<(), String> {
     };
     log::info!("verify-and-derive at ghidra {:#x}", main.to_ghidra(addr));
     crate::hooks::install(addr, HookType::Retn(on_verify_and_derive), 0)
-            .map_err(|e| format!("hook: {e}"))?;
+        .map_err(|e| format!("hook: {e}"))?;
     Ok(())
 }
 

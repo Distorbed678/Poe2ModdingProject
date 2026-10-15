@@ -123,6 +123,7 @@ fn start_features(config: &Config, main: &Module) {
             },
         )
     });
+    report("packets", config.packets.capture, || packets::init(main));
     let dump_path = poe_hook_shared::exe_dir().join("object_types.txt");
     report("dump_object_types", f.dump_object_types, || {
         dump_types::init(main, dump_path)
@@ -176,6 +177,7 @@ extern "C" fn on_window_message(
 extern "C" fn stop() {
     log::info!("debug core stopping");
     overlay::stop();
+    packets::stop();
     crash::stop();
     hooks::remove_all();
     position_sync::stop();

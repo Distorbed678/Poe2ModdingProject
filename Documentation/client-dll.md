@@ -34,7 +34,17 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
 - The backend's `framebuffer_srgb` option is set for the game's `B8G8R8A8_SRGB` swapchain, so colors are right.
 - Release builds abort on panic; the core installs a panic hook that logs the message and backtrace first.
 - `scale` multiplies the font size (DejaVu Sans Mono 16 px, embedded; license in `poe-hook-core/assets/`). Window layout persists in `logs/poe-hook/imgui.ini`.
-- Tabs: Status (mode, latch, session folder, connections, Vulkan, Reload core / Snapshot buttons), Log (the shared log ring: level and text filters, copy).
+- Tabs: Status (mode, latch, session folder, connections, Vulkan, Reload core / Snapshot buttons), Log (the shared log ring: level and text filters, copy), Packets (filters, decoded view, hex, copy).
+
+## Packet capture (`[packets]`, `packets.rs`)
+Plaintext of every login and instance message, read inside the client (no cipher is broken, so it works the same on official servers):
+- **Received:** the message reader `0x1421c5950(registry, stream)` (Retn hook). It reads the opcode from the stream's receive ring (decrypted on arrival; ring `+0x298..+0x2a0`, read offset `+0x268`), the registered handlers deserialize the body, and the read offset advances by exactly the message size: the bytes in between are the message. Return value low byte 1 = a whole message was read (0 = not enough data yet). Registry byte 0 set = 1-byte opcodes. The caller gives the channel (`0x1420e6bc0` login, `0x142120b70` instance).
+- **Sent:** a JmpBack hook at `0x142198037` inside the stream flush `0x142197fc0`, after its lock and before the cipher (`stream+0x1b8`, slot 1) encrypts in place: pending plaintext `[+0x280] + [+0x260 .. +0x258]`, rbx = stream. Boundaries come from the game-session send `0x14211f880` (stream `session+0x20f8`, opcode `packet+8`), which records where each message starts and ends in the send buffer. Bytes sent outside it (frame reports, login messages) are split with the fixed sizes from `instance.toml` `[client_body_sizes]` and the `poe-proto` decoders, and marked "unframed".
+- Streams without a reply yet are classified by their socket (`stream+0`) and the connection's port: ports in `gateway_list.txt` are login, everything else instance.
+- The game also has its own plaintext taps (receive `stream+0x150`, send `stream+0x190`, called with `(tap, &ptr, &len)`), probably for packet recording; they are unused here (setting them would be a write).
+- Output: the Packets tab (`[packets] keep` messages; restored from `packets.jsonl` after a core reload), `packets.jsonl` (one JSON object per message: seq, t, dir, chan, op, name, len, framed, redacted, official, hex) and `packets.txt` in the session folder. Names come from `protocol/0.5.5e/*.toml` (embedded at build time), decoded fields from `poe_proto::describe`.
+- `redact` (default on) drops the bodies of Authenticate, ResumeSession, AuthenticationResult, InstanceDetails, Hello and client `0x000e` (instance ticket) before anything is stored.
+- Finding (2026-10-14): the instance opening "Hello" is two messages, `0x000f` (u32) and `0x000e` (12 bytes, u32 ticket, u32, u8); the server still reads them as one (left as is for now).
 
 ### Snapshots
 `<session>/snapshots/<time>/`: `screenshot.png` (copied from the presented image in the overlay's command buffer; needs the `TRANSFER_SRC` usage the loader adds), `log.txt`, `packets.txt`, `timings.csv` (the last `snapshot_seconds`) and `state.txt` (mode, connections, Vulkan, player).

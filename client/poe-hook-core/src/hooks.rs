@@ -45,10 +45,9 @@ static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 pub fn install(addr: usize, kind: HookType, user: usize) -> Result<(), String> {
     let mut saved = [0u8; SAVED];
     unsafe { std::ptr::copy_nonoverlapping(addr as *const u8, saved.as_mut_ptr(), SAVED) };
-    let point = unsafe {
-        Hooker::new(addr, kind, CallbackOption::None, user, HookFlags::empty()).hook()
-    }
-    .map_err(|e| format!("{e:?}"))?;
+    let point =
+        unsafe { Hooker::new(addr, kind, CallbackOption::None, user, HookFlags::empty()).hook() }
+            .map_err(|e| format!("{e:?}"))?;
     HOOKS.lock().unwrap().push(Installed {
         addr,
         saved,

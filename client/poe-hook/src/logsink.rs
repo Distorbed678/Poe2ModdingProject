@@ -113,7 +113,9 @@ pub fn write(level: u32, target: &str, message: &str) {
 }
 
 pub extern "C" fn host_log(level: u32, target: Str, message: Str) {
-    write(level, unsafe { target.as_str() }, unsafe { message.as_str() });
+    write(level, unsafe { target.as_str() }, unsafe {
+        message.as_str()
+    });
 }
 
 pub extern "C" fn host_logs_since(since: u64, ctx: *mut c_void, visit: LogVisit) -> u64 {

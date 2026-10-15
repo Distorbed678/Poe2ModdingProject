@@ -160,14 +160,17 @@ impl Config {
             .and_then(|text| toml::from_str(&text).ok())
             .unwrap_or_default();
         if let Ok(keys) = std::env::var("POE_HOOK_AUTO_KEYS") {
-            config.features.auto_keys.extend(keys.split(',').filter_map(|entry| {
-                let (at, vk) = entry.trim().split_once(':')?;
-                let num = |v: &str| match v.strip_prefix("0x") {
-                    Some(hex) => u64::from_str_radix(hex, 16).ok(),
-                    None => v.parse().ok(),
-                };
-                Some((num(at)?, num(vk)? as u16))
-            }));
+            config
+                .features
+                .auto_keys
+                .extend(keys.split(',').filter_map(|entry| {
+                    let (at, vk) = entry.trim().split_once(':')?;
+                    let num = |v: &str| match v.strip_prefix("0x") {
+                        Some(hex) => u64::from_str_radix(hex, 16).ok(),
+                        None => v.parse().ok(),
+                    };
+                    Some((num(at)?, num(vk)? as u16))
+                }));
         }
         config
     }

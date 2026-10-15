@@ -136,8 +136,13 @@ pub struct CoreApi {
     /// Called before the game destroys a swapchain.
     pub on_swapchain_destroy: extern "C" fn(swapchain: u64),
     /// A message for the game window. Returns true when the core consumed it (`*result`).
-    pub on_window_message:
-        extern "C" fn(hwnd: isize, msg: u32, wparam: usize, lparam: isize, result: *mut isize) -> bool,
+    pub on_window_message: extern "C" fn(
+        hwnd: isize,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+        result: *mut isize,
+    ) -> bool,
     /// Undo everything (hooks, threads, Vulkan objects) before the loader unloads the core.
     pub stop: extern "C" fn(),
 }

@@ -44,7 +44,10 @@ pub fn player() -> Option<Player> {
         facing_locked: read::<u8>(pos + 0x1e5).unwrap_or(0) & 2 != 0,
         action: action(0x238),
         action2: action(0x240),
-        wasd: (read(actor + 0x400).unwrap_or(0), read(actor + 0x404).unwrap_or(0)),
+        wasd: (
+            read(actor + 0x400).unwrap_or(0),
+            read(actor + 0x404).unwrap_or(0),
+        ),
         flags: read(actor + 0x2a2).unwrap_or(0),
     })
 }
