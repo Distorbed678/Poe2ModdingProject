@@ -31,6 +31,9 @@ pub struct PacketsView {
     shown_key: (String, bool, bool, [bool; 3], bool),
     shown_upto: usize,
     detail: Option<(u64, String)>,
+    /// Note editors for the selected message's opcode and for the message itself.
+    opcode_note: String,
+    message_note: String,
 }
 
 impl PacketsView {
@@ -50,6 +53,8 @@ impl PacketsView {
             shown_key: (String::new(), true, true, [true; 3], true),
             shown_upto: 0,
             detail: None,
+            opcode_note: String::new(),
+            message_note: String::new(),
         }
     }
 
@@ -164,6 +169,15 @@ impl PacketsView {
                             m.len,
                             if m.framed { "" } else { " unframed" }
                         );
+                        // Notes: [note] on this message, * on its opcode.
+                        let line = match (
+                            crate::notes::has_message_note(m),
+                            crate::notes::has_opcode_note(m.channel, m.dir, m.opcode),
+                        ) {
+                            (true, _) => format!("{line}  [note]"),
+                            (false, true) => format!("{line}  *"),
+                            _ => line,
+                        };
                         let color = match m.dir {
                             Dir::In => [0.6, 0.85, 1.0, 1.0],
                             Dir::Out => [1.0, 0.85, 0.55, 1.0],
@@ -188,10 +202,13 @@ impl PacketsView {
             ui.text_disabled("Select a message to see it decoded.");
             return;
         };
-        let Some(m) = self.msgs.iter().find(|m| m.seq == seq) else {
+        let Some(m) = self.msgs.iter().find(|m| m.seq == seq).cloned() else {
             return;
         };
+        let m = &m;
         if self.detail.as_ref().is_none_or(|(s, _)| *s != seq) {
+            self.opcode_note = crate::notes::opcode_note(m.channel, m.dir, m.opcode);
+            self.message_note = crate::notes::message_note(m);
             let mut text = format!(
                 "#{} {} {} {} {:#06x} {} ({} bytes{}{})\n\n",
                 m.seq,
@@ -217,6 +234,27 @@ impl PacketsView {
             .as_ref()
             .map(|(_, t)| t.clone())
             .unwrap_or_default();
+        let name = m.name().unwrap_or("?");
+        ui.text(format!(
+            "Note on every {} {} {:#06x} {name} (what you think it does):",
+            m.channel.name(),
+            m.dir.name(),
+            m.opcode
+        ));
+        ui.input_text_multiline("##opcode_note", &mut self.opcode_note, [-1.0, 54.0])
+            .build();
+        if ui.button("Save opcode note") {
+            crate::notes::set_opcode_note(m.channel, m.dir, m.opcode, &self.opcode_note);
+            crate::ui::notice(format!("Note saved for {:#06x} {name}", m.opcode));
+        }
+        ui.text(format!("Note on this message only (#{}):", m.seq));
+        ui.input_text_multiline("##message_note", &mut self.message_note, [-1.0, 54.0])
+            .build();
+        if ui.button("Save message note") {
+            crate::notes::set_message_note(m, &self.message_note);
+            crate::ui::notice(format!("Note saved for message #{}", m.seq));
+        }
+        ui.same_line();
         if ui.button("Copy") {
             crate::ui::set_clipboard(&text);
         }
