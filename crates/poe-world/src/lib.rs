@@ -17,6 +17,7 @@ pub mod hash;
 pub mod lattice;
 pub mod outer_buffer;
 pub mod layout;
+pub mod node_tiles;
 pub mod rng;
 pub mod rooms;
 pub mod smoothing;

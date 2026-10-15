@@ -333,6 +333,51 @@ graph (`0x1420c7400`, `.et` flag 4). The virtual split copies both flags to each
 at a chain's far end sets virtual end on both far nodes unless the far node lies on the map
 border (the clone's far node also copies fixed).
 
+**Node tiles** (`crates/poe-world/src/node_tiles.rs`, `0x1420cade0`): at the start of the tile
+stage `0x1420c7400` sorts the room-less nodes into lists. The tile list takes dead ends (a
+virtual one only at the border), nodes with three or more edges, and nodes whose two edges have
+different `.et` types; two edges of one type pass through. Nodes touching a virtual edge
+otherwise go to a separate list. `0x1420cade0` walks the tile list. A dead end near the border
+(`0x1420c75c0`) is pushed off the map; any other node is tilised like a room node
+(`0x1420c87a0`):
+1. Key and sides from the node's edges (`0x1420d2e20`, same as rooms).
+2. Candidates: the tile-set branch of `0x1420c76d0`. The sizes in which feature-less tiles have
+   the key's edges are listed sorted (`0x141d09700`, map +0x68). For each size, every tile
+   entry of any feature with those edges and that size is taken (`0x141d0a7d0`, map +0x20,
+   tst order then orientation 0..7), using the swapped size when there is none. The list is
+   then filtered by the node's orientation, or for `(any)` by `0x1420b87b0` (climb check
+   first, then without).
+3. `below(total weight)`. Position, alignment and fit work as for rooms; the map cells must be
+   free (`0x141d0d880`). On failure the first entry with that tile and orientation is dropped.
+   Then `0x1420c59e0`. For `(any)`, `0x1420c9d70` turns the tile a quarter either way
+   (orientation table `0x141d00f00`, key turned by `0x141d08a40`) when the summed edge-to-side
+   angle (`0x1420b8e20`, degrees) drops. A turn is not allowed if it would put an edge against
+   the border the tile touches.
+4. `0x1420cbe60` with the room flag clear: the tiles' rectangles push every node except those
+   with exactly one edge (a tile's own node is not pushed by its own rectangle) and every
+   internal point. Each tile is then centred on its node again where the cells are free, and
+   `0x1420c59e0` runs with its alignment.
+5. `0x1420c9970`: snapped, placed into the map, and the node's edges are cut at the tile and
+   ended at its exits (`0x1420c5750`, `0x1420c5b50`). The first edge keeps the node; each other
+   edge gets a new fixed node (`0x141ef2800`).
+
+Riverbank seed 1001 needs this for one node: the narrow river changes from `S` to `M`, so the
+node takes `NarrowRiver_Mud/StMS_01.tdt` (3×3, o5).
+
+**Inheriting tiles** (`0x1429153f0`): a `.tdt` with an `inherits` path (for example
+`ZombieIntroFeature_Reorient_1.tdt`) has an override-flags byte after it and carries only what
+the flags name:
+- 1: the `.tgt`.
+- 8: the header from `feature` on (edges, size, grounds, distances), its sub-tile bytes and
+  corner points.
+- 0x10: size and sub-tile geometry.
+- 0x20: the orientation mask.
+Everything else comes from the parent (`Tdt::resolve`, `generate::load_tdt`). The orientation
+mask (vtable +0x68, data +0x171) is a `u8` after the body flags; 0 or 0xff means all
+orientations. The tile index (`0x141d09ab0`) ANDs it with the `.tst` rotation list.
+`ZombieIntroFeature.tdt` has mask 3 (o0 and o1 only), so a room that wants it in o7 gets
+`_Reorient_1` in o0.
+
 **Edge tiles** (`crates/poe-world/src/edge_tiles.rs`, `0x1420b6950`):
 1. Occupancy grid (`0x141ef5700`, 0x20-byte cells: cost, parent, f, g, h, closed, occupied,
    open-set link): cells under room tiles are occupied. Per edge (`0x1420b6660`): +80 cost on
@@ -462,7 +507,9 @@ cell is skipped). Map ground checks are off during the pass.
 
 **Result (2026-10-15):** Riverbank (`G1_1`) seed 1000 generates identically to the client: tile
 hash 138293894, all 5382 cells (tile, orientation, sub-tile) equal, 6414 draws in step. The draws
-after that (`0x1415a5005`, …) belong to the doodad/entity stage.
+after that (`0x1415a5005`, …) belong to the doodad/entity stage. With node tiles and inheriting
+tiles, `area::generate` also matches seeds 1001 and 1002 (`intro_4`, current-build sweep vectors
+in `data/sweep-results.tsv`).
 
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet

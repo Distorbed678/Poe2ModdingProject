@@ -205,6 +205,11 @@ impl TileMap {
         }
     }
 
+    /// Whether every cell of a `w`×`h` rectangle is inside the map and empty (`0x141d0d880`).
+    pub fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
+        (0..h).all(|dy| (0..w).all(|dx| self.index(x + dx, y + dy).is_some_and(|i| self.cells[i].is_none())))
+    }
+
     /// Whether a tile fits at `(x, y)`: inside the map, every covered cell empty.
     fn fits(&self, x: i32, y: i32, size: (u8, u8), o: u8) -> bool {
         let (w, h) = Self::oriented_size(size, o);
@@ -291,6 +296,15 @@ pub struct Master {
     ground_names: HashMap<String, String>,
 }
 
+/// Reads a `.tdt`, applying an inheriting tile's overrides to its parent chain.
+pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
+    let tdt = Tdt::parse(&files.read(path)?).map_err(|e| data_err(path, e))?;
+    match &tdt.inherits {
+        Some(parent) => Ok(tdt.resolve(&load_tdt(files, parent)?)),
+        None => Ok(tdt),
+    }
+}
+
 impl Master {
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
         let parsed = TSTParser
@@ -299,14 +313,13 @@ impl Master {
         let mut defs = Vec::new();
         let mut headers = HashMap::new();
         for e in &parsed.tdt_files {
-            let tdt =
-                Tdt::parse(&files.read(&e.tdt_file)?).map_err(|x| data_err(&e.tdt_file, x))?;
+            let tdt = load_tdt(files, &e.tdt_file)?;
             headers.insert(e.tdt_file.to_ascii_lowercase(), tdt.clone());
             defs.push(TileDef {
                 path: e.tdt_file.clone(),
-                tdt,
                 weight: e.weight.unwrap_or(1),
-                orientations: orientation_mask(&e.rotations),
+                orientations: tdt.restrict_orientations(orientation_mask(&e.rotations)),
+                tdt,
             });
         }
         let gft_file = GFTParser
@@ -394,7 +407,7 @@ impl Master {
     pub(crate) fn header(&mut self, files: &dyn Files, path: &str) -> Result<&Tdt, GenError> {
         let key = path.to_ascii_lowercase();
         if !self.headers.contains_key(&key) {
-            let tdt = Tdt::parse(&files.read(path)?).map_err(|e| data_err(path, e))?;
+            let tdt = load_tdt(files, path)?;
             self.headers.insert(key.clone(), tdt);
         }
         Ok(&self.headers[&key])

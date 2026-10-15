@@ -226,6 +226,51 @@ impl PlacedGraph<'_> {
     }
 }
 
+/// What node keys and edge checks need to know about a graph (the placed `.tgr` graph for
+/// rooms, the layout graph for node tiles).
+pub trait EdgeView {
+    /// The node's edge slots.
+    fn slots(&self, node: usize) -> [Option<usize>; 4];
+    fn pos(&self, node: usize) -> (i32, i32);
+    /// The point an edge leaves `node` towards.
+    fn towards(&self, node: usize, e: usize) -> (i32, i32);
+    fn edge_type(&self, e: usize) -> &str;
+    /// Whether `node` is the edge's start.
+    fn starts(&self, node: usize, e: usize) -> bool;
+    fn chirality(&self, e: usize) -> bool;
+    fn other(&self, node: usize, e: usize) -> usize;
+    /// The node's height (`.tgr` node value 1).
+    fn height(&self, node: usize) -> i32;
+}
+
+impl EdgeView for PlacedGraph<'_> {
+    fn slots(&self, node: usize) -> [Option<usize>; 4] {
+        PlacedGraph::slots(self, node)
+    }
+    fn pos(&self, node: usize) -> (i32, i32) {
+        self.nodes[node]
+    }
+    fn towards(&self, node: usize, e: usize) -> (i32, i32) {
+        PlacedGraph::towards(self, node, e)
+    }
+    fn edge_type(&self, e: usize) -> &str {
+        &self.graph.edges[e].edge_type
+    }
+    fn starts(&self, node: usize, e: usize) -> bool {
+        self.graph.edges[e].from as usize == node
+    }
+    fn chirality(&self, e: usize) -> bool {
+        self.graph.edges[e].values.get(1).copied().unwrap_or(0) != 0
+    }
+    fn other(&self, node: usize, e: usize) -> usize {
+        let edge = &self.graph.edges[e];
+        if edge.from as usize == node { edge.to as usize } else { edge.from as usize }
+    }
+    fn height(&self, node: usize) -> i32 {
+        self.graph.nodes[node].values.get(1).copied().unwrap_or(0)
+    }
+}
+
 /// `0x142f10760`: angle (0x8000 = 180°) by `127·cos + 127`.
 const ANGLE: [u16; 255] = [
     32768, 31458, 30914, 30496, 30143, 29831, 29549, 29289, 29046, 28818, 28601, 28395,
@@ -278,17 +323,17 @@ const SIDE_DIR: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 /// Side per slot (4 = none) and the key edges (`0x1420d1220`/`0x1420d2e20`).
 pub fn node_key(
-    g: &PlacedGraph,
+    g: &dyn EdgeView,
     node: usize,
     types: &mut TerrainTypes,
     files: &dyn Files,
 ) -> Result<([usize; 4], TileKey), GenError> {
     let slots = g.slots(node);
     let mut per_side: [Vec<usize>; 4] = Default::default();
-    let (nx, ny) = g.nodes[node];
+    let (nx, ny) = g.pos(node);
     for (i, s) in slots.iter().enumerate() {
         let Some(e) = *s else { continue };
-        if types.edge(files, &g.graph.edges[e].edge_type)?.wildcard {
+        if types.edge(files, g.edge_type(e))?.wildcard {
             continue;
         }
         let (px, py) = g.towards(node, e);
@@ -343,7 +388,7 @@ pub fn node_key(
     for (side, l) in per_side.iter().enumerate() {
         if let Some(&slot) = l.first() {
             sides[slot] = side;
-            key.edges[side] = Some(norm(&g.graph.edges[slots[slot].unwrap()].edge_type));
+            key.edges[side] = Some(norm(g.edge_type(slots[slot].unwrap())));
         }
     }
     Ok((sides, key))
@@ -352,10 +397,10 @@ pub fn node_key(
 /// `0x1420b87b0`: whether a turned room key agrees with the node's edges (ground types on each
 /// side of the edge by its direction, heights).
 #[allow(clippy::too_many_arguments)]
-fn fits_edges(
+pub(crate) fn fits_edges(
     key: &TileKey,
     sides: &[usize; 4],
-    g: &PlacedGraph,
+    g: &dyn EdgeView,
     node: usize,
     strict_height: bool,
     types: &mut TerrainTypes,
@@ -364,25 +409,21 @@ fn fits_edges(
     let slots = g.slots(node);
     for i in 0..4 {
         if sides[i] < 4 {
-            let et = slots[i].map(|e| norm(&g.graph.edges[e].edge_type));
+            let et = slots[i].map(|e| norm(g.edge_type(e)));
             if key.edges[sides[i]] != et {
                 return Ok(false);
             }
         }
     }
-    let height = |n: usize| g.graph.nodes[n].values.get(1).copied().unwrap_or(0);
     let (mut dir, mut climb) = ([0usize; 4], [0i32; 4]);
     for i in 0..4 {
         let Some(e) = slots[i] else { continue };
-        let edge = &g.graph.edges[e];
-        if types.edge(files, &edge.edge_type)?.wildcard || sides[i] >= 4 {
+        if types.edge(files, g.edge_type(e))?.wildcard || sides[i] >= 4 {
             continue;
         }
         let s = sides[i];
-        let chirality = edge.values.get(1).copied().unwrap_or(0) != 0;
-        dir[s] = ((edge.from as usize == node) ^ chirality) as usize;
-        let other = if edge.from as usize == node { edge.to } else { edge.from } as usize;
-        climb[s] = (height(other) - height(node)).max(0);
+        dir[s] = (g.starts(node, e) ^ g.chirality(e)) as usize;
+        climb[s] = (g.height(g.other(node, e)) - g.height(node)).max(0);
     }
     let h = key.heights.map(|v| v as i8 as i32);
     for s in 0..4 {
