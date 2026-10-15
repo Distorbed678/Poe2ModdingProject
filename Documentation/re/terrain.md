@@ -445,6 +445,25 @@ replacement (`0x141fde880`) are not ported.
 
 **Verified:** Riverbank de-repetition equals the client's; 6412 draws in step.
 
+**Outer buffer** (`0x141fd8360`, `crates/poe-world/src/outer_buffer.rs`): the map is the
+region plus the master's `OuterBufferSize` (top right bottom left; the Riverbank's `3 3 3 0`
+gives a 69×78 map with the region at (0, 3)). Set corners get flag 2; each margin corner takes
+the ground and height of the nearest set corner along its column (up/down) and row
+(left/right), and margin corners get flag 8. Then the strips: below the region (columns left
+to right; the strip shrinks under taken cells), above it (strict `x < x1`), right of it (rows
+top to bottom; left not ported). At each step the region's border cell decides: an edge
+crossing that cell side (`0x141fd5cd0`; virtual edges give the split type whose exit
+crosses) makes an edge-tile key (that edge on the two sides across the strip, exits
+`e`/`3s−e−1` from the border tile's exit `0x141d083d0` minus the cell offset, corner grounds
+from the border corners (none for `.gt` flag 8), heights relative to their minimum),
+`below(total)` picks a tile that is stacked across the margin; otherwise the ground's first fill
+tile (`0x141fdd3e0`) is stacked where it fits, unless the two border grounds disagree (then one
+cell is skipped). Map ground checks are off during the pass.
+
+**Result (2026-10-15):** Riverbank (`G1_1`) seed 1000 generates identically to the client: tile
+hash 138293894, all 5382 cells (tile, orientation, sub-tile) equal, 6414 draws in step. The draws
+after that (`0x1415a5005`, …) belong to the doodad/entity stage.
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,

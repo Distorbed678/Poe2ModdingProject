@@ -653,6 +653,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     poe_world::generate::derepeat_pass(&mut map, &master, &room_list, &mut rng);
     println!("de-repetition: {} re-picks", map.pieces.len() - pieces_before_derepeat);
 
+    // Outer buffer (`0x141fd8360`) and the final layout against the client export.
+    let tsi_text = poe_world::text_utf16(&Files::read(files, &tsi_path)?);
+    let margins = poe_world::outer_buffer::Margins::parse(&tsi_text);
+    let edge_types = master.edge_type_table(files)?;
+    match poe_world::outer_buffer::outer_buffer(&map, margins, &mut master, files, &edge_types, &mut rng) {
+        Ok(full) => {
+            let export = poe_world::export::AreaExport::load(Path::new(&export_dir))?;
+            println!("map {}x{}: tile hash ours {} client {}", full.width, full.height, full.tile_hash(), export.meta("tile_hash").unwrap_or("?"));
+            let (mut same, mut diff) = (0, 0);
+            for y in 0..full.height {
+                for x in 0..full.width {
+                    let (a, b) = (full.get(x, y), export.tile(x, y));
+                    let ok = match (a, b) {
+                        (Some(a), Some(b)) => a.path.eq_ignore_ascii_case(&b.path) && a.orientation == b.orientation && a.sub == b.sub,
+                        (None, None) => true,
+                        _ => false,
+                    };
+                    if ok {
+                        same += 1;
+                    } else {
+                        diff += 1;
+                        if diff <= 8 {
+                            println!("  ({x},{y}) ours {:?} client {:?}", a.map(|c| (&c.path, c.orientation, c.sub)), b.map(|c| (&c.path, c.orientation, c.sub)));
+                        }
+                    }
+                }
+            }
+            println!("cells: {same} identical, {diff} different");
+        }
+        Err(e) => println!("outer buffer: {e}"),
+    }
+
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {
         if ours.0 != theirs.1 || ours.1 != theirs.2 {

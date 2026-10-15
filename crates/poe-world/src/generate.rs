@@ -122,6 +122,38 @@ impl TileMap {
         }
     }
 
+    /// This map placed at `offset` inside an empty `width × height` map (cells, pieces and
+    /// corners move; the outer buffer pass then fills the rest).
+    pub fn embed(&self, offset: (i32, i32), width: u32, height: u32) -> TileMap {
+        let mut m = TileMap::new(width, height);
+        m.ground_flags = self.ground_flags.clone();
+        m.edge_flags = self.edge_flags.clone();
+        m.pieces = self
+            .pieces
+            .iter()
+            .map(|p| Piece { x: p.x + offset.0, y: p.y + offset.1, ..p.clone() })
+            .collect();
+        for y in 0..self.height as i32 {
+            for x in 0..self.width as i32 {
+                let i = self.index(x, y).unwrap();
+                if let Some(j) = m.index(x + offset.0, y + offset.1) {
+                    m.cells[j] = self.cells[i].clone();
+                    m.grounds[j] = self.grounds[i].clone();
+                    m.piece_at[j] = self.piece_at[i];
+                }
+            }
+        }
+        for y in 0..=self.height as i32 {
+            for x in 0..=self.width as i32 {
+                let i = self.point_index(x, y).unwrap();
+                if let Some(j) = m.point_index(x + offset.0, y + offset.1) {
+                    m.lattice[j] = self.lattice[i].clone();
+                }
+            }
+        }
+        m
+    }
+
     /// Lattice index of corner `(x, y)` (0..=width, 0..=height).
     pub fn point_index(&self, x: i32, y: i32) -> Option<usize> {
         (x >= 0 && y >= 0 && x as u32 <= self.width && y as u32 <= self.height)
@@ -313,6 +345,35 @@ impl Master {
             }
         }
         Ok(out)
+    }
+
+    /// Every `.et` the tile set's tiles use, with the split types of virtual ones.
+    pub fn edge_type_table(&self, files: &dyn Files) -> Result<HashMap<String, crate::rooms::EdgeType>, GenError> {
+        let mut out = HashMap::new();
+        let mut todo: Vec<String> = self.tiles.tiles.iter().flat_map(|t| t.tdt.edges.iter().flatten().map(|e| e.to_ascii_lowercase())).collect();
+        while let Some(key) = todo.pop() {
+            if key.is_empty() || out.contains_key(&key) {
+                continue;
+            }
+            let et = crate::rooms::EdgeType::parse(&crate::text::decode_utf16(&files.read(&key)?));
+            todo.extend(et.splits.iter().map(|(p, _)| p.clone()));
+            out.insert(key, et);
+        }
+        Ok(out)
+    }
+
+    /// The first fill tile of a ground's group (`0x141f93cc0`; the `default` group without a
+    /// ground or when the ground's name has none), with its orientation (8 = any).
+    pub fn first_fill_tile(&mut self, files: &dyn Files, ground: Option<&str>) -> Result<Option<(String, u8)>, GenError> {
+        let name = match ground {
+            Some(g) => self.ground_name(files, g)?,
+            None => "default".into(),
+        };
+        let group = self.fills.get(&name).or_else(|| self.fills.get("default"));
+        Ok(group.and_then(|g| g.iter().find(|(_, p, _)| p.to_ascii_lowercase().ends_with(".tdt"))).map(|(_, p, m)| {
+            let o = if *m == 0xff { 8 } else { m.trailing_zeros() as u8 };
+            (p.clone(), o)
+        }))
     }
 
     /// `.et` flags (0x80 wildcard, 4 virtual) of every edge type the tile set's tiles use.
