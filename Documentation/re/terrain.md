@@ -171,3 +171,23 @@ pairs of a weighted fill-tile pick (`0x141f900a7`; `n` = the fill group's total 
    fixed-tile list (`0x141f9e780`), not the place-tile calls above.
 6. Generator trace kinds added for this: `below`/`range` with exact call sites, `candidates`
    (the room pass's candidate list), `place` (`0x141f9e2e0`: x, y, orientation, height, tile).
+7. Fill pass (`0x141f8f930`, row by row over empty cells): fill group = the cell's marked
+   ground's `.gt` name (first line of the `.gt`), else `default`; weighted pick `below(total)`;
+   orientation (`0x141f90d60`): square tiles `below(8)` if they fit unrotated, others
+   `below(840)` over the set of orientations that fit (`0x1421c3d00`); a tile that does not fit
+   is removed and the pick repeated.
+8. De-repetition (`0x141fdd7c0`, row by row over cells): for a tile-set tile bigger than 1×1,
+   without feature, with a non-uniform key and not touching a room ground-override lattice
+   point (`0x141fde360`), check the neighbours one tile-size away (up, right, down, left): the
+   same tile in the mirror orientation across the shared side (horizontal 0↔4 1↔7 2↔6 3↔5,
+   vertical 0↔6 1↔5 2↔4 3↔7) → `0x141fdfa60` re-picks it from its key's candidates minus those
+   mirroring the up/left neighbours (`0x141fde4b0`) or that neighbour; nothing left → unchanged.
+   Room ground overrides: the `.arm`'s last line, `(w-1)×(h-1)` string indices (not parsed by
+   `poe_data_tools`).
+9. Tile hash: the place function (`0x141d0bad0`) stores each cell's offset from the tile's
+   corner at record +0x34/+0x35; only offset (0, 0) cells are hashed.
+
+**Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
+client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
+ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,
+heights, doodads (their hash), the Riverbank's topology choice.

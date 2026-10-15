@@ -51,6 +51,10 @@ const RNG_RANGE: usize = 0x141f9c340;
 const ROOM_CANDIDATES: usize = 0x141f8ed45;
 /// Place a tile: `(terrain context, x, y, &tile, u8 orientation, i32 height, u8)`.
 const PLACE_TILE: usize = 0x141f9e2e0;
+/// De-repetition pass `(ctx, region, ...)`: region +0x58..+0x60 lists room placements
+/// (0x38 bytes, +0 room resource); room data (+0x28) +0xe8 is a (w-1)×(h-1) grid of resource
+/// pointers at interior lattice points (pieces touching a set point are not re-picked).
+const DEREPEAT: usize = 0x141fdd7c0;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -145,6 +149,7 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(RNG_BELOW, HookType::JmpBack(on_rng_call), 0)?;
         hook(ROOM_CANDIDATES, HookType::JmpBack(on_candidates), 0)?;
         hook(PLACE_TILE, HookType::JmpBack(on_place), 0)?;
+        hook(DEREPEAT, HookType::JmpBack(on_derepeat), 0)?;
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -281,6 +286,49 @@ unsafe extern "win64" fn on_rng_call(regs: *mut Registers, range: usize) {
         &args,
         "",
     );
+}
+
+unsafe extern "win64" fn on_derepeat(regs: *mut Registers, _: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_derepeat");
+    if !on_generator_thread() {
+        return;
+    }
+    let region = unsafe { &*regs }.rdx as usize;
+    let (Some(b), Some(e)) = (read::<usize>(region + 0x58), read::<usize>(region + 0x60)) else {
+        return;
+    };
+    let mut p = b;
+    while p < e {
+        if let Some(room) = read::<usize>(p).filter(|&r| r != 0) {
+            let path = resource_path(room);
+            let data = read::<usize>(room + 0x28).unwrap_or(0);
+            let (w, h) = (
+                read::<u8>(data + 0x138).unwrap_or(0) as usize,
+                read::<u8>(data + 0x139).unwrap_or(0) as usize,
+            );
+            let grid = read::<usize>(data + 0xe8).unwrap_or(0);
+            let mut points = Vec::new();
+            for y in 1..h.max(1) {
+                for x in 1..w.max(1) {
+                    let at = grid + ((y - 1) * (w - 1) + (x - 1)) * 8;
+                    if let Some(v) = read::<usize>(at).filter(|&v| v != 0) {
+                        points.push(format!(
+                            "{x},{y}:{}",
+                            resource_path(v).rsplit('/').next().unwrap_or("")
+                        ));
+                    }
+                }
+            }
+            let pos: [i32; 4] = read(p + 8).unwrap_or_default();
+            trace_line(
+                "derepeat_room",
+                "",
+                &format!("{path} {w}x{h} at {pos:?}"),
+                &points.join(" "),
+            );
+        }
+        p += 0x38;
+    }
 }
 
 unsafe extern "win64" fn on_place(regs: *mut Registers, _: usize) {
