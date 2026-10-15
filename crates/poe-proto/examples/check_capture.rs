@@ -31,8 +31,22 @@ fn main() {
         .and_then(|i| args.get(i + 1)?.parse().ok())
         .unwrap_or(1);
     let tables = [
-        ("login", OpcodeTable::parse("login", &std::fs::read_to_string(dir.join("login.toml")).unwrap()).unwrap()),
-        ("instance", OpcodeTable::parse("instance", &std::fs::read_to_string(dir.join("instance.toml")).unwrap()).unwrap()),
+        (
+            "login",
+            OpcodeTable::parse(
+                "login",
+                &std::fs::read_to_string(dir.join("login.toml")).unwrap(),
+            )
+            .unwrap(),
+        ),
+        (
+            "instance",
+            OpcodeTable::parse(
+                "instance",
+                &std::fs::read_to_string(dir.join("instance.toml")).unwrap(),
+            )
+            .unwrap(),
+        ),
     ];
     // (channel, dir, op, name) -> (ok, errors, trailing, examples)
     let mut stats: BTreeMap<(String, String, String, String), (u32, u32, u32, Vec<String>)> =
@@ -50,7 +64,11 @@ fn main() {
         let Some((_, table)) = tables.iter().find(|(c, _)| *c == chan) else {
             continue;
         };
-        let direction = if d == "in" { Direction::Server } else { Direction::Client };
+        let direction = if d == "in" {
+            Direction::Server
+        } else {
+            Direction::Client
+        };
         let id = u16::from_str_radix(op.trim_start_matches("0x"), 16).unwrap_or(0);
         let Some(name) = table.name(direction, id) else {
             continue;
@@ -65,7 +83,11 @@ fn main() {
                     "#{} {}\n{}\n",
                     m["seq"],
                     desc.text.as_deref().unwrap_or_else(|e| e),
-                    if desc.trailing > 0 { format!("({} bytes left)", desc.trailing) } else { String::new() }
+                    if desc.trailing > 0 {
+                        format!("({} bytes left)", desc.trailing)
+                    } else {
+                        String::new()
+                    }
                 );
             }
             continue;
@@ -78,7 +100,10 @@ fn main() {
             (Ok(_), n) => {
                 e.2 += 1;
                 if e.3.len() < show {
-                    e.3.push(format!("{n} bytes left: {}", m["hex"].as_str().unwrap_or("")));
+                    e.3.push(format!(
+                        "{n} bytes left: {}",
+                        m["hex"].as_str().unwrap_or("")
+                    ));
                 }
             }
             (Err(err), _) => {

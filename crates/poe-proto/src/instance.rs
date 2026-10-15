@@ -1376,3 +1376,39 @@ impl Message for SetAimTarget {
         })
     }
 }
+
+/// S→C component delta for one entity (reader `0x141f6c7a2`): the header (official: entity,
+/// `0xffffffff`, 0, 0), a varuint length and that many bytes, which are the component index
+/// (the entity template's order) followed by the component's own delta (component vfunc
+/// +0xb0). See [`crate::entity::PlayerDelta`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComponentDelta {
+    pub header: SimulationHeader,
+    pub component: u8,
+    pub delta: Vec<u8>,
+}
+
+impl Message for ComponentDelta {
+    const NAME: &'static str = "ComponentDelta";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.varuint(1 + self.delta.len() as u32)
+            .u8(self.component)
+            .bytes(&self.delta);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let header = SimulationHeader::decode(r)?;
+        let len = r.varuint()? as usize;
+        let blob = r.bytes(len)?;
+        let (&component, delta) = blob.split_first().ok_or(DecodeError::Incomplete {
+            offset: r.position(),
+            needed: 1,
+        })?;
+        Ok(Self {
+            header,
+            component,
+            delta: delta.to_vec(),
+        })
+    }
+}

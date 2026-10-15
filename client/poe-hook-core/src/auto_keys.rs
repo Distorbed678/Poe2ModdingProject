@@ -351,10 +351,18 @@ fn hook_input() -> Result<(), String> {
     if user32.is_null() {
         return Err("user32.dll not loaded".into());
     }
-    let hooks: [(&[u8], ilhook::x64::RetnRoutine); 3] = [
+    // Test runs (`POE_HOOK_FAKE_FOCUS`, set by tools/test-run.sh): the game believes its window
+    // is in the foreground. Some of its input runs only then, e.g. the cursor (aim) reports
+    // `0x0062` (`0x14016ba40` checks GetForegroundWindow). The real focus does not change.
+    FAKE_FOCUS.store(
+        std::env::var_os("POE_HOOK_FAKE_FOCUS").is_some(),
+        Ordering::Relaxed,
+    );
+    let hooks: [(&[u8], ilhook::x64::RetnRoutine); 4] = [
         (b"GetRawInputData\0", on_get_raw_input_data),
         (b"GetKeyState\0", on_get_key_state),
         (b"GetCursorPos\0", on_get_cursor_pos),
+        (b"GetForegroundWindow\0", on_get_foreground_window),
     ];
     for (name, routine) in hooks {
         let display = String::from_utf8_lossy(&name[..name.len() - 1]).into_owned();
@@ -431,6 +439,34 @@ unsafe extern "win64" fn on_get_key_state(
 }
 
 type GetCursorPosFn = unsafe extern "system" fn(*mut POINT) -> i32;
+
+/// The game's own main window handle (`*0x1445d8308` points to it; the aim check compares
+/// GetForegroundWindow with it).
+fn game_hwnd() -> Option<usize> {
+    let m = poe_hook_shared::module::Module::main();
+    let p = poe_hook_shared::mem::read::<usize>(m.from_ghidra(0x1445d8308))?;
+    poe_hook_shared::mem::read::<usize>(p).filter(|&h| h != 0)
+}
+
+static FAKE_FOCUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+type GetForegroundWindowFn = unsafe extern "system" fn() -> usize;
+
+unsafe extern "win64" fn on_get_foreground_window(
+    _regs: *mut Registers,
+    original: usize,
+    _: usize,
+) -> usize {
+    let _guard = crate::hook_guard!("auto_keys::on_get_foreground_window");
+    if FAKE_FOCUS.load(Ordering::Relaxed)
+        && !crate::host::read_only()
+        && let Some(w) = game_hwnd().or_else(|| game_window().map(|w| w as usize))
+    {
+        return w;
+    }
+    let f: GetForegroundWindowFn = unsafe { std::mem::transmute(original) };
+    unsafe { f() }
+}
 
 unsafe extern "win64" fn on_get_cursor_pos(
     regs: *mut Registers,
