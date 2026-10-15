@@ -64,6 +64,8 @@ pub fn describe(name: &str, direction: Direction, body: &[u8]) -> Option<Describ
         login::CharacterDetails,
         login::PlayCharacter,
         login::InstanceDetails,
+        login::Unknown003c,
+        login::Unknown0017,
         instance::Hello,
         instance::EnableEncryption,
         instance::AreaInfo,
@@ -97,6 +99,8 @@ pub fn describe(name: &str, direction: Direction, body: &[u8]) -> Option<Describ
         instance::SimulationTick,
         instance::AddObject,
         instance::AddInventory,
+        instance::AimTarget,
+        instance::SetAimTarget,
     )
 }
 

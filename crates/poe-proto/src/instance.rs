@@ -222,7 +222,7 @@ mod tests {
             dir_y: 127,
             grid_x: 285,
             grid_y: 1140,
-            unk_30: false,
+            unk_30: 0xf1,
         };
         let mut w = Writer::new();
         update.encode(&mut w);
@@ -802,7 +802,9 @@ pub struct MoveDirectionUpdate {
     pub dir_y: i32,
     pub grid_x: i32,
     pub grid_y: i32,
-    pub unk_30: bool,
+    /// Official servers send `0xf1` in nearly all of these (0 in a few answers to
+    /// single-axis input); the client's handler does not read it (`0x142149640`).
+    pub unk_30: u8,
 }
 
 impl Message for MoveDirectionUpdate {
@@ -814,7 +816,7 @@ impl Message for MoveDirectionUpdate {
             .varint(self.dir_y)
             .varint(self.grid_x)
             .varint(self.grid_y)
-            .u8(self.unk_30 as u8);
+            .u8(self.unk_30);
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
@@ -823,7 +825,7 @@ impl Message for MoveDirectionUpdate {
             dir_y: r.varint()?,
             grid_x: r.varint()?,
             grid_y: r.varint()?,
-            unk_30: r.u8()? != 0,
+            unk_30: r.u8()?,
         })
     }
 }
@@ -1244,6 +1246,9 @@ pub struct Inventory {
     pub slot: u8,
     pub width: u8,
     pub height: u8,
+    /// Official servers send 0x00/0x01/0x03/0x04/0x60/0x61/0x65 here
+    /// (`protocol/<version>/inventories.tsv`); none of these add bytes to the message.
+    pub flags: u8,
 }
 
 impl Inventory {
@@ -1252,8 +1257,7 @@ impl Inventory {
             .u8(self.slot)
             .u8(self.width)
             .u8(self.height)
-            // Flags: no optional sections.
-            .u8(0)
+            .u8(self.flags)
             // Item count.
             .varuint(0);
     }
@@ -1263,11 +1267,12 @@ impl Inventory {
             slot: r.u8()?,
             width: r.u8()?,
             height: r.u8()?,
+            flags: r.u8()?,
         };
-        if r.u8()? != 0 || r.varuint()? != 0 {
+        if r.varuint()? != 0 {
             return Err(DecodeError::Invalid {
                 offset: r.position(),
-                what: "inventory flags/items not supported",
+                what: "inventory items not supported",
             });
         }
         Ok(inv)
@@ -1300,6 +1305,74 @@ impl Message for AddInventory {
             local_index: r.u8()?,
             inventory_id: r.u32()?,
             inventory: Inventory::decode(r)?,
+        })
+    }
+}
+
+/// C→S `0x0062`: where the player aims (the cursor), reported by the client. `u8 local player`,
+/// `u8 mode`, then by mode: 2 = a ground cell (`i32 x, i32 y`), 3 = an entity (`u32`), 0/1 =
+/// nothing (seen once each around spawning and before a skill use). Official servers echo mode 2
+/// as [`SetAimTarget`] one frame later, which turns the player toward the cursor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AimTarget {
+    pub local_index: u8,
+    pub mode: u8,
+    pub cell: Option<(i32, i32)>,
+    pub entity: Option<u32>,
+}
+
+impl Message for AimTarget {
+    const NAME: &'static str = "AimTarget";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.local_index).u8(self.mode);
+        if let Some((x, y)) = self.cell {
+            w.i32(x).i32(y);
+        } else if let Some(e) = self.entity {
+            w.u32(e);
+        }
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let local_index = r.u8()?;
+        let mode = r.u8()?;
+        let (cell, entity) = match mode {
+            2 => (Some((r.i32()?, r.i32()?)), None),
+            3 => (None, Some(r.u32()?)),
+            _ => (None, None),
+        };
+        Ok(Self {
+            local_index,
+            mode,
+            cell,
+            entity,
+        })
+    }
+}
+
+/// S→C `0x01dc` (Actor message, handler `0x142149640` case `0x1dc`): turn the entity toward a
+/// cell (`kind` 0) or an entity (`kind` 1, its id in `entity`). Header `(0, 0, 0)` on official
+/// servers. Official servers send it for the player's [`AimTarget`] positions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SetAimTarget {
+    pub header: SimulationHeader,
+    pub kind: u8,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Message for SetAimTarget {
+    const NAME: &'static str = "SetAimTarget";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u8(self.kind).i32(self.x).i32(self.y);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            header: SimulationHeader::decode(r)?,
+            kind: r.u8()?,
+            x: r.i32()?,
+            y: r.i32()?,
         })
     }
 }

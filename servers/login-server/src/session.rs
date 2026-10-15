@@ -484,6 +484,14 @@ async fn play_character(
         unk_7c: [0; 8],
         unk_84: 0,
     };
-    conn.send(&server.protocol.login.encode(&details)?).await?;
+    let mut out = server.protocol.login.encode(&details)?;
+    // Official servers follow InstanceDetails with 0x0017 0x0014.
+    out.extend(
+        server
+            .protocol
+            .login
+            .encode(&poe_proto::login::Unknown0017 { value: 0x0014 })?,
+    );
+    conn.send(&out).await?;
     Ok(())
 }
