@@ -22,6 +22,7 @@ optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
 | Login `0x003c` | four zero u32 before the key-exchange reply | not sent | sent |
 | Login `0x0017` | u16 `0x0014` right after `InstanceDetails` | not sent | sent |
 | `AddObject` header (player) | (0xffffffff, 0, 0) | (0, 0xff, 0) | official; verified with and without the first-visit intro (the old (0, 0, 0) crash does not come back) |
+| AreaInfo league (+0x38) | the character's league | empty | the character's league |
 | Entry order | `LocalPlayers`, `PlayerEntity`, inventories | `PlayerEntity` after the inventories | official |
 
 ## Open (by priority)
@@ -30,12 +31,19 @@ optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
    after kills, deltas with mask `0x0201` (`u32` 17, 34, 51, experience?, and +0x209 set). Ours sends only the
    stance.
 2. **Messages official servers send at entry that we do not** (all decoded sizes in the
-   session's `protocol.tsv`): `0x0021` (u16 id list), `0x00c6` (account name `Name#1234`),
+   session's `protocol.tsv`). Known so far: `0x0021` = MonsterVarieties rows to preload (`u8`,
+   `u16` count, `u16`, count x `u16` row, count x `u8`; session dispatcher `0x142121f70` case
+   `0x142123a2c`, monsters milestone); `0x0066` = skill bar (`u8` local, `bool`, `u8` count,
+   64-byte records: `u32` skill id, ..., reader `0x142153de0`; skills milestone); `0x005a` = `u32`
+   + 22 bytes kept on the session (+0x2318, all zero officially); `0x00c6` = a social-list entry
+   (account name). Others: `0x0021` (u16 id list), `0x00c6` (account name `Name#1234`),
    `0x0043`, `0x0045`, `0x018b`, `0x018c`, `0x0229`, `0x0226`, `0x0237`, `0x0066` (389 bytes,
    looks like the skill bar), `0x003a`, `0x02db`, `0x00c4`, `0x02d8`, `0x0325` (5.5 KB),
    `0x005a`, `0x0329`, `0x0320`, `0x031d`, `0x0271`, `0x00de` (per-inventory data),
    `0x02a6`, `0x0352`, `0x0358`, `0x0222`.
-3. **AreaInfo** 221 vs 39 bytes, **InitialState** 121 vs 29 bytes (richer forms to decode).
+3. **AreaInfo** 221 vs 39 bytes: the layout is now known (instance.md); missing are the
+   object-type preload list (needs the area's spawns), a u16 key list, scalar bytes and the
+   optional blocks. **InitialState** 121 vs 29 bytes.
 4. **CharacterList**: `unk_51` (64), `unk_40` (85) and a 92-byte appearance/gear blob; league
    flag row of the current league.
 5. Skills, monsters, items, sprint buff: later milestones; the captures have the sequences.

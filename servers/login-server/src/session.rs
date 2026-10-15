@@ -457,6 +457,7 @@ async fn play_character(
         TicketCharacter {
             id: character.id,
             name: character.name.clone(),
+            league: character.league.clone(),
             class_id: character.class_id,
             level: character.level,
             intro_done: character.intro_done,

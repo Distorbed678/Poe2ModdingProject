@@ -387,7 +387,8 @@ impl InstanceServer {
         let msg = AreaInfo {
             instance_id,
             area_hash: area.hash16,
-            text_38: String::new(),
+            // Official servers send the character's league here.
+            league: ticket.character.league.clone(),
             seed,
             ..Default::default()
         };
