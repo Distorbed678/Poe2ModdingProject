@@ -9,7 +9,7 @@
 use std::ffi::c_void;
 
 /// Bumped whenever a struct or function below changes.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 /// Name of the core's entry point.
 pub const CORE_START: &[u8] = b"poe_core_start\0";
 pub type CoreStart = unsafe extern "C" fn(host: *const HostApi) -> *const CoreApi;
@@ -89,6 +89,8 @@ pub struct VulkanState {
     pub image_count: u32,
     pub images: [u64; 16],
     pub hwnd: isize,
+    /// A queue family the game found able to present (-1: unknown).
+    pub present_family: i32,
 }
 
 impl Default for VulkanState {

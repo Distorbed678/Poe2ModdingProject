@@ -970,3 +970,8 @@ unsafe extern "win64" fn on_lookup(regs: *mut Registers, _: usize) {
         log::info!("dumped {count} object types to {}", path.display());
     }
 }
+
+/// The player entity (0 until known).
+pub fn player() -> usize {
+    PLAYER.load(Ordering::Relaxed)
+}
