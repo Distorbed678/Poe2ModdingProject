@@ -248,11 +248,11 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
     // (our server gives the player id 1).
     if PLAYER.load(Ordering::Relaxed) == 0
         && entity > 0x10000
-        && poe_hook_shared::mem::read::<u32>(entity + 0x88) == Some(1)
+        && poe_hook_shared::mem::read::<u32>(entity + 0x88) == Some(player_id())
     {
         PLAYER.store(entity, Ordering::SeqCst);
         log::info!("player entity {entity:#x} found from its frame tick");
-        crate::entities::adopt(entity, 1);
+        crate::entities::adopt(entity, player_id());
         track_player(entity);
     }
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
@@ -576,7 +576,7 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         let count = (end.saturating_sub(begin)) / 8;
         let id = *((entity + 0x88) as *const u32);
         crate::entities::register(entity, id);
-        if id == 1 {
+        if id == player_id() {
             PLAYER.store(entity, Ordering::SeqCst);
             PLAYER_UPDATES.store(0, Ordering::SeqCst);
             track_player(entity);
@@ -971,4 +971,18 @@ pub fn player() -> usize {
 /// The game module (set when the research hooks start).
 pub fn main_module() -> Option<Module> {
     MAIN.get().copied()
+}
+
+/// The controlled character's entity id: from the server's PlayerEntity message (packet
+/// capture); 1 until known (our server's player id).
+static PLAYER_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+pub fn player_id() -> u32 {
+    PLAYER_ID.load(Ordering::Relaxed)
+}
+
+pub fn set_player_id(id: u32) {
+    if PLAYER_ID.swap(id, Ordering::Relaxed) != id {
+        log::info!("player entity id {id:#x} (PlayerEntity)");
+    }
 }

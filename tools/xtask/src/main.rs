@@ -152,8 +152,8 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
         println!("gateway -> {entry}");
     }
 
-    copy(&dlls.join("poe_hook.dll"), &game.join(DLL_NAME))?;
-    copy(&dlls.join(CORE_DLL), &game.join(CORE_DLL))?;
+    install(&dlls.join("poe_hook.dll"), &game.join(DLL_NAME))?;
+    install(&dlls.join(CORE_DLL), &game.join(CORE_DLL))?;
     let hook_cfg = game.join(HOOK_CONFIG);
     if !hook_cfg.exists() {
         copy(&root.join("client/poe-hook").join(HOOK_CONFIG), &hook_cfg)?;
@@ -186,10 +186,7 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
 fn deploy_core(root: &Path, config: &Config, build: bool) -> Result<()> {
     let dlls = dll_dir(root, build)?;
     let target = config.game.game_dir.join(CORE_DLL);
-    // Write a temporary file first: the loader reloads once the file is complete and stable.
-    let tmp = target.with_extension("dll.tmp");
-    copy(&dlls.join(CORE_DLL), &tmp)?;
-    std::fs::rename(&tmp, &target)?;
+    install(&dlls.join(CORE_DLL), &target)?;
     println!("installed {} (a running client reloads it)", target.display());
     Ok(())
 }
@@ -331,6 +328,16 @@ fn backup_once(path: &Path) -> Result<()> {
         std::fs::copy(path, &orig).with_context(|| format!("backing up {}", path.display()))?;
         println!("backed up {} -> {}", path.display(), orig.display());
     }
+    Ok(())
+}
+
+/// Copies a DLL through a temporary file and a rename: a running client keeps its mapping of
+/// the old file intact (overwriting a mapped file in place can corrupt it), and the core
+/// loader only ever sees a complete file.
+fn install(from: &Path, to: &Path) -> Result<()> {
+    let tmp = to.with_extension("dll.tmp");
+    copy(from, &tmp)?;
+    std::fs::rename(&tmp, to).with_context(|| format!("renaming to {}", to.display()))?;
     Ok(())
 }
 

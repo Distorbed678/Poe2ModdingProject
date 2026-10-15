@@ -291,6 +291,7 @@ fn record(dir: Dir, channel: Channel, data: Vec<u8>, opcode_len: usize, framed: 
         redacted,
         official: crate::host::read_only(),
     });
+    note_player(&msg);
     crate::timing::record(
         match dir {
             Dir::In => crate::timing::Series::PacketIn,
@@ -511,6 +512,15 @@ pub fn text_line(m: &Msg) -> String {
     )
 }
 
+/// PlayerEntity (`u8, u8 local index, u32 entity id`) names the controlled character.
+fn note_player(m: &Msg) {
+    if m.dir == Dir::In && m.channel == Channel::Instance && m.name() == Some("PlayerEntity") {
+        if let Some(id) = m.body().get(2..6) {
+            crate::dump_types::set_player_id(u32::from_be_bytes([id[0], id[1], id[2], id[3]]));
+        }
+    }
+}
+
 /// After a core reload: the messages of this session so far, from `packets.jsonl`.
 fn restore() {
     let Ok(text) = std::fs::read_to_string(crate::host::session_dir().join("packets.jsonl")) else {
@@ -562,6 +572,7 @@ fn restore() {
             })
         };
         if let Some(m) = parse() {
+            note_player(&m);
             SEQ.fetch_max(m.seq, Ordering::Relaxed);
             store.push_back(Arc::new(m));
         }
