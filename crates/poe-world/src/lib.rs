@@ -13,3 +13,4 @@ pub mod hash;
 pub mod rng;
 pub mod tdt;
 mod text;
+pub mod tileset;
