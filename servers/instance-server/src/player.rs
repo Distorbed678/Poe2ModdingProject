@@ -11,7 +11,7 @@ use poe_game::movement::{Motion, Mover, Open};
 use poe_proto::{
     entity::Skill,
     instance::{
-        MoveDirection, MoveDirectionUpdate, SetOrientation, SimulationHeader, SprintInput,
+        AimTarget, MoveDirection, MoveDirectionUpdate, SetAimTarget, SetOrientation, SimulationHeader, SprintInput,
         SprintState, StartAction, UpdateActionTarget, UpdateSkillTarget, UseSkill,
     },
 };
@@ -33,6 +33,8 @@ pub enum Reply {
     Start(StartAction),
     Sprint(SprintState),
     Orientation(SetOrientation),
+    /// Turn toward the cursor (official echo of the client's AimTarget).
+    Aim(SetAimTarget),
 }
 
 /// The action the player is running (started by a StartAction).
@@ -95,6 +97,11 @@ pub struct Player {
     pub face_cursor: Option<[f32; 6]>,
     /// The facing last sent: angle and whether it is locked.
     facing: Option<(f32, bool)>,
+    /// The client's last aim cell (AimTarget mode 2), echoed in the next frame.
+    aim: Option<(i32, i32)>,
+    /// The client reports its aim itself (as with official servers): the cursor facing from
+    /// the DLL's reports (`face_cursor`) is not used any more.
+    aim_seen: bool,
     /// Length of a simulation frame in seconds (`tick_ms`).
     pub frame_seconds: f32,
     /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
@@ -111,6 +118,12 @@ pub struct Player {
     /// Direction of the running roll (relative cells).
     roll_dir: (f32, f32),
 }
+
+/// Index of the Actor component in the player's object (Positioned 0 .. Actor 9 .. BuffOrbs 12,
+/// as the DLL's component inspector lists them).
+const ACTOR_COMPONENT: u8 = 9;
+/// Last byte of `0x64` on official servers (unread by the client).
+const MOVE_UPDATE_TRAILER: u8 = 0xf1;
 
 /// Roll length when the skill does not list `dodge_roll_base_travel_distance`.
 const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
@@ -208,6 +221,8 @@ impl Player {
             pending_turn: None,
             face_cursor: None,
             facing: None,
+            aim: None,
+            aim_seen: false,
             walkable: None,
             frame_offset: None,
             in_roll: false,
@@ -332,7 +347,28 @@ impl Player {
             self.mover.advance(dt, &Open);
         }
         let mut out = Vec::new();
-        out.extend(self.face_cursor_replies());
+        if self.aim_seen {
+            // The client's own aim drives the facing; a facing the DLL path locked is released.
+            if self.facing.is_some_and(|f| f.1) {
+                let angle = self.facing.map_or(0.0, |f| f.0);
+                self.facing = Some((angle, false));
+                out.push(Reply::Orientation(SetOrientation {
+                    header: self.header(),
+                    angle,
+                    locked: false,
+                }));
+            }
+            if let Some((x, y)) = self.aim.take() {
+                out.push(Reply::Aim(SetAimTarget {
+                    header: self.header(),
+                    kind: 0,
+                    x,
+                    y,
+                }));
+            }
+        } else {
+            out.extend(self.face_cursor_replies());
+        }
         // A turn held back for a better frame (`turn`) goes out in the frame it was meant for.
         if let Some((req, frame)) = self.pending_turn
             && self.apply_frame >= frame
@@ -427,6 +463,18 @@ impl Player {
         out
     }
 
+    /// Header of the player's Actor messages as official servers send them (`0x64`): ordered
+    /// after the entity's own Actor component (`unk_14` = the entity, `unk_18` = the Actor's
+    /// component index).
+    fn actor_header(&self) -> SimulationHeader {
+        SimulationHeader {
+            entity_id: self.entity_id,
+            unk_14: self.entity_id,
+            unk_18: ACTOR_COMPONENT,
+            unk_1a: 0,
+        }
+    }
+
     fn header(&self) -> SimulationHeader {
         SimulationHeader {
             entity_id: self.entity_id,
@@ -450,12 +498,12 @@ impl Player {
                 // roll ends, so it gets the direction now, with its own cell.
                 let (grid_x, grid_y) = self.send_cell(Some((req.x as f32, req.y as f32)));
                 return Some(MoveDirectionUpdate {
-                    header: self.header(),
+                    header: self.actor_header(),
                     dir_x: req.x,
                     dir_y: req.y,
                     grid_x,
                     grid_y,
-                    unk_30: false,
+                    unk_30: MOVE_UPDATE_TRAILER,
                 });
             }
             self.pending = Some(Pending::Direction(*req));
@@ -665,12 +713,12 @@ impl Player {
             });
         }
         MoveDirectionUpdate {
-            header: self.header(),
+            header: self.actor_header(),
             dir_x: req.x,
             dir_y: req.y,
             grid_x,
             grid_y,
-            unk_30: false,
+            unk_30: MOVE_UPDATE_TRAILER,
         }
     }
 
@@ -764,12 +812,12 @@ impl Player {
         info!(?cell, "teleport (dev command)");
         let update = |dir_x| {
             Reply::Direction(MoveDirectionUpdate {
-                header: self.header(),
+                header: self.actor_header(),
                 dir_x,
                 dir_y: 0,
                 grid_x: cell.0,
                 grid_y: cell.1,
-                unk_30: false,
+                unk_30: MOVE_UPDATE_TRAILER,
             })
         };
         vec![update(1), update(0)]
@@ -835,6 +883,18 @@ impl Player {
         );
         kv("paused", self.paused.to_string());
         s
+    }
+
+    /// The client's aim (cursor) report. Official servers echo a cell in the next frame as
+    /// SetAimTarget, which turns the player toward it; entity aims (mode 3) are not echoed.
+    pub fn on_aim_target(&mut self, req: &AimTarget) {
+        if let Some(cell) = req.cell {
+            if !self.aim_seen {
+                info!("the client reports its aim: facing follows AimTarget");
+            }
+            self.aim_seen = true;
+            self.aim = Some(cell);
+        }
     }
 
     pub fn on_use_skill(&mut self, req: &UseSkill) -> Option<StartAction> {

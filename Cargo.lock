@@ -1691,6 +1691,7 @@ version = "0.1.0"
 dependencies = [
  "poe-net",
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
 ]

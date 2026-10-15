@@ -5,7 +5,8 @@
 [client]
 Hello = 0x000f
 # Not decoded yet (fixed sizes in [client_body_sizes]); seen after entering an area.
-Unknown0062 = 0x0062
+# Aim target (cursor): u8 local player, u8 mode, then by mode (variable length).
+AimTarget = 0x0062
 Unknown00bc = 0x00bc
 Unknown013d = 0x013d
 Unknown0221 = 0x0221
@@ -55,6 +56,8 @@ AddInventory = 0x00df
 ExitSession = 0x0174
 # Simulation messages (second factory 0x142186aa0): queued per frame, applied by 0x142134240.
 SimulationTick = 0x02f4
+# Turn an entity toward a cell or entity (the echo of the client's AimTarget).
+SetAimTarget = 0x01dc
 SimulationFrameValue = 0x02f5
 SetPause = 0x01fe
 AddObject = 0x02f7
@@ -75,7 +78,6 @@ SkillStatsUpdate = 0x01d8
 
 # Body sizes of client messages the server does not decode yet, so batches can be split.
 [client_body_sizes]
-Unknown0062 = 2
 Unknown00bc = 3
 Unknown013d = 1
 Unknown0221 = 1

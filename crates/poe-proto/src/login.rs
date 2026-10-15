@@ -800,3 +800,43 @@ mod play_tests {
         assert_eq!(p.selections, vec![(0, 1)]);
     }
 }
+
+/// S→C `0x003c` (deserializer `0x14214f280`): four u32, all zero on official servers, sent
+/// in plaintext right before the server's key exchange. Meaning unknown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Unknown003c {
+    pub values: [u32; 4],
+}
+
+impl Message for Unknown003c {
+    const NAME: &'static str = "Unknown003c";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        for v in self.values {
+            w.u32(v);
+        }
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            values: [r.u32()?, r.u32()?, r.u32()?, r.u32()?],
+        })
+    }
+}
+
+/// S→C `0x0017` (deserializer `0x14214ef40`): a u16; official servers send `0x0014` right
+/// after InstanceDetails (`0x14`), so it is probably "request answered" for that opcode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Unknown0017 {
+    pub value: u16,
+}
+
+impl Message for Unknown0017 {
+    const NAME: &'static str = "Unknown0017";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u16(self.value);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self { value: r.u16()? })
+    }
+}

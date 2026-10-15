@@ -118,3 +118,9 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 
 ## Splitting client messages
 Client messages have no length prefix. The instance server decodes the known messages one after another (`InstanceServer::handle_client_message`). Fixed-size messages that are not decoded yet are listed by name in `[client_body_sizes]` of `protocol/0.5.5e/instance.toml` and skipped. Anything else ends the batch, and the rest is logged.
+
+## Aim (cursor) and inventories (2026-10-14, from official captures)
+- **C→S `0x0062` AimTarget**: `u8 local player, u8 mode`, then mode 2 `i32 x, i32 y` (the cursor's cell), mode 3 `u32` (an entity, probably hovered), modes 0/1 nothing. Sent while the cursor moves once the client reports aims (see [official-comparison.md](official-comparison.md)).
+- **S→C `0x01dc` SetAimTarget** (Actor handler `0x142149640` case `0x1dc`): header, `u8 kind` (0 = cell, 1 = entity), `i32 x, i32 y`. Official servers echo each AimTarget cell one frame later; the client turns the player toward it.
+- **AddInventory**: the byte after width/height is a flags byte (official values in `protocol/0.5.5e/inventories.tsv`), then the item count. The server sends the official inventory set; the client needs all of it before it starts the world.
+- **Local player index** is 1 on official servers (LocalPlayers, PlayerEntity, AddInventory, and the client's own messages).

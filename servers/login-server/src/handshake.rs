@@ -8,7 +8,7 @@
 use poe_net::{Connection, KeyMaterial};
 use poe_proto::{
     Protocol,
-    login::{ClientKeyExchange, KeyExchange, ServerKeyExchange},
+    login::{ClientKeyExchange, KeyExchange, ServerKeyExchange, Unknown003c},
 };
 use rand::RngCore;
 use tracing::{debug, info};
@@ -37,7 +37,10 @@ pub async fn perform(conn: &mut Connection, protocol: &Protocol) -> anyhow::Resu
         public_key,
         signature: Vec::new(),
     });
-    conn.send(&protocol.login.encode(&reply)?).await?;
+    // Official servers send 0x003c (four zero u32) first.
+    let mut out = protocol.login.encode(&Unknown003c::default())?;
+    out.extend(protocol.login.encode(&reply)?);
+    conn.send(&out).await?;
 
     let keys = KeyMaterial::from_server_public_key(&reply.0.public_key);
     conn.set_ciphers(

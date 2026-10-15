@@ -27,7 +27,7 @@ use poe_net::{Connection, DecodeError, KeyMaterial, StreamCipher, hexdump::hexdu
 use poe_proto::{
     Message, Protocol, entity,
     instance::{
-        AddInventory, AddObject, AreaInfo, CharacterState, ChatJoinRequest, ChatJoined,
+        AddInventory, AddObject, AimTarget, AreaInfo, CharacterState, ChatJoinRequest, ChatJoined,
         EnableEncryption, ExitReport, FrameReport, Hello, InitialState, Inventory, LeaveGame,
         LocalPlayers, MoveDirection, PauseRequest, PingReply, PlayerEntity, PlayerState, SetPause,
         SimulationHeader, SimulationTick, SkillReleased, SprintInput, TerrainHashes,
@@ -459,6 +459,9 @@ impl InstanceServer {
                 "out-facing",
                 format_args!("{:.3}\t{}", m.angle, m.locked),
             ),
+            player::Reply::Aim(m) => {
+                self.trace(port, "out-aim", format_args!("{}\t{}\t{}", m.kind, m.x, m.y))
+            }
         }
         let table = &self.protocol.instance;
         Ok(match reply {
@@ -466,6 +469,7 @@ impl InstanceServer {
             player::Reply::Start(m) => table.encode(m)?,
             player::Reply::Sprint(m) => table.encode(m)?,
             player::Reply::Orientation(m) => table.encode(m)?,
+            player::Reply::Aim(m) => table.encode(m)?,
         })
     }
 }
@@ -507,6 +511,16 @@ impl InstanceServer {
                     ..Default::default()
                 };
                 conn.send(&table.encode(&reply)?).await?;
+            }
+            // The cursor: echoed as SetAimTarget in the next frame (player facing).
+            AimTarget::NAME => {
+                let req = AimTarget::decode(r)?;
+                self.trace(
+                    port,
+                    "in-aim",
+                    format_args!("{}\t{:?}\t{:?}", req.mode, req.cell, req.entity),
+                );
+                player.on_aim_target(&req);
             }
             // WASD: the server echoes the direction with its position of the player; the client
             // then moves the player itself until the next change.
@@ -736,30 +750,47 @@ impl InstanceServer {
         let table = &self.protocol.instance;
         let character = &ticket.character;
         let spawn = player.mover.cell();
+        // Local player 1 (as on official servers: the client copies the index into its own
+        // messages, e.g. `0062 01 ..`).
         let players = LocalPlayers {
             unk: 0,
-            players: vec![(0, character.name.clone())],
+            players: vec![(LOCAL_PLAYER, character.name.clone())],
         };
         conn.send(&table.encode(&players)?).await?;
 
-        // One empty inventory per slot; the in-game UI resolves every slot it shows.
-        let cfg = &self.config.inventories;
+        // The inventories an official server creates (protocol/<version>/inventories.tsv),
+        // else one empty inventory per Inventories.dat slot.
         let mut out = Vec::new();
-        for slot in InventorySlot::all(&self.data)? {
-            if cfg.skip.contains(&slot.id) {
-                continue;
+        let official = load_inventories(&self.config.game.protocol_dir.join("inventories.tsv"));
+        if !official.is_empty() {
+            for (id, inventory) in official {
+                out.extend(table.encode(&AddInventory {
+                    unk_10: LOCAL_PLAYER,
+                    inventory_id: id,
+                    inventory,
+                    ..Default::default()
+                })?);
             }
-            let [width, height] = cfg.size(&slot.id);
-            out.extend(table.encode(&AddInventory {
-                inventory_id: slot.index as u32 + 1,
-                inventory: Inventory {
-                    id_key: slot.id_key as u8,
-                    slot: slot.index,
-                    width,
-                    height,
-                },
-                ..Default::default()
-            })?);
+        } else {
+            let cfg = &self.config.inventories;
+            for slot in InventorySlot::all(&self.data)? {
+                if cfg.skip.contains(&slot.id) {
+                    continue;
+                }
+                let [width, height] = cfg.size(&slot.id);
+                out.extend(table.encode(&AddInventory {
+                    unk_10: LOCAL_PLAYER,
+                    inventory_id: slot.index as u32 + 1,
+                    inventory: Inventory {
+                        id_key: slot.id_key as u8,
+                        slot: slot.index,
+                        width,
+                        height,
+                        flags: 0,
+                    },
+                    ..Default::default()
+                })?);
+            }
         }
         conn.send(&out).await?;
 
@@ -776,8 +807,9 @@ impl InstanceServer {
         }
         let entity_id = player.entity_id;
         let mut out = table.encode(&PlayerEntity {
+            unk: LOCAL_PLAYER,
+            local_index: LOCAL_PLAYER,
             entity_id,
-            ..Default::default()
         })?;
         out.extend(table.encode(&AddObject {
             header: SimulationHeader {
@@ -787,7 +819,9 @@ impl InstanceServer {
                 // without advancing the queue cursor; a nested flush during that apply (starting
                 // the WashedUp action from the Player reader) applies queued packets whose
                 // ordering matches the current position (0, 0, 0). With 0 here the player was
-                // added twice ("Replacing awake object") and the client crashed.
+                // added twice ("Replacing awake object") and the client crashed. Official servers
+                // send (0xffffffff, 0, 0); with that (and PlayerEntity before the inventories)
+                // the client never started the world (2026-10-14), so this stays.
                 unk_18: 0xff,
                 ..Default::default()
             },
@@ -890,4 +924,40 @@ impl InstanceServer {
             ],
         ))
     }
+}
+
+/// The local player index the server gives the character (official servers use 1).
+const LOCAL_PLAYER: u8 = 1;
+
+/// `inventories.tsv`: `id, id_key, slot, width, height, flags` per line (`#` comments, a
+/// header line). Empty when the file is missing.
+fn load_inventories(path: &std::path::Path) -> Vec<(u32, Inventory)> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let num = |s: &str| -> Option<u32> {
+        match s.strip_prefix("0x") {
+            Some(h) => u32::from_str_radix(h, 16).ok(),
+            None => s.parse().ok(),
+        }
+    };
+    text.lines()
+        .filter(|l| !l.starts_with('#') && !l.starts_with("id\t"))
+        .filter_map(|l| {
+            let f: Vec<u32> = l.split('\t').map(num).collect::<Option<_>>()?;
+            let [id, id_key, slot, width, height, flags] = f[..] else {
+                return None;
+            };
+            Some((
+                id,
+                Inventory {
+                    id_key: id_key as u8,
+                    slot: slot as u8,
+                    width: width as u8,
+                    height: height as u8,
+                    flags: flags as u8,
+                },
+            ))
+        })
+        .collect()
 }
