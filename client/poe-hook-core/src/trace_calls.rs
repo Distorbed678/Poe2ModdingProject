@@ -8,9 +8,9 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use ilhook::x64::{CallbackOption, HookFlags, HookType, Hooker, Registers};
+use ilhook::x64::{HookType, Registers};
 
-use crate::module::Module;
+use poe_hook_shared::module::Module;
 
 static MAIN: OnceLock<Module> = OnceLock::new();
 static LIMIT: OnceLock<u32> = OnceLock::new();
@@ -31,21 +31,15 @@ pub fn init(main: &Module, addresses: &[String], limit: u32) -> Result<(), Strin
             ghidra,
             hits: AtomicU32::new(0),
         }));
-        let hooker = Hooker::new(
-            runtime,
-            HookType::JmpBack(on_hit),
-            CallbackOption::None,
-            target as *const Target as usize,
-            HookFlags::empty(),
-        );
-        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {text}: {e:?}"))?;
-        Box::leak(Box::new(point));
+        crate::hooks::install(runtime, HookType::JmpBack(on_hit), target as *const Target as usize)
+            .map_err(|e| format!("hook {text}: {e}"))?;
         log::info!("tracing {ghidra:#x}");
     }
     Ok(())
 }
 
 unsafe extern "win64" fn on_hit(regs: *mut Registers, user: usize) {
+    let _guard = crate::hooks::enter();
     let target = unsafe { &*(user as *const Target) };
     let n = target.hits.fetch_add(1, Ordering::Relaxed);
     if n >= *LIMIT.get().unwrap_or(&20) {
@@ -55,7 +49,7 @@ unsafe extern "win64" fn on_hit(regs: *mut Registers, user: usize) {
     let stack = MAIN
         .get()
         .map(|m| {
-            crate::module::stack_refs(m, r.rsp as usize, 20)
+            poe_hook_shared::module::stack_refs(m, r.rsp as usize, 20)
                 .iter()
                 .map(|a| format!("{a:#x}"))
                 .collect::<Vec<_>>()

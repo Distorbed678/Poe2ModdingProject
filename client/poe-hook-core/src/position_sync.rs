@@ -31,24 +31,40 @@ pub static ENABLED: AtomicBool = AtomicBool::new(false);
 /// The instance server's port (0: any loopback connection).
 pub static PORT: AtomicU16 = AtomicU16::new(0);
 
-/// Last loopback connection: destination, socket and our local port (0 until known).
-static TARGET: Mutex<Option<(SOCKADDR_IN, SOCKET, u16)>> = Mutex::new(None);
+/// The report target: the newest loopback connection to [`PORT`] (from the loader's connection
+/// table): socket, destination and our local port (0 until known).
+static TARGET: Mutex<Option<(u64, SOCKADDR_IN, u16)>> = Mutex::new(None);
 static SOCK: AtomicUsize = AtomicUsize::new(INVALID_SOCKET);
 
-/// Called by the connect hook for loopback connections, after the connect call.
-pub fn record_connect(sock: SOCKET, dest: &SOCKADDR_IN) {
+fn target() -> Option<(SOCKADDR_IN, u16)> {
     let wanted = PORT.load(Ordering::Relaxed);
-    if wanted != 0 && u16::from_be(dest.sin_port) != wanted {
-        return;
+    let newest = crate::host::connections()
+        .into_iter()
+        .rev()
+        .find(|c| !c.external && (wanted == 0 || c.port == wanted))?;
+    let mut target = TARGET.lock().unwrap();
+    if target.as_ref().is_none_or(|t| t.0 != newest.socket) {
+        let mut dest: SOCKADDR_IN = unsafe { std::mem::zeroed() };
+        dest.sin_family = AF_INET;
+        dest.sin_port = newest.port.to_be();
+        dest.sin_addr.S_un.S_addr = u32::from_ne_bytes(newest.ip);
+        log::info!(
+            "position sync: target port {} (socket {:#x})",
+            newest.port,
+            newest.socket
+        );
+        *target = Some((newest.socket, dest, 0));
     }
-    // The game connects non-blocking: under Wine the local port can still be 0 here, so it
-    // is looked up again when reporting until it is known.
-    let port = local_port(sock);
-    log::info!(
-        "position sync: target port {} (local port {port}, socket {sock:#x})",
-        u16::from_be(dest.sin_port)
-    );
-    *TARGET.lock().unwrap() = Some((*dest, sock, port));
+    let (sock, dest, port) = target.as_mut()?;
+    // The game connects non-blocking: under Wine the local port can still be 0 right after the
+    // connect, so it is looked up until it is known.
+    if *port == 0 {
+        *port = local_port(*sock as SOCKET);
+        if *port != 0 {
+            log::info!("position sync: local port {port}");
+        }
+    }
+    (*port != 0).then_some((*dest, *port))
 }
 
 fn local_port(sock: SOCKET) -> u16 {
@@ -63,23 +79,14 @@ pub fn report(entity: usize, frame: u32) {
     if !ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    let (dest, local_port) = {
-        let mut target = TARGET.lock().unwrap();
-        let Some((dest, sock, port)) = target.as_mut() else {
-            return;
-        };
-        if *port == 0 {
-            *port = local_port(*sock);
-            if *port != 0 {
-                log::info!("position sync: local port {} (resolved late)", *port);
-            }
-        }
-        (*dest, *port)
-    };
-    if local_port == 0 {
+    // Never while read-only (official servers): this talks to our server.
+    if crate::host::read_only() {
         return;
     }
-    use crate::mem::read;
+    let Some((dest, local_port)) = target() else {
+        return;
+    };
+    use poe_hook_shared::mem::read;
     let Some(comps) = read::<usize>(entity + 0x10) else {
         return;
     };
@@ -141,7 +148,7 @@ fn cursor() -> Option<(i16, i16, u16, u16)> {
     static WINDOW: AtomicUsize = AtomicUsize::new(0);
     let mut hwnd = WINDOW.load(Ordering::Relaxed);
     if hwnd == 0 {
-        hwnd = super::auto_keys::game_window()? as usize;
+        hwnd = crate::auto_keys::game_window()? as usize;
         WINDOW.store(hwnd, Ordering::Relaxed);
     }
     let hwnd = hwnd as HWND;
@@ -160,4 +167,12 @@ fn cursor() -> Option<(i16, i16, u16, u16)> {
             (r.bottom - r.top).clamp(0, 65535) as u16,
         )
     })
+}
+
+/// Closes the report socket (core stop).
+pub fn stop() {
+    let s = SOCK.swap(INVALID_SOCKET, Ordering::SeqCst);
+    if s != INVALID_SOCKET {
+        unsafe { windows_sys::Win32::Networking::WinSock::closesocket(s) };
+    }
 }

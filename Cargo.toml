@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*", "servers/*", "tools/xtask"]
 # The client DLL targets Windows and is built separately (cargo xtask build-dll).
-exclude = ["client/poe-hook"]
+exclude = ["client"]
 
 [workspace.package]
 edition = "2024"

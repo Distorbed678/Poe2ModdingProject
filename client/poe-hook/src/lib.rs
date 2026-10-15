@@ -1,47 +1,62 @@
-//! poe-hook: client-side companion of the private server.
+//! poe-hook: the PoE2 client's companion DLL, loaded as `version.dll` (see [`proxy`]).
 //!
-//! Loaded by the PoE2 client as `version.dll` (see [`proxy`]). On attach it reads
-//! `poe-hook.toml`, opens `poe-hook.log` and installs the network guard synchronously (the
-//! client's crash-report helper connects out within milliseconds of starting), then starts a
-//! thread that enables the remaining [`features`]. Game code is located through [`module`] (main-module info and byte-pattern
-//! scanning), so features avoid hardcoded addresses where practical.
+//! This loader stays small and is never unloaded. In `DllMain` it reads `poe-hook.toml`, opens
+//! the logs (next to the exe and in this process's session folder `logs/poe-hook/<time>_<pid>/`)
+//! and installs the network guard (the client's crash-report helper connects out within
+//! milliseconds of starting). A thread then hooks Vulkan for the overlay and loads the debug
+//! core (`poe_hook_core.dll`), which holds the features and the overlay and can be hot-reloaded
+//! ([`core`]).
 
-mod config;
-mod features;
-mod logger;
-mod mem;
-mod module;
+mod core;
+mod guard;
+mod logsink;
 mod proxy;
+mod vulkan;
+mod window;
 
-use std::{ffi::c_void, path::PathBuf};
+use std::ffi::c_void;
 
-use windows_sys::Win32::{
-    Foundation::HINSTANCE,
-    System::{LibraryLoader::GetModuleFileNameW, SystemServices::DLL_PROCESS_ATTACH},
-};
+use poe_hook_shared::{config::Config, module::Module};
+use windows_sys::Win32::{Foundation::HINSTANCE, System::SystemServices::DLL_PROCESS_ATTACH};
 
 #[unsafe(no_mangle)]
 pub extern "system" fn DllMain(_module: HINSTANCE, reason: u32, _reserved: *mut c_void) -> i32 {
     if reason == DLL_PROCESS_ATTACH {
         // Under the loader lock: only file I/O and code patching of already-mapped modules
         // (ws2_32 is a static import of the game). Everything else runs on a thread.
-        let dir = exe_dir();
-        let config = config::Config::load(&dir.join("poe-hook.toml"));
-        logger::init(&dir.join("poe-hook.log"), config.log.level);
-        log::info!("poe-hook {} loaded", env!("CARGO_PKG_VERSION"));
-        let main = module::Module::main();
+        let dir = poe_hook_shared::exe_dir();
+        let config = Config::load(&dir.join("poe-hook.toml"));
+        let session = dir.join("logs").join("poe-hook").join(format!(
+            "{}_{}",
+            poe_hook_shared::local_timestamp(),
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&session);
+        logsink::init(
+            &[&dir.join("poe-hook.log"), &session.join("poe-hook.log")],
+            config.log.level,
+        );
+        log::info!(
+            "poe-hook {} loaded, mode {:?}, session {}",
+            env!("CARGO_PKG_VERSION"),
+            config.mode,
+            session.display()
+        );
+        let main = Module::main();
         log::info!("main module: base={:#x} size={:#x}", main.base, main.size);
-        features::init_early(&config, &main);
-        std::thread::spawn(move || features::init_all(&config, &main));
+        match guard::init(&main, config.official(), config.features.block_external) {
+            Ok(()) => log::info!("network guard: enabled"),
+            Err(e) => log::error!("network guard: failed: {e}"),
+        }
+        std::thread::spawn(move || {
+            if config.overlay.enabled {
+                match vulkan::init() {
+                    Ok(()) => log::info!("vulkan hooks: enabled"),
+                    Err(e) => log::warn!("vulkan hooks: {e}"),
+                }
+            }
+            core::start(dir, session, config.reload.auto);
+        });
     }
     1
-}
-
-/// Directory of the host executable (the game folder).
-pub(crate) fn exe_dir() -> PathBuf {
-    let mut buf = [0u16; 1024];
-    let len =
-        unsafe { GetModuleFileNameW(std::ptr::null_mut(), buf.as_mut_ptr(), buf.len() as u32) };
-    let exe = PathBuf::from(String::from_utf16_lossy(&buf[..len as usize]));
-    exe.parent().map(PathBuf::from).unwrap_or_default()
 }

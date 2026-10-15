@@ -27,7 +27,7 @@ use std::{
     },
 };
 
-use ilhook::x64::{CallbackOption, HookFlags, HookType, Hooker, Registers};
+use ilhook::x64::{HookType, Registers};
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, POINT},
     Graphics::Gdi::ClientToScreen,
@@ -51,17 +51,18 @@ use windows_sys::Win32::{
 pub fn init(keys: Vec<(u64, u16)>) -> Result<(), String> {
     hook_input()?;
     let start = Instant::now();
-    let file = crate::exe_dir().join("poe-hook.keys");
-    std::thread::spawn(move || {
+    let file = poe_hook_shared::exe_dir().join("poe-hook.keys");
+    crate::hooks::spawn(move || {
         for (at_ms, vk) in keys {
             let at = Duration::from_millis(at_ms);
-            if let Some(wait) = at.checked_sub(start.elapsed()) {
-                std::thread::sleep(wait);
+            if let Some(wait) = at.checked_sub(start.elapsed())
+                && !crate::hooks::sleep(wait)
+            {
+                return;
             }
             press(vk, 60);
         }
-        loop {
-            std::thread::sleep(Duration::from_millis(250));
+        while crate::hooks::sleep(Duration::from_millis(250)) {
             let Ok(text) = std::fs::read_to_string(&file) else {
                 continue;
             };
@@ -249,6 +250,7 @@ unsafe extern "win64" fn on_create_window(
     original: usize,
     _: usize,
 ) -> usize {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     let title = match WINDOW_TITLE.get() {
         Some(t) if r.r8 != 0 => t.as_ptr(),
@@ -280,6 +282,7 @@ unsafe extern "win64" fn on_set_window_text(
     original: usize,
     _: usize,
 ) -> usize {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     let title = WINDOW_TITLE
         .get()
@@ -321,15 +324,8 @@ fn hook_user32(hooks: &[(&[u8], ilhook::x64::RetnRoutine)]) -> Result<(), String
         let display = String::from_utf8_lossy(&name[..name.len() - 1]).into_owned();
         let addr = unsafe { GetProcAddress(user32, name.as_ptr()) }
             .ok_or_else(|| format!("{display} not exported"))? as usize;
-        let hooker = Hooker::new(
-            addr,
-            HookType::Retn(routine),
-            CallbackOption::None,
-            0,
-            HookFlags::empty(),
-        );
-        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {display}: {e:?}"))?;
-        Box::leak(Box::new(point));
+        crate::hooks::install(addr, HookType::Retn(routine), 0)
+            .map_err(|e| format!("hook {display}: {e}"))?;
     }
     Ok(())
 }
@@ -351,15 +347,8 @@ fn hook_input() -> Result<(), String> {
         let display = String::from_utf8_lossy(&name[..name.len() - 1]).into_owned();
         let addr = unsafe { GetProcAddress(user32, name.as_ptr()) }
             .ok_or_else(|| format!("{display} not exported"))? as usize;
-        let hooker = Hooker::new(
-            addr,
-            HookType::Retn(routine),
-            CallbackOption::None,
-            0,
-            HookFlags::empty(),
-        );
-        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {display}: {e:?}"))?;
-        Box::leak(Box::new(point));
+        crate::hooks::install(addr, HookType::Retn(routine), 0)
+            .map_err(|e| format!("hook {display}: {e}"))?;
     }
     Ok(())
 }
@@ -371,6 +360,7 @@ unsafe extern "win64" fn on_get_raw_input_data(
     original: usize,
     _: usize,
 ) -> usize {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     let (handle, command, data, size, header_size) = (
         r.rcx as usize,
@@ -418,6 +408,7 @@ unsafe extern "win64" fn on_get_key_state(
     original: usize,
     _: usize,
 ) -> usize {
+    let _guard = crate::hooks::enter();
     let vk = unsafe { &*regs }.rcx as i32;
     if (0..256).contains(&vk) && HELD[vk as usize].load(Ordering::Relaxed) {
         return 0x8000u16 as i16 as isize as usize;
@@ -433,6 +424,7 @@ unsafe extern "win64" fn on_get_cursor_pos(
     original: usize,
     _: usize,
 ) -> usize {
+    let _guard = crate::hooks::enter();
     let p = unsafe { &*regs }.rcx as *mut POINT;
     if CURSOR_SET.load(Ordering::Relaxed) && !p.is_null() {
         unsafe {

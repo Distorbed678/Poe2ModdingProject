@@ -15,7 +15,7 @@ use windows_sys::Win32::{
     System::Diagnostics::Debug::{AddVectoredExceptionHandler, EXCEPTION_POINTERS},
 };
 
-use crate::{
+use poe_hook_shared::{
     mem::{c_string, read},
     module::Module,
 };
@@ -32,10 +32,26 @@ pub fn init(main: &Module) -> Result<(), String> {
     if handle.is_null() {
         return Err("AddVectoredExceptionHandler failed".into());
     }
+    HANDLE.store(handle as usize, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 
+static HANDLE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Removes the handler (core stop).
+pub fn stop() {
+    let h = HANDLE.swap(0, std::sync::atomic::Ordering::SeqCst);
+    if h != 0 {
+        unsafe {
+            windows_sys::Win32::System::Diagnostics::Debug::RemoveVectoredExceptionHandler(
+                h as *const _,
+            )
+        };
+    }
+}
+
 unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
+    let _guard = crate::hooks::enter();
     let (record, context) = unsafe { (&*(*info).ExceptionRecord, &*(*info).ContextRecord) };
     let code = record.ExceptionCode;
     let fatal = [
@@ -89,7 +105,7 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     );
     // Game-code addresses on the stack: a cheap call-stack hint.
     if let Some(m) = main {
-        let frames: Vec<String> = crate::module::stack_refs(&m, context.Rsp as usize, 16)
+        let frames: Vec<String> = poe_hook_shared::module::stack_refs(&m, context.Rsp as usize, 16)
             .iter()
             .map(|a| format!("{a:#x}"))
             .collect();
@@ -126,7 +142,7 @@ fn log_cpp_exception(
         if m.contains(rip) {
             msg += &format!(" at ghidra {:#x}", m.to_ghidra(rip));
         }
-        let frames: Vec<String> = crate::module::stack_refs(&m, unsafe { get_rsp() }, 16)
+        let frames: Vec<String> = poe_hook_shared::module::stack_refs(&m, unsafe { get_rsp() }, 16)
             .iter()
             .map(|a| format!("{a:#x}"))
             .collect();

@@ -1,5 +1,11 @@
 # poe-hook configuration (deployed next to PathOfExileSteam.exe; edits there are kept
-# across redeploys). Log file: poe-hook.log next to the exe.
+# across redeploys). Logs: poe-hook.log next to the exe, and a folder per process under
+# logs/poe-hook/<date_time>_<pid>/ (logs, packets, snapshots).
+
+# private: our server (crypto bypass, external connections refused).
+# official: official servers, read-only: the DLL only observes and logs; nothing is sent,
+# altered or injected. Set by `cargo xtask deploy-client [--official]`.
+mode = "private"
 
 [log]
 # error | warn | info | debug | trace
@@ -10,24 +16,48 @@ level = "debug"
 crash_log = true
 # Replace the login key exchange (signature check + DH) with SHA-512(server public key) so
 # the private server can derive the session keys. Required to log in to the private server.
+# Never while read-only.
 crypto_bypass = true
-# Log the process's send/recv/WSASend/WSARecv/connect calls with payload prefix and call
-# stack (Ghidra addresses). Research aid; data is ciphertext once encryption is active.
-net_trace = true
+# Log the process's send/recv/WSASend/WSARecv calls with payload prefix and call stack
+# (Ghidra addresses). Research aid; data is ciphertext once encryption is active.
+net_trace = false
 net_trace_dump_bytes = 256
-# Refuse connections to non-loopback addresses (keeps the client away from official
-# services such as the shop, telemetry and crash upload while using the private server).
+# Private mode: refuse connections to non-loopback addresses (keeps the client away from
+# official services such as the shop, telemetry and crash upload).
 block_external = true
 # Logging breakpoints: Ghidra addresses (function starts) to hook; each hit logs rcx/rdx/r8/r9
 # and the game call stack, up to trace_limit hits per address (POE_HOOK_TRACE adds more).
 trace_addresses = []
 trace_limit = 20
-# Dump the client's object-type table (key -> metadata path) to object_types.txt the first
-# time the server's add-object message is applied (RE aid).
-dump_object_types = false
+# Research hooks on entities, frames and area loads (object-type dump, terrain layout
+# export, player frame tick). Position sync and the player inspector need them.
+dump_object_types = true
 # Log the player's position every simulation frame (movement research; or set the
 # POE_HOOK_MOVEMENT_LOG environment variable).
 movement_log = false
 # Report the player's position and action to the local instance server every frame (UDP to
-# the instance port; dev bridge for movement until M5).
+# the instance port; dev bridge for movement until M5). Never while read-only.
 position_sync = true
+# Test input timeline [[ms, vk], ...]; tests use POE_HOOK_AUTO_KEYS instead.
+auto_keys = []
+
+[overlay]
+enabled = true
+# Virtual keys: Insert shows/hides the overlay, Home saves a bug-report snapshot.
+toggle_key = 0x2d
+snapshot_key = 0x24
+snapshot_seconds = 30
+visible_at_start = false
+scale = 1.0
+
+[packets]
+# Plaintext capture of the login and instance connections (inside the client).
+capture = true
+# Replace secrets (Steam ticket, session tokens, key material) in exported files.
+redact = true
+# Messages kept in memory for the Packets tab (all of them go to the files).
+keep = 50000
+
+[reload]
+# Reload the debug core when poe_hook_core.dll next to the exe changes.
+auto = true

@@ -4,10 +4,10 @@
 
 use std::sync::OnceLock;
 
-use ilhook::x64::{CallbackOption, HookFlags, HookType, Hooker, Registers};
+use ilhook::x64::{HookType, Registers};
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
-use crate::module::Module;
+use poe_hook_shared::module::Module;
 
 static MAIN: OnceLock<Module> = OnceLock::new();
 
@@ -28,15 +28,8 @@ pub fn init(main: &Module) -> Result<(), String> {
         let display = String::from_utf8_lossy(&name[..name.len() - 1]).into_owned();
         let addr = unsafe { GetProcAddress(module, name.as_ptr()) }
             .ok_or_else(|| format!("{display} not exported"))? as usize;
-        let hooker = Hooker::new(
-            addr,
-            HookType::JmpBack(routine),
-            CallbackOption::None,
-            0,
-            HookFlags::empty(),
-        );
-        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {display}: {e:?}"))?;
-        Box::leak(Box::new(point));
+        crate::hooks::install(addr, HookType::JmpBack(routine), 0)
+            .map_err(|e| format!("hook {display}: {e}"))?;
     }
     Ok(())
 }
@@ -44,7 +37,7 @@ pub fn init(main: &Module) -> Result<(), String> {
 fn stack(rsp: u64) -> String {
     MAIN.get()
         .map(|m| {
-            crate::module::stack_refs(m, rsp as usize, 24)
+            poe_hook_shared::module::stack_refs(m, rsp as usize, 24)
                 .iter()
                 .map(|a| format!("{a:#x}"))
                 .collect::<Vec<_>>()
@@ -54,11 +47,13 @@ fn stack(rsp: u64) -> String {
 }
 
 unsafe extern "win64" fn on_exit_process(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     log::error!("ExitProcess({}) stack=[{}]", r.rcx as u32, stack(r.rsp));
 }
 
 unsafe extern "win64" fn on_terminate_process(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     log::error!(
         "TerminateProcess(handle={:#x}, code={}) stack=[{}]",

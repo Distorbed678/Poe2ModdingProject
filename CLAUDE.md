@@ -34,14 +34,14 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
   - `poe-game`: simulation (ECS).
   - `poe-mod-api`: mod hooks.
 - `servers/`: `login-server`, `instance-server`, and `poe-server` (a dev launcher that runs both).
-- `client/poe-hook`: `version.dll` proxy DLL, built for `x86_64-pc-windows-msvc` with cargo-xwin. It is **excluded from the workspace** and has its own Cargo project.
+- `client/`: the client DLLs, built for `x86_64-pc-windows-msvc` with cargo-xwin; **excluded from the workspace** (own Cargo workspace). `poe-hook` = `version.dll` loader (permanent hooks), `poe-hook-core` = hot-reloadable debug core and overlay, `poe-hook-shared` = config and ABI.
 - `tools/xtask`: dev automation (`cargo xtask <cmd>`).
 - `config/`, `protocol/`, `Documentation/`, `Tools/`.
 
 ## Commands
 - `cargo build` / `cargo test`. The toolchain is pinned to `nightly-2026-08-10` because `poe_data_tools` needs nightly.
 - `cargo run -p poe-server` runs the login and instance servers using `config/server.toml`.
-- `cargo xtask build-dll` builds `client/poe-hook` into `version.dll`.
+- `cargo xtask build-dll` builds the client DLLs; `cargo xtask deploy-core` installs only the core, which a running client hot-reloads.
 - `cargo xtask deploy-client` / `cargo xtask revert-client` install and remove the gateway entry, DLL and config in `GameFiles/`.
 - `cargo xtask run-client` launches `GameFiles/PathOfExileSteam.exe` through Proton with its own prefix (`Tools/proton-prefix`). Steam must be running.
 - `Tools/poe_data_tools/poe_data_tools -p 2 --steam GameFiles list '<glob>'` lists and extracts game files.
@@ -53,5 +53,5 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 
 ## Logs
 - Client: `GameFiles/logs/Client.txt`.
-- DLL: `GameFiles/poe-hook.log`.
+- DLL: `GameFiles/poe-hook.log`, plus a per-process session folder `GameFiles/logs/poe-hook/<date_time>_<pid>/` (logs, packets, snapshots) and the in-game overlay (Insert).
 - Server: stdout, with the level set by `RUST_LOG` or `config/server.toml`.

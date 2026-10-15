@@ -15,6 +15,8 @@ use poe_config::Config;
 
 /// Files installed next to the client executable by `deploy-client`.
 const DLL_NAME: &str = "version.dll";
+/// The hot-reloadable debug core loaded by `version.dll`.
+const CORE_DLL: &str = "poe_hook_core.dll";
 const HOOK_CONFIG: &str = "poe-hook.toml";
 const STEAM_APPID_FILE: &str = "steam_appid.txt";
 const STEAM_APPID: &str = "2694490";
@@ -34,14 +36,23 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Build the client hook DLL (client/poe-hook) with cargo-xwin.
+    /// Build the client DLLs (client/: version.dll loader and the debug core) with cargo-xwin.
     BuildDll {
         #[arg(long)]
         debug: bool,
     },
-    /// Point GameFiles at the local server: gateway entry, hook DLL + config, steam_appid.txt.
+    /// Point GameFiles at the local server: gateway entry, hook DLLs + config, steam_appid.txt.
     DeployClient {
-        /// Skip building the DLL first.
+        /// Skip building the DLLs first.
+        #[arg(long)]
+        no_build: bool,
+        /// Official servers, read-only: keep the original gateway list and set the DLL's
+        /// `mode = "official"` (no crypto bypass, no injection; only observing and logging).
+        #[arg(long)]
+        official: bool,
+    },
+    /// Build and install only the debug core; a running client reloads it by itself.
+    DeployCore {
         #[arg(long)]
         no_build: bool,
     },
@@ -62,7 +73,11 @@ fn main() -> Result<()> {
     let config = Config::load(&cli.config)?;
     match cli.cmd {
         Cmd::BuildDll { debug } => build_dll(&root, !debug).map(|_| ()),
-        Cmd::DeployClient { no_build } => deploy_client(&root, &config, !no_build),
+        Cmd::DeployClient {
+            no_build,
+            official,
+        } => deploy_client(&root, &config, !no_build, official),
+        Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::RunClient { proton } => run_client(&root, &config, &proton),
     }
@@ -81,83 +96,142 @@ fn build_dll(root: &Path, release: bool) -> Result<PathBuf> {
     if !xwin.exists() {
         bail!("{} missing; run Tools/fetch-tools.sh", xwin.display());
     }
-    let crate_dir = root.join("client/poe-hook");
+    let client = root.join("client");
     let mut cmd = Command::new(&xwin);
     // When invoked directly, cargo subcommands expect their own name as the first argument.
-    cmd.args(["xwin", "build", "--target", DLL_TARGET])
-        .current_dir(&crate_dir)
+    cmd.args(["xwin", "build", "--workspace", "--target", DLL_TARGET])
+        .current_dir(&client)
         .env("XWIN_CACHE_DIR", root.join("Tools/xwin-cache"));
     if release {
         cmd.arg("--release");
     }
     run(&mut cmd)?;
-    let dll = crate_dir
+    let out = client
         .join("target")
         .join(DLL_TARGET)
-        .join(if release { "release" } else { "debug" })
-        .join("poe_hook.dll");
-    println!("built {}", dll.display());
-    Ok(dll)
+        .join(if release { "release" } else { "debug" });
+    println!("built {}", out.display());
+    Ok(out)
 }
 
-fn deploy_client(root: &Path, config: &Config, build: bool) -> Result<()> {
-    let game = &config.game.game_dir;
-    let dll = if build {
-        build_dll(root, true)?
+fn dll_dir(root: &Path, build: bool) -> Result<PathBuf> {
+    if build {
+        build_dll(root, true)
     } else {
-        root.join("client/poe-hook/target")
+        Ok(root
+            .join("client/target")
             .join(DLL_TARGET)
-            .join("release/poe_hook.dll")
-    };
+            .join("release"))
+    }
+}
 
-    // Gateway list: keep the original once, then write a single local entry.
+fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> Result<()> {
+    let game = &config.game.game_dir;
+    let dlls = dll_dir(root, build)?;
+
+    // Gateway list: keep the original once, then write a single local entry (or put the
+    // original back for official servers).
     let gateway = game.join(GATEWAY_FILE);
     backup_once(&gateway)?;
-    let entry = format!(
-        "{};{};{}:{};{};false",
-        config.gateway.region,
-        config.gateway.display_name,
-        config.login.public_host,
-        config.login.bind.port(),
-        config.login.public_host,
-    );
-    std::fs::write(&gateway, utf16le_with_bom(&entry))?;
-    println!("gateway -> {entry}");
+    if official {
+        let orig = backup_path(&gateway);
+        if orig.exists() {
+            copy(&orig, &gateway)?;
+        }
+        println!("gateway -> official (original list)");
+    } else {
+        let entry = format!(
+            "{};{};{}:{};{};false",
+            config.gateway.region,
+            config.gateway.display_name,
+            config.login.public_host,
+            config.login.bind.port(),
+            config.login.public_host,
+        );
+        std::fs::write(&gateway, utf16le_with_bom(&entry))?;
+        println!("gateway -> {entry}");
+    }
 
-    copy(&dll, &game.join(DLL_NAME))?;
+    copy(&dlls.join("poe_hook.dll"), &game.join(DLL_NAME))?;
+    copy(&dlls.join(CORE_DLL), &game.join(CORE_DLL))?;
     let hook_cfg = game.join(HOOK_CONFIG);
     if !hook_cfg.exists() {
         copy(&root.join("client/poe-hook").join(HOOK_CONFIG), &hook_cfg)?;
     }
-    // Position reports go to the instance server's port only.
-    set_hook_feature(
+    set_hook_key(
         &hook_cfg,
+        None,
+        "mode",
+        if official { "\"official\"" } else { "\"private\"" },
+    )?;
+    // Position reports go to the instance server's port only.
+    set_hook_key(
+        &hook_cfg,
+        Some("features"),
         "position_sync_port",
         &config.instance.public_port.to_string(),
     )?;
+    // Test input comes from POE_HOOK_AUTO_KEYS (tools/test-run.sh), never from the user's
+    // config (an Enter at 20 s opened the chat box in normal play).
+    set_hook_key(&hook_cfg, Some("features"), "auto_keys", "[]")?;
     std::fs::write(game.join(STEAM_APPID_FILE), STEAM_APPID)?;
-    println!("deployed to {}", game.display());
+    println!(
+        "deployed to {} ({})",
+        game.display(),
+        if official { "official, read-only" } else { "private server" }
+    );
     Ok(())
 }
 
-/// Sets `key = value` in the `[features]` table of the installed `poe-hook.toml`, keeping the
-/// rest of the file (the user's settings).
-fn set_hook_feature(path: &Path, key: &str, value: &str) -> Result<()> {
+fn deploy_core(root: &Path, config: &Config, build: bool) -> Result<()> {
+    let dlls = dll_dir(root, build)?;
+    let target = config.game.game_dir.join(CORE_DLL);
+    // Write a temporary file first: the loader reloads once the file is complete and stable.
+    let tmp = target.with_extension("dll.tmp");
+    copy(&dlls.join(CORE_DLL), &tmp)?;
+    std::fs::rename(&tmp, &target)?;
+    println!("installed {} (a running client reloads it)", target.display());
+    Ok(())
+}
+
+/// Sets `key = value` in `table` (`None`: the top level, before the first table) of the
+/// installed `poe-hook.toml`, keeping the rest of the file (the user's settings).
+fn set_hook_key(path: &Path, table: Option<&str>, key: &str, value: &str) -> Result<()> {
     let text = std::fs::read_to_string(path)?;
     let line = format!("{key} = {value}");
-    let is_key = |l: &str| {
-        l.split('=')
-            .next()
-            .is_some_and(|k| k.trim() == key && l.contains('='))
-    };
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
-    if let Some(i) = lines.iter().position(|l| is_key(l)) {
-        lines[i] = line;
-    } else if let Some(i) = lines.iter().position(|l| l.trim() == "[features]") {
-        lines.insert(i + 1, line);
-    } else {
-        lines.push("[features]".into());
+    let header = table.map(|t| format!("[{t}]"));
+    // The section: from its header (or the file start) to the next header.
+    let start = match &header {
+        Some(h) => lines.iter().position(|l| l.trim() == h).map(|i| i + 1),
+        None => Some(0),
+    };
+    let Some(start) = start else {
+        lines.push(header.unwrap());
         lines.push(line);
+        std::fs::write(path, lines.join("\n") + "\n")?;
+        return Ok(());
+    };
+    let end = lines[start..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map_or(lines.len(), |i| start + i);
+    let is_key = |l: &str| {
+        !l.trim_start().starts_with('#')
+            && l.split('=').next().is_some_and(|k| k.trim() == key)
+            && l.contains('=')
+    };
+    match lines[start..end].iter().position(|l| is_key(l)) {
+        Some(i) => lines[start + i] = line,
+        None if table.is_none() => {
+            // After the leading comment block.
+            let at = lines[..end]
+                .iter()
+                .position(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+                .unwrap_or(end);
+            lines.insert(at, line);
+        }
+        None => lines.insert(start, line),
     }
     std::fs::write(path, lines.join("\n") + "\n")?;
     Ok(())
@@ -171,7 +245,7 @@ fn revert_client(config: &Config) -> Result<()> {
         std::fs::rename(&orig, &gateway)?;
         println!("restored {}", gateway.display());
     }
-    for name in [DLL_NAME, HOOK_CONFIG, STEAM_APPID_FILE] {
+    for name in [DLL_NAME, CORE_DLL, HOOK_CONFIG, STEAM_APPID_FILE] {
         let p = game.join(name);
         if p.exists() {
             std::fs::remove_file(&p)?;

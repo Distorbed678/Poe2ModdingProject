@@ -19,9 +19,9 @@ use std::{
     },
 };
 
-use ilhook::x64::{CallbackOption, HookFlags, HookType, Hooker, Registers};
+use ilhook::x64::{HookType, Registers};
 
-use crate::module::Module;
+use poe_hook_shared::module::Module;
 
 /// Ghidra address of the object-type lookup (0.5.5e).
 const LOOKUP: usize = 0x1416936c0;
@@ -68,34 +68,13 @@ static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::
 
 pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     OUT.set(out).ok();
-    let hooker = Hooker::new(
-        main.from_ghidra(LOOKUP),
-        HookType::JmpBack(on_lookup),
-        CallbackOption::None,
-        0,
-        HookFlags::empty(),
-    );
-    let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
-    Box::leak(Box::new(point));
+    crate::hooks::install(main.from_ghidra(LOOKUP), HookType::JmpBack(on_lookup), 0)
+            .map_err(|e| format!("hook: {e}"))?;
     MAIN.set(*main).ok();
-    let hooker = Hooker::new(
-        main.from_ghidra(READ_INITIAL_STATE),
-        HookType::JmpBack(on_read_initial_state),
-        CallbackOption::None,
-        0,
-        HookFlags::empty(),
-    );
-    let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
-    Box::leak(Box::new(point));
-    let hooker = Hooker::new(
-        main.from_ghidra(ENTITY_UPDATE),
-        HookType::JmpBack(on_entity_update),
-        CallbackOption::None,
-        0,
-        HookFlags::empty(),
-    );
-    let point = unsafe { hooker.hook() }.map_err(|e| format!("hook entity update: {e:?}"))?;
-    Box::leak(Box::new(point));
+    crate::hooks::install(main.from_ghidra(READ_INITIAL_STATE), HookType::JmpBack(on_read_initial_state), 0)
+            .map_err(|e| format!("hook: {e}"))?;
+    crate::hooks::install(main.from_ghidra(ENTITY_UPDATE), HookType::JmpBack(on_entity_update), 0)
+            .map_err(|e| format!("hook entity update: {e}"))?;
     for (addr, cb) in [
         (
             FRAME_DRAIN,
@@ -107,51 +86,38 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
         (SET_ORIENTATION, on_set_orientation),
         (STREAM_WRITE, on_stream_write),
     ] {
-        let hooker = Hooker::new(
-            main.from_ghidra(addr),
-            HookType::JmpBack(cb),
-            CallbackOption::None,
-            0,
-            HookFlags::empty(),
-        );
-        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook {addr:#x}: {e:?}"))?;
-        Box::leak(Box::new(point));
+        crate::hooks::install(main.from_ghidra(addr), HookType::JmpBack(cb), 0)
+            .map_err(|e| format!("hook {addr:#x}: {e}"))?;
     }
     for addr in LOAD_AREA {
-        let hooker = Hooker::new(
-            main.from_ghidra(addr),
-            HookType::Retn(on_load_area),
-            CallbackOption::None,
-            addr,
-            HookFlags::empty(),
-        );
-        let point = unsafe { hooker.hook() }.map_err(|e| format!("hook load area: {e:?}"))?;
-        Box::leak(Box::new(point));
+        crate::hooks::install(main.from_ghidra(addr), HookType::Retn(on_load_area), addr)
+            .map_err(|e| format!("hook load area: {e}"))?;
     }
     Ok(())
 }
 
 fn begin_components(entity: usize) -> usize {
-    crate::mem::read::<usize>(entity + 0x10).unwrap_or(0)
+    poe_hook_shared::mem::read::<usize>(entity + 0x10).unwrap_or(0)
 }
 
 unsafe extern "win64" fn on_stream_write(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let r = unsafe { &*regs };
-    if r.r8 != 2 || crate::mem::read::<[u8; 2]>(r.rdx as usize) != Some([0, 0x1c]) {
+    if r.r8 != 2 || poe_hook_shared::mem::read::<[u8; 2]>(r.rdx as usize) != Some([0, 0x1c]) {
         return;
     }
     if DONE.swap(true, Ordering::Relaxed) {
         return;
     }
     let Some(m) = MAIN.get() else { return };
-    let refs: Vec<String> = crate::module::stack_refs(m, r.rsp as usize, 16)
+    let refs: Vec<String> = poe_hook_shared::module::stack_refs(m, r.rsp as usize, 16)
         .into_iter()
         .map(|a| format!("{a:#x}"))
         .collect();
     log::info!("stream write 00 1c: {}", refs.join(" "));
     // HNC side channel: stream +0xd0 -> bit queue whose +0 is the cipher object.
-    use crate::mem::read;
+    use poe_hook_shared::mem::read;
     let hnc = read::<usize>(r.rcx as usize + 0xd0).unwrap_or(0);
     let cipher = read::<usize>(hnc).unwrap_or(0);
     let vt = read::<usize>(cipher).unwrap_or(0);
@@ -172,11 +138,12 @@ unsafe extern "win64" fn on_stream_write(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_session_send(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     use std::sync::Mutex;
     static SEEN: Mutex<Vec<u16>> = Mutex::new(Vec::new());
     let Some(m) = MAIN.get() else { return };
     let r = unsafe { &*regs };
-    let Some(op) = crate::mem::read::<u16>(r.rdx as usize + 8) else {
+    let Some(op) = poe_hook_shared::mem::read::<u16>(r.rdx as usize + 8) else {
         return;
     };
     let mut seen = SEEN.lock().unwrap();
@@ -184,11 +151,11 @@ unsafe extern "win64" fn on_session_send(regs: *mut Registers, _: usize) {
         return;
     }
     seen.push(op);
-    let refs: Vec<String> = crate::module::stack_refs(m, r.rsp as usize, 12)
+    let refs: Vec<String> = poe_hook_shared::module::stack_refs(m, r.rsp as usize, 12)
         .into_iter()
         .map(|a| format!("{a:#x}"))
         .collect();
-    let vt = crate::mem::read::<usize>(r.rdx as usize).unwrap_or(0);
+    let vt = poe_hook_shared::mem::read::<usize>(r.rdx as usize).unwrap_or(0);
     log::info!(
         "session send opcode {op:#06x} vtable {:#x}: {}",
         if m.contains(vt) { m.to_ghidra(vt) } else { vt },
@@ -199,6 +166,7 @@ unsafe extern "win64" fn on_session_send(regs: *mut Registers, _: usize) {
 /// Movement research: who sets the player's facing (logged once per distinct call stack, with
 /// the movement log on).
 unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     use std::sync::Mutex;
     static SEEN: Mutex<Vec<Vec<usize>>> = Mutex::new(Vec::new());
     if !MOVEMENT_LOG.load(Ordering::Relaxed) {
@@ -207,11 +175,11 @@ unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
     let Some(m) = MAIN.get() else { return };
     let r = unsafe { &*regs };
     let player = PLAYER.load(Ordering::Relaxed);
-    let pos = crate::mem::read::<usize>(player + 0x10).and_then(crate::mem::read::<usize>);
+    let pos = poe_hook_shared::mem::read::<usize>(player + 0x10).and_then(poe_hook_shared::mem::read::<usize>);
     if player == 0 || pos != Some(r.rcx as usize) {
         return;
     }
-    let refs = crate::module::stack_refs(m, r.rsp as usize, 8);
+    let refs = poe_hook_shared::module::stack_refs(m, r.rsp as usize, 8);
     let mut seen = SEEN.lock().unwrap();
     if seen.contains(&refs) || seen.len() > 40 {
         return;
@@ -226,6 +194,7 @@ unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_game_update(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     static LAST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed) + 1;
@@ -239,13 +208,14 @@ unsafe extern "win64" fn on_game_update(regs: *mut Registers, _: usize) {
             r.rdx,
             f32::from_bits(r.xmm2 as u32),
             f32::from_bits(r.xmm3 as u32),
-            crate::mem::read::<f32>(r.rcx as usize + 0x17cc)
+            poe_hook_shared::mem::read::<f32>(r.rcx as usize + 0x17cc)
         );
     }
 }
 
 unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
-    use crate::mem::read;
+    let _guard = crate::hooks::enter();
+    use poe_hook_shared::mem::read;
     let world = unsafe { (*regs).rcx } as usize;
     // Frame-mode worlds (the game world): log a few calls with dt and pause flags.
     if read::<u8>(world + 0x661).is_some_and(|m| m != 0) {
@@ -276,7 +246,7 @@ unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
     }
     let n = DRAINS.fetch_add(1, Ordering::Relaxed) + 1;
     if matches!(n, 1 | 10 | 100 | 1000 | 3000) {
-        use crate::mem::read;
+        use poe_hook_shared::mem::read;
         let world = unsafe { (*regs).rcx } as usize;
         let dt = f32::from_bits(unsafe { (*regs).xmm1 } as u32);
         log::info!(
@@ -289,7 +259,18 @@ unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     let entity = (unsafe { (*regs).rcx } as usize).wrapping_sub(0x58);
+    // After a core reload the player was created before this core: adopt it from its tick
+    // (our server gives the player id 1).
+    if PLAYER.load(Ordering::Relaxed) == 0
+        && entity > 0x10000
+        && poe_hook_shared::mem::read::<u32>(entity + 0x88) == Some(1)
+    {
+        PLAYER.store(entity, Ordering::SeqCst);
+        log::info!("player entity {entity:#x} found from its frame tick");
+        track_player(entity);
+    }
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
         let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
         let dt = f32::from_bits(unsafe { (*regs).xmm1 } as u32);
@@ -300,11 +281,12 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
             );
         }
         log_player_frame(entity, n, dt);
-        super::position_sync::report(entity, n as u32);
+        crate::position_sync::report(entity, n as u32);
     }
 }
 
 unsafe extern "win64" fn on_entity_update(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     let entity = unsafe { (*regs).rcx } as usize;
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
         let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
@@ -320,6 +302,7 @@ type LoadAreaFn =
 /// Runs the area load, then exports the generated layout. Stack arguments (5th..8th) are
 /// passed through.
 unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at: usize) -> usize {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     let f: LoadAreaFn = unsafe { std::mem::transmute(original) };
     let ret = unsafe {
@@ -342,7 +325,7 @@ unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at:
 /// Writes `terrain_layout_<tile hash>.tsv` next to the exe: a `size<TAB>w<TAB>h` line, then one
 /// `x<TAB>y<TAB>tile path` line per tile. Dev bridge until the server generates terrain (M5).
 unsafe fn export_layout(world: usize) {
-    use crate::mem::{read, wide_string};
+    use poe_hook_shared::mem::{read, wide_string};
     // The terrain object is a member (or pointed-to member) of the world; find it by its
     // vtable instead of assuming an offset.
     let Some(m) = MAIN.get() else { return };
@@ -423,7 +406,7 @@ unsafe fn export_layout(world: usize) {
         }
     }
     unsafe { export_grids(terrain, w as usize, h as usize, tile_hash) };
-    let path = crate::exe_dir().join(format!("terrain_layout_{tile_hash}.tsv"));
+    let path = poe_hook_shared::exe_dir().join(format!("terrain_layout_{tile_hash}.tsv"));
     match std::fs::write(&path, out) {
         Ok(()) => log::info!("exported {w}x{h} layout to {}", path.display()),
         Err(e) => log::error!("layout export: {e}"),
@@ -435,7 +418,7 @@ unsafe fn export_layout(world: usize) {
 /// `terrain_grid_<tile hash>.bin`: `b"PWG1"`, u32 cells_x, u32 cells_y, u32 bytes_per_row,
 /// u32 layer count, then each layer's bytes.
 unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
-    use crate::mem::read;
+    use poe_hook_shared::mem::read;
     let (cells_x, cells_y) = (w * 23, h * 23);
     let bytes_per_row = cells_x.div_ceil(2);
     let mut out = Vec::new();
@@ -450,13 +433,13 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
         ) else {
             return;
         };
-        if e - b != bytes_per_row * cells_y || !crate::mem::readable(b, e - b) {
+        if e - b != bytes_per_row * cells_y || !poe_hook_shared::mem::readable(b, e - b) {
             log::warn!("grid at terrain+{off:#x}: unexpected size {:#x}", e - b);
             return;
         }
         out.extend_from_slice(unsafe { std::slice::from_raw_parts(b as *const u8, e - b) });
     }
-    let path = crate::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
+    let path = poe_hook_shared::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
     match std::fs::write(&path, out) {
         Ok(()) => log::info!(
             "exported {cells_x}x{cells_y} cell grids to {}",
@@ -474,7 +457,7 @@ pub static MOVEMENT_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Movement research: the player's world position at the start of each of its updates
 /// (one per simulation frame), logged when it changed.
 fn log_player_frame(entity: usize, n: usize, dt: f32) {
-    use crate::mem::read;
+    use poe_hook_shared::mem::read;
     if !MOVEMENT_LOG.load(Ordering::Relaxed) {
         return;
     }
@@ -510,13 +493,13 @@ fn track_player(entity: usize) {
     if !MOVEMENT_LOG.load(Ordering::Relaxed) {
         return;
     }
-    std::thread::spawn(move || {
-        use crate::mem::read;
+    crate::hooks::spawn(move || {
+        use poe_hook_shared::mem::read;
         let start = std::time::Instant::now();
         let mut last = None;
         let mut last_actions = String::new();
         let mut last_facing = (i32::MIN, 0u32);
-        while PLAYER.load(Ordering::SeqCst) == entity {
+        while PLAYER.load(Ordering::SeqCst) == entity && crate::hooks::running() {
             std::thread::sleep(std::time::Duration::from_millis(20));
             let Some(comps) = read::<usize>(entity + 0x10) else {
                 return;
@@ -596,6 +579,7 @@ fn track_player(entity: usize) {
 /// Logs each component of the entity being deserialized: object address, vtable and the
 /// component's initial-state reader (vtable +0x98), as Ghidra addresses.
 unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     let Some(m) = MAIN.get() else { return };
     unsafe {
@@ -611,12 +595,14 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
             PLAYER_UPDATES.store(0, Ordering::SeqCst);
             track_player(entity);
             // State flags a few seconds later (+0x8c bit 3: in the wake/update set).
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(5));
+            crate::hooks::spawn(move || {
+                if !crate::hooks::sleep(std::time::Duration::from_secs(5)) {
+                    return;
+                }
                 if PLAYER.load(Ordering::SeqCst) != entity {
                     return;
                 }
-                use crate::mem::read;
+                use poe_hook_shared::mem::read;
                 let b = |o: usize| read::<u8>(entity + o).unwrap_or(0xff);
                 log::info!(
                     "player entity after 5 s: +0x8c={:#04x} +0x8d={:#04x} updates={}",
@@ -766,7 +752,7 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
                 }
                 // Animated component (index 5): its animated object (+0x350) and that
                 // object's path (+8 -> wide string).
-                use crate::mem::wide_string;
+                use poe_hook_shared::mem::wide_string;
                 let comps = read::<usize>(entity + 0x10).unwrap_or(0);
                 if let Some(animated) = read::<usize>(comps + 5 * 8) {
                     let ao = read::<usize>(animated + 0x350).unwrap_or(0);
@@ -792,7 +778,7 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
         log::info!(
             "entity {id:#x} at {entity:#x} initial state: {count} components ({serialized} serialized), blob {len} bytes at pos {pos} (data {data:#x})"
         );
-        let refs: Vec<String> = crate::module::stack_refs(m, r.rsp as usize, 24)
+        let refs: Vec<String> = poe_hook_shared::module::stack_refs(m, r.rsp as usize, 24)
             .into_iter()
             .map(|a| format!("{a:#x}"))
             .collect();
@@ -836,24 +822,15 @@ fn hook_reader(m: &Module, ghidra: usize) {
     if !hooked.get_or_insert_with(HashSet::new).insert(ghidra) {
         return;
     }
-    let hooker = Hooker::new(
-        m.from_ghidra(ghidra),
-        HookType::Retn(on_reader),
-        CallbackOption::None,
-        ghidra,
-        HookFlags::empty(),
-    );
-    match unsafe { hooker.hook() } {
-        Ok(point) => {
-            Box::leak(Box::new(point));
-        }
-        Err(e) => log::error!("hook reader {ghidra:#x}: {e:?}"),
+    if let Err(e) = crate::hooks::install(m.from_ghidra(ghidra), HookType::Retn(on_reader), ghidra) {
+        log::error!("hook reader {ghidra:#x}: {e}");
     }
 }
 
 type ReaderFn = unsafe extern "win64" fn(usize, usize, usize, usize) -> usize;
 
 unsafe extern "win64" fn on_reader(regs: *mut Registers, original: usize, ghidra: usize) -> usize {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     let blob = r.rdx as *const usize;
     let start = unsafe { *blob.add(2) };
@@ -912,7 +889,7 @@ unsafe fn log_terrain(component: usize) {
 /// two levels, read with guards since the record layout is not known yet). Shows where the
 /// generator placed each room, e.g. the start room of an area.
 fn dump_tiles(terrain: usize, w: usize, h: usize) {
-    use crate::mem::{read, wide_string};
+    use poe_hook_shared::mem::{read, wide_string};
     let Some(tiles) = read::<usize>(terrain + 0x28) else {
         return;
     };
@@ -949,7 +926,7 @@ fn dump_tiles(terrain: usize, w: usize, h: usize) {
             out += &format!("{x} {y} [{}] {}\n", raw.join(" "), found.join(" | "));
         }
     }
-    let path = crate::exe_dir().join("terrain_tiles.txt");
+    let path = poe_hook_shared::exe_dir().join("terrain_tiles.txt");
     match std::fs::write(&path, out) {
         Ok(()) => log::info!("    dumped {} tiles to {}", w * h, path.display()),
         Err(e) => log::error!("    tile dump: {e}"),
@@ -969,6 +946,7 @@ unsafe fn wide(ptr: usize) -> String {
 }
 
 unsafe extern "win64" fn on_lookup(regs: *mut Registers, _: usize) {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
     log::info!("object type lookup key={:#010x}", r.r8 as u32);
     if DONE.swap(true, Ordering::SeqCst) {
