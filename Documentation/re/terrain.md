@@ -187,6 +187,42 @@ pairs of a weighted fill-tile pick (`0x141f900a7`; `n` = the fill group's total 
 9. Tile hash: the place function (`0x141d0bad0`) stores each cell's offset from the tile's
    corner at record +0x34/+0x35; only offset (0, 0) cells are hashed.
 
+### Graph layout (Riverbank, `G1_1`)
+Per region, `0x141ff2c50` loads the graph, rolls edge existence (`0x141fe9970` →
+`0x141feeaf0`: per edge with exist % ≠ 0, `below(100) < exist` keeps it; exist 0 removes it
+without a draw), then `0x1420bec40` lays the graph out. Seed 1000 → topology 2 of 5
+(`intro_3.tgr`, 66×72 tiles; the map is 69×78 with `OuterBufferSize 3 3 3 0`).
+
+`.tgr` v25 fields (parser `0x142aa4ad0` / `0x142aa5470`, caller `0x142927930`):
+- node: x, y, edge count + indices, room type, orientation, descriptions, exist %, height,
+  priority, deletion behaviour, lock-orientation flag, random offset (4 ints), then x and y
+  constraint flags (read by the caller; constrained axes are not jittered).
+- edge: from, to, internal points, exist %, chirality, priority, edge type, min/max width.
+
+**Node jitter** (`0x141ef4720` builds, `0x141ef3bb0` applies; `crates/poe-world/src/voronoi.rs`,
+`layout.rs`):
+1. Sites = node positions, then every edge's internal points (grid cells, 23 per tile).
+2. Voronoi diagram (`0x141ef73e0`/`0x141ef8370`): Fortune's sweepline in the
+   `VoronoiDiagramGenerator` layout, all-integer (edges unnormalised `b = dx`, `a = -dy`,
+   `c = (dx²+dy²)/2 + x·dx + y·dy`; circle events at `y + isqrt(d²)` with `0x14196e010`; the hash
+   tables degenerate, so the beach line is walked from an end and the event queue is one sorted
+   list). Box `(0, 0, w·23, h·23)`. `clip_line` (`0x141ef7ee0`) pushes each edge to the front of
+   a list with its two site numbers; vertices joined to 1 or 3 edges form the vertex list.
+3. Cell graph: a node per distinct vertex; per diagram edge (list order) the **nearest** nodes
+   to its ends (`0x141f05890`: clipped ends are recomputed from the line and can be a cell off),
+   skipped when equal or already joined; both sites' cells get the edge. Then the four corners
+   `(0,0) (0,h-1) (w-1,0) (w-1,h-1)`, and the border: nodes with ≤ 2 edges on each side, sorted
+   along it, chained (`0x141ef3e10`); each chain edge goes to one cell, chosen among the sites
+   of the chain node by an orientation test against the node's first edge (the first chain edge
+   tests from the neighbour, the rest from the node, so the signs differ).
+4. Per node (then per internal point): triangles (node, cell edge) with weight |cross|/2
+   (`0x141ef3390`; a node in a border tile whose cell has an edge on that border takes that
+   edge alone, weight 1), `below(total)`, then `a, b = below(128)` (folded when `a+b > 128`),
+   offset `((Q-N)·b + (P-N)·a) / 160`.
+
+**Verified:** `cargo run -p poe-world --example river_gen -- <export> 1000` matches the first 110
+draws of the Riverbank trace (topology, 19 edge rolls, 30 jitters).
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,
