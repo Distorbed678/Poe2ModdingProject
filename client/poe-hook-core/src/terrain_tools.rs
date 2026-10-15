@@ -88,6 +88,8 @@ const LATTICE_STEPS: &[(usize, &str, usize)] = &[
 ];
 /// Tile set lookup by key (`0x141d0a4c0(tile set, key, feature)`), traced for edge tiles.
 const TILE_LOOKUP: usize = 0x141d0a4c0;
+/// Edge-tile path crossings `0x1420b7490(_, out, &tiles, size)`: logs the path's tile list.
+const PATH_CROSSINGS: usize = 0x1420b7490;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -193,6 +195,7 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(ROUND_CORNERS, HookType::Retn(on_edge_step), 2)?;
         hook(EDGE_TILES, HookType::JmpBack(on_edge_tiles), 0)?;
         hook(TILE_LOOKUP, HookType::JmpBack(on_tile_lookup), 0)?;
+        hook(PATH_CROSSINGS, HookType::JmpBack(on_path_crossings), 0)?;
         for (i, (addr, _, _)) in LATTICE_STEPS.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_lattice_step), i)?;
         }
@@ -470,6 +473,24 @@ unsafe extern "win64" fn on_lattice_step(regs: *mut Registers, step: usize) {
 
 /// A tile key (`0x4e` bytes): edges[4], size, grounds[4] (at +0x22), heights, exits and
 /// virtual exits (4 bytes each from +0x42).
+unsafe extern "win64" fn on_path_crossings(regs: *mut Registers, _: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_path_crossings");
+    if !on_generator_thread() {
+        return;
+    }
+    let r = unsafe { &*regs };
+    let v = r.r8 as usize;
+    let (b, e) = (read::<usize>(v).unwrap_or(0), read::<usize>(v + 8).unwrap_or(0));
+    let mut tiles = Vec::new();
+    let mut q = b;
+    while q < e && tiles.len() < 4096 {
+        let t: [i32; 2] = read(q).unwrap_or_default();
+        tiles.push(format!("{},{}", t[0], t[1]));
+        q += 8;
+    }
+    trace_line("path_tiles", "1420b7490", &format!("size {} n {}", r.r9, tiles.len()), &tiles.join(" "));
+}
+
 unsafe extern "win64" fn on_tile_lookup(regs: *mut Registers, _: usize) {
     let _guard = crate::hook_guard!("terrain_tools::on_tile_lookup");
     if !on_generator_thread() {

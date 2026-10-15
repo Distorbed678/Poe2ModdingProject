@@ -571,7 +571,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             grounds: et.grounds.clone(),
             height: et.height_change,
             centred: et.centred,
-            hashed: false,
+            hashed: et.hashed,
         });
     }
     let pieces_before = map.pieces.len();

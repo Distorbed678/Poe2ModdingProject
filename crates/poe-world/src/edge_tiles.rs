@@ -1119,6 +1119,7 @@ impl EdgeTiler<'_> {
                 key.heights[c] = key.heights[(c + 1) & 3];
             }
             let list = self.tileset.candidates("", &key);
+            if std::env::var_os("POE_DEBUG_TILES").is_some() { eprintln!("edge lookup {} at {:?}", list.len(), key); for c in list { eprintln!("edge cand {} o{} w{} key {:?}", self.tileset.tiles[c.tile].path, c.orientation, c.weight, self.tileset.tiles[c.tile].key.oriented(c.orientation)); } }
             if list.is_empty() {
                 return Err(format!("no edge tile at {t:?} for key {key:?}"));
             }

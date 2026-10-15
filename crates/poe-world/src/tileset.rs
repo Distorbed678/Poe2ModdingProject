@@ -147,6 +147,9 @@ impl TileKey {
 pub struct TileDef {
     pub path: String,
     pub tdt: Tdt,
+    /// The key the tile is indexed by: the `.tdt`'s, without grounds whose `.gt` has flag 0x10
+    /// (`0x141d09900`, e.g. river trims).
+    pub key: TileKey,
     pub weight: u32,
     /// Allowed orientations (bit per orientation).
     pub orientations: u8,
@@ -192,7 +195,7 @@ impl TileSet {
                 .clone()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            let key = TileKey::from_tdt(&t.tdt);
+            let key = t.key.clone();
             for o in 0..8u8 {
                 if t.orientations & (1 << o) == 0 {
                     continue;

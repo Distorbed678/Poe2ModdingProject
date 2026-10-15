@@ -26,6 +26,17 @@ fn data(e: impl std::fmt::Display) -> GenError {
     GenError::Unsupported(e.to_string())
 }
 
+/// A point in the pipeline [`generate_probed`] reports.
+pub enum Stage<'a> {
+    /// The layout graph after smoothing (`"smooth"`), the virtual split (`"split"`), before the
+    /// edge tiles (`"tiles"`).
+    Graph(&'a str, &'a LayoutGraph),
+    /// The tile map after the room passes.
+    Rooms(&'a TileMap),
+    /// The tile map after the edge tiles, with the number of pieces before them.
+    Edges(&'a TileMap, usize),
+}
+
 /// A generated area.
 pub struct Generated {
     /// The topology's graph file.
@@ -84,6 +95,12 @@ pub fn generate(gd: &GameData, area_id: &str, seed: u32) -> Result<Generated, Ge
 /// passes from exact to adjacent) and only falls back to the index draw here when nothing
 /// matches; that choice is not ported yet.
 pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<u32>) -> Result<Generated, GenError> {
+    generate_probed(gd, area_id, rng, forced, &mut |_| {})
+}
+
+/// [`generate_with`] reporting intermediate [`Stage`]s to `probe`, for comparing with the
+/// client's trace.
+pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<u32>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
     let graphs = topologies(gd, area_id)?;
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));
@@ -96,12 +113,16 @@ pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced:
     };
     let dgr = graphs[index].clone();
     let graph = Graph::parse_bytes(&crate::generate::Files::read(files, &dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
-    let map = generate_graph(files, &graph, rng)?;
+    let map = generate_graph_probed(files, &graph, rng, probe)?;
     Ok(Generated { graph: dgr, map, draws: rng.draws })
 }
 
 /// Everything after the topology choice, for one graph.
 pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+    generate_graph_probed(files, graph, rng, &mut |_| {})
+}
+
+fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
     // Edge existence (`0x141feeaf0`).
     let removed: Vec<bool> = graph
         .edges
@@ -149,6 +170,41 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
     let mut placed_graph = PlacedGraph { graph, nodes: nodes.iter().map(|n| n.pos).collect(), points: edge_points, removed };
     let mut types = TerrainTypes::default();
 
+    // `0x1420c7400` sorts the room-less nodes before placement: virtual nodes (touching a
+    // virtual edge; not dead ends at the border) and junctions of three or more edges get
+    // exploded before routing (virtual ones only when no tile fits them at the room stage).
+    let (mut virtual_nodes, mut junctions) = (Vec::new(), Vec::new());
+    for n in 0..graph.nodes.len() {
+        if !graph.nodes[n].room_type.is_empty() {
+            continue;
+        }
+        let edges: Vec<usize> = crate::rooms::EdgeView::slots(&placed_graph, n).into_iter().flatten().collect();
+        let mut virtual_end = false;
+        for &e in &edges {
+            virtual_end |= types.edge(files, &graph.edges[e].edge_type)?.virtual_edge;
+        }
+        match edges.len() {
+            0 => {}
+            1 => {
+                let b = types.edge(files, &graph.edges[edges[0]].edge_type)?.size as i32;
+                let (x, y) = placed_graph.nodes[n];
+                let (tx, ty) = ((x / 23).min(tiles.0 - 1), (y / 23).min(tiles.1 - 1));
+                let near = !(b <= tx && b <= ty && tx < tiles.0 - b && ty < tiles.1 - b);
+                if virtual_end && !near {
+                    virtual_nodes.push(n);
+                }
+            }
+            2 if graph.edges[edges[0]].edge_type.eq_ignore_ascii_case(&graph.edges[edges[1]].edge_type) => {}
+            k => {
+                if virtual_end {
+                    virtual_nodes.push(n);
+                } else if k > 2 {
+                    junctions.push(n);
+                }
+            }
+        }
+    }
+
     // Rooms.
     let mut placed: Vec<PlacedRoom> = Vec::new();
     for n in 0..graph.nodes.len() {
@@ -156,6 +212,10 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
             continue;
         }
         let p = place_node(&set, &master.tiles, &placed_graph, n, tiles, &placed, &mut types, files, rng)?;
+        if std::env::var_os("POE_DEBUG_ROOMS").is_some() {
+            let name = p.tile.map_or_else(|| set.rooms[p.room].path.clone(), |t| master.tiles.tiles[t].path.clone());
+            eprintln!("room node {n} {name} o{} at {},{} sides {:?}", p.orientation, p.pos.0, p.pos.1, p.sides);
+        }
         placed.push(p);
     }
     let fixed: Vec<(bool, bool)> = graph
@@ -172,10 +232,23 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
             // `0x1420c9970`: a node that took a tile places just that tile.
             Some(t) => {
                 let def = &master.tiles.tiles[t];
-                map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, None);
+                map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, Some(t));
             }
             None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, rng)?,
         }
+    }
+    probe(Stage::Rooms(&map));
+
+    // Exploded nodes (`0x1420cb200`). A virtual node that a tile fits is placed with the rooms
+    // instead (`0x1420caa40`), which is not ported yet.
+    for &n in virtual_nodes.iter().chain(&junctions) {
+        if virtual_nodes.contains(&n) {
+            let (sides, key) = crate::rooms::node_key(&placed_graph, n, &mut types, files)?;
+            if !node_tiles::candidates(&placed_graph, n, 8, "", &key, &sides, &master.tiles, &mut types, files)?.is_empty() {
+                return Err(data(format!("node {n}: virtual node tile at the room stage is not ported")));
+            }
+        }
+        node_tiles::explode(&mut placed_graph, n, tiles, &mut types, files)?;
     }
 
     // Edge ends at the rooms' exits (`0x1420c5750`, `0x1420c5b50`), then routing.
@@ -327,6 +400,7 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
         }
     }
     smoothing::smooth(&mut lg);
+    probe(Stage::Graph("smooth", &lg));
 
     // Virtual edges split into their two banks.
     let mut split_types: HashMap<String, SplitType> = HashMap::new();
@@ -341,6 +415,7 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
     }
     let lookup = |t: &str| split_types.get(&t.to_ascii_lowercase()).cloned().unwrap_or_default();
     split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), rng);
+    probe(Stage::Graph("split", &lg));
 
     // Rounding, border dead ends and node tiles (`0x1420cade0`), slot compaction, rounding,
     // end points.
@@ -396,6 +471,7 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
     smoothing::compact_slots(&mut lg);
     smoothing::round_corners(&mut lg);
     smoothing::add_end_points(&mut lg);
+    probe(Stage::Graph("tiles", &lg));
 
     // Edge tiles.
     let mut infos = Vec::new();
@@ -407,10 +483,13 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
             grounds: et.grounds.clone(),
             height: et.height_change,
             centred: et.centred,
-            hashed: false,
+            hashed: et.hashed,
         });
     }
-    EdgeTiler::new(&mut lg, &mut map, &master.tiles, infos).run(rng).map_err(data)?;
+    let before = map.pieces.len();
+    let tiled = EdgeTiler::new(&mut lg, &mut map, &master.tiles, infos).run(rng).map_err(data);
+    probe(Stage::Edges(&map, before));
+    tiled?;
 
     // Corner lattice passes, fill, de-repetition.
     for p in &mut map.lattice {
