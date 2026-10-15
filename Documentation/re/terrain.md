@@ -354,7 +354,23 @@ border (the clone's far node also copies fixed).
    each passed segment −20 (`0x141ef7000`); failures backtrack (at most 10 steps). Paths that
    fit cost +80 on their inner tiles; those that do not are retried after the others.
 
-**Verified:** all 103 edge tile positions (17 paths) equal the client's; 5158 draws in step.
+4. Tiles (`0x1420b7f30`), per inner path tile: the sides of the previous and next tile
+   (`0x1420b78d0`, room tiles count with their size) get the edge's `.et` and an exit position:
+   the middle (`3·size/2`) for `.et` flag 8 (third number); next to a room tile, the room exit
+   seen from this side (`0x141f9e990`, falling back to the virtual exit); otherwise which third of
+   the side the smoothed path crosses (`0x1420b7ba0`, threshold `23·size/6`), where the crossing
+   is a degree-9 de Casteljau midpoint over the tile centres padded with four copies of each end
+   (`0x1420b7490`, f32). Grounds (`0x1420b7d70`/`0x1420b7c60`): left/right ground on the two
+   corners of each side, swapped by the edge's chirality (`+0x41`) against the path direction;
+   a turn's outer corner copies its neighbour. Lookup with no feature, `below(total weight)`.
+
+`.et` data: `+0x48` flags (4 virtual, 8 third number, 0x80 wildcard name), `+0x4b` size,
+`+0x4c` first number (the right ground's corner height in tile keys), `+0x4d` hashed crossings
+(`0x1421969e0`; 0 for every Riverbank type). The DLL traces tile keys (`tile_key`, with caller)
+and dumps these bytes with each graph edge.
+
+**Verified:** all 103 edge tiles (17 paths) equal the client's (position, orientation, tile);
+5261 draws in step.
 
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
