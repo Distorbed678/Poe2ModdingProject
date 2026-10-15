@@ -42,6 +42,9 @@ const SEED_RNG: usize = 0x141f9c020;
 const MT_NEXT: usize = 0x140a58a70;
 /// MSVC `uniform_int` helper: `(&{state, bits, mask}, n)` -> value in `0..n`.
 const UNIFORM: usize = 0x141f0d7f0;
+/// `TerrainRng_Below(n)` / `TerrainRng_Range(a, b)`: logged with their exact call site.
+const RNG_BELOW: usize = 0x141f9c270;
+const RNG_RANGE: usize = 0x141f9c340;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -133,6 +136,8 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(SEED_RNG, HookType::JmpBack(on_seed), 0)?;
         hook(MT_NEXT, HookType::Retn(on_mt_next), 0)?;
         hook(UNIFORM, HookType::Retn(on_uniform), 0)?;
+        hook(RNG_BELOW, HookType::JmpBack(on_rng_call), 0)?;
+        hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
         }
@@ -249,6 +254,27 @@ unsafe extern "win64" fn on_seed(regs: *mut Registers, _: usize) {
     );
 }
 
+/// `below`/`range` entry: the exact caller (return address) and arguments.
+unsafe extern "win64" fn on_rng_call(regs: *mut Registers, range: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_rng_call");
+    if !on_generator_thread() {
+        return;
+    }
+    let r = unsafe { &*regs };
+    let ret = read::<usize>(r.rsp as usize).map_or(0, ghidra);
+    let args = if range == 1 {
+        format!("{} {}", r.rcx as u32, r.rdx as u32)
+    } else {
+        format!("{}", r.rcx as u32)
+    };
+    trace_line(
+        if range == 1 { "range" } else { "below" },
+        &format!("{ret:x}"),
+        &args,
+        "",
+    );
+}
+
 unsafe extern "win64" fn on_phase(regs: *mut Registers, index: usize) {
     let _guard = crate::hook_guard!("terrain_tools::on_phase");
     if !on_generator_thread() {
@@ -295,9 +321,10 @@ unsafe extern "win64" fn on_uniform(regs: *mut Registers, original: usize, _: us
     let v = guard.original(|| unsafe { f(engine, n) });
     if on_generator_thread() {
         let state = read::<usize>(engine).unwrap_or(0);
+        let ret = read::<usize>(r.rsp as usize).map_or(0, ghidra);
         trace_line(
             "uniform",
-            &callers(r.rsp as usize, 3),
+            &format!("{ret:x}|{}", callers(r.rsp as usize, 3)),
             &format!("n={n} state={state:x}"),
             &(v as u32).to_string(),
         );

@@ -134,3 +134,19 @@ the seed (fill tiles and orientations are random), the doodad hash does not.
 one `n=8` (orientation), ~40 small draws (`n` 1/2/8, `0x141f8ed4d`), 990 draws of `n=1024`, then
 pairs of a weighted fill-tile pick (`0x141f900a7`; `n` = the fill group's total weight, 300 for
 `default` = `Blank.tdt`, 3 for the three `Slash` fills) and an orientation (`0x141f90de4`, `n=8`).
+
+### Port notes (generation order, town first)
+1. `TerrainGen_Run` seeds the RNG with the area seed (after `prepare`'s throwaway seed-0 draws).
+2. Topology choice, generator vtable slot 0 `0x141ff9280`: candidate topologies
+   `0x141fdfe30(world area, world+0xb8)`, filtered `0x141fa6440`; a sub-seed
+   `v = below(0xffffffff)` (not for area kind 0x21), then the index from an LCG seeded with
+   `v` (`0x141025cf0`: `x = x·1103515245 + 12345`, take `(x >> 16) & 0x7fff` in chunks of up
+   to 15 bits until it has `bits(n-1)` bits, reject ≥ n; n < 2 → 0 without stepping).
+   `0x141ff89e0` loads the chosen graph (another `below(count)` and `below(0x348)` only when no
+   topology was passed); `0x141ff8310` turns the graph into a region record (0x98 bytes, in the
+   generation state's region list).
+3. Graph nodes are placed by `0x1420c87a0`: candidates matching the node's TileEdgeKey
+   (`0x1420c76d0`, 0x68-byte entries, weight at +0x60), weighted pick `below(total)`, position =
+   node cell / 23 minus half the candidate's size (+0x31/+0x32), clamped to the map; must fit
+   (`0x141d0d880`) and not overlap (`0x1420c4b30`), otherwise the candidate is removed and drawn
+   again. Town: total weight 8, draw 3.
