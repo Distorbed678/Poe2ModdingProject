@@ -298,26 +298,30 @@ pub fn load_room(files: &dyn Files, path: &str) -> Result<Room, GenError> {
     Ok(Room { arm, lattice })
 }
 
+/// The key of a `k` slot (also a room's root slot).
+pub fn slot_key(k: &poe_data_tools::file_parsers::arm::types::SlotK) -> TileKey {
+    TileKey {
+        edges: k
+            .edges
+            .clone()
+            .map(|e| e.edge.map(|s| s.to_ascii_lowercase().replace('\\', "/"))),
+        size: (k.width as u8, k.height as u8),
+        grounds: k
+            .corners
+            .clone()
+            .map(|c| c.ground.map(|s| s.to_ascii_lowercase().replace('\\', "/"))),
+        heights: k.corners.clone().map(|c| c.height as u8),
+        exits: k.edges.clone().map(|e| e.exit as u8),
+        virtual_exits: k.edges.clone().map(|e| e.virtual_exit as u8),
+    }
+}
+
 /// The key of an `.arm` grid cell for the room pass, or None when the cell places nothing
 /// itself (uniform-ground `k` slots only mark their ground; `n`/`s`/`o` cells).
 fn cell_key(slot: &Slot) -> Option<(TileKey, String)> {
     match slot {
         Slot::K(k) => {
-            let key = TileKey {
-                edges: k
-                    .edges
-                    .clone()
-                    .map(|e| e.edge.map(|s| s.to_ascii_lowercase())),
-                size: (k.width as u8, k.height as u8),
-                grounds: k
-                    .corners
-                    .clone()
-                    .map(|c| c.ground.map(|s| s.to_ascii_lowercase())),
-                heights: k.corners.clone().map(|c| c.height as u8),
-                exits: k.edges.clone().map(|e| e.exit as u8),
-                virtual_exits: k.edges.clone().map(|e| e.virtual_exit as u8),
-            };
-            Some((key, k.slot_tag.clone().unwrap_or_default()))
+            Some((slot_key(k), k.slot_tag.clone().unwrap_or_default()))
         }
         Slot::F { fill: Some(name) } => Some((
             TileKey {
@@ -338,13 +342,26 @@ fn uniform_ground(key: &TileKey, feature: &str) -> bool {
         && key.grounds.iter().all(|g| *g == key.grounds[0])
 }
 
-/// Room pass (`0x141f8e6c0`): every cell of the room, x outer, y inner. `room_o` must be 0
-/// for now (rotated rooms are not ported yet).
+/// Room pass (`0x141f8e6c0`) for an unrotated room.
 pub fn room_pass(
     map: &mut TileMap,
     master: &Master,
     room: &Room,
     origin: (i32, i32),
+    rng: &mut TerrainRng,
+) -> Result<(), GenError> {
+    room_pass_oriented(map, master, room, origin, 0, rng)
+}
+
+/// Room pass (`0x141f8e6c0`): every cell of the room grid, x outer, y inner; a slot's key is
+/// seen with the room's orientation `o` and lands where its cells land when the room is
+/// turned (`origin` is the turned room's corner).
+pub fn room_pass_oriented(
+    map: &mut TileMap,
+    master: &Master,
+    room: &Room,
+    origin: (i32, i32),
+    o: u8,
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
     let (w, h) = (room.width(), room.height());
@@ -354,7 +371,11 @@ pub fn room_pass(
             let Some((key, feature)) = cell_key(&room.grid[y][x]) else {
                 continue;
             };
-            let (mx, my) = (origin.0 + x as i32, origin.1 + y as i32);
+            let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
+            let key = key.oriented(o);
+            let (ax, ay) = orient_cell(o, w as i32, h as i32, x as i32, y as i32);
+            let (bx, by) = orient_cell(o, w as i32, h as i32, x as i32 + sw - 1, y as i32 + sh - 1);
+            let (mx, my) = (origin.0 + ax.min(bx), origin.1 + ay.min(by));
             if uniform_ground(&key, &feature) {
                 // Only the ground is marked (the fill pass places a tile here).
                 for dy in 0..key.size.1 as i32 {

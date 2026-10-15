@@ -13,6 +13,7 @@ pub mod graph;
 pub mod hash;
 pub mod layout;
 pub mod rng;
+pub mod rooms;
 pub mod tdt;
 mod text;
 pub mod tileset;
