@@ -6,10 +6,11 @@ use std::path::Path;
 
 use poe_data::{GameData, Value};
 use poe_world::{
-    generate::Files,
+    generate::{Files, Master, TileMap, room_pass_oriented},
     graph::Graph,
     layout::{self, JitterNode},
     rng::{TerrainRng, lcg_index},
+    rooms::{PlacedGraph, PlacedRoom, RoomSet, TerrainTypes, place_node, tsi_entries},
 };
 
 /// The trace's bounded draws after the real seed: (call site, n, result).
@@ -72,13 +73,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pick = lcg_index(sub, rows.len() as u32) as usize;
     let dgr = topologies.row(rows[pick]).ok_or("bad row")?.str("DGRFile")?;
     println!("topology {pick}: {dgr}");
-    let mut graph = Graph::parse_bytes(&Files::read(data.files(), &dgr)?)?;
+    let graph = Graph::parse_bytes(&Files::read(data.files(), &dgr)?)?;
 
     // Edge existence (`0x141feeaf0`): exist % 0 removes the edge without a draw.
-    graph.edges.retain(|e| {
-        let exist = e.values.first().copied().unwrap_or(100);
-        exist != 0 && (rng.below(100) as i32) < exist
-    });
+    let removed: Vec<bool> = graph
+        .edges
+        .iter()
+        .map(|e| {
+            let exist = e.values.first().copied().unwrap_or(100);
+            !(exist != 0 && (rng.below(100) as i32) < exist)
+        })
+        .collect();
 
     let mut nodes: Vec<JitterNode> = graph
         .nodes
@@ -89,14 +94,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fix_y: n.values.get(10).copied().unwrap_or(0) != 0,
         })
         .collect();
-    let mut points: Vec<(i32, i32)> =
-        graph.edges.iter().flat_map(|e| e.points.iter().copied()).collect();
+    let mut points: Vec<(i32, i32)> = graph
+        .edges
+        .iter()
+        .zip(&removed)
+        .filter(|(_, r)| !**r)
+        .flat_map(|(e, _)| e.points.iter().copied())
+        .collect();
     let tiles = (graph.width as i32, graph.height as i32);
     layout::jitter(&mut nodes, &mut points, tiles, &mut rng)?;
-    for (i, n) in nodes.iter().enumerate() {
-        println!("node {i}: {:?}", n.pos);
+    let mut it = points.iter().copied();
+    let edge_points: Vec<Vec<(i32, i32)>> = graph
+        .edges
+        .iter()
+        .zip(&removed)
+        .map(|(e, r)| if *r { Vec::new() } else { e.points.iter().map(|_| it.next().unwrap()).collect() })
+        .collect();
+    let jitter_draws = rng.log.as_ref().map_or(0, Vec::len);
+    println!("jitter done after {jitter_draws} draws");
+
+    // Master file: tile set, fill tiles, room set.
+    let tsi_path = graph.master_file.clone();
+    let tsi = tsi_entries(&Files::read(data.files(), &tsi_path)?);
+    let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
+    let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
+    let files = data.files();
+    let master = Master::load(
+        files,
+        &rel("TileSet").ok_or("no TileSet")?,
+        &rel("FillTiles").ok_or("no FillTiles")?,
+    )?;
+    let set = RoomSet::load(files, &rel("RoomSet").ok_or("no RoomSet")?)?;
+    let placed_graph = PlacedGraph {
+        graph: &graph,
+        nodes: nodes.iter().map(|n| n.pos).collect(),
+        points: edge_points,
+        removed,
+    };
+    let mut types = TerrainTypes::default();
+    let mut placed: Vec<PlacedRoom> = Vec::new();
+    for n in 0..graph.nodes.len() {
+        if graph.nodes[n].room_type.is_empty() {
+            continue;
+        }
+        if std::env::var("DEBUG_NODE").ok().and_then(|v| v.parse::<usize>().ok()) == Some(n) {
+            let (sides, key) = poe_world::rooms::node_key(&placed_graph, n, &mut types, files)?;
+            println!("node {n} sides {sides:?} key {:?}", key.edges);
+            for r in &set.rooms {
+                if r.tag.eq_ignore_ascii_case(&graph.nodes[n].room_type) {
+                    for o in 0..8 {
+                        println!("  {} o{o} {:?}", r.path, r.key.oriented(o).edges);
+                    }
+                }
+            }
+        }
+        let p = place_node(&set, &placed_graph, n, tiles, &placed, &mut types, files, &mut rng)?;
+        println!(
+            "node {n} {:?}: {} o{} at {:?}",
+            graph.nodes[n].room_type, set.rooms[p.room].path, p.orientation, p.pos
+        );
+        placed.push(p);
     }
-    println!("points: {points:?}");
+    let mut map = TileMap::new(graph.width, graph.height);
+    for p in &placed {
+        room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, &mut rng)?;
+    }
+    println!("room passes: {} pieces", map.pieces.len());
 
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {

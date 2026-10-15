@@ -55,6 +55,12 @@ const PLACE_TILE: usize = 0x141f9e2e0;
 /// (0x38 bytes, +0 room resource); room data (+0x28) +0xe8 is a (w-1)×(h-1) grid of resource
 /// pointers at interior lattice points (pieces touching a set point are not re-picked).
 const DEREPEAT: usize = 0x141fdd7c0;
+/// Graph node placement (`0x1420c87a0`: context, result out, node): the room or tile picked
+/// for a room node and its position (result +0x70).
+const NODE_PLACE: usize = 0x1420c87a0;
+/// Room/tile candidates of a node (`0x1420c76d0`: list out, node, room type, key, ..., ...):
+/// 0x68-byte entries (name view +0/+8, variant byte +0x10, size +0x31/+0x32, weight +0x60).
+const NODE_CANDIDATES: usize = 0x1420c76d0;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -150,6 +156,8 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(ROOM_CANDIDATES, HookType::JmpBack(on_candidates), 0)?;
         hook(PLACE_TILE, HookType::JmpBack(on_place), 0)?;
         hook(DEREPEAT, HookType::JmpBack(on_derepeat), 0)?;
+        hook(NODE_PLACE, HookType::Retn(on_node_place), 0)?;
+        hook(NODE_CANDIDATES, HookType::Retn(on_node_candidates), 0)?;
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -380,6 +388,126 @@ unsafe extern "win64" fn on_candidates(regs: *mut Registers, _: usize) {
         &format!("total={total}"),
         &out.join(" "),
     );
+}
+
+/// A `(wchar*, len)` string view.
+fn view(addr: usize) -> String {
+    let (Some(p), Some(n)) = (read::<usize>(addr), read::<usize>(addr + 8)) else {
+        return String::new();
+    };
+    if n == 0 || n > 512 || !readable(p, n * 2) {
+        return String::new();
+    }
+    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p as *const u16, n) })
+}
+
+fn node_desc(node: usize) -> String {
+    let x = read::<i32>(node + 0x4c).unwrap_or(0);
+    let y = read::<i32>(node + 0x50).unwrap_or(0);
+    let o = read::<u8>(node + 0x40).unwrap_or(0xff);
+    let room = msvc_wstring(node + 0x20).unwrap_or_default();
+    format!("node ({x},{y}) {room:?} o{o}")
+}
+
+type NodePlaceFn = unsafe extern "win64" fn(usize, usize, usize) -> usize;
+
+unsafe extern "win64" fn on_node_place(regs: *mut Registers, original: usize, _: usize) -> usize {
+    let mut guard = crate::hook_guard!("terrain_tools::on_node_place");
+    let r = unsafe { &*regs };
+    let (ctx, out, node) = (r.rcx as usize, r.rdx as usize, r.r8 as usize);
+    let f: NodePlaceFn = unsafe { std::mem::transmute(original) };
+    let ret = guard.original(|| unsafe { f(ctx, out, node) });
+    if on_generator_thread() {
+        let x = read::<i32>(out + 0x70).unwrap_or(0);
+        let y = read::<i32>(out + 0x74).unwrap_or(0);
+        let variant = read::<u8>(out + 0x10).unwrap_or(0xff);
+        trace_line(
+            "node_place",
+            "1420c87a0",
+            &node_desc(node),
+            &format!("{} v{variant} at {x},{y}", view(out)),
+        );
+    }
+    ret
+}
+
+type NodeCandidatesFn = unsafe extern "win64" fn(usize, usize, usize, usize, usize, usize) -> usize;
+
+unsafe extern "win64" fn on_node_candidates(
+    regs: *mut Registers,
+    original: usize,
+    _: usize,
+) -> usize {
+    let mut guard = crate::hook_guard!("terrain_tools::on_node_candidates");
+    let r = unsafe { &*regs };
+    let rsp = r.rsp as usize;
+    let a5 = read::<usize>(rsp + 0x28).unwrap_or(0);
+    let a6 = read::<usize>(rsp + 0x30).unwrap_or(0);
+    let (list, node) = (r.rcx as usize, r.rdx as usize);
+    let (a3, a4) = (r.r8 as usize, r.r9 as usize);
+    let f: NodeCandidatesFn = unsafe { std::mem::transmute(original) };
+    let ret = guard.original(|| unsafe { f(list, node, a3, a4, a5, a6) });
+    if on_generator_thread() {
+        let (b, e) = (
+            read::<usize>(list).unwrap_or(0),
+            read::<usize>(list + 8).unwrap_or(0),
+        );
+        let mut out = Vec::new();
+        let mut p = b;
+        while p < e && out.len() < 64 {
+            out.push(format!(
+                "{}:v{}:{}x{}:w{}",
+                view(p),
+                read::<u8>(p + 0x10).unwrap_or(0),
+                read::<u8>(p + 0x31).unwrap_or(0),
+                read::<u8>(p + 0x32).unwrap_or(0),
+                read::<i32>(p + 0x60).unwrap_or(0)
+            ));
+            p += 0x68;
+        }
+        // The node's key edges (key +0, four resources) and slot -> side (a5, four u32), and
+        // each slot edge's internal points (edge +8..+0x10, (x, y) i32 pairs).
+        let mut key = Vec::new();
+        for i in 0..4 {
+            let e = read::<usize>(a4 + i * 8).unwrap_or(0);
+            key.push(if e == 0 {
+                "-".to_string()
+            } else {
+                resource_path(e).rsplit('/').next().unwrap_or("").to_string()
+            });
+        }
+        let sides: [u32; 4] = read(a5).unwrap_or_default();
+        let mut slots = Vec::new();
+        for i in 0..4 {
+            let e = read::<usize>(node + 0x58 + i * 8).unwrap_or(0);
+            if e == 0 {
+                continue;
+            }
+            let (pb, pe) = (read::<usize>(e + 8).unwrap_or(0), read::<usize>(e + 0x10).unwrap_or(0));
+            let mut pts = Vec::new();
+            let mut q = pb;
+            while q < pe && pts.len() < 16 {
+                let xy: [i32; 2] = read(q).unwrap_or_default();
+                pts.push(format!("{},{}", xy[0], xy[1]));
+                q += 8;
+            }
+            let from = read::<usize>(e + 0x20).unwrap_or(0) == node;
+            slots.push(format!("s{i}{}[{}]", if from { ">" } else { "<" }, pts.join(" ")));
+        }
+        trace_line(
+            "node_key",
+            "1420c76d0",
+            &format!("key {} sides {:?}", key.join("|"), sides),
+            &slots.join(" "),
+        );
+        trace_line(
+            "node_candidates",
+            "1420c76d0",
+            &format!("{} total={}", node_desc(node), read::<i32>(list + 0x18).unwrap_or(0)),
+            &out.join(" "),
+        );
+    }
+    ret
 }
 
 unsafe extern "win64" fn on_phase(regs: *mut Registers, index: usize) {

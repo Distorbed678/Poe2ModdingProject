@@ -223,6 +223,41 @@ without a draw), then `0x1420bec40` lays the graph out. Seed 1000 → topology 2
 **Verified:** `cargo run -p poe-world --example river_gen -- <export> 1000` matches the first 110
 draws of the Riverbank trace (topology, 19 edge rolls, 30 jitters).
 
+**Room placement** (`crates/poe-world/src/rooms.rs`; trace kinds `node_candidates`, `node_key`,
+`node_place` from DLL hooks on `0x1420c76d0` and `0x1420c87a0`). Room nodes are placed in
+node order, all before any room pass (the passes then run in the same order):
+1. Node key (`0x1420d2e20`): each graph edge (except `.et` types named `Wildcard…`, flag 0x80)
+   goes to the side it leaves by, towards its nearest internal point or the other node
+   (`0x1420d1220`: `|dx| > |dy|` → right (1) / left (3), else down (2) / up (0)); a side with
+   several edges gives one up to a neighbouring side, cheapest angle first (`0x1420d15b0`, angle
+   table `0x142f10760`, side vectors `0x142f0c608`). The key is the `.et` per side.
+2. Room table: per `.rs` room (its `.arm` tag is the room type) and allowed orientation, the
+   turned root-slot key. When no entry of the node's type has the key's edges, `0x1420c51c0`
+   moves an edge to a free side (two edges: the first to the following/preceding free side;
+   three: the one after the free side back into it, else the one before it forward).
+3. Candidates (`0x1420c76d0`): fixed-orientation node → every matching entry, in the node's
+   orientation (a room symmetric under a flip appears twice); `(any)`/`(best)` → each matching
+   entry in its own orientation if `0x1420b87b0` agrees: per edge, its direction (from/to xor
+   chirality) picks the two corners at its end, whose ground types must equal the `.et`'s
+   left/right ground (`None`/flag 8 = wildcard) and whose heights its height change; first with
+   the climb check, then without.
+4. `below(total weight)`; position = node tile − half the size, snapped to the node's alignment
+   (`align<N>` description, else the largest edge size; `0x141fe7400` rounds up when the
+   remainder is above half), clamped to the map; must fit and not overlap earlier rooms, else
+   all entries of that room and orientation are dropped and another is drawn. Then
+   `0x1420c59e0` keeps it a margin (largest edge size, twice for virtual edges) from the map
+   border on each side with an edge.
+5. `.et`: name, left/right ground (`wildcard`), numbers `height_change size flag`, then
+   `virtual` (two split edges, chiralities, default min/max width) or `random_wiggle`,
+   `can_end`, `force_height_zero`. `.gt` flags: the five bools of line 2 (default 1 1 1 1 0),
+   bit 7 for Abyss/Water/Pool/Void names.
+6. Before placement every room node is "exploded" (`0x1420cb200`): each edge gets an internal
+   point 23 cells from the node towards its side (points within 23 cells removed first,
+   `0x1420c6b80`); this matters for routing, not for the draws so far.
+
+**Verified:** `river_gen` places all 12 room nodes of seed 1000 where the client does and stays
+in step for 204 draws (through the room passes).
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,
