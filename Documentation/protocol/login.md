@@ -87,6 +87,10 @@ Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatc
 | +0x48 (u16) | fallback area: `WorldAreas.HASH16` |
 | +0x4c (u8) | assumed level |
 | +0x4d (u8) | league banner: `LeagueFlag` row + 1 |
+| +0x40 (u32) | experience (official: 51 after three 17-xp kills, the same values as the Player component delta's mask `0x0001` field) |
+| +0x51 (u8) | flags: bit 3 goes to the select-screen entry (`0x1406b9b90` → `0x1406b8890`); official characters that have played have `0x40` |
+
+Official lists of characters that have played also carry a 91-byte blob (`blob_30`, the same bytes as a component delta of component 8 seen in game, likely the visible gear) and (stat id, value) pairs (`pairs_48`); a fresh character has neither.
 
 ### CharacterList trailer
 | Field | Meaning |

@@ -232,6 +232,8 @@ impl Player {
 /// fields seen in official traffic are supported:
 /// - `0x0002` flag words: `u16` count (raw), then (`u8` key, `u64` bits) entries. Official
 ///   servers send the whole set (5 at entry, key 0x08 added after the first Move).
+/// - `0x0001` experience (`u32`, raw little-endian; `0x141dd11e0`). Official kills send it
+///   with `0x0200` (no data, sets +0x209).
 /// - `0x0400` combat stance (`u8`, +0x20c): the component's vfunc +0x138 (`0x141dd47e0`)
 ///   sets +0x20d from it. While +0x20d is set the client reports its cursor cell
 ///   (`AimTarget` mode 2, `0x14016ba40`) and the player turns toward it. Official servers
@@ -240,6 +242,7 @@ impl Player {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlayerDelta {
     pub flag_words: Option<Vec<(u8, u64)>>,
+    pub experience: Option<u32>,
     pub combat_stance: Option<bool>,
     pub unk_3e7: Option<u8>,
 }
@@ -250,6 +253,7 @@ pub const PLAYER_COMPONENT: u8 = 6;
 impl PlayerDelta {
     pub fn encode(&self) -> Vec<u8> {
         let mut mask = 0u16;
+        mask |= if self.experience.is_some() { 0x0001 } else { 0 };
         mask |= if self.flag_words.is_some() { 0x0002 } else { 0 };
         mask |= if self.combat_stance.is_some() {
             0x0400
@@ -264,6 +268,9 @@ impl PlayerDelta {
             for (key, bits) in words {
                 w.u8(*key).bytes(&bits.to_le_bytes());
             }
+        }
+        if let Some(xp) = self.experience {
+            w.u32_le(xp);
         }
         if let Some(on) = self.combat_stance {
             w.u8(on as u8);
@@ -392,6 +399,11 @@ mod tests {
         expect.extend([0x08, 0, 0, 0x40, 0, 0, 0, 0, 0]);
         expect.push(1);
         assert_eq!(on.encode(), expect);
+        let xp = PlayerDelta {
+            experience: Some(17),
+            ..Default::default()
+        };
+        assert_eq!(xp.encode(), [0x01, 0x00, 0x11, 0, 0, 0]);
     }
 
     #[test]

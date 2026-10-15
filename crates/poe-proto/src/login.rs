@@ -295,8 +295,8 @@ pub struct CharacterEntry {
     pub unk_51: u8,
     /// +0x4c
     pub unk_4c: u8,
-    /// +0x40
-    pub unk_40: u32,
+    /// +0x40: experience (official: 51 after three kills of 17).
+    pub experience: u32,
     /// +0x4e
     pub unk_4e: u8,
     /// +0x44
@@ -320,7 +320,7 @@ impl CharacterEntry {
             .u8(self.unk_4d)
             .u8(self.unk_51)
             .u8(self.unk_4c)
-            .u32(self.unk_40)
+            .u32(self.experience)
             .u8(self.unk_4e)
             .u16(self.unk_44)
             .u16(self.unk_46)
@@ -337,7 +337,7 @@ impl CharacterEntry {
             unk_4d: r.u8()?,
             unk_51: r.u8()?,
             unk_4c: r.u8()?,
-            unk_40: r.u32()?,
+            experience: r.u32()?,
             unk_4e: r.u8()?,
             unk_44: r.u16()?,
             unk_46: r.u16()?,

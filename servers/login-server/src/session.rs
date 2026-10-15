@@ -341,6 +341,7 @@ fn character_entry(server: &LoginServer, c: &Character) -> anyhow::Result<Charac
         league: c.league.clone(),
         unk_4d: league_flag,
         unk_4c: c.level.min(255) as u8,
+        experience: c.experience.min(u32::MAX as u64) as u32,
         unk_4e: c.class_id as u8,
         unk_4a: area_hash,
         unk_48: area_hash,
