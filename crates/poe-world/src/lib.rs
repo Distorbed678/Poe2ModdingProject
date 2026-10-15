@@ -7,6 +7,7 @@
 //! - [`graph`], [`tdt`]: the terrain graph (`.tgr`) and tile (`.tdt`) formats.
 //! - [`export`]: the client DLL's area exports, the reference for comparisons.
 
+pub mod area;
 pub mod edge_tiles;
 pub mod export;
 pub mod fill;
