@@ -162,6 +162,10 @@ fn start_features(config: &Config, main: &Module) {
         Vec::new()
     };
     report("auto_keys", !read_only, || auto_keys::init(keys));
+    // The server debug link (our server only).
+    if !read_only {
+        devlink::start();
+    }
 }
 
 extern "C" fn on_present(queue: u64, info: *const std::ffi::c_void) -> u64 {

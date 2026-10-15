@@ -12,6 +12,7 @@ mod minimap_tab;
 mod packets_tab;
 mod protocol_tab;
 mod scanner_tab;
+mod server_tab;
 mod status_tab;
 mod timing_tab;
 
@@ -55,6 +56,7 @@ pub struct App {
     scanner: scanner_tab::ScannerView,
     stats: game_tab::StatsView,
     minimap: minimap_tab::MinimapView,
+    server: server_tab::ServerView,
 }
 
 impl App {
@@ -72,6 +74,7 @@ impl App {
             scanner: scanner_tab::ScannerView::new(),
             stats: game_tab::StatsView::new(),
             minimap: minimap_tab::MinimapView::new(),
+            server: server_tab::ServerView::new(),
         }
     }
 
@@ -87,8 +90,8 @@ impl App {
             return;
         }
         let toggle = crate::config().overlay.toggle_key;
-        ui.window("poe-hook debug")
-            .size([1100.0, 700.0], Condition::FirstUseEver)
+        ui.window("poe-hook debug##main2")
+            .size([1500.0, 780.0], Condition::FirstUseEver)
             .position([40.0, 80.0], Condition::FirstUseEver)
             .build(|| {
                 if let Some(_bar) = ui.tab_bar("tabs") {
@@ -115,6 +118,12 @@ impl App {
                     }
                     if let Some(_t) = ui.tab_item("Player") {
                         inspect_tab::draw_player(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Server") {
+                        self.server.draw_server(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Desync") {
+                        self.server.draw_desync(ui, plots);
                     }
                     if let Some(_t) = ui.tab_item("Minimap") {
                         self.minimap.draw(ui);

@@ -304,7 +304,22 @@ impl InstanceServer {
                              movement uses the server simulation and can snap"
                         );
                     }
-                    let replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
+                    let mut replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
+                    if self.config.instance.debug_link {
+                        for command in self.reports.take_commands(client_port) {
+                            let (result, reply) = self.dev_command(player, &command);
+                            info!(%command, %result, "dev command");
+                            replies.extend(reply);
+                            self.reports
+                                .send_debug(client_port, &format!("ack\t{command}\t{result}\n"));
+                        }
+                        if ticks.is_multiple_of(2) {
+                            self.reports.send_debug(
+                                client_port,
+                                &format!("tick\t{ticks}\n{}", player.debug_state()),
+                            );
+                        }
+                    }
                     let mut out = Vec::new();
                     for reply in &replies {
                         out.extend(self.encode_reply(client_port, reply)?);
@@ -317,6 +332,37 @@ impl InstanceServer {
                     }
                 }
             }
+        }
+    }
+
+    /// A dev command from the client DLL's overlay (debug link): returns a short result and
+    /// the message for the client, if any.
+    fn dev_command(
+        &self,
+        player: &mut player::Player,
+        command: &str,
+    ) -> (String, Vec<player::Reply>) {
+        let words: Vec<&str> = command.split_whitespace().collect();
+        let on = |w: Option<&&str>| matches!(w, Some(&"on" | &"true" | &"1"));
+        match words.as_slice() {
+            ["teleport", x, y] => match (x.parse(), y.parse()) {
+                (Ok(x), Ok(y)) => ("ok".into(), player.teleport((x, y))),
+                _ => ("bad cell".into(), Vec::new()),
+            },
+            ["turn_cell", mode] => {
+                player.turn_cell = player::TurnCell::parse(mode);
+                (format!("{:?}", player.turn_cell), Vec::new())
+            }
+            ["turn_timing", ..] => {
+                player.turn_timing = on(words.get(1));
+                (player.turn_timing.to_string(), Vec::new())
+            }
+            ["face_cursor", ..] => {
+                player.face_cursor =
+                    on(words.get(1)).then_some(self.config.instance.cursor_to_grid);
+                (player.face_cursor.is_some().to_string(), Vec::new())
+            }
+            _ => ("unknown command".into(), Vec::new()),
         }
     }
 

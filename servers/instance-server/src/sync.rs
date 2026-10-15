@@ -85,11 +85,16 @@ impl ClientReport {
     }
 }
 
-/// Latest report per client TCP port.
+/// Latest report per client TCP port, plus the client DLL's debug link: the UDP address its
+/// reports come from (state goes back there as `PDB1` datagrams) and the commands it sent
+/// (`PDC1`).
 #[derive(Default)]
 pub struct ClientReports {
     latest: Mutex<HashMap<u16, ClientReport>>,
     trace: OnceLock<Arc<MovementTrace>>,
+    socket: OnceLock<Arc<UdpSocket>>,
+    peers: Mutex<HashMap<u16, SocketAddr>>,
+    commands: Mutex<HashMap<u16, Vec<String>>>,
 }
 
 /// Movement trace (dev, `[instance] movement_trace`): one TSV line per client position
@@ -168,12 +173,36 @@ impl ClientReports {
         self.latest.lock().unwrap().remove(&port);
     }
 
+    /// Commands the client DLL sent for the session of `port` since the last call.
+    pub fn take_commands(&self, port: u16) -> Vec<String> {
+        self.commands
+            .lock()
+            .unwrap()
+            .remove(&port)
+            .unwrap_or_default()
+    }
+
+    /// Sends the debug state (`key\tvalue` lines) to the client DLL of `port`, if it reports.
+    pub fn send_debug(&self, port: u16, text: &str) {
+        let (Some(socket), Some(peer)) = (
+            self.socket.get(),
+            self.peers.lock().unwrap().get(&port).copied(),
+        ) else {
+            return;
+        };
+        let mut msg = b"PDB1".to_vec();
+        msg.extend_from_slice(text.as_bytes());
+        let _ = socket.try_send_to(&msg, peer);
+    }
+
     /// Receives reports on the instance address (UDP, same port as the TCP listener). Only
-    /// loopback senders are accepted.
+    /// loopback senders are accepted. `PDC1` datagrams (`u16 client port`, then a text
+    /// command) are dev commands from the client DLL's overlay.
     pub async fn listen(&self, addr: SocketAddr) -> anyhow::Result<()> {
-        let socket = UdpSocket::bind(addr).await?;
+        let socket = Arc::new(UdpSocket::bind(addr).await?);
+        let _ = self.socket.set(socket.clone());
         info!(%addr, "client position reports (UDP) listening");
-        let mut buf = [0u8; 64];
+        let mut buf = [0u8; 512];
         loop {
             let (n, from) = match socket.recv_from(&mut buf).await {
                 Ok(v) => v,
@@ -185,7 +214,20 @@ impl ClientReports {
             if !from.ip().is_loopback() {
                 continue;
             }
+            if n >= 6 && &buf[..4] == b"PDC1" {
+                let port = u16::from_le_bytes([buf[4], buf[5]]);
+                let text = String::from_utf8_lossy(&buf[6..n]).trim().to_owned();
+                info!(port, command = %text, "dev command from the client DLL");
+                self.commands
+                    .lock()
+                    .unwrap()
+                    .entry(port)
+                    .or_default()
+                    .push(text);
+                continue;
+            }
             if let Some((port, report)) = ClientReport::parse(&buf[..n]) {
+                self.peers.lock().unwrap().insert(port, from);
                 self.insert(port, report);
             }
         }
