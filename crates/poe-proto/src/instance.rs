@@ -298,9 +298,12 @@ impl Message for LocalPlayers {
 /// `0x1420edaa0` for the local player whose [`PlayerState`] points at it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterState {
-    /// Two lists of 0x68-byte records (reader `0x141ce2e20`); only empty lists are supported.
-    pub unk_00: Vec<()>,
-    pub unk_18: Vec<()>,
+    /// The account's stash tabs (copied to local player +0x3a90; official new accounts: four
+    /// tabs named "1".."4").
+    pub stash_tabs: Vec<StashTab>,
+    /// A second tab list (local player +0x3ac0, sorted by `0x1420ec230`), presumably the guild
+    /// stash; empty officially.
+    pub guild_tabs: Vec<StashTab>,
     /// (u32, u32) pairs at +0x30.
     pub pairs: Vec<(u32, u32)>,
     /// Wide string at +0x48.
@@ -310,6 +313,78 @@ pub struct CharacterState {
     /// bit 1 -> +0x3ed1, bits 2..4 -> +0x3df8..+0x3dfa, bit 5 -> +0x3e32, bit 6 -> +0x3edc
     /// ([`CHARACTER_FULL_ACCESS`]), bit 7 -> +0x3edd; byte 2 bit 0 -> +0x3ede.
     pub flags: [u8; 3],
+}
+
+/// A stash tab record (reader `0x141ce2e20`, client entry 0x68 bytes). Optional fields
+/// follow when `flags` bit 0x20 (8 bytes, +0x00), 0x10 (`u8`, +0x3c) or 0x40 (4 bytes, +0x3f)
+/// is set; those are not supported (keep the bits clear).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StashTab {
+    pub unk_28: u32,
+    pub unk_2c: u32,
+    /// Tab name (+0x08).
+    pub name: String,
+    /// Byte string at +0x48 (empty officially).
+    pub text_48: String,
+    /// Tab index (+0x38).
+    pub index: u16,
+    /// +0x3d.
+    pub flags: u8,
+    pub unk_3e: u8,
+    /// +0x3a (`0xffff` officially: no parent?).
+    pub unk_3a: u16,
+    /// +0x30, +0x31, +0x32 (a colour?), +0x34.
+    pub bytes: [u8; 4],
+}
+
+impl StashTab {
+    /// A plain tab as official servers send them for a new account.
+    pub fn plain(index: u16, name: &str) -> Self {
+        Self {
+            name: name.into(),
+            index,
+            unk_3a: 0xffff,
+            ..Default::default()
+        }
+    }
+
+    fn encode(&self, w: &mut Writer) {
+        assert_eq!(
+            self.flags & 0x70,
+            0,
+            "optional stash tab fields are not implemented"
+        );
+        w.u32(self.unk_28)
+            .u32(self.unk_2c)
+            .wstring(&self.name)
+            .astring(&self.text_48)
+            .u16(self.index)
+            .u8(self.flags)
+            .u8(self.unk_3e)
+            .u16(self.unk_3a)
+            .bytes(&self.bytes);
+    }
+
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let tab = Self {
+            unk_28: r.u32()?,
+            unk_2c: r.u32()?,
+            name: r.wstring()?,
+            text_48: r.astring()?,
+            index: r.u16()?,
+            flags: r.u8()?,
+            unk_3e: r.u8()?,
+            unk_3a: r.u16()?,
+            bytes: r.array()?,
+        };
+        if tab.flags & 0x70 != 0 {
+            return Err(DecodeError::Invalid {
+                offset: r.position(),
+                what: "stash tab optional fields not supported",
+            });
+        }
+        Ok(tab)
+    }
 }
 
 /// [`CharacterState::flags`] byte 1 bit 6: full game access (the escape menu's "Get Full
@@ -370,9 +445,13 @@ impl Message for InitialState {
             .u8(self.flags)
             .u8(self.characters.len() as u8);
         for c in &self.characters {
-            w.u16(c.unk_00.len() as u16)
-                .u16(c.unk_18.len() as u16)
-                .u8(c.pairs.len() as u8);
+            for list in [&c.stash_tabs, &c.guild_tabs] {
+                w.u16(list.len() as u16);
+                for tab in list {
+                    tab.encode(w);
+                }
+            }
+            w.u8(c.pairs.len() as u8);
             for (a, b) in &c.pairs {
                 w.u32(*a).u32(*b);
             }
@@ -398,18 +477,18 @@ impl Message for InitialState {
             flags: r.u8()?,
             ..Default::default()
         };
-        let unsupported = |r: &Reader<'_>| DecodeError::Invalid {
-            offset: r.position(),
-            what: "InitialState 0x68-byte records not supported",
+        let tabs = |r: &mut Reader<'_>| -> Result<Vec<StashTab>, DecodeError> {
+            (0..r.u16()?).map(|_| StashTab::decode(r)).collect()
         };
         for _ in 0..r.u8()? {
-            if r.u16()? != 0 || r.u16()? != 0 {
-                return Err(unsupported(r));
-            }
+            let stash_tabs = tabs(r)?;
+            let guild_tabs = tabs(r)?;
             let pairs = (0..r.u8()?)
                 .map(|_| Ok((r.u32()?, r.u32()?)))
                 .collect::<Result<_, DecodeError>>()?;
             m.characters.push(CharacterState {
+                stash_tabs,
+                guild_tabs,
                 pairs,
                 text: r.wstring()?,
                 flags: r.array()?,
