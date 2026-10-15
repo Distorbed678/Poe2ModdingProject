@@ -19,6 +19,7 @@ sha2.workspace = true
 toml.workspace = true
 ash.workspace = true
 windows-sys.workspace = true
-imgui = { version = "0.12", features = ["tables-api"] }
-imgui-rs-vulkan-renderer = "1.16"
+imgui = { package = "dear-imgui-rs", version = "0.20" }
+dear-imgui-ash = "0.20"
+dear-implot = "0.20"
 png = "0.17"

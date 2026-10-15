@@ -99,7 +99,7 @@ impl LogView {
                 .iter()
                 .map(|&i| self.records[i].line.as_str())
                 .collect();
-            ui.set_clipboard_text(text.join("\n"));
+            crate::ui::set_clipboard(&text.join("\n"));
         }
         self.refresh();
         ui.text_disabled(format!(
@@ -109,9 +109,9 @@ impl LogView {
             crate::host::session_dir().display()
         ));
         ui.child_window("log_lines")
-            .horizontal_scrollbar(true)
-            .build(|| {
-                let mut clipper = ListClipper::new(self.shown.len() as i32).begin(ui);
+            .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
+            .build(ui, || {
+                let mut clipper = ListClipper::new(self.shown.len()).begin(ui);
                 while clipper.step() {
                     for row in clipper.display_start()..clipper.display_end() {
                         let r = &self.records[self.shown[row as usize]];
@@ -125,7 +125,7 @@ impl LogView {
                     }
                 }
                 if self.follow && ui.scroll_y() >= ui.scroll_max_y() - 40.0 {
-                    ui.set_scroll_here_y_with_ratio(1.0);
+                    ui.set_scroll_here_y(1.0);
                 }
             });
     }

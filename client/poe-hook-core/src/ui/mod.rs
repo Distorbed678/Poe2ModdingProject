@@ -70,11 +70,24 @@ impl App {
     }
 }
 
+/// Copies text to the system clipboard.
+pub fn set_clipboard(text: &str) {
+    let c = std::ffi::CString::new(text.replace('\0', "?")).unwrap_or_default();
+    unsafe { imgui::sys::igSetClipboardText(c.as_ptr()) };
+}
+
+/// Top-left position that centres a one-line window of `text` horizontally.
+fn centred(ui: &Ui, text: &str, y: f32) -> [f32; 2] {
+    let [w, _] = ui.io().display_size();
+    let tw = ui.calc_text_size(text)[0];
+    [(w - tw) * 0.5 - 8.0, y]
+}
+
+const BADGE: &str = "OFFICIAL: read-only";
+
 fn badge(ui: &Ui) {
-    let [w, _] = ui.io().display_size;
     ui.window("##read-only")
-        .position([w * 0.5, 6.0], Condition::Always)
-        .position_pivot([0.5, 0.0])
+        .position(centred(ui, BADGE, 6.0), Condition::Always)
         .flags(
             WindowFlags::NO_DECORATION
                 | WindowFlags::NO_INPUTS
@@ -85,7 +98,7 @@ fn badge(ui: &Ui) {
         )
         .bg_alpha(0.75)
         .build(|| {
-            ui.text_colored([1.0, 0.75, 0.2, 1.0], "OFFICIAL: read-only");
+            ui.text_colored([1.0, 0.75, 0.2, 1.0], BADGE);
         });
 }
 
@@ -98,10 +111,9 @@ fn notices(ui: &Ui) {
     if list.is_empty() {
         return;
     }
-    let [w, _] = ui.io().display_size;
+    let longest = list.iter().max_by_key(|s| s.len()).cloned().unwrap_or_default();
     ui.window("##notices")
-        .position([w * 0.5, 44.0], Condition::Always)
-        .position_pivot([0.5, 0.0])
+        .position(centred(ui, &longest, 44.0), Condition::Always)
         .flags(
             WindowFlags::NO_DECORATION
                 | WindowFlags::NO_INPUTS

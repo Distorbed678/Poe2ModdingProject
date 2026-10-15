@@ -50,6 +50,11 @@ pub unsafe extern "C" fn poe_core_start(host: *const HostApi) -> *const CoreApi 
         return std::ptr::null();
     }
     host::set(host);
+    // Release builds abort on panic: log it first (otherwise the game just vanishes).
+    std::panic::set_hook(Box::new(|info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        log::error!("PANIC: {info}\n{bt}");
+    }));
     let loaded = Config::load(&poe_hook_shared::exe_dir().join("poe-hook.toml"));
     log::set_max_level(loaded.log.level);
     CONFIG.set(loaded).ok();

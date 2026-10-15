@@ -7,7 +7,7 @@
 //! waits on instead. Slots rotate in step with the renderer's per-frame buffers.
 
 use ash::vk::{self, Handle};
-use imgui_rs_vulkan_renderer::{Options, Renderer};
+use dear_imgui_ash::{AshRenderer, AshRendererConfig, Options, TextureRetirementBatch};
 use poe_hook_shared::abi::VulkanState;
 
 /// Frames in flight (command buffers, fences, semaphores; also the renderer's mesh buffers).
@@ -41,7 +41,12 @@ pub struct Gpu {
     slots: Vec<Slot>,
     next: usize,
     target: Option<Target>,
-    renderer: Option<Renderer>,
+    renderer: Option<AshRenderer>,
+    /// Render pass kept across swapchain rebuilds while the format stays the same (the
+    /// renderer's pipeline is built for it).
+    render_pass: Option<(vk::Format, vk::RenderPass)>,
+    /// Texture retirements waiting for the fence of the frame that last used them.
+    retirements: Vec<(TextureRetirementBatch, vk::Fence)>,
     queue: vk::Queue,
     instance: ash::Instance,
     physical: vk::PhysicalDevice,
@@ -116,6 +121,8 @@ impl Gpu {
             next: 0,
             target: None,
             renderer: None,
+            render_pass: None,
+            retirements: Vec::new(),
             queue,
             instance,
             physical: vk::PhysicalDevice::from_raw(state.physical_device),
@@ -156,29 +163,35 @@ impl Gpu {
         }
         self.wait_idle();
         self.drop_target();
-        let target = self.create_target(state)?;
-        match &mut self.renderer {
-            Some(r) => r
-                .set_render_pass(target.render_pass)
-                .map_err(|e| format!("renderer render pass: {e}"))?,
-            None => {
-                self.renderer = Some(
-                    Renderer::with_default_allocator(
-                        &self.instance,
-                        self.physical,
-                        self.device.clone(),
-                        self.queue,
-                        self.pool,
-                        target.render_pass,
-                        ctx,
-                        Some(Options {
-                            in_flight_frames: SLOTS,
-                            ..Default::default()
-                        }),
-                    )
+        let format = vk::Format::from_raw(state.format);
+        if self.render_pass.is_some_and(|(f, _)| f != format) {
+            self.shutdown_renderer(ctx);
+        }
+        if self.render_pass.is_none() {
+            self.render_pass = Some((format, self.create_render_pass(format)?));
+        }
+        let render_pass = self.render_pass.unwrap().1;
+        let target = self.create_target(state, render_pass)?;
+        if self.renderer.is_none() {
+            let srgb = matches!(
+                format,
+                vk::Format::B8G8R8A8_SRGB | vk::Format::R8G8B8A8_SRGB | vk::Format::A8B8G8R8_SRGB_PACK32
+            );
+            let config = AshRendererConfig::with_render_pass(
+                self.device.clone(),
+                self.queue,
+                self.pool,
+                render_pass,
+            )
+            .with_options(Options {
+                in_flight_frames: SLOTS,
+                framebuffer_srgb: srgb,
+                ..Default::default()
+            });
+            self.renderer = Some(
+                unsafe { AshRenderer::with_default_allocator(&self.instance, self.physical, config, ctx) }
                     .map_err(|e| format!("renderer: {e}"))?,
-                );
-            }
+            );
         }
         log::info!(
             "overlay: target {}x{} {:?}, {} images",
@@ -191,22 +204,21 @@ impl Gpu {
         Ok(())
     }
 
-    fn create_target(&self, state: &VulkanState) -> Result<Target> {
-        let swapchain = vk::SwapchainKHR::from_raw(state.swapchain);
-        let images = if state.image_count > 0 {
-            state.images[..state.image_count as usize]
-                .iter()
-                .map(|&i| vk::Image::from_raw(i))
-                .collect()
-        } else {
-            unsafe { self.swapchain_fn.get_swapchain_images(swapchain) }
-                .map_err(vkerr("swapchain images"))?
-        };
-        let format = vk::Format::from_raw(state.format);
-        let extent = vk::Extent2D {
-            width: state.width,
-            height: state.height,
-        };
+    /// Releases the renderer (and the render pass it was built for).
+    pub fn shutdown_renderer(&mut self, ctx: &mut imgui::Context) {
+        self.wait_idle();
+        if let Some(mut r) = self.renderer.take()
+            && let Err(e) = r.shutdown(ctx)
+        {
+            log::warn!("overlay: renderer shutdown: {e}");
+        }
+        self.retirements.clear();
+        if let Some((_, rp)) = self.render_pass.take() {
+            unsafe { self.device.destroy_render_pass(rp, None) };
+        }
+    }
+
+    fn create_render_pass(&self, format: vk::Format) -> Result<vk::RenderPass> {
         let attachment = vk::AttachmentDescription::default()
             .format(format)
             .samples(vk::SampleCountFlags::TYPE_1)
@@ -233,7 +245,7 @@ impl Gpu {
         let attachments = [attachment];
         let subpasses = [subpass];
         let dependencies = [dependency];
-        let render_pass = unsafe {
+        unsafe {
             self.device.create_render_pass(
                 &vk::RenderPassCreateInfo::default()
                     .attachments(&attachments)
@@ -242,7 +254,25 @@ impl Gpu {
                 None,
             )
         }
-        .map_err(vkerr("render pass"))?;
+        .map_err(vkerr("render pass"))
+    }
+
+    fn create_target(&self, state: &VulkanState, render_pass: vk::RenderPass) -> Result<Target> {
+        let swapchain = vk::SwapchainKHR::from_raw(state.swapchain);
+        let images = if state.image_count > 0 {
+            state.images[..state.image_count as usize]
+                .iter()
+                .map(|&i| vk::Image::from_raw(i))
+                .collect()
+        } else {
+            unsafe { self.swapchain_fn.get_swapchain_images(swapchain) }
+                .map_err(vkerr("swapchain images"))?
+        };
+        let format = vk::Format::from_raw(state.format);
+        let extent = vk::Extent2D {
+            width: state.width,
+            height: state.height,
+        };
         let mut views = Vec::new();
         let mut framebuffers = Vec::new();
         for &image in &images {
@@ -292,9 +322,10 @@ impl Gpu {
         &mut self,
         image_index: u32,
         wait: &[vk::Semaphore],
-        draw_data: &imgui::DrawData,
+        ctx: &mut imgui::Context,
         extra: impl FnOnce(&ash::Device, vk::CommandBuffer),
     ) -> Result<(vk::Semaphore, vk::Fence)> {
+        self.complete_retirements();
         let (Some(target), Some(renderer)) = (&self.target, &mut self.renderer) else {
             return Err("no target".into());
         };
@@ -329,8 +360,18 @@ impl Gpu {
                     }),
                 vk::SubpassContents::INLINE,
             );
+            let consumer = renderer
+                .renderer_consumer()
+                .map_err(|e| format!("imgui consumer: {e}"))?;
+            let pending = ctx.render(consumer);
+            let (frame, retirement) = renderer
+                .prepare_frame(pending)
+                .map_err(|e| format!("imgui prepare: {e}"))?;
+            if let Some(batch) = retirement {
+                self.retirements.push((batch, slot.fence));
+            }
             renderer
-                .cmd_draw(slot.cmd, draw_data)
+                .cmd_draw(slot.cmd, frame)
                 .map_err(|e| format!("imgui draw: {e}"))?;
             d.cmd_end_render_pass(slot.cmd);
             extra(d, slot.cmd);
@@ -349,6 +390,21 @@ impl Gpu {
         slot.used = true;
         self.next = (self.next + 1) % SLOTS;
         Ok((slot.done, slot.fence))
+    }
+
+    /// Releases retired textures whose last frame has finished.
+    fn complete_retirements(&mut self) {
+        let Some(renderer) = &mut self.renderer else { return };
+        let device = &self.device;
+        self.retirements.retain(|(batch, fence)| {
+            if unsafe { device.get_fence_status(*fence) } != Ok(true) {
+                return true;
+            }
+            if let Err(e) = unsafe { renderer.complete_texture_retirements_with_fences(*batch, &[*fence]) } {
+                log::warn!("overlay: texture retirement: {e}");
+            }
+            false
+        });
     }
 
     /// Waits until no overlay frame is in flight.
@@ -376,9 +432,6 @@ impl Gpu {
             for v in t.views {
                 self.device.destroy_image_view(v, None);
             }
-            // The renderer's pipeline was built for this render pass; it gets the next one
-            // (`set_render_pass`) before it draws again.
-            self.device.destroy_render_pass(t.render_pass, None);
         }
     }
 }
@@ -386,8 +439,14 @@ impl Gpu {
 impl Drop for Gpu {
     fn drop(&mut self) {
         self.wait_idle();
-        self.renderer.take();
+        // The renderer is shut down with its imgui context by the owner (`shutdown_renderer`).
+        if self.renderer.is_some() {
+            log::warn!("overlay: renderer dropped without shutdown");
+        }
         self.drop_target();
+        if let Some((_, rp)) = self.render_pass.take() {
+            unsafe { self.device.destroy_render_pass(rp, None) };
+        }
         unsafe {
             for s in &self.slots {
                 self.device.destroy_fence(s.fence, None);
