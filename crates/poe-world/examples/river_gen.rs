@@ -227,6 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         });
     }
+    let mut vends: Vec<[Option<[(i32, i32); 2]>; 2]> = vec![[None, None]; route.len()];
     for p in &placed {
         let node = p.node;
         let (rx, ry) = (p.pos.0 * 23, p.pos.1 * 23);
@@ -262,9 +263,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let et = types.edge(files, &graph.edges[ei].edge_type)?;
             let end = if et.virtual_edge {
-                let a = at(p.key.virtual_exits[side]);
-                let b = at(p.key.exits[side]);
-                ((a.0 + b.0) / 2, (a.1 + b.1) / 2)
+                let mut v1 = at(p.key.virtual_exits[side]);
+                let mut v2 = at(p.key.exits[side]);
+                let which = (!from) as usize;
+                // `0x1420c6860`: order the pair by the side of the edge they fall on.
+                let n = placed_graph.nodes[node];
+                let q = if from {
+                    r.points.first().copied().unwrap_or(r.ends[1])
+                } else {
+                    r.points.last().copied().unwrap_or(r.ends[0])
+                };
+                let mut c = (v1.1 - q.1) * (n.0 - q.0) - (v1.0 - q.0) * (n.1 - q.1);
+                let c2 = (n.0 - q.0) * (v2.1 - q.1) - (n.1 - q.1) * (v2.0 - q.0);
+                if (c2 < 0) == (c < 0) {
+                    c = ((v1.0 + v2.0) / 2 - n.0) * (v1.1 - n.1) - (v1.0 - n.0) * ((v1.1 + v2.1) / 2 - n.1);
+                }
+                if c < 0 {
+                    std::mem::swap(&mut v1, &mut v2);
+                }
+                let m = ((v1.0 + v2.0) / 2, (v2.1 + v1.1) / 2);
+                // `0x1420c5b50`: and by the side of the exit direction.
+                let d = SIDE_DIR[side];
+                if (v1.1 - (d.1 + m.1)) * (m.0 - (d.0 + m.0)) - (v1.0 - (d.0 + m.0)) * (m.1 - (d.1 + m.1)) < 0 {
+                    std::mem::swap(&mut v1, &mut v2);
+                }
+                vends[route_index[ei]][which] = Some([v1, v2]);
+                m
             } else {
                 at(p.key.exits[side])
             };
@@ -343,6 +367,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             edge_type: e.edge_type.to_ascii_lowercase(),
             virtual_edge: et.virtual_edge,
             width: (e.tail.first().copied().unwrap_or(0), e.tail.get(1).copied().unwrap_or(0)),
+            chirality: e.values.get(1).copied().unwrap_or(0) != 0,
+            vends: vends[ri],
+            split: false,
+            fixed: false,
         });
     }
     for p in &placed {
@@ -388,6 +416,138 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!("graph after smoothing: {same} same, {diff} different");
+
+    // Virtual edges split into their two banks.
+    let mut split_types = std::collections::HashMap::new();
+    let mut want: Vec<String> = lg.edges.iter().map(|e| e.edge_type.clone()).collect();
+    while let Some(t) = want.pop() {
+        if split_types.contains_key(&t) {
+            continue;
+        }
+        let et = types.edge(files, &t)?.clone();
+        for s in &et.splits {
+            if !s.0.is_empty() {
+                want.push(s.0.clone());
+            }
+        }
+        split_types.insert(
+            t,
+            poe_world::split::SplitType {
+                virtual_edge: et.virtual_edge,
+                grounds: et.grounds.clone(),
+                height_change: et.height_change,
+                splits: et.splits.clone(),
+            },
+        );
+    }
+    let lookup = |t: &str| split_types.get(&t.to_ascii_lowercase()).cloned().unwrap_or_default();
+    poe_world::split::split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), &mut rng);
+    let dump: Vec<Vec<String>> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter(|l| l.split('\t').nth(1) == Some("graph_after_split"))
+        .map(|l| l.split('\t').map(String::from).collect())
+        .collect();
+    let (mut same, mut diff) = (0, 0);
+    for l in &dump {
+        let args = &l[3];
+        let pts = l.get(4).cloned().unwrap_or_default();
+        let mut it = args.split_whitespace();
+        let idx: usize = it.next().unwrap().parse()?;
+        if l[2] == "node" {
+            let pos = it.next().unwrap();
+            let ours = lg.nodes.get(idx).map(|n| format!("{},{}", n.pos.0, n.pos.1)).unwrap_or_default();
+            if ours == pos { same += 1 } else { diff += 1; println!("split node {idx}: ours {ours} client {pos}"); }
+        } else {
+            let ends = it.next().unwrap();
+            let et = it.next().unwrap();
+            let ours = lg.edges.get(idx).map(|e| {
+                format!("{}->{} {} [{}]", e.from, e.to, e.edge_type.rsplit('/').next().unwrap_or(""),
+                    e.points.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" "))
+            }).unwrap_or_default();
+            let theirs = format!("{ends} {} [{pts}]", et.to_ascii_lowercase());
+            if ours == theirs { same += 1 } else { diff += 1; println!("split edge {idx}: ours {ours}\n  client {theirs}"); }
+        }
+    }
+    println!("graph after split: {same} same, {diff} different");
+
+    // Up to tile placement: rounding, border nodes (`0x1420cade0`), slot compaction, rounding,
+    // end points (`0x1420b6660`).
+    poe_world::smoothing::round_corners(&mut lg);
+    for n in 0..graph.nodes.len() {
+        if !graph.nodes[n].room_type.is_empty() {
+            continue;
+        }
+        let edges: Vec<usize> = lg.nodes[n].slots.iter().flatten().copied().collect();
+        if edges.len() != 1 {
+            continue;
+        }
+        let e = edges[0];
+        let et = types.edge(files, &lg.edges[e].edge_type)?.clone();
+        let b = et.size as i32;
+        let (x, y) = lg.nodes[n].pos;
+        let (tx, ty) = ((x / 23).min(tiles.0 - 1), (y / 23).min(tiles.1 - 1));
+        let near = !(b <= tx && b <= ty && tx < tiles.0 - b && ty < tiles.1 - b);
+        if et.virtual_edge && !near {
+            continue;
+        }
+        if !near {
+            println!("node {n}: a dead end inside the map (tile node) is not ported yet");
+            continue;
+        }
+        let w = (lg.edges[e].from != n) as usize;
+        let mut pos = lg.nodes[n].pos;
+        let mut off = lg.edges[e].offsets[w];
+        if tx < b {
+            pos.0 = -1;
+            off.0 = 1;
+        } else if ty < b {
+            pos.1 = -1;
+            off.1 = 1;
+        }
+        if tx < tiles.0 - b {
+            if tiles.1 - b <= ty {
+                pos.1 = tiles.1 * 23;
+                off.1 = -1;
+            }
+        } else {
+            pos.0 = tiles.0 * 23;
+            off.0 = -1;
+        }
+        lg.nodes[n].pos = pos;
+        lg.edges[e].offsets[w] = off;
+    }
+    poe_world::smoothing::compact_slots(&mut lg);
+    poe_world::smoothing::round_corners(&mut lg);
+    poe_world::smoothing::add_end_points(&mut lg);
+    let dump: Vec<Vec<String>> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter(|l| l.split('\t').nth(1) == Some("graph_before_tiles"))
+        .map(|l| l.split('\t').map(String::from).collect())
+        .collect();
+    let (mut same, mut diff) = (0, 0);
+    for l in &dump {
+        let args = &l[3];
+        let pts = l.get(4).cloned().unwrap_or_default();
+        let mut it = args.split_whitespace();
+        let idx: usize = it.next().unwrap().parse()?;
+        if l[2] == "node" {
+            let pos = it.next().unwrap();
+            let ours = lg.nodes.get(idx).map(|n| format!("{},{}", n.pos.0, n.pos.1)).unwrap_or_default();
+            if ours == pos { same += 1 } else { diff += 1; println!("tiles node {idx}: ours {ours} client {pos}"); }
+        } else {
+            let ends = it.next().unwrap();
+            let et = it.next().unwrap();
+            let off = args.split(" off [").nth(1).and_then(|r| r.split(']').next()).unwrap_or("");
+            let ours = lg.edges.get(idx).map(|e| {
+                format!("{}->{} {} off {}, {}, {}, {} [{}]", e.from, e.to, e.edge_type.rsplit('/').next().unwrap_or(""),
+                    e.offsets[0].0, e.offsets[0].1, e.offsets[1].0, e.offsets[1].1,
+                    e.points.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" "))
+            }).unwrap_or_default();
+            let theirs = format!("{ends} {} off {off} [{pts}]", et.to_ascii_lowercase());
+            if ours == theirs { same += 1 } else { diff += 1; println!("tiles edge {idx}: ours {ours}\n  client {theirs}"); }
+        }
+    }
+    println!("graph before tiles: {same} same, {diff} different");
 
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {

@@ -307,6 +307,26 @@ replays the logged arc steps). After routing, `0x1420bd650(layout, 1)` (no RNG):
 
 **Verified:** the whole graph after smoothing equals the client's (seed 1000).
 
+**Virtual edges and the last graph passes** (`crates/poe-world/src/split.rs`; DLL dumps
+`graph_after_split`, `graph_before_tiles`):
+1. Room exits of virtual edges get a pair of virtual end points (virtual exit, exit), ordered by
+   `0x1420c6860` (side of the edge they fall on) and `0x1420c5b50` (side of the exit direction).
+2. `0x1420bc400`: edges with virtual end points first (from the end that has them), then the
+   rest; each chain of virtual edges through degree-2 nodes is split (`0x1420bb4f0`): the edge is
+   cloned, one copy takes split type 0 and the other split type 1 with chirality flags
+   (`0x1420bb0c0`), the node moves to the first virtual point and a new node at the second takes
+   the clone; at a junction a width `below((max₁+max₂−min₁−min₂)/2 + 1)` and a miter
+   (`0x1420b9c30`) give the points, and `0x1420ba050` re-attaches whichever edge does not cross;
+   every internal point gets `below(max−min+1)+min` and the two banks are placed by the miter
+   (`0x1420baa20`); at the chain's far end the far node takes the second virtual point and a new
+   node the first. Off-map ends (`0x1420ba340`) are not ported yet.
+3. Then: rounding again, nodes sorted by priority (stable, `0x141f04fe0`), dead ends near the
+   map border pushed one cell off the map with an inward offset (`0x1420cade0`), node slots
+   compacted (`0x1420bd5f0`), rounding again, and every edge gets a point one step out of each
+   end node along its offset (`0x1420b6660`).
+
+**Verified:** the graph before tile placement equals the client's; 5055 draws in step.
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,

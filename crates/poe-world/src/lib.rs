@@ -15,6 +15,7 @@ pub mod layout;
 pub mod rng;
 pub mod rooms;
 pub mod smoothing;
+pub mod split;
 pub mod routing;
 pub mod tdt;
 mod text;
