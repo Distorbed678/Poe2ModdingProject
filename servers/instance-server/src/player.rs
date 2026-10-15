@@ -9,10 +9,11 @@
 use poe_data::views::GrantedSkill;
 use poe_game::movement::{Motion, Mover, Open};
 use poe_proto::{
-    entity::Skill,
+    entity::{PLAYER_COMPONENT, PlayerDelta, Skill},
     instance::{
-        AimTarget, MoveDirection, MoveDirectionUpdate, SetAimTarget, SetOrientation, SimulationHeader, SprintInput,
-        SprintState, StartAction, UpdateActionTarget, UpdateSkillTarget, UseSkill,
+        AimTarget, ComponentDelta, MoveDirection, MoveDirectionUpdate, SetAimTarget,
+        SetOrientation, SimulationHeader, SprintInput, SprintState, StartAction,
+        UpdateActionTarget, UpdateSkillTarget, UseSkill,
     },
 };
 use tracing::{debug, info};
@@ -35,6 +36,8 @@ pub enum Reply {
     Orientation(SetOrientation),
     /// Turn toward the cursor (official echo of the client's AimTarget).
     Aim(SetAimTarget),
+    /// A component's state changed (the Player component's combat stance).
+    Component(ComponentDelta),
 }
 
 /// The action the player is running (started by a StartAction).
@@ -102,6 +105,11 @@ pub struct Player {
     /// The client reports its aim itself (as with official servers): the cursor facing from
     /// the DLL's reports (`face_cursor`) is not used any more.
     aim_seen: bool,
+    /// The Player component's combat stance, and whether the client still has to be told.
+    /// Official servers turn it on with the first Move; the client only reports its cursor
+    /// (AimTarget mode 2) while it is on.
+    combat_stance: bool,
+    stance_changed: bool,
     /// Length of a simulation frame in seconds (`tick_ms`).
     pub frame_seconds: f32,
     /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
@@ -223,6 +231,8 @@ impl Player {
             facing: None,
             aim: None,
             aim_seen: false,
+            combat_stance: false,
+            stance_changed: false,
             walkable: None,
             frame_offset: None,
             in_roll: false,
@@ -347,6 +357,9 @@ impl Player {
             self.mover.advance(dt, &Open);
         }
         let mut out = Vec::new();
+        if std::mem::take(&mut self.stance_changed) {
+            out.push(Reply::Component(self.stance_delta()));
+        }
         if self.aim_seen {
             // The client's own aim drives the facing; a facing the DLL path locked is released.
             if self.facing.is_some_and(|f| f.1) {
@@ -492,6 +505,9 @@ impl Player {
     /// waits for the roll to end; during a sprint it steers the sprint.
     pub fn on_move_direction(&mut self, req: &MoveDirection) -> Option<MoveDirectionUpdate> {
         self.wasd = (req.x, req.y);
+        if req.x != 0 || req.y != 0 {
+            self.enter_combat_stance();
+        }
         if self.rolling() {
             if self.client.is_some() {
                 // The client keeps WASD input during a roll and walks (or sprints) on when the
@@ -887,6 +903,34 @@ impl Player {
 
     /// The client's aim (cursor) report. Official servers echo a cell in the next frame as
     /// SetAimTarget, which turns the player toward it; entity aims (mode 3) are not echoed.
+    /// The player acted (moved or used a skill): it enters combat stance, sent in the next
+    /// frame. Official servers do it with the first Move; that WASD movement does the same is
+    /// an assumption.
+    fn enter_combat_stance(&mut self) {
+        if !self.combat_stance {
+            self.combat_stance = true;
+            self.stance_changed = true;
+        }
+    }
+
+    fn stance_delta(&self) -> ComponentDelta {
+        ComponentDelta {
+            // Official: after all entities (order key 0xffffffff).
+            header: SimulationHeader {
+                entity_id: self.entity_id,
+                unk_14: 0xffff_ffff,
+                unk_18: 0,
+                unk_1a: 0,
+            },
+            component: PLAYER_COMPONENT,
+            delta: PlayerDelta {
+                combat_stance: Some(self.combat_stance),
+                ..Default::default()
+            }
+            .encode(),
+        }
+    }
+
     pub fn on_aim_target(&mut self, req: &AimTarget) {
         if let Some(cell) = req.cell {
             if !self.aim_seen {
@@ -945,6 +989,7 @@ impl Player {
         } else {
             return None;
         }
+        self.enter_combat_stance();
         let action_id = self.next_action_id();
         self.current = Some(Current {
             action_id,
@@ -1035,7 +1080,26 @@ mod tests {
             id_name: "DodgeRollPlayer".into(),
             stats: Vec::new(),
         };
-        Player::new(1, (100, 100), 37.0, vec![roll], Some(0x2000_2909))
+        let mut p = Player::new(1, (100, 100), 37.0, vec![roll], Some(0x2000_2909));
+        // Already in combat stance, so the movement tests only see movement replies.
+        p.combat_stance = true;
+        p
+    }
+
+    #[test]
+    fn first_action_enters_combat_stance_once() {
+        let mut p = player();
+        p.combat_stance = false;
+        p.on_use_skill(&use_skill(0x2000_2909, 5, 0)).unwrap();
+        let out = p.tick(0.033);
+        assert!(matches!(&out[..], [Reply::Component(c)]
+            if c.component == 6 && c.delta == [0x00, 0x04, 0x01] && c.header.unk_14 == 0xffff_ffff));
+        p.on_use_skill(&use_skill(0x2000_2909, 0, 5)).unwrap();
+        assert!(
+            !p.tick(0.033)
+                .iter()
+                .any(|r| matches!(r, Reply::Component(_)))
+        );
     }
 
     fn use_skill(skill: u32, x: i32, y: i32) -> UseSkill {

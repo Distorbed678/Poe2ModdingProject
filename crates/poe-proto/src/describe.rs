@@ -101,6 +101,7 @@ pub fn describe(name: &str, direction: Direction, body: &[u8]) -> Option<Describ
         instance::AddInventory,
         instance::AimTarget,
         instance::SetAimTarget,
+        instance::ComponentDelta,
     )
 }
 

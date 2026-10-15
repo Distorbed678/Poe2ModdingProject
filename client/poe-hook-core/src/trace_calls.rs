@@ -85,9 +85,10 @@ unsafe extern "win64" fn on_hit(regs: *mut Registers, user: usize) {
         })
         .unwrap_or_default();
     log::info!(
-        "hit {:#x} #{n} rax={:#x}{rax_target}{handler} rcx={:#x} rdx={:#x} r8={:#x} r9={:#x} stack=[{stack}]",
+        "hit {:#x} #{n} rax={:#x}{rax_target}{handler} rbx={:#x} rcx={:#x} rdx={:#x} r8={:#x} r9={:#x} stack=[{stack}]",
         target.ghidra,
         r.rax,
+        r.rbx,
         r.rcx,
         r.rdx,
         r.r8,

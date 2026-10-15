@@ -58,6 +58,8 @@ ExitSession = 0x0174
 SimulationTick = 0x02f4
 # Turn an entity toward a cell or entity (the echo of the client's AimTarget).
 SetAimTarget = 0x01dc
+# A component's delta (u8 component index + the component's own delta format).
+ComponentDelta = 0x02f9
 SimulationFrameValue = 0x02f5
 SetPause = 0x01fe
 AddObject = 0x02f7

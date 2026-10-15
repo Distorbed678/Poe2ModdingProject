@@ -162,6 +162,7 @@ Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the playe
 - The game reads WASD through Raw Input, so posted key messages do not move the player.
 - **`in:<vk>[:ms]`** posts `WM_INPUT` with a marker handle. The DLL hooks `GetRawInputData` (user32) to return a synthetic keyboard record for that handle, and `GetKeyState` reports the key as held meanwhile.
 - **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
+- **`POE_HOOK_FAKE_FOCUS`** (set by `tools/test-run.sh`): the hooked `GetForegroundWindow` returns the game's own window (`*[0x1445d8308]`), so a client on another desktop still sends cursor reports (AimTarget checks the foreground window). Never while read-only.
 - **Plain keys (`0x20`)** are still posted messages. Space (dodge roll) is read that way.
 - **`text:<chars>`** posts one `WM_CHAR` per character, for text boxes such as the character name.
 - **`inpress:x,y` / `inrelease:x,y`** hold and release the left button at a client position (held click-to-move); the hooked `GetKeyState` reports `VK_LBUTTON` held meanwhile.

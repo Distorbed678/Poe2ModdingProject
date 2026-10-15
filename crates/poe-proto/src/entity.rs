@@ -227,6 +227,54 @@ impl Player {
     }
 }
 
+/// A Player component delta (component vfunc +0xb0, `0x141dd0a10`): a `u16` field mask
+/// (raw, little-endian), then the fields whose bit is set, in the reader's order. Only the
+/// fields seen in official traffic are supported:
+/// - `0x0002` flag words: `u16` count (raw), then (`u8` key, `u64` bits) entries. Official
+///   servers send the whole set (5 at entry, key 0x08 added after the first Move).
+/// - `0x0400` combat stance (`u8`, +0x20c): the component's vfunc +0x138 (`0x141dd47e0`)
+///   sets +0x20d from it. While +0x20d is set the client reports its cursor cell
+///   (`AimTarget` mode 2, `0x14016ba40`) and the player turns toward it. Official servers
+///   send 1 at entry, 0 right after, and 1 again with the first Move.
+/// - `0x1000` a `u8` (+0x3e7, unknown; official: 1 right after entry).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlayerDelta {
+    pub flag_words: Option<Vec<(u8, u64)>>,
+    pub combat_stance: Option<bool>,
+    pub unk_3e7: Option<u8>,
+}
+
+/// Player component index in the player template (the official `ComponentDelta`s use 6).
+pub const PLAYER_COMPONENT: u8 = 6;
+
+impl PlayerDelta {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut mask = 0u16;
+        mask |= if self.flag_words.is_some() { 0x0002 } else { 0 };
+        mask |= if self.combat_stance.is_some() {
+            0x0400
+        } else {
+            0
+        };
+        mask |= if self.unk_3e7.is_some() { 0x1000 } else { 0 };
+        let mut w = Writer::new();
+        w.u16_le(mask);
+        if let Some(words) = &self.flag_words {
+            w.u16_le(words.len() as u16);
+            for (key, bits) in words {
+                w.u8(*key).bytes(&bits.to_le_bytes());
+            }
+        }
+        if let Some(on) = self.combat_stance {
+            w.u8(on as u8);
+        }
+        if let Some(v) = self.unk_3e7 {
+            w.u8(v);
+        }
+        w.into_vec()
+    }
+}
+
 /// Reader `0x1416d8090` (body `0x142147180`):
 /// - 3 × (`u8`, `u8`, `u32` length + UTF-16 string) (18 bytes when empty);
 /// - sub-reader `0x142149390`: `u8` flags, then (initial state) the skill container
@@ -323,6 +371,27 @@ mod tests {
         assert_eq!(size(&Component::Player(Player::default())), 39);
         assert_eq!(size(&Component::Inventories), 2);
         assert_eq!(size(&Component::Actor(Actor::default())), 48);
+    }
+
+    /// Official deltas (comp 6): `0014 00 01` and the entry's flag words + stance.
+    #[test]
+    fn player_delta_matches_official() {
+        let off = PlayerDelta {
+            combat_stance: Some(false),
+            unk_3e7: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(off.encode(), [0x00, 0x14, 0x00, 0x01]);
+        let on = PlayerDelta {
+            flag_words: Some(vec![(0x1f, 0x2000_0000), (0x08, 0x40_0000)]),
+            combat_stance: Some(true),
+            ..Default::default()
+        };
+        let mut expect = vec![0x02, 0x04, 0x02, 0x00];
+        expect.extend([0x1f, 0, 0, 0, 0x20, 0, 0, 0, 0]);
+        expect.extend([0x08, 0, 0, 0x40, 0, 0, 0, 0, 0]);
+        expect.push(1);
+        assert_eq!(on.encode(), expect);
     }
 
     #[test]

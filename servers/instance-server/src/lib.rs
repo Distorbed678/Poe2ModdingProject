@@ -459,9 +459,16 @@ impl InstanceServer {
                 "out-facing",
                 format_args!("{:.3}\t{}", m.angle, m.locked),
             ),
-            player::Reply::Aim(m) => {
-                self.trace(port, "out-aim", format_args!("{}\t{}\t{}", m.kind, m.x, m.y))
-            }
+            player::Reply::Aim(m) => self.trace(
+                port,
+                "out-aim",
+                format_args!("{}\t{}\t{}", m.kind, m.x, m.y),
+            ),
+            player::Reply::Component(m) => self.trace(
+                port,
+                "out-component",
+                format_args!("{}\t{:02x?}", m.component, m.delta),
+            ),
         }
         let table = &self.protocol.instance;
         Ok(match reply {
@@ -470,6 +477,7 @@ impl InstanceServer {
             player::Reply::Sprint(m) => table.encode(m)?,
             player::Reply::Orientation(m) => table.encode(m)?,
             player::Reply::Aim(m) => table.encode(m)?,
+            player::Reply::Component(m) => table.encode(m)?,
         })
     }
 }

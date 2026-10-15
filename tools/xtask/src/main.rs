@@ -73,10 +73,9 @@ fn main() -> Result<()> {
     let config = Config::load(&cli.config)?;
     match cli.cmd {
         Cmd::BuildDll { debug } => build_dll(&root, !debug).map(|_| ()),
-        Cmd::DeployClient {
-            no_build,
-            official,
-        } => deploy_client(&root, &config, !no_build, official),
+        Cmd::DeployClient { no_build, official } => {
+            deploy_client(&root, &config, !no_build, official)
+        }
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::RunClient { proton } => run_client(&root, &config, &proton),
@@ -106,10 +105,11 @@ fn build_dll(root: &Path, release: bool) -> Result<PathBuf> {
         cmd.arg("--release");
     }
     run(&mut cmd)?;
-    let out = client
-        .join("target")
-        .join(DLL_TARGET)
-        .join(if release { "release" } else { "debug" });
+    let out =
+        client
+            .join("target")
+            .join(DLL_TARGET)
+            .join(if release { "release" } else { "debug" });
     println!("built {}", out.display());
     Ok(out)
 }
@@ -118,10 +118,7 @@ fn dll_dir(root: &Path, build: bool) -> Result<PathBuf> {
     if build {
         build_dll(root, true)
     } else {
-        Ok(root
-            .join("client/target")
-            .join(DLL_TARGET)
-            .join("release"))
+        Ok(root.join("client/target").join(DLL_TARGET).join("release"))
     }
 }
 
@@ -162,7 +159,11 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
         &hook_cfg,
         None,
         "mode",
-        if official { "\"official\"" } else { "\"private\"" },
+        if official {
+            "\"official\""
+        } else {
+            "\"private\""
+        },
     )?;
     // Position reports go to the instance server's port only.
     set_hook_key(
@@ -182,7 +183,11 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
     println!(
         "deployed to {} ({})",
         game.display(),
-        if official { "official, read-only" } else { "private server" }
+        if official {
+            "official, read-only"
+        } else {
+            "private server"
+        }
     );
     Ok(())
 }
@@ -208,7 +213,12 @@ fn export_dll_data(config: &Config) -> Result<()> {
         }
     }
     std::fs::write(dir.join("action_types.tsv"), out)?;
-    println!("dll data -> {} ({} stats, {} action types)", dir.display(), stats.len(), actions.len());
+    println!(
+        "dll data -> {} ({} stats, {} action types)",
+        dir.display(),
+        stats.len(),
+        actions.len()
+    );
     Ok(())
 }
 
@@ -240,7 +250,10 @@ fn deploy_core(root: &Path, config: &Config, build: bool) -> Result<()> {
     let dlls = dll_dir(root, build)?;
     let target = config.game.game_dir.join(CORE_DLL);
     install(&dlls.join(CORE_DLL), &target)?;
-    println!("installed {} (a running client reloads it)", target.display());
+    println!(
+        "installed {} (a running client reloads it)",
+        target.display()
+    );
     Ok(())
 }
 
