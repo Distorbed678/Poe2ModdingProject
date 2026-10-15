@@ -176,3 +176,15 @@ pub fn stop() {
         unsafe { windows_sys::Win32::Networking::WinSock::closesocket(s) };
     }
 }
+
+/// The report socket and target (instance server address, our TCP port of the session), for
+/// the debug link ([`crate::devlink`]).
+pub fn link() -> Option<(SOCKET, SOCKADDR_IN, u16)> {
+    let s = SOCK.load(Ordering::Relaxed);
+    if s == INVALID_SOCKET {
+        return None;
+    }
+    let target = TARGET.lock().unwrap();
+    let (_, dest, port) = target.as_ref()?;
+    (*port != 0).then_some((s, *dest, *port))
+}

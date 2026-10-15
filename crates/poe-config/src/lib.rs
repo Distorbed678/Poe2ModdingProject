@@ -202,6 +202,11 @@ pub struct InstanceConfig {
     /// `[a, b, c, d, e, f]` (calibrated from dodge-roll targets, 2026-10-15).
     #[serde(default = "default_cursor_to_grid")]
     pub cursor_to_grid: [f32; 6],
+    /// Debug link for the client DLL's overlay (dev): send each session's simulation state to
+    /// the DLL (UDP, where its position reports come from) and accept its dev commands
+    /// (teleport, movement switches). Loopback only.
+    #[serde(default = "default_true")]
+    pub debug_link: bool,
 }
 
 fn default_cursor_to_grid() -> [f32; 6] {

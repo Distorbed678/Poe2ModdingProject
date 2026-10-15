@@ -750,6 +750,93 @@ impl Player {
         out
     }
 
+    /// Dev command (the client DLL's overlay, our server only): put the player on `cell`. The
+    /// client checks the cell of a direction update only when the direction is not zero
+    /// (`0x142149640`); in lockstep it then places the player on that cell's centre. So: a
+    /// minimal direction with the cell, then a stop, in the same frame.
+    pub fn teleport(&mut self, cell: (i32, i32)) -> Vec<Reply> {
+        self.wasd = (0, 0);
+        self.held_dir = None;
+        self.held_target = None;
+        self.pending_turn = None;
+        self.last_turn = None;
+        self.mover.place(cell);
+        info!(?cell, "teleport (dev command)");
+        let update = |dir_x| {
+            Reply::Direction(MoveDirectionUpdate {
+                header: self.header(),
+                dir_x,
+                dir_y: 0,
+                grid_x: cell.0,
+                grid_y: cell.1,
+                unk_30: false,
+            })
+        };
+        vec![update(1), update(0)]
+    }
+
+    /// The simulation state for the client DLL's debug link, as `key\tvalue` lines.
+    pub fn debug_state(&self) -> String {
+        let (at, vel) = self.predict(self.apply_frame - 1);
+        let mut s = String::new();
+        let mut kv = |k: &str, v: String| {
+            s.push_str(k);
+            s.push('\t');
+            s.push_str(&v);
+            s.push('\n');
+        };
+        kv("apply_frame", self.apply_frame.to_string());
+        kv("synced", self.synced.to_string());
+        kv("fresh", self.fresh.to_string());
+        kv("frame_offset", format!("{:?}", self.frame_offset));
+        kv(
+            "server_pos",
+            format!("{:.3} {:.3}", self.mover.x, self.mover.y),
+        );
+        kv("predicted_pos", format!("{:.3} {:.3}", at.0, at.1));
+        kv("predicted_vel", format!("{:.4} {:.4}", vel.0, vel.1));
+        if let Some(r) = &self.client {
+            kv("report_frame", r.frame.to_string());
+            kv("report_pos", format!("{:.3} {:.3}", r.x, r.y));
+            kv(
+                "report_action",
+                format!("{:#06x} {:#06x}", r.action, r.action2),
+            );
+        }
+        kv(
+            "velocity",
+            format!("{:.4} {:.4}", self.velocity.0, self.velocity.1),
+        );
+        kv("wasd", format!("{} {}", self.wasd.0, self.wasd.1));
+        kv("held_dir", format!("{:?}", self.held_dir));
+        kv(
+            "last_turn",
+            match &self.last_turn {
+                Some(t) => format!(
+                    "frame {} at {:.3} {:.3} dir {:.3} {:.3}",
+                    t.frame, t.at.0, t.at.1, t.dir.0, t.dir.1
+                ),
+                None => "-".into(),
+            },
+        );
+        kv(
+            "pending_turn",
+            format!("{:?}", self.pending_turn.map(|(_, f)| f)),
+        );
+        kv("turn_cell", format!("{:?}", self.turn_cell));
+        kv("turn_timing", self.turn_timing.to_string());
+        kv("face_cursor", self.face_cursor.is_some().to_string());
+        kv("facing", format!("{:?}", self.facing));
+        kv("in_roll", self.in_roll.to_string());
+        kv("sprint_held", self.sprint_held.to_string());
+        kv(
+            "current_action",
+            format!("{:?}", self.current.map(|c| c.action_id)),
+        );
+        kv("paused", self.paused.to_string());
+        s
+    }
+
     pub fn on_use_skill(&mut self, req: &UseSkill) -> Option<StartAction> {
         if self.rolling() {
             // Moves wait for the roll to end (the latest one wins); a second roll is ignored.

@@ -43,6 +43,8 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
   - **Game log**: this launch's lines of `logs/Client.txt` (Wine reuses process ids, so lines are taken from the launch time in the session folder name).
   - **Player**: grid, world position, facing (and lock), actions, WASD direction, actor flags.
   - **Entities**: entities created in the area (initial-state reader), type path from the object-type lookup just before, live grid position (Positioned found by its reader `0x141dd8820`). After a reload the player is adopted from its frame tick (type unknown).
+  - **Server** (our server only): the instance server's simulation state for this session (debug link, refreshed every second tick: apply frame, synced, server/predicted position and velocity, last report, WASD, held click, last turn, turn modes, facing, roll, current action, pause) and dev commands: teleport (cell, or "Here"), `turn_cell`, `turn_timing`, `face_cursor`.
+  - **Desync** (our server only): the server's predicted position and the last report against the client's own position (ImPlot), with a count of samples over 1.5 cells and the worst; desyncs over 6 cells are logged. The prediction is one frame ahead, so ~1.2 cells while walking is normal.
   - **Minimap**: the client's four cell grids around the player (terrain object found by vtable in the game world; tiles `+0x18`/`+0x20`, 23 cells per tile, 4 bits per cell at `+0xd0`, `+0xe8`, `+0x100`, `+0x118`), shaded by value, with the player and its facing, and the server's position (blue ring, our server). "Export area" writes `terrain_layout_*.tsv` / `terrain_grid_*.bin` on demand (also on official servers, where the automatic export is off).
   - **Stats**: the player's stats by name (`poe-hook-data/stats.tsv`), all stat sets, values that changed in the last 3 s highlighted. Stats component (found by name) `+0x1c8` = set 0 (the entity's own stats), other sets in the 16-byte list `+0x1e8..+0x1f0` (container `+0xd8` = set id); a container is a sorted `(i32 key, i32 value)` array at `+0xf8..+0x100` (setter `0x1426ac920`, StatsUpdate handler `0x142181f20`).
   - **Actions**: starts and ends of the player's Actor actions (`+0x238`, `+0x240`; type at action `+0x120`) with `ActionTypes` names, sampled every simulation frame; also logged ("action start slot 0: DodgeRoll ...").
@@ -85,6 +87,10 @@ The game resolves some functions (instance and device creation) before the loade
 Compare a capture with one from our server: `Tools/pyenv/bin/python tools/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`.
 
 Risk: the DLL is a third-party module inside the official client, even if it only observes. It can be detected (the client can also load server-delivered code modules, see [re/crypto.md](re/crypto.md#other-crypto-in-the-binary)), and it is against the game's terms; there is some risk to the account.
+
+## Debug link with our server (`devlink.rs`)
+The DLL's position-report UDP socket also receives `PDB1` datagrams from the instance server (`key\tvalue` lines; `ack\t<command>\t<result>` for commands, shown as notices) and sends `PDC1` commands (`u16 our TCP port of the session`, then text). Server side: `[instance] debug_link` (default on), `sync.rs` remembers each client's UDP address and queues its commands, the session tick applies them (`dev_command`) and sends `Player::debug_state`. Never while read-only.
+- Teleport sends two direction updates in one frame: a minimal direction with the target cell, then a stop. The client checks the cell of `0x64` only when the direction is not zero (`0x142149640`); in lockstep it then always places the player on the cell's centre (the 46-cell rule applies only outside lockstep).
 
 ## Modes and the read-only latch
 `mode` in `poe-hook.toml` (set by `cargo xtask deploy-client [--official]`):
