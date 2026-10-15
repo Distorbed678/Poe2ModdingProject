@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for e in &tst.tdt_files {
         let tdt = Tdt::parse(&read(&e.tdt_file)?)?;
         tiles.push(TileDef {
+            key: TileKey::from_tdt(&tdt),
             path: e.tdt_file.clone(),
             tdt,
             weight: e.weight.unwrap_or(1),

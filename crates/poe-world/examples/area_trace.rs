@@ -5,7 +5,85 @@
 
 use std::path::Path;
 
-use poe_world::rng::TerrainRng;
+use poe_world::{area::Stage, generate::TileMap, rng::TerrainRng, smoothing::LayoutGraph};
+
+/// Compares the edge tiles with the trace's `place` lines of `0x1420b85bf`.
+fn compare_edges(map: &TileMap, before: usize, lines: &[Vec<String>]) {
+    let places: Vec<String> = lines.iter().filter(|f| f.len() > 4 && f[1] == "place" && f[2] == "1420b85bf").map(|f| format!("{} {}", f[3], f[4].to_ascii_lowercase())).collect();
+    let ours: Vec<String> = map.pieces[before..].iter().map(|p| format!("{} {} o{} h0 {}", p.x, p.y, p.orientation, p.path.to_ascii_lowercase())).collect();
+    let same = ours.iter().zip(&places).take_while(|(a, b)| a == b).count();
+    println!("edge tiles: ours {}, client {}, first {same} identical", ours.len(), places.len());
+    let extra: usize = std::env::var("POE_EDGE_SHOW").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+    for k in same..(same + extra).min(ours.len().max(places.len())) {
+        println!("  {k}: ours {:?}\n     client {:?}", ours.get(k), places.get(k));
+    }
+}
+
+/// Compares the room-pass pieces with the trace's first `place` lines.
+fn compare_rooms(map: &TileMap, lines: &[Vec<String>]) {
+    let places: Vec<(i32, i32, u8, String)> = lines
+        .iter()
+        .filter(|f| f.len() > 4 && f[1] == "place")
+        .map(|f| {
+            let a: Vec<&str> = f[3].split(' ').collect();
+            (a[0].parse().unwrap_or(0), a[1].parse().unwrap_or(0), a[2].trim_start_matches('o').parse().unwrap_or(0), f[4].to_ascii_lowercase())
+        })
+        .collect();
+    let mut bad = 0;
+    for (i, p) in map.pieces.iter().enumerate() {
+        let Some(t) = places.get(i) else { break };
+        if (p.x, p.y, p.orientation) != (t.0, t.1, t.2) || !t.3.ends_with(&p.path.to_ascii_lowercase()) {
+            bad += 1;
+            if bad <= 5 {
+                println!("  room piece {i}: ours {} {} o{} {} client {:?}", p.x, p.y, p.orientation, p.path, t);
+            }
+        }
+    }
+    println!("room pass: {} pieces, {bad} differ", map.pieces.len());
+}
+
+/// Compares a layout graph with the client's dump of the same stage (positions, slots and
+/// fixed/virtual flags of nodes; ends, type, offsets and points of edges).
+fn compare_graph(stage: &str, lg: &LayoutGraph, lines: &[Vec<String>]) {
+    let kind = match stage {
+        "smooth" => "graph_after_smooth1",
+        "split" => "graph_after_split",
+        _ => "graph_before_tiles",
+    };
+    let (mut same, mut diff) = (0, 0);
+    for l in lines.iter().filter(|l| l.len() > 3 && l[1] == kind) {
+        let args = &l[3];
+        let pts = l.get(4).cloned().unwrap_or_default();
+        let mut it = args.split_whitespace();
+        let Some(idx) = it.next().and_then(|v| v.parse::<usize>().ok()) else { continue };
+        let (ours, theirs) = if l[2] == "node" {
+            let pos = it.next().unwrap_or("");
+            let flags = args.split("flags [").nth(1).and_then(|r| r.split(']').next()).unwrap_or("");
+            let theirs = format!("{pos} {}", flags.split(", ").take(2).collect::<Vec<_>>().join(","));
+            let ours = lg.nodes.get(idx).map(|n| format!("{},{} {},{}", n.pos.0, n.pos.1, n.fixed as u8, n.virtual_end as u8)).unwrap_or_default();
+            (ours, theirs)
+        } else {
+            let ends = it.next().unwrap_or("");
+            let et = it.next().unwrap_or("");
+            let off = args.split(" off [").nth(1).and_then(|r| r.split(']').next()).unwrap_or("");
+            let ours = lg.edges.get(idx).map(|e| {
+                format!("{}->{} {} off {}, {}, {}, {} [{}]", e.from, e.to, e.edge_type.rsplit('/').next().unwrap_or(""),
+                    e.offsets[0].0, e.offsets[0].1, e.offsets[1].0, e.offsets[1].1,
+                    e.points.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" "))
+            }).unwrap_or_default();
+            (ours, format!("{ends} {} off {off} [{pts}]", et.to_ascii_lowercase()))
+        };
+        if ours == theirs {
+            same += 1;
+        } else {
+            diff += 1;
+            if diff <= 8 {
+                println!("  {stage} {} {idx}: ours {ours}\n    client {theirs}", l[2]);
+            }
+        }
+    }
+    println!("graph {stage}: {same} same, {diff} different (ours {} nodes, {} edges)", lg.nodes.len(), lg.edges.len());
+}
 
 /// The trace's bounded draws after the real seed: (trace line, call site, n, result).
 fn trace_draws(lines: &[Vec<String>]) -> Vec<(usize, String, u32, u32)> {
@@ -63,7 +141,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let forced = force.map(|f| f.parse::<u32>()).transpose()?;
     let mut rng = TerrainRng::new(seed);
     rng.log = Some(Vec::new());
-    match poe_world::area::generate_with(&gd, &area, &mut rng, forced) {
+    let mut probe = |stage: Stage| match stage {
+        Stage::Graph(name, lg) => compare_graph(name, lg, &lines),
+        Stage::Rooms(map) => compare_rooms(map, &lines),
+        Stage::Edges(map, before) => compare_edges(map, before, &lines),
+    };
+    match poe_world::area::generate_probed(&gd, &area, &mut rng, forced, &mut probe) {
         Ok(g) => println!("{} {}x{}: tile hash {}", g.graph, g.map.width, g.map.height, g.map.tile_hash()),
         Err(e) => println!("error: {e}"),
     }

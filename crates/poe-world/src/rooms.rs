@@ -44,6 +44,9 @@ pub struct EdgeType {
     pub wildcard: bool,
     /// Third number (flag 8, `+0x48`): edge tiles cross sides in the middle.
     pub centred: bool,
+    /// Fourth number (`+0x4d`): edge tiles take their exits from a coordinate hash
+    /// (`0x1421969e0`) instead of the path's curve.
+    pub hashed: bool,
     pub virtual_edge: bool,
     /// A virtual edge's two split edge types (lower case) and their chirality flags (flag
     /// bits 0 and 1).
@@ -87,6 +90,7 @@ impl EdgeType {
             height_change: nums.first().copied().unwrap_or(0) as u8,
             size: nums.get(1).copied().unwrap_or(1) as u8,
             centred: nums.get(2).is_some_and(|&v| v != 0),
+            hashed: nums.get(3).is_some_and(|&v| v != 0),
             virtual_edge,
         }
     }
@@ -821,7 +825,7 @@ pub fn place_node(
                 tile: c.tile,
                 orientation,
                 pos: (px, py),
-                size: c.size,
+                size: key.size,
                 sides,
                 key,
             });

@@ -312,10 +312,24 @@ impl Master {
             .map_err(|e| data_err(tst, e))?;
         let mut defs = Vec::new();
         let mut headers = HashMap::new();
+        let mut gt_flags: HashMap<String, u8> = HashMap::new();
         for e in &parsed.tdt_files {
             let tdt = load_tdt(files, &e.tdt_file)?;
             headers.insert(e.tdt_file.to_ascii_lowercase(), tdt.clone());
+            let mut key = TileKey::from_tdt(&tdt);
+            for g in key.grounds.iter_mut() {
+                let Some(path) = g.clone() else { continue };
+                let lower = path.to_ascii_lowercase();
+                if !gt_flags.contains_key(&lower) {
+                    let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&lower)?));
+                    gt_flags.insert(lower.clone(), f);
+                }
+                if gt_flags[&lower] & 0x10 != 0 {
+                    *g = None;
+                }
+            }
             defs.push(TileDef {
+                key,
                 path: e.tdt_file.clone(),
                 weight: e.weight.unwrap_or(1),
                 orientations: tdt.restrict_orientations(orientation_mask(&e.rotations)),

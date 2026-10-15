@@ -105,7 +105,7 @@ pub fn feature_has_edges(set: &TileSet, feature: &str, edges: &[Option<String>; 
     set.tiles.iter().any(|t| {
         t.weight != 0
             && t.tdt.feature.as_deref().unwrap_or("").eq_ignore_ascii_case(feature)
-            && (0..8u8).any(|o| t.orientations & (1 << o) != 0 && TileKey::from_tdt(&t.tdt).oriented(o).edges == *edges)
+            && (0..8u8).any(|o| t.orientations & (1 << o) != 0 && t.key.oriented(o).edges == *edges)
     })
 }
 
@@ -120,7 +120,7 @@ pub fn candidates(view: &dyn EdgeView, node: usize, node_o: u8, feature: &str, k
         if t.weight == 0 {
             continue;
         }
-        let base = TileKey::from_tdt(&t.tdt);
+        let base = t.key.clone();
         for o in 0..8u8 {
             if t.orientations & (1 << o) == 0 {
                 continue;
@@ -439,7 +439,7 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
 fn place(lg: &mut LayoutGraph, t: &NodeTile, master: &Master, map: &mut TileMap, types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
     let pos = (snap(t.pos.0, t.align), snap(t.pos.1, t.align));
     let def = &master.tiles.tiles[t.tile];
-    map.place(pos.0, pos.1, &def.path, &def.tdt, t.orientation, 0, None);
+    map.place(pos.0, pos.1, &def.path, &def.tdt, t.orientation, 0, Some(t.tile));
     let (rx, ry) = (pos.0 * 23, pos.1 * 23);
     let (rw, rh) = (t.size.0 as i32 * 23, t.size.1 as i32 * 23);
     let inside = |q: &(i32, i32)| q.0 >= rx && q.0 < rx + rw && q.1 >= ry && q.1 < ry + rh;
@@ -483,6 +483,46 @@ fn place(lg: &mut LayoutGraph, t: &NodeTile, master: &Master, map: &mut TileMap,
             lg.nodes.push(LNode { pos: end, slots: [Some(e), None, None, None], fixed: true, virtual_end: false });
             if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
             lg.nodes[node].slots[slot] = None;
+        }
+    }
+    Ok(())
+}
+
+/// `0x1420cb200`: before routing, a junction (or a virtual node no tile fits) gets one point
+/// 23 cells out of the node on each edge's side (`0x1420d1220`), after its edges drop the
+/// points within 23 cells of it (`0x1420c6b80`).
+pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
+    const R: i32 = 23;
+    let (nx, ny) = g.nodes[node];
+    let near = |p: &(i32, i32)| {
+        let (dx, dy) = ((p.0 - nx).abs(), (p.1 - ny).abs());
+        ((dx * dx + dy * dy) as u32) < (R * R) as u32
+    };
+    let slots = EdgeView::slots(&*g, node);
+    for e in slots.into_iter().flatten() {
+        let from = g.graph.edges[e].from as usize == node;
+        let pts = &mut g.points[e];
+        if from {
+            if let Some(i) = pts.iter().rposition(|p| near(p)) {
+                pts.drain(..=i);
+            }
+        } else if let Some(i) = pts.iter().position(|p| near(p)) {
+            pts.truncate(i);
+        }
+    }
+    let (sides, _) = node_key(&*g, node, types, files)?;
+    for (slot, e) in slots.iter().enumerate() {
+        let Some(e) = *e else { continue };
+        let side = sides[slot];
+        if side > 3 {
+            return Err(GenError::Unsupported(format!("could not explode node {node}: edge {e} has no side")));
+        }
+        let d = SIDE_DIR[side];
+        let p = ((nx + d.0 * R).clamp(0, tiles.0 * 23 - 1), (ny + d.1 * R).clamp(0, tiles.1 * 23 - 1));
+        if g.graph.edges[e].from as usize == node {
+            g.points[e].insert(0, p);
+        } else {
+            g.points[e].push(p);
         }
     }
     Ok(())
