@@ -11,6 +11,7 @@ use poe_world::{
     layout::{self, JitterNode},
     rng::{TerrainRng, lcg_index},
     rooms::{PlacedGraph, PlacedRoom, RoomSet, TerrainTypes, place_node, tsi_entries},
+    routing::{EXIT_CELL, RouteEdge, Router, SIDE_DIR},
 };
 
 /// The trace's bounded draws after the real seed: (call site, n, result).
@@ -52,9 +53,9 @@ fn trace_draws(path: &Path) -> Result<Vec<(String, u32, u32)>, Box<dyn std::erro
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let dir = args.next().ok_or("usage: river_gen <export dir> <seed>")?;
+    let export_dir = args.next().ok_or("usage: river_gen <export dir> <seed>")?;
     let seed: u32 = args.next().ok_or("seed")?.parse()?;
-    let trace = trace_draws(&Path::new(&dir).join("generator_trace.tsv"))?;
+    let trace = trace_draws(&Path::new(&export_dir).join("generator_trace.tsv"))?;
     let data = GameData::open(
         Path::new("GameFiles"),
         Path::new("Tools/dat-schema/schema-poe2.min.json"),
@@ -125,7 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &rel("FillTiles").ok_or("no FillTiles")?,
     )?;
     let set = RoomSet::load(files, &rel("RoomSet").ok_or("no RoomSet")?)?;
-    let placed_graph = PlacedGraph {
+    let mut placed_graph = PlacedGraph {
         graph: &graph,
         nodes: nodes.iter().map(|n| n.pos).collect(),
         points: edge_points,
@@ -155,11 +156,169 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         placed.push(p);
     }
+    let fixed: Vec<(bool, bool)> = graph
+        .nodes
+        .iter()
+        .map(|n| {
+            (
+                n.values.get(9).copied().unwrap_or(0) != 0,
+                n.values.get(10).copied().unwrap_or(0) != 0,
+            )
+        })
+        .collect();
+    poe_world::rooms::repel(&mut placed, &mut placed_graph, &fixed, tiles, &mut types, files)?;
+    for p in &placed {
+        println!("after repel: node {} at {:?}", p.node, p.pos);
+    }
     let mut map = TileMap::new(graph.width, graph.height);
     for p in &placed {
         room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, &mut rng)?;
     }
     println!("room passes: {} pieces", map.pieces.len());
+
+    // Room-pass placements against the trace's `place` lines (region coordinates).
+    let trace_places: Vec<(i32, i32, u8, String)> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            (f.len() > 4 && f[1] == "place").then(|| {
+                let a: Vec<&str> = f[3].split(' ').collect();
+                (
+                    a[0].parse().unwrap_or(0),
+                    a[1].parse().unwrap_or(0),
+                    a[2].trim_start_matches('o').parse().unwrap_or(0),
+                    f[4].to_ascii_lowercase(),
+                )
+            })
+        })
+        .collect();
+    let mut bad = 0;
+    for (i, p) in map.pieces.iter().enumerate() {
+        let t = &trace_places[i];
+        if (p.x, p.y, p.orientation) != (t.0, t.1, t.2) || !t.3.ends_with(&p.path.to_ascii_lowercase().replace('\\', "/")) {
+            bad += 1;
+            if bad <= 5 {
+                println!("piece {i}: ours {} {} o{} {} client {:?}", p.x, p.y, p.orientation, p.path, t);
+            }
+        }
+    }
+    println!("room-pass pieces differing from the trace: {bad} of {}", map.pieces.len());
+
+    // Edge ends at the rooms' exits (`0x1420c5750`, `0x1420c5b50`).
+    let mut route: Vec<RouteEdge> = Vec::new();
+    let mut route_index = vec![usize::MAX; graph.edges.len()];
+    for (i, e) in graph.edges.iter().enumerate() {
+        if placed_graph.removed[i] {
+            continue;
+        }
+        let et = types.edge(files, &e.edge_type)?.clone();
+        if et.wildcard {
+            continue;
+        }
+        route_index[i] = route.len();
+        route.push(RouteEdge {
+            ends: [placed_graph.nodes[e.from as usize], placed_graph.nodes[e.to as usize]],
+            offsets: [(0, 0); 2],
+            points: placed_graph.points[i].clone(),
+            margin: if et.virtual_edge {
+                e.tail.get(1).copied().unwrap_or(0) / 23 + 3
+            } else {
+                et.size as i32 + 2
+            },
+        });
+    }
+    for p in &placed {
+        let node = p.node;
+        let (rx, ry) = (p.pos.0 * 23, p.pos.1 * 23);
+        let (rw, rh) = (p.size.0 as i32 * 23, p.size.1 as i32 * 23);
+        let inside = |q: &(i32, i32)| q.0 >= rx && q.0 < rx + rw && q.1 >= ry && q.1 < ry + rh;
+        for (slot, &ei) in graph.nodes[node].edges.iter().take(4).enumerate() {
+            let ei = ei as usize;
+            if route_index.get(ei).copied().unwrap_or(usize::MAX) == usize::MAX {
+                continue;
+            }
+            let r = &mut route[route_index[ei]];
+            let from = graph.edges[ei].from as usize == node;
+            if from {
+                let k = r.points.iter().position(|q| !inside(q)).unwrap_or(r.points.len());
+                r.points.drain(..k);
+            } else if let Some(k) = r.points.iter().position(|q| inside(q)) {
+                r.points.truncate(k);
+            }
+            let side = p.sides[slot];
+            if side > 3 {
+                continue;
+            }
+            let at = |e: u8| {
+                let (t, c) = (e as i32 / 3, EXIT_CELL[(e % 3) as usize]);
+                let o = c + t * 23;
+                let (x, y) = match side {
+                    0 => (o, 0),
+                    1 => (rw - 1, o),
+                    2 => (rw - o - 1, rh - 1),
+                    _ => (0, rh - o - 1),
+                };
+                (rx + x, ry + y)
+            };
+            let et = types.edge(files, &graph.edges[ei].edge_type)?;
+            let end = if et.virtual_edge {
+                let a = at(p.key.virtual_exits[side]);
+                let b = at(p.key.exits[side]);
+                ((a.0 + b.0) / 2, (a.1 + b.1) / 2)
+            } else {
+                at(p.key.exits[side])
+            };
+            let which = (!from) as usize;
+            r.ends[which] = end;
+            r.offsets[which] = SIDE_DIR[side];
+        }
+    }
+    let mut router = Router::new(tiles.0, tiles.1, &map, &mut rng);
+    for e in &route {
+        router.reserve(e);
+    }
+    let grids: Vec<Vec<(i32, i32, bool)>> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter(|l| l.split('\t').nth(1) == Some("route_grid"))
+        .map(|l| {
+            l.split('\t')
+                .nth(4)
+                .unwrap_or("")
+                .split(' ')
+                .map(|c| {
+                    let v: Vec<i32> = c.split(':').map(|x| x.parse().unwrap_or(0)).collect();
+                    (v[0], v[1], v[2] != 0)
+                })
+                .collect()
+        })
+        .collect();
+    for (k, client) in grids.iter().enumerate() {
+        let ours = router.snapshot();
+        let diff: Vec<usize> = (0..ours.len()).filter(|&i| ours[i] != client[i]).collect();
+        if !diff.is_empty() {
+            println!("grid before edge {k}: {} tiles differ", diff.len());
+            for &i in diff.iter().take(30) {
+                println!("  ({},{}): ours {:?} client {:?}", i as i32 % tiles.0, i as i32 / tiles.0, ours[i], client[i]);
+            }
+            break;
+        }
+        if k < route.len() {
+            let ok = router.route(&mut route[k], &mut rng);
+            println!("edge {k} routed {ok}: {:?}", route[k].points);
+        }
+    }
+    let _ = &mut route;
+    if grids.is_empty() {
+    match poe_world::routing::route_reserved(&mut router, &mut route, &mut rng) {
+        Ok(()) => {
+            println!("routed {} edges", route.len());
+            for (i, r) in route.iter().enumerate() {
+                println!("route {i}: {:?} off {:?} -> {:?}", r.ends, r.offsets, r.points);
+            }
+        }
+        Err(e) => println!("routing: {e}"),
+    }
+    }
 
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {
