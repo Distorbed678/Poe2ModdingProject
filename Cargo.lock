@@ -1723,6 +1723,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "poe-world"
+version = "0.1.0"
+dependencies = [
+ "poe-data",
+ "poe_data_tools",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "poe_data_tools"
 version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

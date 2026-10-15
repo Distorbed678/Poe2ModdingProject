@@ -35,5 +35,6 @@ poe-store = { path = "crates/poe-store" }
 poe-cluster = { path = "crates/poe-cluster" }
 poe-data = { path = "crates/poe-data" }
 poe-game = { path = "crates/poe-game" }
+poe-world = { path = "crates/poe-world" }
 login-server = { path = "servers/login-server" }
 instance-server = { path = "servers/instance-server" }

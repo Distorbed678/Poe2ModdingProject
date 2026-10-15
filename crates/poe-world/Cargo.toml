@@ -1,0 +1,13 @@
+[package]
+name = "poe-world"
+description = "Areas and terrain: the client's terrain generator ported to the server (M5)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+poe-data.workspace = true
+poe_data_tools.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
