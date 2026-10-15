@@ -22,6 +22,7 @@ mod overlay;
 mod packets;
 mod position_sync;
 mod protocol;
+mod scanner;
 mod snapshot;
 mod symbols;
 mod timing;

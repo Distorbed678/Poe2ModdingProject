@@ -8,7 +8,7 @@
 14013fc60	FID_conflict:`scalar_deleting_destructor'
 14013fec0	FID_conflict:`scalar_deleting_destructor'
 140140c00	~sentry
-140150cb0	entity → Render component (by name)
+140150cb0	get Render component by name
 1401620a0	`scalar_deleting_destructor'
 14016e780	C→S 0x2e6 sender (u8 player, u8)
 1401b6940	chat join timeout message ("Timeout while joining {0} chat")

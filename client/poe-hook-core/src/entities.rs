@@ -135,3 +135,39 @@ pub fn live(e: &Entity) -> Live {
         facing: pos.and_then(|p| read(p + 0x44c)),
     }
 }
+
+/// Component names of an entity, by index: the entity type's lookup (`entity+8` → `+0x28`)
+/// holds a sorted array of `{char* name, i32 index}` (16 bytes) from `+0x28` to `+0x30`, the
+/// table the game's get-component-by-name uses (e.g. `0x140150cb0` for "Render").
+pub fn component_names(ptr: usize) -> Vec<(usize, String)> {
+    let Some(lookup) = read::<usize>(ptr + 8).and_then(|t| read::<usize>(t + 0x28)) else {
+        return Vec::new();
+    };
+    let (Some(begin), Some(end)) = (read::<usize>(lookup + 0x28), read::<usize>(lookup + 0x30))
+    else {
+        return Vec::new();
+    };
+    if end < begin || end - begin > 256 * 16 {
+        return Vec::new();
+    }
+    let mut out: Vec<(usize, String)> = (begin..end)
+        .step_by(16)
+        .filter_map(|e| {
+            let name = read::<usize>(e).and_then(|p| poe_hook_shared::mem::c_string(p, 64))?;
+            let index = read::<i32>(e + 8)?;
+            (index >= 0).then_some((index as usize, name))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Component pointers of an entity (index order).
+pub fn components(ptr: usize) -> Vec<usize> {
+    let begin = read::<usize>(ptr + 0x10).unwrap_or(0);
+    let end = read::<usize>(ptr + 0x18).unwrap_or(0);
+    let count = (end.saturating_sub(begin) / 8).min(64);
+    (0..count)
+        .filter_map(|i| read::<usize>(begin + i * 8))
+        .collect()
+}
