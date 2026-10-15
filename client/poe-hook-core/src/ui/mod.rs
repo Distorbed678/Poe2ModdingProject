@@ -1,9 +1,14 @@
 //! The overlay's windows: the main debug window with its tabs, the read-only badge and
 //! short notices. Each tab keeps its own state in [`App`].
 
+mod coverage_tab;
+mod features_tab;
+mod gamelog_tab;
+mod inspect_tab;
 mod log_tab;
 mod packets_tab;
 mod status_tab;
+mod timing_tab;
 
 use std::{
     sync::Mutex,
@@ -35,6 +40,11 @@ pub fn state_text() -> String {
 pub struct App {
     log: log_tab::LogView,
     packets: packets_tab::PacketsView,
+    coverage: coverage_tab::CoverageView,
+    timing: timing_tab::TimingView,
+    gamelog: gamelog_tab::GameLogView,
+    entities: inspect_tab::EntitiesView,
+    watches: inspect_tab::WatchesView,
 }
 
 impl App {
@@ -42,10 +52,15 @@ impl App {
         Self {
             log: log_tab::LogView::new(),
             packets: packets_tab::PacketsView::new(),
+            coverage: coverage_tab::CoverageView::new(),
+            timing: timing_tab::TimingView::new(),
+            gamelog: gamelog_tab::GameLogView::new(),
+            entities: inspect_tab::EntitiesView::new(),
+            watches: inspect_tab::WatchesView::new(),
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, visible: bool) {
+    pub fn draw(&mut self, ui: &Ui, visible: bool, plots: &dear_implot::PlotContext) {
         // Logs are pulled every drawn frame so nothing is missed while hidden.
         self.log.pull();
         if crate::host::read_only() {
@@ -70,10 +85,37 @@ impl App {
                     if let Some(_t) = ui.tab_item("Packets") {
                         self.packets.draw(ui);
                     }
+                    if let Some(_t) = ui.tab_item("Coverage") {
+                        self.coverage.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Timing") {
+                        self.timing.draw(ui, plots);
+                    }
+                    if let Some(_t) = ui.tab_item("Game log") {
+                        self.gamelog.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Player") {
+                        inspect_tab::draw_player(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Entities") {
+                        self.entities.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Watches") {
+                        self.watches.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Features") {
+                        features_tab::draw(ui);
+                    }
                 }
-                let _ = toggle;
             });
+        let _ = toggle;
     }
+}
+
+/// Table options for the overlay's tables: columns fit their contents, resizable, striped.
+pub fn table_opts() -> imgui::TableOptions {
+    imgui::TableOptions::from(imgui::TableFlags::RESIZABLE | imgui::TableFlags::ROW_BG)
+        .sizing_policy(imgui::TableSizingPolicy::FixedFit)
 }
 
 /// Copies text to the system clipboard.

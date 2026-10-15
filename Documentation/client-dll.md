@@ -34,7 +34,17 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
 - The backend's `framebuffer_srgb` option is set for the game's `B8G8R8A8_SRGB` swapchain, so colors are right.
 - Release builds abort on panic; the core installs a panic hook that logs the message and backtrace first.
 - `scale` multiplies the font size (DejaVu Sans Mono 16 px, embedded; license in `poe-hook-core/assets/`). Window layout persists in `logs/poe-hook/imgui.ini`.
-- Tabs: Status (mode, latch, session folder, connections, Vulkan, Reload core / Snapshot buttons), Log (the shared log ring: level and text filters, copy), Packets (filters, decoded view, hex, copy).
+- Tabs:
+  - **Status**: mode, latch, session folder, connections, Vulkan; Reload core / Snapshot / Hide buttons.
+  - **Log**: the shared log ring (level and text filters, copy).
+  - **Packets**: captured messages (filters, decoded view, hex, copy).
+  - **Coverage**: every opcode seen per channel and direction, counts on official / our servers (all sessions) and this session, sizes. "Official only" = sent by official servers but never by ours.
+  - **Timing** (ImPlot): frame time, messages per 100 ms in each direction, lockstep backlog (world +0x6a8, frames queued).
+  - **Game log**: this launch's lines of `logs/Client.txt` (Wine reuses process ids, so lines are taken from the launch time in the session folder name).
+  - **Player**: grid, world position, facing (and lock), actions, WASD direction, actor flags.
+  - **Entities**: entities created in the area (initial-state reader), type path from the object-type lookup just before, live grid position (Positioned found by its reader `0x141dd8820`). After a reload the player is adopted from its frame tick (type unknown).
+  - **Watches**: read-only memory watches with address expressions (`[ptr]`, `+`/`-`, Ghidra addresses, `player`/`pos`/`actor`/`exe`), saved in `logs/poe-hook/watches.txt`.
+  - **Features**: runtime switches (movement log, position sync) and the config values.
 
 ## Packet capture (`[packets]`, `packets.rs`)
 Plaintext of every login and instance message, read inside the client (no cipher is broken, so it works the same on official servers):

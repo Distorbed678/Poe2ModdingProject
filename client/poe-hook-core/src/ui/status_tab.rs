@@ -51,7 +51,7 @@ pub fn draw(ui: &Ui) {
     ));
     ui.separator();
     ui.text("Connections");
-    if let Some(_t) = ui.begin_table_header(
+    if let Some(_t) = ui.begin_table_header_with_flags(
         "conns",
         [
             imgui::TableColumnSetup::new("#"),
@@ -60,6 +60,7 @@ pub fn draw(ui: &Ui) {
             imgui::TableColumnSetup::new("kind"),
             imgui::TableColumnSetup::new("time"),
         ],
+        crate::ui::table_opts(),
     ) {
         for c in crate::host::connections().iter().rev() {
             ui.table_next_column();

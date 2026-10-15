@@ -11,7 +11,9 @@ mod auto_keys;
 mod crash;
 mod crypto_bypass;
 mod dump_types;
+mod entities;
 mod exit_trace;
+mod gamelog;
 mod hooks;
 mod host;
 mod inspect;
@@ -24,6 +26,7 @@ mod timing;
 mod trace_calls;
 mod ui;
 mod util;
+mod watches;
 
 use std::sync::{OnceLock, atomic::Ordering};
 

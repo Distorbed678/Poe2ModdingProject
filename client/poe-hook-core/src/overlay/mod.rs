@@ -56,6 +56,7 @@ enum Job {
 struct Overlay {
     // Drop order: the GPU objects (and the renderer) before the imgui context.
     gpu: gpu::Gpu,
+    plots: dear_implot::PlotContext,
     ctx: imgui::Context,
     app: App,
     last: Instant,
@@ -171,6 +172,10 @@ fn run(jobs: Receiver<Job>) {
             } => {
                 let semaphore = frame(&mut overlay, queue, image_index, &wait, &state);
                 let _ = reply.send(semaphore);
+                // After the game's present went on: reading a screenshot back takes a while.
+                if let Some(o) = overlay.as_ref() {
+                    crate::snapshot::poll(o.gpu.device());
+                }
             }
             Job::Release(swapchain, done) => {
                 if let Some(o) = overlay.as_mut() {
@@ -200,9 +205,11 @@ fn frame(
     if overlay.is_none() {
         match gpu::Gpu::new(state, vk::Queue::from_raw(queue)) {
             Ok(gpu) => {
+                let ctx = create_context();
                 *overlay = Some(Overlay {
                     gpu,
-                    ctx: create_context(),
+                    plots: dear_implot::PlotContext::create(&ctx),
+                    ctx,
                     app: App::new(),
                     last: Instant::now(),
                 })
@@ -238,7 +245,7 @@ fn frame(
     }
     o.last = now;
     let ui = o.ctx.frame();
-    o.app.draw(ui, visible());
+    o.app.draw(ui, visible(), &o.plots);
     let (want_mouse, want_keyboard) = {
         let io = ui.io();
         (io.want_capture_mouse(), io.want_capture_keyboard())
@@ -246,7 +253,6 @@ fn frame(
     WANT_MOUSE.store(want_mouse && visible(), Ordering::Relaxed);
     WANT_KEYBOARD.store(want_keyboard && visible(), Ordering::Relaxed);
     let shot = crate::snapshot::take_frame_request();
-    crate::snapshot::poll(o.gpu.device());
     let image = o.gpu.image(image_index);
     let mut capture = None;
     let memory = o.gpu.memory_properties();
