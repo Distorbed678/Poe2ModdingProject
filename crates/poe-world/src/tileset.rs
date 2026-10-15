@@ -52,6 +52,18 @@ const TRANSFORM: [(bool, u8, u8); 8] = [
     (true, 1, 1),
 ];
 
+/// Where corner point `(u, v)` (0..=w, 0..=h) of a `w × h` piece lands with orientation `o`
+/// (`0x141d0bad0`, same table as [`orient_cell`]).
+pub fn orient_point(o: u8, w: i32, h: i32, u: i32, v: i32) -> (i32, i32) {
+    let (t, xs, ys) = TRANSFORM[(o & 7) as usize];
+    let a = [w - u, u, h - v, v];
+    if t {
+        (a[2 + xs as usize], a[ys as usize])
+    } else {
+        (a[xs as usize], a[2 + ys as usize])
+    }
+}
+
 /// Where local cell `(x, y)` of a `w × h` piece lands with orientation `o` (relative to the
 /// placed piece's corner).
 pub fn orient_cell(o: u8, w: i32, h: i32, x: i32, y: i32) -> (i32, i32) {

@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
     let files = data.files();
-    let master = Master::load(
+    let mut master = Master::load(
         files,
         &rel("TileSet").ok_or("no TileSet")?,
         &rel("FillTiles").ok_or("no FillTiles")?,
@@ -171,6 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("after repel: node {} at {:?}", p.node, p.pos);
     }
     let mut map = TileMap::new(graph.width, graph.height);
+    map.ground_flags = master.ground_flag_table(files)?;
     for p in &placed {
         room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, &mut rng)?;
     }
@@ -605,6 +606,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  client key {}", keys.get(same).cloned().unwrap_or_default());
     }
 
+    // Corner lattice after the edge tiles against the client's `lattice borders` snapshot.
+    compare_lattice(&map, &export_dir, "borders", |p| {
+        let f = if p.flags & 1 != 0 { p.flags | 4 } else { p.flags };
+        (p.ground.clone(), p.height, f)
+    })?;
+
+    // Fill pass (`0x141f8f930`).
+    if let Err(e) = poe_world::generate::fill_pass(&mut map, &mut master, files, &mut rng) {
+        println!("fill pass: {e}");
+    }
+
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {
         if ours.0 != theirs.1 || ours.1 != theirs.2 {
@@ -620,5 +632,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         log.len(),
         trace.get(log.len())
     );
+    Ok(())
+}
+
+/// Compares the map's corner lattice with a client `lattice` snapshot (region coordinates).
+fn compare_lattice(
+    map: &poe_world::generate::TileMap,
+    export_dir: &str,
+    step: &str,
+    ours: impl Fn(&poe_world::generate::LatticePoint) -> (Option<String>, i8, u8),
+) -> Result<(), Box<dyn std::error::Error>> {
+    let text = std::fs::read_to_string(Path::new(export_dir).join("generator_trace.tsv"))?;
+    let mut grounds: Vec<String> = Vec::new();
+    let mut rows: Vec<Vec<(usize, i8, u8)>> = Vec::new();
+    for l in text.lines() {
+        let f: Vec<&str> = l.split('\t').collect();
+        if f.len() < 4 || f[1] != "lattice" || f[2] != step {
+            continue;
+        }
+        if f[3].starts_with("view") {
+            grounds = f.get(4).unwrap_or(&"").split(',').map(|g| g.to_ascii_lowercase()).collect();
+        } else {
+            rows.push(f[4].split(' ').map(|c| {
+                let v: Vec<i32> = c.split('.').map(|x| x.parse().unwrap()).collect();
+                (v[0] as usize, v[1] as i8, v[2] as u8)
+            }).collect());
+        }
+    }
+    let (mut same, mut diff) = (0, 0);
+    let mut shown = 0;
+    for (y, row) in rows.iter().enumerate() {
+        for (x, &(g, h, fl)) in row.iter().enumerate() {
+            let Some(i) = map.point_index(x as i32, y as i32) else { continue };
+            let (og, oh, of) = ours(&map.lattice[i]);
+            let og = og.map(|g| g.rsplit('/').next().unwrap().to_string()).unwrap_or("-".into());
+            let tg = grounds.get(g).cloned().unwrap_or_default();
+            if og == tg && oh == h && of == fl {
+                same += 1;
+            } else {
+                diff += 1;
+                if shown < 8 {
+                    shown += 1;
+                    println!("  lattice {step} ({x},{y}): ours {og} {oh} {of}, client {tg} {h} {fl}");
+                }
+            }
+        }
+    }
+    println!("lattice before {step}: {same} same, {diff} different");
     Ok(())
 }

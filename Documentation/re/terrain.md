@@ -372,6 +372,28 @@ and dumps these bytes with each graph edge.
 **Verified:** all 103 edge tiles (17 paths) equal the client's (position, orientation, tile);
 5261 draws in step.
 
+**Corner lattice** (map +0x40 row stride, +0x50 3-byte points `(ground index, height, flags)`
+over `(w + 1) × (h + 1)` tile corners, +0x68 the ground table, indices in order of first use):
+- `.tdt` body (`0x1429153f0`, version 14): u16 flags (bit 9 cleared before v13, bit 8 before
+  v14), a byte (v > 9), hull planes (byte n, then n bytes when n ≥ 2), a byte if flags bit 9,
+  u16 sub-tile count; per sub-tile u16 (low byte bits: 4 = no byte map, 1|2 = no byte list),
+  a byte, 3 bytes if flags bit 9, the byte map (`0x1429179c0`: header byte with type in bits
+  0..2, extra size bytes in 3..4, size in 5..7; types 1..4 carry a compressed payload of that
+  size), the byte list (u16 n + n bytes); then per corner point (row-major, own orientation)
+  a ground string (flags bit 1) and a height byte (flags bit 0). Read for every non-inheriting
+  `.tdt`, with or without a `.tgt`.
+- Placing a tile (`0x141d0bad0`, map vtable +0x10) writes each corner (`orient_point`, the cell
+  transform with `w − u` instead of `w − 1 − u`): flag 1, its ground if it has one
+  (`0x141d0e130`), and its height plus the tile height (flag 2) when the old or new ground is
+  missing or has `.gt` flag 1.
+- The region driver (`0x1420bec40`) after edge tiles: copy flag 1 to flag 4, border floods
+  (`0x1420b94d0`), the lattice pass (`0x1420c0a60`), heights (`0x1420b9820`), `0x141f92ce0`, clear
+  flag 4, `0x1420bdae0`, `0x1420be360`, then fill (`0x141f93060`, row by row; a cell's ground
+  is its top-left corner's) and de-repetition. The DLL dumps the lattice before each step
+  (`lattice <step>` trace lines).
+
+**Verified:** the lattice after edge tiles equals the client's (4891 points).
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,
