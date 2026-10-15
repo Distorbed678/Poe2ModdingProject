@@ -14,6 +14,7 @@ pub mod generate;
 pub mod graph;
 pub mod hash;
 pub mod lattice;
+pub mod outer_buffer;
 pub mod layout;
 pub mod rng;
 pub mod rooms;
@@ -24,3 +25,8 @@ pub mod tdt;
 mod text;
 pub mod tileset;
 pub mod voronoi;
+
+/// Decodes a UTF-16 (or UTF-8) text file from the game data.
+pub fn text_utf16(bytes: &[u8]) -> String {
+    text::decode_utf16(bytes)
+}

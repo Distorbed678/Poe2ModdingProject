@@ -1144,6 +1144,10 @@ pub fn virtual_exit(tdt: &crate::tdt::Tdt, o: u8, side: usize) -> i32 {
 }
 
 /// `0x141d00fd0(1, 1, side, inverse orientation)`: a tile's own side shown at map side `side`.
+pub fn own_side_pub(o: u8, side: usize) -> usize {
+    own_side(o, side)
+}
+
 fn own_side(o: u8, side: usize) -> usize {
     const INVERSE: [usize; 9] = [0, 3, 2, 1, 4, 5, 6, 7, 8];
     const A: [u32; 9] = [0, 0, 1, 1, 1, 1, 2, 2, 0];
