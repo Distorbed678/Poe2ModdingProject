@@ -258,6 +258,35 @@ node order, all before any room pass (the passes then run in the same order):
 **Verified:** `river_gen` places all 12 room nodes of seed 1000 where the client does and stays
 in step for 204 draws (through the room passes).
 
+**Repulsion, exits and routing** (`crates/poe-world/src/rooms.rs` `repel`, `routing.rs`; DLL
+trace kinds `route_edge` and, with `POE_HOOK_ROUTE_GRIDS=1`, `route_grid` per edge):
+1. Placement stage order (`0x1420caa40`): place room nodes → `0x1420cbe60` → tilise each room
+   (`0x1420c9970`: room pass, then exits).
+2. `0x1420cbe60` (no RNG): every placed room gives a rectangle (room cells grown on each side
+   with an edge by its size, twice for virtual edges, `0x1420cb470`); every graph node and then
+   every edge internal point gets the sum of the rectangles' pushes (`0x1420cb7a0`: inside →
+   out along node→point; within 138 cells of a side or corner → a linear fall-off), a room's
+   own node instead gets minus the pushes of the four map-border midpoints; pushes apply after
+   all are computed (constrained node axes stay), clamped to the map; then each room is centred
+   on its node again (snap, fit, border margin with the alignment).
+3. Exits (`0x1420c5750`, `0x1420c5b50`, `0x141ef2800`): edge internal points inside the room are
+   dropped; each room edge then ends at the room's exit on its side (exit `e`: tile `e / 3`,
+   cell `[3, 11, 19][e % 3]` (`0x142f0df10`), sides 2/3 counted backwards; virtual edges at
+   the midpoint of the virtual exit and the exit) with the side's direction as end offset.
+4. Router (`0x1420cdc30`): `below(1024)` per tile (row-major), +1024 on the border, placed
+   tiles occupied; every edge reserves its straight legs (`0x1420ce390`, Bresenham
+   `0x1420ccdc0`: the line's tiles +1 use, tiles across within the margin (size + 2, or max
+   width / 23 + 3 for virtual edges) + `(m−k+1)·200000/m/100`); edges routed in graph order
+   (`0x1420cd460`): per leg its reservation is lifted, a search runs from the leg's end to its
+   start (`0x1420cd110`: neighbours left/up/right/down; open set ordered by (g+h, tile index);
+   h = Manhattan × 100; **g = the neighbour's own g + 100 + its cost**, i.e. not accumulated —
+   a client quirk that makes it a best-first search; tiles in use or occupied are closed except
+   the goal), the path is reserved and every 6th tile adds an internal point at
+   `(tile·23 + below(23), tile·23 + below(23))`.
+
+**Verified:** seed 1000 routes all 19 edges exactly as the client (grid identical before each
+edge, same internal points); 5022 draws in step.
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,

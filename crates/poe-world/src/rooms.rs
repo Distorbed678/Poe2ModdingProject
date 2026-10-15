@@ -490,7 +490,7 @@ pub fn room_candidates(
     node: usize,
     types: &mut TerrainTypes,
     files: &dyn Files,
-) -> Result<Vec<RoomCandidate>, GenError> {
+) -> Result<(Vec<RoomCandidate>, [usize; 4]), GenError> {
     let (mut sides, mut key) = node_key(g, node, types, files)?;
     let n = &g.graph.nodes[node];
     let node_o = node_orientation(&n.orientation);
@@ -501,7 +501,7 @@ pub fn room_candidates(
         })
     };
     if !any_match(&key) && !adjust_sides(g, node, &mut sides, &mut key, &any_match, types, files)? {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), sides));
     }
     let mut matches = Vec::new();
     for (ri, r) in set.rooms.iter().enumerate() {
@@ -528,7 +528,7 @@ pub fn room_candidates(
                 size: k.size,
             });
         }
-        return Ok(out);
+        return Ok((out, sides));
     }
     for strict in [true, false] {
         for &(ri, o) in &matches {
@@ -546,7 +546,7 @@ pub fn room_candidates(
             break;
         }
     }
-    Ok(out)
+    Ok((out, sides))
 }
 
 /// A placed room node.
@@ -557,6 +557,53 @@ pub struct PlacedRoom {
     pub orientation: u8,
     pub pos: (i32, i32),
     pub size: (u8, u8),
+    /// Side per edge slot (4 = none), after the client's fix-ups.
+    pub sides: [usize; 4],
+    /// The room's turned root key.
+    pub key: TileKey,
+}
+
+/// `0x1420b8b70`: for a fixed-orientation node, when the room's corners disagree with the
+/// edges, turn the side assignment (+1, then −1, then two mirrorings) until they agree.
+fn fix_sides(
+    key: &TileKey,
+    sides: &mut [usize; 4],
+    g: &PlacedGraph,
+    node: usize,
+    types: &mut TerrainTypes,
+    files: &dyn Files,
+) -> Result<(), GenError> {
+    if fits_edges(key, sides, g, node, false, types, files)? {
+        return Ok(());
+    }
+    let map = |s: &mut [usize; 4], f: &dyn Fn(usize) -> usize| {
+        for v in s.iter_mut() {
+            if *v != 4 {
+                *v = f(*v);
+            }
+        }
+    };
+    map(sides, &|v| (v + 1) & 3);
+    if fits_edges(key, sides, g, node, false, types, files)? {
+        return Ok(());
+    }
+    map(sides, &|v| (v + 2) & 3);
+    if fits_edges(key, sides, g, node, false, types, files)? {
+        return Ok(());
+    }
+    // [3, 2, 1, 0] after +1, then [3, 2, 1, 0] followed by [1, 0, 3, 2] (the tables at the
+    // end of `0x1420b8b70`).
+    const MIRROR_A: [usize; 5] = [3, 2, 1, 0, 4];
+    map(sides, &|v| MIRROR_A[(v + 1) & 3]);
+    if fits_edges(key, sides, g, node, false, types, files)? {
+        return Ok(());
+    }
+    const MIRROR_B: [usize; 5] = [1, 0, 3, 2, 4];
+    map(sides, &|v| MIRROR_B[MIRROR_A[v]]);
+    if fits_edges(key, sides, g, node, false, types, files)? {
+        return Ok(());
+    }
+    Err(GenError::Unsupported(format!("node {node}: edge to side does not work")))
 }
 
 /// `0x141ef3290`: a node's alignment: an `align<N>` description, else the largest size of its
@@ -594,7 +641,7 @@ pub fn place_node(
     files: &dyn Files,
     rng: &mut TerrainRng,
 ) -> Result<PlacedRoom, GenError> {
-    let mut list = room_candidates(set, g, node, types, files)?;
+    let (mut list, mut sides) = room_candidates(set, g, node, types, files)?;
     let align = node_alignment(g, node, types, files)?;
     let mut max_size = 0;
     for e in g.slots(node).into_iter().flatten() {
@@ -663,12 +710,17 @@ pub fn place_node(
             if let Some(m) = margin_of(1)? {
                 px = px.min(tiles.0 - m - w).max(0);
             }
+            if node_orientation(&g.graph.nodes[node].orientation) < 8 {
+                fix_sides(&key, &mut sides, g, node, types, files)?;
+            }
             return Ok(PlacedRoom {
                 node,
                 room: c.room,
                 orientation: c.orientation,
                 pos: (px, py),
                 size: c.size,
+                sides,
+                key,
             });
         }
         list.retain(|o| !(o.room == c.room && o.orientation == c.orientation));
@@ -686,4 +738,315 @@ pub fn tsi_entries(bytes: &[u8]) -> HashMap<String, String> {
             (t.len() >= 2).then(|| (t[0].clone(), t[t.len() - 1].clone()))
         })
         .collect()
+}
+
+/// A placed room's repulsion rectangle (`0x1420cb470`): the room in grid cells, grown on each
+/// side with an edge by that edge's size (twice for virtual edges).
+#[derive(Debug, Clone, Copy)]
+pub struct RepelRect {
+    pub x0: i32,
+    pub y0: i32,
+    pub x1: i32,
+    pub y1: i32,
+    pub node: usize,
+}
+
+const REACH: i32 = 0x8a;
+
+/// `0x1420cb7a0`: the push a rectangle gives a point (integer arithmetic as the client's).
+pub fn repel_push(r: &RepelRect, node_pos: (i32, i32), p: (i32, i32)) -> (i32, i32) {
+    let (px, py) = p;
+    let (x0, y0, x1, y1) = (r.x0, r.y0, r.x1, r.y1);
+    let d = |a: i32, b: i32| if b == 0 { 0 } else { a.wrapping_div(b) };
+    let far = |dx: i32, dy: i32| {
+        (dx.wrapping_abs().wrapping_mul(dx.wrapping_abs()))
+            .wrapping_add(dy.wrapping_abs().wrapping_mul(dy.wrapping_abs())) as u32
+            > 0x4a64
+    };
+    let lab = |a: i32, b: i32, dot: i32, len: i32| -> (i32, i32) {
+        // (x, y) = (b * dot / len, a * dot / len) with 64-bit division.
+        let len = len as i64;
+        if len == 0 {
+            return (0, 0);
+        }
+        (
+            (b.wrapping_mul(dot) as i64 / len) as i32,
+            (a.wrapping_mul(dot) as i64 / len) as i32,
+        )
+    };
+    if y0 < py {
+        if py < y1 {
+            if x0 < px {
+                if px < x1 {
+                    let (nx, ny) = node_pos;
+                    let mut vy = py - ny;
+                    let hy = (y1 - y0) / 2;
+                    let push_y = if py < ny {
+                        let t = (vy.wrapping_mul(hy).wrapping_mul(REACH) as i64 / (y0 - ny) as i64) as i32;
+                        (y0 - (t as i64 / (hy + REACH) as i64) as i32) - py
+                    } else {
+                        let t = (vy.wrapping_mul(hy).wrapping_mul(REACH) as i64 / (y1 - ny) as i64) as i32;
+                        ((t as i64 / (hy + REACH) as i64) as i32 - py) + y1
+                    };
+                    let mut vx = px - nx;
+                    let hx = (x1 - x0) / 2;
+                    let push_x = if px < nx {
+                        let t = (vx.wrapping_mul(hx).wrapping_mul(REACH) as i64 / (x0 - nx) as i64) as i32;
+                        (x0 - (t as i64 / (hx + REACH) as i64) as i32) - px
+                    } else {
+                        let t = (vx.wrapping_mul(hx).wrapping_mul(REACH) as i64 / (x1 - nx) as i64) as i32;
+                        if px == nx && py == ny {
+                            // Region orientation 0: direction (1, 0).
+                            vx = 1;
+                            vy = 0;
+                        }
+                        ((t as i64 / (hx + REACH) as i64) as i32 - px) + x1
+                    };
+                    let dot = push_y.wrapping_mul(vy).wrapping_add(vx.wrapping_mul(push_x));
+                    let len = vy.wrapping_mul(vy).wrapping_add(vx.wrapping_mul(vx));
+                    return (d(vx.wrapping_mul(dot), len), d(dot.wrapping_mul(vy), len));
+                }
+                if px < x1 + REACH {
+                    let h = (x1 - x0) / 2;
+                    return (d(((x1 - px) + REACH) * h, h + REACH), 0);
+                }
+            } else if x0 - REACH < px {
+                let h = (x0 - x1) / 2;
+                return (d(((px - x0) + REACH) * h, REACH - h), 0);
+            }
+            return (0, 0);
+        }
+        // Below the rectangle.
+        if px <= x0 {
+            if far((x0 + 1) - px, (y1 - 1) - py) {
+                return (0, 0);
+            }
+            let a = py - (y1 - 1);
+            let b = px - (x0 + 1);
+            let mut fy = 0;
+            let mut fx = 0;
+            if py < y1 + REACH {
+                let h = (y1 - y0) / 2;
+                fy = d(((y1 - py) + REACH) * h, h + REACH);
+            }
+            if x0 - REACH < px {
+                let h = (x0 - x1) / 2;
+                fx = d(((px - x0) + REACH) * h, REACH - h);
+            }
+            let dot = a.wrapping_mul(fy).wrapping_add(b.wrapping_mul(fx));
+            return lab(a, b, dot, b.wrapping_mul(b).wrapping_add(a.wrapping_mul(a)));
+        }
+        if px < x1 {
+            if py < y1 + REACH {
+                let h = (y1 - y0) / 2;
+                return (0, d(((y1 - py) + REACH) * h, h + REACH));
+            }
+            return (0, 0);
+        }
+        let ex = x1 - px;
+        let ey = y1 - py;
+        if far(ex, ey) {
+            return (0, 0);
+        }
+        let a = py - (y1 - 1);
+        let b = px - (x1 - 1);
+        let mut fy = 0;
+        let mut fx = 0;
+        if py < y1 + REACH {
+            let h = (y1 - y0) / 2;
+            fy = d((ey + REACH) * h, h + REACH);
+        }
+        if px < x1 + REACH {
+            let h = (x1 - x0) / 2;
+            fx = d((ex + REACH) * h, h + REACH);
+        }
+        let dot = a.wrapping_mul(fy).wrapping_add(b.wrapping_mul(fx));
+        return lab(a, b, dot, a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)));
+    }
+    // Above the rectangle.
+    if px <= x0 {
+        if far(x0 - px, y0 - py) {
+            return (0, 0);
+        }
+        let a = py - (y0 + 1);
+        let b = px - (x0 + 1);
+        let mut fy = 0;
+        let mut fx = 0;
+        if y0 - REACH < py {
+            let h = (y0 - y1) / 2;
+            fy = d(((py - y0) + REACH) * h, REACH - h);
+        }
+        if x0 - REACH < px {
+            let h = (x0 - x1) / 2;
+            fx = d(((px - x0) + REACH) * h, REACH - h);
+        }
+        let dot = a.wrapping_mul(fy).wrapping_add(b.wrapping_mul(fx));
+        return lab(a, b, dot, a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)));
+    }
+    if px < x1 {
+        if y0 - REACH < py {
+            let h = (y0 - y1) / 2;
+            return (0, d(((py - y0) + REACH) * h, REACH - h));
+        }
+        return (0, 0);
+    }
+    if far((x1 - 1) - px, (y0 + 1) - py) {
+        return (0, 0);
+    }
+    let a = py - (y0 + 1);
+    let b = px - (x1 - 1);
+    let mut fy = 0;
+    let mut fx = 0;
+    if y0 - REACH < py {
+        let h = (y0 - y1) / 2;
+        fy = d(((py - y0) + REACH) * h, REACH - h);
+    }
+    if px < x1 + REACH {
+        let h = (x1 - x0) / 2;
+        fx = d(((x1 - px) + REACH) * h, h + REACH);
+    }
+    let dot = b.wrapping_mul(fx).wrapping_add(a.wrapping_mul(fy));
+    lab(a, b, dot, a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)))
+}
+
+/// `0x1420cbe60`: rooms push graph nodes and edge internal points away (each room's own node
+/// is pushed off the map border instead), then each room is centred again on its node.
+#[allow(clippy::too_many_arguments)]
+pub fn repel(
+    placed: &mut [PlacedRoom],
+    g: &mut PlacedGraph,
+    fixed: &[(bool, bool)],
+    tiles: (i32, i32),
+    types: &mut TerrainTypes,
+    files: &dyn Files,
+) -> Result<(), GenError> {
+    let (wc, hc) = (tiles.0 * 23, tiles.1 * 23);
+    let mut rects = Vec::new();
+    for p in placed.iter() {
+        let mut at = [4usize; 4];
+        for (slot, &side) in p.sides.iter().enumerate() {
+            if side < 4 {
+                at[side] = slot;
+            }
+        }
+        let slots = g.slots(p.node);
+        let mut margin = |side: usize| -> Result<i32, GenError> {
+            if at[side] == 4 {
+                return Ok(0);
+            }
+            let Some(e) = slots[at[side]] else { return Ok(0) };
+            let et = types.edge(files, &g.graph.edges[e].edge_type)?;
+            Ok(et.size as i32 * (et.virtual_edge as i32 + 1))
+        };
+        rects.push(RepelRect {
+            x0: (p.pos.0 - margin(3)?) * 23,
+            y0: (p.pos.1 - margin(0)?) * 23,
+            x1: (p.size.0 as i32 + p.pos.0 + margin(1)?) * 23,
+            y1: (p.size.1 as i32 + p.pos.1 + margin(2)?) * 23,
+            node: p.node,
+        });
+    }
+    // Pushes for every node, then every edge's internal points, all before any is applied.
+    let mut node_push = Vec::with_capacity(g.nodes.len());
+    for n in 0..g.nodes.len() {
+        let mut acc = (0i32, 0i32);
+        for r in &rects {
+            let np = g.nodes[r.node];
+            if r.node == n {
+                let cx = (r.x0 + r.x1) / 2;
+                let cy = (r.y1 + r.y0) / 2;
+                let mut sum = (0, 0);
+                for q in [(0, cy), (wc - 1, cy), (cx, 0), (cx, hc - 1)] {
+                    let v = repel_push(r, np, q);
+                    sum = (sum.0 + v.0, sum.1 + v.1);
+                }
+                acc = (acc.0 - sum.0, acc.1 - sum.1);
+            } else {
+                let v = repel_push(r, np, g.nodes[n]);
+                acc = (acc.0 + v.0, acc.1 + v.1);
+            }
+        }
+        node_push.push(acc);
+    }
+    let mut point_push = Vec::new();
+    for e in 0..g.points.len() {
+        for &p in &g.points[e] {
+            let mut acc = (0, 0);
+            for r in &rects {
+                let v = repel_push(r, g.nodes[r.node], p);
+                acc = (acc.0 + v.0, acc.1 + v.1);
+            }
+            point_push.push(acc);
+        }
+    }
+    for (n, push) in node_push.into_iter().enumerate() {
+        let (x, y) = g.nodes[n];
+        let inside = x >= 0 && y >= 0 && x < wc && y < hc;
+        let (fx, fy) = fixed.get(n).copied().unwrap_or((false, false));
+        let mut q = (x, y);
+        if !fx {
+            q.0 += push.0;
+        }
+        if !fy {
+            q.1 += push.1;
+        }
+        g.nodes[n] = if inside {
+            (q.0.clamp(0, wc - 1), q.1.clamp(0, hc - 1))
+        } else {
+            (q.0.max(-1).min(wc), q.1.max(-1).min(hc))
+        };
+    }
+    let mut k = 0;
+    for e in 0..g.points.len() {
+        for p in g.points[e].iter_mut() {
+            let v = point_push[k];
+            k += 1;
+            *p = ((p.0 + v.0).clamp(0, wc - 1), (p.1 + v.1).clamp(0, hc - 1));
+        }
+    }
+    // Centre each room on its node again.
+    for p in placed.iter_mut() {
+        let (nx, ny) = g.nodes[p.node];
+        let (w, h) = (p.size.0 as i32, p.size.1 as i32);
+        let cy = (ny / 23).min(tiles.1 - 1);
+        let cx = (nx / 23).min(tiles.0 - 1);
+        let x = (cx - w / 2).max(0).min(tiles.0 - w);
+        let y = (cy - h / 2).max(0).min(tiles.1 - h);
+        let align = node_alignment(g, p.node, types, files)?;
+        let snap = |v: i32| {
+            if align <= 1 {
+                return v;
+            }
+            let r = v.rem_euclid(align);
+            v - r + if r > align / 2 { align } else { 0 }
+        };
+        let (sx, sy) = (snap(x), snap(y));
+        if sx < tiles.0 && sx + w <= tiles.0 && sy < tiles.1 && sy + h <= tiles.1 {
+            p.pos = (sx, sy);
+        }
+        // `0x1420c59e0` with the alignment as the margin.
+        let key = p.key.clone();
+        let mut margin_of = |side: usize| -> Result<Option<i32>, GenError> {
+            Ok(match &key.edges[side] {
+                None => None,
+                Some(path) => {
+                    let v = types.edge(files, path)?.virtual_edge;
+                    Some((v as i32 + 1) * align)
+                }
+            })
+        };
+        if let Some(m) = margin_of(0)? {
+            p.pos.1 = p.pos.1.max(m).min(tiles.1 - h);
+        }
+        if let Some(m) = margin_of(3)? {
+            p.pos.0 = p.pos.0.max(m).min(tiles.0 - w);
+        }
+        if let Some(m) = margin_of(2)? {
+            p.pos.1 = p.pos.1.min(tiles.1 - m - h).max(0);
+        }
+        if let Some(m) = margin_of(1)? {
+            p.pos.0 = p.pos.0.min(tiles.0 - m - w).max(0);
+        }
+    }
+    Ok(())
 }

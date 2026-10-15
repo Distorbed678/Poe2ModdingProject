@@ -61,6 +61,9 @@ const NODE_PLACE: usize = 0x1420c87a0;
 /// Room/tile candidates of a node (`0x1420c76d0`: list out, node, room type, key, ..., ...):
 /// 0x68-byte entries (name view +0/+8, variant byte +0x10, size +0x31/+0x32, weight +0x60).
 const NODE_CANDIDATES: usize = 0x1420c76d0;
+/// Edge routing (`0x1420cd460`: router, edge) → bool: the edge's ends (+0x20/+0x28 nodes,
+/// position +0x4c), end offsets (+0x70/+0x78) and internal points (+8..+0x10) afterwards.
+const ROUTE_EDGE: usize = 0x1420cd460;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -158,6 +161,7 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(DEREPEAT, HookType::JmpBack(on_derepeat), 0)?;
         hook(NODE_PLACE, HookType::Retn(on_node_place), 0)?;
         hook(NODE_CANDIDATES, HookType::Retn(on_node_candidates), 0)?;
+        hook(ROUTE_EDGE, HookType::Retn(on_route_edge), 0)?;
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -223,6 +227,7 @@ unsafe extern "win64" fn on_driver(regs: *mut Registers, original: usize, _: usi
     if traced && TRACE.load(Ordering::Relaxed) {
         TRACE_BUF.lock().unwrap().clear();
         TRACE_SEQ.store(0, Ordering::Relaxed);
+        GRID_DUMPED.store(false, Ordering::Relaxed);
         trace_line("begin", "", &format!("seed={seed}"), "");
     }
     if traced {
@@ -505,6 +510,73 @@ unsafe extern "win64" fn on_node_candidates(
             "1420c76d0",
             &format!("{} total={}", node_desc(node), read::<i32>(list + 0x18).unwrap_or(0)),
             &out.join(" "),
+        );
+    }
+    ret
+}
+
+fn edge_points(e: usize) -> String {
+    let (pb, pe) = (read::<usize>(e + 8).unwrap_or(0), read::<usize>(e + 0x10).unwrap_or(0));
+    let mut pts = Vec::new();
+    let mut q = pb;
+    while q < pe && pts.len() < 64 {
+        let xy: [i32; 2] = read(q).unwrap_or_default();
+        pts.push(format!("{},{}", xy[0], xy[1]));
+        q += 8;
+    }
+    pts.join(" ")
+}
+
+type RouteFn = unsafe extern "win64" fn(usize, usize) -> usize;
+
+static GRID_DUMPED: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "win64" fn on_route_edge(regs: *mut Registers, original: usize, _: usize) -> usize {
+    let mut guard = crate::hook_guard!("terrain_tools::on_route_edge");
+    let r = unsafe { &*regs };
+    let (router, edge) = (r.rcx as usize, r.rdx as usize);
+    let before = on_generator_thread().then(|| edge_points(edge));
+    if before.is_some() && (std::env::var_os("POE_HOOK_ROUTE_GRIDS").is_some() || !GRID_DUMPED.swap(true, Ordering::Relaxed)) {
+        // The router's tile grid before the first edge: cost, uses, occupied (+0x28, 12 bytes).
+        let w = read::<u32>(router + 0x40).unwrap_or(0);
+        let h = read::<u32>(router + 0x44).unwrap_or(0);
+        let base = read::<usize>(router + 0x28).unwrap_or(0);
+        let mut cells = Vec::with_capacity((w * h) as usize);
+        for i in 0..(w * h) as usize {
+            let c: [i32; 3] = read(base + i * 12).unwrap_or_default();
+            cells.push(format!("{}:{}:{}", c[0], c[1], c[2] & 0xff));
+        }
+        trace_line("route_grid", "", &format!("{w} {h}"), &cells.join(" "));
+    }
+    let f: RouteFn = unsafe { std::mem::transmute(original) };
+    let ret = guard.original(|| unsafe { f(router, edge) });
+    if let Some(before) = before {
+        let pos = |n: usize| {
+            let x = read::<i32>(n + 0x4c).unwrap_or(0);
+            let y = read::<i32>(n + 0x50).unwrap_or(0);
+            format!("{x},{y}")
+        };
+        let from = read::<usize>(edge + 0x20).unwrap_or(0);
+        let to = read::<usize>(edge + 0x28).unwrap_or(0);
+        let off: [i32; 4] = read(edge + 0x70).unwrap_or_default();
+        let width: [u32; 2] = read(edge + 0x80).unwrap_or_default();
+        let et = read::<usize>(edge + 0x38)
+            .map(resource_path)
+            .unwrap_or_default();
+        trace_line(
+            "route_edge",
+            "1420cd460",
+            &format!(
+                "{} {}->{} off {:?} width {:?} ok={} before [{}]",
+                et.rsplit('/').next().unwrap_or(""),
+                pos(from),
+                pos(to),
+                off,
+                width,
+                ret as u8,
+                before
+            ),
+            &edge_points(edge),
         );
     }
     ret
