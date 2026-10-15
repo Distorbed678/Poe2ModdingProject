@@ -8,6 +8,7 @@ mod gamelog_tab;
 mod hooks_tab;
 mod inspect_tab;
 mod log_tab;
+mod minimap_tab;
 mod packets_tab;
 mod protocol_tab;
 mod scanner_tab;
@@ -53,6 +54,7 @@ pub struct App {
     protocol: protocol_tab::ProtocolView,
     scanner: scanner_tab::ScannerView,
     stats: game_tab::StatsView,
+    minimap: minimap_tab::MinimapView,
 }
 
 impl App {
@@ -69,6 +71,7 @@ impl App {
             protocol: protocol_tab::ProtocolView::new(),
             scanner: scanner_tab::ScannerView::new(),
             stats: game_tab::StatsView::new(),
+            minimap: minimap_tab::MinimapView::new(),
         }
     }
 
@@ -112,6 +115,9 @@ impl App {
                     }
                     if let Some(_t) = ui.tab_item("Player") {
                         inspect_tab::draw_player(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Minimap") {
+                        self.minimap.draw(ui);
                     }
                     if let Some(_t) = ui.tab_item("Stats") {
                         self.stats.draw(ui);
