@@ -13,7 +13,7 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 |---|---|
 | `lib.rs` | `DllMain`. Loads the config, creates the session folder `logs/poe-hook/<date_time>_<pid>/`, opens the logs and installs the network guard synchronously (the client's crash-report helper connects out within milliseconds), then starts a thread that hooks Vulkan and loads the core. |
 | `proxy.rs` | Forwards all 16 version.dll exports to the system DLL, resolved lazily. |
-| `logsink.rs` | One sink for both DLLs: `poe-hook.log` next to the exe (appended per process with a `---- process <pid> ----` header; `run-client` clears it per launch), the session folder's `poe-hook.log`, and a 50 000-record ring the overlay's Log tab reads (it survives core reloads). |
+| `logsink.rs` | Buffered (flushed at once for warnings/errors, otherwise every 250-500 ms; per-line flushes cost frames). One sink for both DLLs: `poe-hook.log` next to the exe (appended per process with a `---- process <pid> ----` header; `run-client` clears it per launch), the session folder's `poe-hook.log`, and a 50 000-record ring the overlay's Log tab reads (it survives core reloads). |
 | `guard.rs` | Hooks `connect`/`WSAConnect`: refuses non-loopback connections in private mode (`block_external`), records every connection for the core, and sets the **read-only latch** (official mode, or the first external connection). |
 | `vulkan.rs` | Redirects `vkGetInstanceProcAddr`/`vkGetDeviceProcAddr` in `vulkan-1.dll`'s **export table** (jump stubs near the module; under Wine both exports forward to `winevulkan`). Inline hooks there hung the game: Wine's exports are tiny thunks. The game (`0x1410262d0`) resolves everything through them, so it gets our wrappers for instance/device/queue/surface/swapchain creation and `vkQueuePresentKHR`. The swapchain gets `COLOR_ATTACHMENT` and `TRANSFER_SRC` usage added when the surface supports them. |
 | `window.rs` | Subclasses the game window (from the Vulkan surface) and passes each message to the core first. |
@@ -86,7 +86,8 @@ Risk: the DLL is a third-party module inside the official client, even if it onl
 | `net_trace` | off | Inline hooks on ws2_32 `send`/`WSASend`/`recv`/`WSARecv`. Logs payload prefixes and game addresses on the stack. Connects are logged by the loader's guard. |
 | `net_trace_dump_bytes` | 256 | Bytes of payload shown per call. |
 | `block_external` | on | Private mode: refuses connections to non-loopback addresses, so the client does not reach official services (shop, telemetry, uploads). Ignored in official mode. |
-| `dump_object_types` | on | The research hooks on entities, frames and area loads (below). Position sync needs them. |
+| `dump_object_types` | on | The research hooks on entities, frames and area loads (below). Position sync needs them. The terrain layout export runs only when not read-only. |
+| `entity_trace` | off | Per-entity tracing: each entity's components, the blob span each component reader consumes, terrain dumps on the Positioned reader. **Slow**: on the first official session (2026-10-14) each spawned entity froze the game for ~2.3 s (a 4554-tile dump per Positioned read), and a three-monster spawn froze it for 7 s, after which the server dropped the connection ("Abnormal disconnect"). Research on our server only. |
 | `position_sync` | on | Reports the player's position and actions to the instance server every frame (see [Position sync](#position-sync)). Never while read-only. |
 | `position_sync_port` | 0 | The instance server's port; only connections to it become the report target (0: the last loopback connection). `deploy-client` sets it from `server.toml`. |
 | `movement_log` | off | Per-frame movement log (see [Movement log](#movement-log)). |

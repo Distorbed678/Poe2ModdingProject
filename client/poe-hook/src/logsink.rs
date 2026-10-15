@@ -25,7 +25,8 @@ struct Owned {
 }
 
 struct Sink {
-    files: Vec<File>,
+    files: Vec<std::io::BufWriter<File>>,
+    last_flush: std::time::Instant,
     next: u64,
     records: VecDeque<Owned>,
 }
@@ -60,11 +61,12 @@ pub fn init(paths: &[&Path], level: log::LevelFilter) {
         .filter_map(|p| OpenOptions::new().create(true).append(true).open(p).ok())
         .map(|mut f| {
             let _ = writeln!(f, "---- process {} ----", std::process::id());
-            f
+            std::io::BufWriter::with_capacity(64 << 10, f)
         })
         .collect();
     *SINK.lock().unwrap() = Some(Sink {
         files,
+        last_flush: std::time::Instant::now(),
         next: 1,
         records: VecDeque::new(),
     });
@@ -72,6 +74,23 @@ pub fn init(paths: &[&Path], level: log::LevelFilter) {
     if log::set_logger(&FACADE).is_ok() {
         log::set_max_level(level);
     }
+}
+
+/// Flushes the log files every half second (started once by the loader).
+pub fn flusher() {
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if let Ok(mut guard) = SINK.lock()
+                && let Some(sink) = guard.as_mut()
+            {
+                for f in &mut sink.files {
+                    let _ = f.flush();
+                }
+                sink.last_flush = std::time::Instant::now();
+            }
+        }
+    });
 }
 
 /// Writes one record (from the loader's facade or from the core through the host API).
@@ -94,9 +113,17 @@ pub fn write(level: u32, target: &str, message: &str) {
     );
     let Ok(mut guard) = SINK.lock() else { return };
     let Some(sink) = guard.as_mut() else { return };
+    // Buffered: flushing every line on game threads cost frames. Warnings and errors (and
+    // anything after 250 ms) are flushed at once; `flusher` covers quiet periods.
+    let urgent = level <= 2 || sink.last_flush.elapsed() > std::time::Duration::from_millis(250);
     for f in &mut sink.files {
         let _ = f.write_all(line.as_bytes());
-        let _ = f.flush();
+        if urgent {
+            let _ = f.flush();
+        }
+    }
+    if urgent {
+        sink.last_flush = std::time::Instant::now();
     }
     let seq = sink.next;
     sink.next += 1;

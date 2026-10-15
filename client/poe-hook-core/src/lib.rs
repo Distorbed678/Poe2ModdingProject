@@ -106,6 +106,7 @@ fn start_features(config: &Config, main: &Module) {
     }
     position_sync::ENABLED.store(f.position_sync && !read_only, Ordering::Relaxed);
     position_sync::PORT.store(f.position_sync_port, Ordering::Relaxed);
+    dump_types::ENTITY_TRACE.store(f.entity_trace, Ordering::Relaxed);
     dump_types::MOVEMENT_LOG.store(
         f.movement_log || std::env::var_os("POE_HOOK_MOVEMENT_LOG").is_some(),
         Ordering::Relaxed,
