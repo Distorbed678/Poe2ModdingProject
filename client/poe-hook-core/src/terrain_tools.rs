@@ -45,6 +45,12 @@ const UNIFORM: usize = 0x141f0d7f0;
 /// `TerrainRng_Below(n)` / `TerrainRng_Range(a, b)`: logged with their exact call site.
 const RNG_BELOW: usize = 0x141f9c270;
 const RNG_RANGE: usize = 0x141f9c340;
+/// Room pass (`0x141f8e6c0`), right after the tile-set lookup: rax = the candidate list
+/// (begin, end; 0x18-byte entries: tile resource, u8 orientation, i32 weight at +0x10; +0x18
+/// total weight). Logged in the generator trace.
+const ROOM_CANDIDATES: usize = 0x141f8ed45;
+/// Place a tile: `(terrain context, x, y, &tile, u8 orientation, i32 height, u8)`.
+const PLACE_TILE: usize = 0x141f9e2e0;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -137,6 +143,8 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(MT_NEXT, HookType::Retn(on_mt_next), 0)?;
         hook(UNIFORM, HookType::Retn(on_uniform), 0)?;
         hook(RNG_BELOW, HookType::JmpBack(on_rng_call), 0)?;
+        hook(ROOM_CANDIDATES, HookType::JmpBack(on_candidates), 0)?;
+        hook(PLACE_TILE, HookType::JmpBack(on_place), 0)?;
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -272,6 +280,57 @@ unsafe extern "win64" fn on_rng_call(regs: *mut Registers, range: usize) {
         &format!("{ret:x}"),
         &args,
         "",
+    );
+}
+
+unsafe extern "win64" fn on_place(regs: *mut Registers, _: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_place");
+    if !on_generator_thread() {
+        return;
+    }
+    let r = unsafe { &*regs };
+    let tile = read::<usize>(r.r9 as usize)
+        .map(resource_path)
+        .unwrap_or_default();
+    let rsp = r.rsp as usize;
+    let o = read::<u8>(rsp + 0x28).unwrap_or(0xff);
+    let height = read::<i32>(rsp + 0x30).unwrap_or(0);
+    let ret = read::<usize>(rsp).map_or(0, ghidra);
+    trace_line(
+        "place",
+        &format!("{ret:x}"),
+        &format!("{} {} o{o} h{height}", r.rdx as i32, r.r8 as i32),
+        &tile,
+    );
+}
+
+unsafe extern "win64" fn on_candidates(regs: *mut Registers, _: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_candidates");
+    if !on_generator_thread() {
+        return;
+    }
+    let list = unsafe { &*regs }.rax as usize;
+    let (Some(b), Some(e)) = (read::<usize>(list), read::<usize>(list + 8)) else {
+        return;
+    };
+    let total = read::<i32>(list + 0x18).unwrap_or(0);
+    let mut out = Vec::new();
+    let mut p = b;
+    while p < e && out.len() < 64 {
+        let tile = read::<usize>(p).map(resource_path).unwrap_or_default();
+        let o = read::<u8>(p + 8).unwrap_or(0);
+        let w = read::<i32>(p + 0x10).unwrap_or(0);
+        out.push(format!(
+            "{}:o{o}:w{w}",
+            tile.rsplit('/').next().unwrap_or("")
+        ));
+        p += 0x18;
+    }
+    trace_line(
+        "candidates",
+        "141f8ed45",
+        &format!("total={total}"),
+        &out.join(" "),
     );
 }
 

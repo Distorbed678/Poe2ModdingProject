@@ -150,3 +150,24 @@ pairs of a weighted fill-tile pick (`0x141f900a7`; `n` = the fill group's total 
    node cell / 23 minus half the candidate's size (+0x31/+0x32), clamped to the map; must fit
    (`0x141d0d880`) and not overlap (`0x1420c4b30`), otherwise the candidate is removed and drawn
    again. Town: total weight 8, draw 3.
+4. Rooms are placed by `0x141f8e6c0` (room, x, y, orientation): **every cell** of the room grid,
+   x outer, y inner (`.arm` grid row = y). Per cell:
+   - `k` slot: key = its edges (file order) with exit/virtual exit, size, corner grounds and
+     heights, oriented by the room's orientation. Uniform ground and no edges: skipped (the
+     ground is only marked; the fill pass places those). Otherwise the tile set is looked up by
+     (slot tag as feature, key) and one candidate is drawn with `below(total weight)`.
+   - `f <name>` slot: key 1×1, no edges/grounds, exits 3, feature `<name>` (`forcedblank` →
+     `forced_blank.tdt`).
+   - The tile-set index (`0x141d09ab0`) lists `(tile, orientation, weight)` per (feature, key)
+     in `.tst` order then orientation order 0..7; `.tst` rotation lists (`I R90 R180 R270 FI FR90
+     FR180 FR270`, `0x142f08780`) restrict orientations; the default weight is 1.
+   - **Verified:** `cargo run -p poe-world --example town_check -- <town export> 1 <trace>`
+     reproduces all 71 room-pass placements of Clearfell Encampment seed 1 (tile and orientation,
+     RNG in step: 48 draws).
+5. After the room pass (town): 990 × `below(1024)` (`0x1420cdc30`), one `below(0)`
+   (`0x1420b698a`), the fill pass (66 placements, `0x141f90664`: weighted `.gft` pick for the
+   cell's ground, then orientation), and a pass that re-places 10 key-slot tiles in other
+   orientations (`0x141fdec67`). The encampment (15×18, `FI R270`) is placed through the room's
+   fixed-tile list (`0x141f9e780`), not the place-tile calls above.
+6. Generator trace kinds added for this: `below`/`range` with exact call sites, `candidates`
+   (the room pass's candidate list), `place` (`0x141f9e2e0`: x, y, orientation, height, tile).

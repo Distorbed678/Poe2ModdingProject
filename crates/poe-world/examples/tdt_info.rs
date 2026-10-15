@@ -7,8 +7,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let bytes = files.read(&path.to_lowercase())?;
         match poe_world::tdt::Tdt::parse(&bytes) {
             Ok(t) => println!(
-                "{path}: v{} size {:?} inherits {:?} edges {:?} grounds {:?} unk {:?} dist {:?} rest {} bytes",
+                "{path}: v{} feature {:?} size {:?} inherits {:?} edges {:?} grounds {:?} unk {:?} dist {:?} rest {} bytes",
                 t.version,
+                t.feature,
                 t.size,
                 t.inherits,
                 t.edges
