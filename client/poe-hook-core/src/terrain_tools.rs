@@ -75,6 +75,8 @@ const ARC_END: usize = 0x1420d2470;
 const ROUND_CORNERS: usize = 0x1420b2f60;
 /// Edge tile placement stage (`0x1420b6950`: layout ...): the graph on entry.
 const EDGE_TILES: usize = 0x1420b6950;
+/// Tile set lookup by key (`0x141d0a4c0(tile set, key, feature)`), traced for edge tiles.
+const TILE_LOOKUP: usize = 0x141d0a4c0;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -179,6 +181,7 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(ARC_END, HookType::Retn(on_edge_step), 1)?;
         hook(ROUND_CORNERS, HookType::Retn(on_edge_step), 2)?;
         hook(EDGE_TILES, HookType::JmpBack(on_edge_tiles), 0)?;
+        hook(TILE_LOOKUP, HookType::JmpBack(on_tile_lookup), 0)?;
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -412,6 +415,36 @@ unsafe extern "win64" fn on_candidates(regs: *mut Registers, _: usize) {
     );
 }
 
+/// A tile key (`0x4e` bytes): edges[4], size, grounds[4] (at +0x22), heights, exits and
+/// virtual exits (4 bytes each from +0x42).
+unsafe extern "win64" fn on_tile_lookup(regs: *mut Registers, _: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_tile_lookup");
+    if !on_generator_thread() {
+        return;
+    }
+    let r = unsafe { &*regs };
+    let key = r.rdx as usize;
+    let name = |h: usize| -> String {
+        if h == 0 {
+            "-".into()
+        } else {
+            let p = resource_path(h);
+            p.rsplit('/').next().unwrap_or("").to_string()
+        }
+    };
+    let edges: Vec<String> = (0..4).map(|k| name(read::<usize>(key + k * 8).unwrap_or(0))).collect();
+    let grounds: Vec<String> = (0..4).map(|k| name(read::<usize>(key + 0x22 + k * 8).unwrap_or(0))).collect();
+    let size: [u8; 2] = read(key + 0x20).unwrap_or_default();
+    let bytes: [u8; 12] = read(key + 0x42).unwrap_or_default();
+    let ret = read::<usize>(r.rsp as usize).map_or(0, ghidra);
+    trace_line(
+        "tile_key",
+        &format!("{ret:x}"),
+        &format!("size {:?} h {:?} x {:?} v {:?}", size, &bytes[0..4], &bytes[4..8], &bytes[8..12]),
+        &format!("e {} g {}", edges.join(","), grounds.join(",")),
+    );
+}
+
 /// A `(wchar*, len)` string view.
 fn view(addr: usize) -> String {
     let (Some(p), Some(n)) = (read::<usize>(addr), read::<usize>(addr + 8)) else {
@@ -585,16 +618,22 @@ fn dump_graph(kind: &str, graph: usize) {
         let off: [i32; 4] = read(e + 0x70).unwrap_or_default();
         let width: [i32; 2] = read(e + 0x80).unwrap_or_default();
         let split = read::<u8>(e + 0x6d).unwrap_or(0);
+        // The `.et` data's flag and number bytes (+0x40..+0x50).
+        let etdata: [u8; 16] = read::<usize>(e + 0x38)
+            .and_then(|h| read::<usize>(h + 0x28))
+            .and_then(|d| read(d + 0x40))
+            .unwrap_or_default();
         trace_line(
             kind,
             "edge",
             &format!(
-                "{i} {from}->{to} {} vflags {:?} vends {:?} off {:?} width {:?} split {split}",
+                "{i} {from}->{to} {} vflags {:?} vends {:?} off {:?} width {:?} split {split} et {:?}",
                 et.rsplit('/').next().unwrap_or(""),
                 vflags,
                 vends,
                 off,
-                width
+                width,
+                etdata
             ),
             &edge_points(e),
         );

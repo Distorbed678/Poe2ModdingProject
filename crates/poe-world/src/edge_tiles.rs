@@ -8,8 +8,26 @@ use crate::{
     generate::TileMap,
     rng::TerrainRng,
     smoothing::{LayoutGraph, Pos},
+    tileset::{pick, TileKey, TileSet},
     voronoi::isqrt,
 };
+
+/// What edge tiling needs of an edge's `.et`.
+#[derive(Debug, Clone, Default)]
+pub struct EdgeInfo {
+    /// `.et` path (lower case), the edge slots of the tile key.
+    pub path: String,
+    /// `+0x4b`: edge tile size (1 or 3).
+    pub size: u32,
+    /// `+0x20`/`+0x28`: left and right ground (`None` = wildcard).
+    pub grounds: [Option<String>; 2],
+    /// `+0x4c` (the first number): the right ground's height in the key.
+    pub height: u8,
+    /// Flag 8 (third number): edges cross tile sides in the middle.
+    pub centred: bool,
+    /// `+0x4d`: crossing positions from a coordinate hash (not met yet; 0 for the Riverbank).
+    pub hashed: bool,
+}
 
 /// A chain of edges turned into a tile path (the client's 0xb8-byte path record).
 #[derive(Debug, Clone, Default)]
@@ -93,7 +111,9 @@ fn path_key(p: Pos, size: i32) -> (i32, i32) {
 /// The edge tile stage's state (`0x1420b6950`'s object): occupancy grid, pending paths.
 pub struct EdgeTiler<'a> {
     pub g: &'a mut LayoutGraph,
-    map: &'a TileMap,
+    map: &'a mut TileMap,
+    tileset: &'a TileSet,
+    edges: Vec<EdgeInfo>,
     w: u32,
     h: u32,
     cells: Vec<Cell>,
@@ -114,7 +134,7 @@ pub struct EdgeTiler<'a> {
 
 impl<'a> EdgeTiler<'a> {
     /// `0x141ef5700`: cells under room tiles start occupied.
-    pub fn new(g: &'a mut LayoutGraph, map: &'a TileMap, sizes: Vec<u32>) -> Self {
+    pub fn new(g: &'a mut LayoutGraph, map: &'a mut TileMap, tileset: &'a TileSet, edges: Vec<EdgeInfo>) -> Self {
         let (w, h) = (map.width, map.height);
         let mut cells = vec![Cell::default(); (w * h) as usize];
         for y in 0..h {
@@ -136,9 +156,12 @@ impl<'a> EdgeTiler<'a> {
             }
         }
         let n = g.edges.len();
+        let sizes = edges.iter().map(|e| e.size).collect();
         Self {
             g,
             map,
+            tileset,
+            edges,
             w,
             h,
             cells,
@@ -862,6 +885,7 @@ impl EdgeTiler<'_> {
                 if !self.fit(&mut p, rng) {
                     return Err(format!("could not tilise edge {}", p.edge));
                 }
+                self.place_path(&p, rng)?;
                 self.order.push(p);
             }
             let mut k = 0;
@@ -896,7 +920,297 @@ impl EdgeTiler<'_> {
                 }
             }
         }
-        self.order.extend(std::mem::take(&mut self.placed));
+        for p in std::mem::take(&mut self.placed) {
+            self.place_path(&p, rng)?;
+            self.order.push(p);
+        }
         Ok(())
     }
+
+    /// Size of the tile at a cell: the room tile's, or the edge tile size.
+    fn tile_size_at(&self, t: (i32, i32), s: i32) -> (i32, i32) {
+        if (t.0 as u32) < self.w && (t.1 as u32) < self.h {
+            let i = self.idx(t.0 as u32, t.1 as u32);
+            if let (Some(_), Some(p)) = (&self.map.cells[i], self.map.piece_at[i]) {
+                let (w, h) = oriented(self.map.pieces[p].size, self.map.pieces[p].orientation);
+                return (w as i32, h as i32);
+            }
+        }
+        (s, s)
+    }
+
+    /// `0x1420b78d0`: the side of `t` that `nb` lies on (0 north, 1 east, 2 south, 3 west).
+    fn side(&self, t: (i32, i32), nb: (i32, i32), s: i32) -> Result<usize, String> {
+        let (tw, th) = self.tile_size_at(t, s);
+        if nb.0 == t.0 + tw {
+            return Ok(1);
+        }
+        if nb.1 == t.1 + th {
+            return Ok(2);
+        }
+        let (nw, nh) = self.tile_size_at(nb, s);
+        if t.1 == nb.1 + nh {
+            return Ok(0);
+        }
+        if t.0 == nb.0 + nw {
+            return Ok(3);
+        }
+        if nb.0 == t.0 + s {
+            return Ok(1);
+        }
+        if nb.1 == t.1 + s {
+            return Ok(2);
+        }
+        if t.1 == nb.1 + s {
+            return Ok(0);
+        }
+        if t.0 != nb.0 + s {
+            return Err(format!("tiles {t:?} and {nb:?} are not adjacent"));
+        }
+        Ok(3)
+    }
+
+    /// `0x141f9e990`: where the room exit on `nb`'s tile meets side `side` of `t`.
+    fn room_exit(&self, t: (i32, i32), nb: (i32, i32), side: usize, s: i32) -> Result<u8, String> {
+        let i = self.idx(nb.0 as u32, nb.1 as u32);
+        let (Some(c), Some(p)) = (&self.map.cells[i], self.map.piece_at[i]) else {
+            return Err("neighbour does not exist".into());
+        };
+        let piece = &self.map.pieces[p];
+        let o = piece.orientation;
+        let tdt = &self.tileset.tiles[piece.tile.ok_or("room tile outside the tile set")?].tdt;
+        let (rw, rh) = oriented(piece.size, o);
+        let (rw, rh) = (rw as i32, rh as i32);
+        let flipped = (4..8).contains(&o);
+        let dim = |own: usize| if own & 1 == 0 { tdt.size.0 } else { tdt.size.1 } as i32;
+        let them = (side + 2) & 3;
+        let own = own_side(o, them);
+        let mut e = tdt.edge_distances[own] as i32;
+        if flipped {
+            e = 3 * dim(own) - e - 1;
+        }
+        // `0x141d08470`: the virtual exit seen with the orientation.
+        let virtual_exit = |side: usize| -> i32 {
+            let own = own_side(o, side);
+            let v = tdt.edge_distances[4 + own] as i32;
+            if flipped && v < 3 * dim(own) {
+                3 * dim(own) - v - 1
+            } else {
+                v
+            }
+        };
+        let (rx, ry) = (nb.0 - c.offset.0 as i32, nb.1 - c.offset.1 as i32);
+        let fail = || format!("could not connect edge tiles from {t:?} to {nb:?}");
+        let v = match them {
+            0 => {
+                let col = e / 3 + rx;
+                if t.0 <= col && col < t.0 + s {
+                    ((t.0 - rx) + s) * 3 - e - 1
+                } else {
+                    let v = virtual_exit(0);
+                    if v == rw * 3 {
+                        return Err(fail());
+                    }
+                    ((t.0 - rx) + s) * 3 - v - 1
+                }
+            }
+            1 => {
+                let row = e / 3 + ry;
+                if t.1 <= row && row < t.1 + s {
+                    ((t.1 - ry) + s) * 3 - e - 1
+                } else {
+                    let v = virtual_exit(1);
+                    if v == rh * 3 {
+                        return Err(fail());
+                    }
+                    ((t.1 - ry) + s) * 3 - v - 1
+                }
+            }
+            2 => {
+                let col = rx - e / 3 - 1 + rw;
+                if t.0 <= col && col < t.0 + s {
+                    ((rx - t.0) + rw) * 3 - e - 1
+                } else {
+                    let v = virtual_exit(2);
+                    if v == rw * 3 {
+                        return Err(fail());
+                    }
+                    ((rx - t.0) + rw) * 3 - v - 1
+                }
+            }
+            _ => {
+                let row = ry - e / 3 - 1 + rh;
+                if t.1 <= row && row < t.1 + s {
+                    ((ry - t.1) + rh) * 3 - e - 1
+                } else {
+                    let v = virtual_exit(3);
+                    if v == rh * 3 {
+                        return Err(fail());
+                    }
+                    ((ry - t.1) + rh) * 3 - v - 1
+                }
+            }
+        };
+        Ok(v as u8)
+    }
+
+    /// `0x1420b7f30`: an edge tile for every inner tile of a path.
+    fn place_path(&mut self, p: &PathInfo, rng: &mut TerrainRng) -> Result<(), String> {
+        let info = self.edges[p.edge].clone();
+        let s = info.size as i32;
+        let full = (3 * info.size) as u8;
+        let curve = if info.centred || info.hashed {
+            Vec::new()
+        } else if p.is_loop {
+            return Err("edge tiles: loop paths (0x1420b70e0) not ported".into());
+        } else {
+            crossings(&p.tiles, info.size)
+        };
+        let chirality = self.g.edges[p.edge].chirality;
+        let skip = (!p.is_loop) as usize;
+        let n = p.tiles.len();
+        for i in skip..n - skip {
+            let t = p.tiles[i];
+            let prev = p.tiles[(i + n - 1) % n];
+            let next = p.tiles[(i + 1) % n];
+            let side_in = self.side(t, prev, s)?;
+            let side_out = self.side(t, next, s)?;
+            let mut key = TileKey {
+                size: (s as u8, s as u8),
+                exits: [full; 4],
+                virtual_exits: [full; 4],
+                ..Default::default()
+            };
+            key.edges[side_in] = Some(info.path.clone());
+            key.edges[side_out] = Some(info.path.clone());
+            if info.centred {
+                key.exits[side_in] = full >> 1;
+                key.exits[side_out] = full >> 1;
+            } else {
+                for (side, nb, k) in [(side_in, prev, i - skip), (side_out, next, i - skip + 1)] {
+                    key.exits[side] = if self.is_room(nb) {
+                        self.room_exit(t, nb, side, s)?
+                    } else if !info.hashed {
+                        crossing_exit(side, curve[k], info.size)
+                    } else {
+                        hashed_exit(t.0, t.1, side as u32, info.size)
+                    };
+                }
+            }
+            // `0x1420b7d70`: grounds either side of the edge, the missing corner of a turn.
+            let rev = p.end != 0;
+            for (side, flag) in [(side_in, rev), (side_out, !rev)] {
+                let (mut a, mut b) = (side, (side + 1) & 3);
+                if chirality != flag {
+                    std::mem::swap(&mut a, &mut b);
+                }
+                key.grounds[a] = info.grounds[0].clone();
+                key.heights[a] = 0;
+                key.grounds[b] = info.grounds[1].clone();
+                key.heights[b] = info.height;
+            }
+            if (side_in + 2) & 3 != side_out {
+                const MISSING: [usize; 16] = [4, 3, 4, 2, 3, 4, 0, 4, 4, 0, 4, 1, 2, 4, 1, 4];
+                let c = MISSING[side_in * 4 + side_out];
+                if c == 4 {
+                    return Err("bad corner index for missing corner".into());
+                }
+                key.grounds[c] = key.grounds[(c + 1) & 3].clone();
+                key.heights[c] = key.heights[(c + 1) & 3];
+            }
+            let list = self.tileset.candidates("", &key);
+            if list.is_empty() {
+                return Err(format!("no edge tile at {t:?} for key {key:?}"));
+            }
+            let total = list.iter().map(|c| c.weight).sum();
+            let c = pick(list, rng.below(total)).expect("non-empty list");
+            let def = &self.tileset.tiles[c.tile];
+            self.map.place(t.0, t.1, &def.path, def.tdt.size, c.orientation, 0, Some(c.tile));
+        }
+        Ok(())
+    }
+
+    fn is_room(&self, t: (i32, i32)) -> bool {
+        (t.0 as u32) < self.w && (t.1 as u32) < self.h && self.map.cells[self.idx(t.0 as u32, t.1 as u32)].is_some()
+    }
+}
+
+/// `0x141d00fd0(1, 1, side, inverse orientation)`: a tile's own side shown at map side `side`.
+fn own_side(o: u8, side: usize) -> usize {
+    const INVERSE: [usize; 9] = [0, 3, 2, 1, 4, 5, 6, 7, 8];
+    const A: [u32; 9] = [0, 0, 1, 1, 1, 1, 2, 2, 0];
+    const B: [u32; 9] = [0, 1, 1, 2, 0, 1, 1, 2, 0];
+    let o2 = INVERSE[(o as usize).min(8)];
+    let mut s = side as u32;
+    if (4..8).contains(&o2) {
+        s = 3u32.wrapping_sub(s);
+    }
+    (s.wrapping_add(A[o2.min(8)]).wrapping_add(B[o2.min(8)]) % 4) as usize
+}
+
+/// `0x1420b7490`: where a path's smoothed line crosses each pair of neighbouring tiles, as an
+/// offset from the middle of their shared side (f32, like the client).
+fn crossings(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
+    let h = (size >> 1) & 0x7fff_ffff;
+    let centre = |t: (i32, i32)| -> (f32, f32) {
+        let x = (t.0 as u32).wrapping_add(h) as f32 + 0.5;
+        let y = (t.1 as u32).wrapping_add(h) as f32 + 0.5;
+        (x * 23.0, y * 23.0)
+    };
+    let mut pts = Vec::with_capacity(tiles.len() + 8);
+    let first = centre(tiles[0]);
+    let last = centre(*tiles.last().unwrap());
+    pts.extend([first; 4]);
+    pts.extend(tiles.iter().map(|&t| centre(t)));
+    pts.extend([last; 4]);
+    let mut out = Vec::new();
+    for i in 0..tiles.len() - 1 {
+        let mut w: Vec<(f32, f32)> = pts[i..i + 10].to_vec();
+        let mid = ((w[4].0 + w[5].0) / 2.0, (w[4].1 + w[5].1) / 2.0);
+        for k in 0..10 {
+            for j in 0..(10usize - k).saturating_sub(1) {
+                let a = (w[j].0 * 0.5, w[j].1 * 0.5);
+                let b = (w[j + 1].0 * 0.5, w[j + 1].1 * 0.5);
+                w[j] = (a.0 + b.0, a.1 + b.1);
+            }
+        }
+        out.push((w[0].0 - mid.0, w[0].1 - mid.1));
+    }
+    out
+}
+
+/// `0x1420b7ba0`: which third of a side the crossing falls in.
+fn crossing_exit(side: usize, v: (f32, f32), size: u32) -> u8 {
+    let t = (size as u64 * 23) as f32 / 6.0;
+    let half = size >> 1;
+    let r = match side {
+        0 | 1 => {
+            let v = if side == 0 { v.0 } else { v.1 };
+            let i = if -t <= v { (t < v) as u32 + 1 } else { 0 };
+            i * size + half
+        }
+        2 | 3 => {
+            let v = if side == 2 { v.0 } else { v.1 };
+            if -t <= v { (v <= t) as u32 * size + half } else { size * 2 + half }
+        }
+        _ => size * 3,
+    };
+    r as u8
+}
+
+/// `0x1421969e0`: crossing position from a coordinate hash.
+fn hashed_exit(x: i32, y: i32, side: u32, size: u32) -> u8 {
+    let (x, y) = (x as u32, y as u32);
+    let i = match side {
+        1 => {
+            let u = y.wrapping_mul(0x7bb).wrapping_add(0x31e9).wrapping_add(x.wrapping_add(size).wrapping_mul(0x337)) % 13;
+            ((u / 3) * 3).wrapping_sub(u).wrapping_add(2) & 0xff
+        }
+        2 => {
+            let u = y.wrapping_add(size).wrapping_mul(0x7bb).wrapping_add(x.wrapping_mul(0x337)) % 13;
+            ((u / 3) * 3).wrapping_sub(u).wrapping_add(2) & 0xff
+        }
+        _ => y.wrapping_mul(0x7bb).wrapping_add(side.wrapping_mul(0x10a3)).wrapping_add(x.wrapping_mul(0x337)) % 13 % 3,
+    };
+    (i.wrapping_mul(size & 0xff) as u8).wrapping_add((size >> 1) as u8)
 }

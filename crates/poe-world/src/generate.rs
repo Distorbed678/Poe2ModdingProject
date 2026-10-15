@@ -130,7 +130,7 @@ impl TileMap {
         })
     }
 
-    fn place(
+    pub(crate) fn place(
         &mut self,
         x: i32,
         y: i32,

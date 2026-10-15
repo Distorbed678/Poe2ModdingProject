@@ -560,44 +560,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Edge tiles (`0x1420b6950`): chains into tile paths; compare the path tiles with the
     // client's edge tile placements (`place` lines at 0x1420b85bf, in path order).
-    let mut sizes = Vec::new();
+    let mut infos = Vec::new();
     for e in &lg.edges {
-        sizes.push(types.edge(files, &e.edge_type)?.size as u32);
+        let et = types.edge(files, &e.edge_type)?;
+        infos.push(poe_world::edge_tiles::EdgeInfo {
+            path: e.edge_type.clone(),
+            size: et.size as u32,
+            grounds: et.grounds.clone(),
+            height: et.height_change,
+            centred: et.centred,
+            hashed: false,
+        });
     }
-    let mut tiler = poe_world::edge_tiles::EdgeTiler::new(&mut lg, &map, sizes);
-    if let Err(e) = tiler.run(&mut rng) {
+    let pieces_before = map.pieces.len();
+    let mut tiler = poe_world::edge_tiles::EdgeTiler::new(&mut lg, &mut map, &master.tiles, infos);
+    let result = tiler.run(&mut rng);
+    let chains = tiler.order.len();
+    drop(tiler);
+    if let Err(e) = result {
         println!("edge tiles: {e}");
     }
-    let ours: Vec<(i32, i32)> = tiler
-        .order
-        .iter()
-        .flat_map(|p| {
-            let skip = (!p.is_loop) as usize;
-            p.tiles[skip..p.tiles.len() - skip].to_vec()
-        })
-        .collect();
-    let theirs: Vec<(i32, i32)> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+    let theirs: Vec<(String, String)> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
         .lines()
         .filter(|l| l.split('\t').nth(1) == Some("place") && l.split('\t').nth(2) == Some("1420b85bf"))
         .map(|l| {
-            let mut a = l.split('\t').nth(3).unwrap().split_whitespace();
-            (a.next().unwrap().parse().unwrap(), a.next().unwrap().parse().unwrap())
+            let f: Vec<&str> = l.split('\t').collect();
+            (f[3].to_string(), f.get(4).unwrap_or(&"").to_ascii_lowercase())
         })
         .collect();
+    let keys: Vec<String> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter(|l| l.split('\t').nth(1) == Some("tile_key") && l.split('\t').nth(2) == Some("1420b8564"))
+        .map(|l| l.split('\t').skip(3).collect::<Vec<_>>().join(" | "))
+        .collect();
+    let ours: Vec<(String, String)> = map.pieces[pieces_before..]
+        .iter()
+        .map(|p| (format!("{} {} o{} h0", p.x, p.y, p.orientation), p.path.to_ascii_lowercase()))
+        .collect();
     let same = ours.iter().zip(&theirs).take_while(|(a, b)| a == b).count();
-    println!("edge tile paths: {} tiles ({} chains), client {}; first {} in step", ours.len(), tiler.order.len(), theirs.len(), same);
+    println!("edge tiles: {} placed ({chains} paths), client {}; first {same} identical", ours.len(), theirs.len());
     if same < theirs.len() {
-        let mut k = 0;
-        for (i, p) in tiler.order.iter().enumerate() {
-            let skip = (!p.is_loop) as usize;
-            let n = p.tiles.len() - 2 * skip;
-            if k + n > same {
-                println!("path {i} (edge {} end {}): {:?}", p.edge, p.end, p.tiles);
-                println!("  client: {:?}", &theirs[k..(k + n + 3).min(theirs.len())]);
-                break;
-            }
-            k += n;
-        }
+        println!("  ours   {:?}", ours.get(same));
+        println!("  client {:?}", theirs.get(same));
+        println!("  client key {}", keys.get(same).cloned().unwrap_or_default());
     }
 
     let log = rng.log.take().unwrap_or_default();
