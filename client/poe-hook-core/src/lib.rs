@@ -7,12 +7,14 @@
 //!
 //! Everything installed here is undone in `stop` ([`hooks::remove_all`]).
 
+mod actions;
 mod auto_keys;
 mod crash;
 mod crypto_bypass;
 mod dump_types;
 mod entities;
 mod exit_trace;
+mod gamedata;
 mod gamelog;
 mod hooks;
 mod host;

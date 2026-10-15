@@ -43,6 +43,8 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
   - **Game log**: this launch's lines of `logs/Client.txt` (Wine reuses process ids, so lines are taken from the launch time in the session folder name).
   - **Player**: grid, world position, facing (and lock), actions, WASD direction, actor flags.
   - **Entities**: entities created in the area (initial-state reader), type path from the object-type lookup just before, live grid position (Positioned found by its reader `0x141dd8820`). After a reload the player is adopted from its frame tick (type unknown).
+  - **Stats**: the player's stats by name (`poe-hook-data/stats.tsv`), all stat sets, values that changed in the last 3 s highlighted. Stats component (found by name) `+0x1c8` = set 0 (the entity's own stats), other sets in the 16-byte list `+0x1e8..+0x1f0` (container `+0xd8` = set id); a container is a sorted `(i32 key, i32 value)` array at `+0xf8..+0x100` (setter `0x1426ac920`, StatsUpdate handler `0x142181f20`).
+  - **Actions**: starts and ends of the player's Actor actions (`+0x238`, `+0x240`; type at action `+0x120`) with `ActionTypes` names, sampled every simulation frame; also logged ("action start slot 0: DodgeRoll ...").
   - **Entities** also lists the selected entity's components with their names (Positioned, Stats, Pathfinding, Buffs, Life, Animated, Player, PlayerClass, Inventories, Actor, Render, Targetable, BuffOrbs for the player), addresses and vtables; "scan" opens one in the Scanner. Names come from the entity type's component lookup (`entity+8` → `+0x28`: sorted `{char* name, i32 index}` array from `+0x28` to `+0x30`, as used by the get-component-by-name functions such as `0x140150cb0`). The client has no RTTI (the slot before a vtable is a function pointer).
   - **Scanner**: a memory region (watch syntax, up to 8 KB) read every frame; bytes that just changed are red, recently changed orange, differing from the baseline yellow; hex plus u32/f32/pointer columns, tooltips with all interpretations, "rows that changed" filter.
   - **Watches**: read-only memory watches with address expressions (`[ptr]`, `+`/`-`, Ghidra addresses, `player`/`pos`/`actor`/`exe`), saved in `logs/poe-hook/watches.txt`.
@@ -106,6 +108,9 @@ Risk: the DLL is a third-party module inside the official client, even if it onl
 | `auto_keys` | `[]` | Test input timeline `[[ms, vk], ...]`; tests pass `POE_HOOK_AUTO_KEYS="20000:13"` instead (`tools/test-run.sh`). `deploy-client` resets it to `[]`. Never while read-only. |
 
 Note: the game's own login/instance TCP traffic does not go through these ws2_32 exports (it is invisible to `net_trace`). The libcurl HTTPS traffic does go through them.
+
+## Game data for the DLL
+`cargo xtask deploy-client` also writes name tables from the game data into `GameFiles/poe-hook-data/`: `stats.tsv` (network key = `Stats.dat` row + 1, id) and `action_types.tsv` (`ActionTypes` key column, id). It also resets the client's remembered gateway (`gateway_id` in our test prefix's `poe2_production_Config.ini`) to our gateway for private deploys; after an official session it stayed on an official realm and the client never contacted our server.
 
 ## Building and deploying
 - `cargo xtask build-dll` runs `Tools/cargo-xwin/bin/cargo-xwin xwin build --workspace --target x86_64-pc-windows-msvc --release` in `client/`, keeping the MSVC SDK cache in `Tools/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.

@@ -178,11 +178,37 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
     if !official {
         select_local_gateway(root, &config.gateway.display_name)?;
     }
+    export_dll_data(config)?;
     println!(
         "deployed to {} ({})",
         game.display(),
         if official { "official, read-only" } else { "private server" }
     );
+    Ok(())
+}
+
+/// Name tables for the DLL's Stats and Actions tabs (`GameFiles/poe-hook-data/`), from the
+/// game data: `stats.tsv` (network key = `Stats.dat` row + 1, id) and `action_types.tsv`
+/// (`ActionTypes` key column, id).
+fn export_dll_data(config: &Config) -> Result<()> {
+    let data = poe_data::GameData::open(&config.game.game_dir, &config.game.schema)?;
+    let dir = config.game.game_dir.join("poe-hook-data");
+    std::fs::create_dir_all(&dir)?;
+    let stats = data.table("Stats")?;
+    let mut out = String::from("# key\tid (Stats.dat row + 1)\n");
+    for (i, row) in stats.rows().enumerate() {
+        out.push_str(&format!("{}\t{}\n", i + 1, row.str("Id")?));
+    }
+    std::fs::write(dir.join("stats.tsv"), out)?;
+    let actions = data.table("ActionTypes")?;
+    let mut out = String::from("# key\tid (ActionTypes column 1)\n");
+    for row in actions.rows() {
+        if let Some(key) = row.get_index(1)?.as_int() {
+            out.push_str(&format!("{key}\t{}\n", row.str("Id")?));
+        }
+    }
+    std::fs::write(dir.join("action_types.tsv"), out)?;
+    println!("dll data -> {} ({} stats, {} action types)", dir.display(), stats.len(), actions.len());
     Ok(())
 }
 

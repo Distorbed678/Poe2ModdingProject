@@ -225,6 +225,7 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
             );
         }
         log_player_frame(entity, n, dt);
+        crate::actions::sample(entity, n as u32);
         crate::position_sync::report(entity, n as u32);
     }
 }
