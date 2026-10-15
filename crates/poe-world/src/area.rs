@@ -35,8 +35,14 @@ pub struct Generated {
     pub draws: u64,
 }
 
-/// The topology graphs (`.tgr`) an area chooses from.
+/// The topology graphs (`.tgr`/`.dgr`) an area chooses from (`0x141fdfe30`): those whose last
+/// Topologies column (league/mode, topology +0x40) equals `mode`, else those marked 0x39 (any);
+/// none at all retries with mode 1 (the default).
 pub fn topologies(gd: &GameData, area_id: &str) -> Result<Vec<String>, GenError> {
+    topologies_for(gd, area_id, 1)
+}
+
+pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<String>, GenError> {
     let areas = gd.table("WorldAreas").map_err(data)?;
     let area = areas.find_by_str("Id", area_id).map_err(data)?.ok_or_else(|| data(format!("no area {area_id}")))?;
     let topologies = gd.table("Topologies").map_err(data)?;
@@ -44,23 +50,53 @@ pub fn topologies(gd: &GameData, area_id: &str) -> Result<Vec<String>, GenError>
         Value::List(l) => l.iter().filter_map(Value::as_row).collect(),
         _ => Vec::new(),
     };
-    rows.iter()
-        .map(|&r| topologies.row(r).ok_or_else(|| data("bad topology row"))?.str("DGRFile").map_err(data))
-        .collect()
+    let last = topologies.schema().columns.len() - 1;
+    let (mut exact, mut any) = (Vec::new(), Vec::new());
+    for &r in &rows {
+        let row = topologies.row(r).ok_or_else(|| data("bad topology row"))?;
+        let path = row.str("DGRFile").map_err(data)?;
+        match row.get_index(last).map_err(data)? {
+            Value::Int(v) if v == mode => exact.push(path),
+            Value::Int(0x39) => any.push(path),
+            _ => {}
+        }
+    }
+    if !exact.is_empty() {
+        return Ok(exact);
+    }
+    if any.is_empty() && mode != 1 {
+        return topologies_for(gd, area_id, 1);
+    }
+    Ok(any)
 }
 
 /// Generates area `area_id` with `seed` (`TerrainGen_Run` up to the tile hash).
 pub fn generate(gd: &GameData, area_id: &str, seed: u32) -> Result<Generated, GenError> {
+    generate_with(gd, area_id, &mut TerrainRng::new(seed), None)
+}
+
+/// [`generate`] with a caller's RNG (for draw logs) and optionally a forced topology
+/// (`map_force_topology`, stat key 0xb92: 1-based index into [`topologies`]; `0x141ff90f0`
+/// still draws the topology value).
+///
+/// Without one the client chooses by the world map (`0x141ff9280` → `0x141fa6440`: the
+/// directions of the connected areas' map pins against each topology's direction list, three
+/// passes from exact to adjacent) and only falls back to the index draw here when nothing
+/// matches; that choice is not ported yet.
+pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<u32>) -> Result<Generated, GenError> {
     let graphs = topologies(gd, area_id)?;
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));
     }
     let files = gd.files();
-    let mut rng = TerrainRng::new(seed);
     let sub = rng.below(u32::MAX);
-    let dgr = graphs[lcg_index(sub, graphs.len() as u32) as usize].clone();
+    let index = match forced {
+        Some(f) if f >= 1 && (f as usize) <= graphs.len() => f as usize - 1,
+        _ => lcg_index(sub, graphs.len() as u32) as usize,
+    };
+    let dgr = graphs[index].clone();
     let graph = Graph::parse_bytes(&crate::generate::Files::read(files, &dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
-    let map = generate_graph(files, &graph, &mut rng)?;
+    let map = generate_graph(files, &graph, rng)?;
     Ok(Generated { graph: dgr, map, draws: rng.draws })
 }
 
@@ -119,7 +155,7 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
         if graph.nodes[n].room_type.is_empty() {
             continue;
         }
-        let p = place_node(&set, &placed_graph, n, tiles, &placed, &mut types, files, rng)?;
+        let p = place_node(&set, &master.tiles, &placed_graph, n, tiles, &placed, &mut types, files, rng)?;
         placed.push(p);
     }
     let fixed: Vec<(bool, bool)> = graph
@@ -132,7 +168,14 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
     for p in &placed {
-        room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, rng)?;
+        match p.tile {
+            // `0x1420c9970`: a node that took a tile places just that tile.
+            Some(t) => {
+                let def = &master.tiles.tiles[t];
+                map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, None);
+            }
+            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, rng)?,
+        }
     }
 
     // Edge ends at the rooms' exits (`0x1420c5750`, `0x1420c5b50`), then routing.
@@ -383,6 +426,7 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
     let fill_rooms = fill_pass(&mut map, &mut master, files, rng)?;
     let mut rooms: Vec<RoomPlacement> = placed
         .iter()
+        .filter(|p| p.tile.is_none())
         .map(|p| RoomPlacement { room: &set.rooms[p.room].room, origin: p.pos, orientation: p.orientation })
         .collect();
     rooms.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));

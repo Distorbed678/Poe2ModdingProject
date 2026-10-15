@@ -23,7 +23,7 @@ use crate::{
     graph::Graph,
     rng::TerrainRng,
     text::{decode_utf16, tokens},
-    tileset::{TileKey, orientation_mask},
+    tileset::{TileKey, TileSet, orientation_mask},
 };
 
 fn norm(p: &str) -> String {
@@ -462,7 +462,10 @@ pub(crate) fn fits_edges(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoomCandidate {
+    /// Room index (`usize::MAX` for a tile).
     pub room: usize,
+    /// Tile-set index when the node takes a tile (`0x1420c76d0`'s tile branch).
+    pub tile: Option<usize>,
     pub orientation: u8,
     pub weight: u32,
     /// Size with the orientation.
@@ -544,6 +547,7 @@ fn adjust_sides(
 /// `0x1420c76d0` for a node with a room type.
 pub fn room_candidates(
     set: &RoomSet,
+    tiles: &TileSet,
     g: &PlacedGraph,
     node: usize,
     types: &mut TerrainTypes,
@@ -552,8 +556,9 @@ pub fn room_candidates(
     let (mut sides, mut key) = node_key(g, node, types, files)?;
     let n = &g.graph.nodes[node];
     let node_o = node_orientation(&n.orientation);
+    // `0x1420c5540`: tiles of the room type as feature, else rooms of that type.
     let any_match = |key: &TileKey| {
-        set.rooms.iter().any(|r| {
+        crate::node_tiles::feature_has_edges(tiles, &n.room_type, &key.edges) || set.rooms.iter().any(|r| {
             r.tag.eq_ignore_ascii_case(&n.room_type)
                 && (0..8u8).any(|o| r.orientations & (1 << o) != 0 && r.key.oriented(o).edges == key.edges)
         })
@@ -581,10 +586,14 @@ pub fn room_candidates(
             let k = set.rooms[ri].key.oriented(node_o);
             out.push(RoomCandidate {
                 room: ri,
+                tile: None,
                 orientation: node_o,
                 weight: set.rooms[ri].weight,
                 size: k.size,
             });
+        }
+        if out.is_empty() {
+            out = tile_fallback(tiles, g, node, node_o, &key, &sides, types, files)?;
         }
         return Ok((out, sides));
     }
@@ -594,6 +603,7 @@ pub fn room_candidates(
             if fits_edges(&k, &sides, g, node, strict, types, files)? {
                 out.push(RoomCandidate {
                     room: ri,
+                    tile: None,
                     orientation: o,
                     weight: set.rooms[ri].weight,
                     size: k.size,
@@ -604,14 +614,39 @@ pub fn room_candidates(
             break;
         }
     }
+    if out.is_empty() {
+        out = tile_fallback(tiles, g, node, node_o, &key, &sides, types, files)?;
+    }
     Ok((out, sides))
+}
+
+/// `0x1420c76d0`'s tile branch for a typed node no room fits: tiles of the room type as feature.
+#[allow(clippy::too_many_arguments)]
+fn tile_fallback(
+    tiles: &TileSet,
+    g: &PlacedGraph,
+    node: usize,
+    node_o: u8,
+    key: &TileKey,
+    sides: &[usize; 4],
+    types: &mut TerrainTypes,
+    files: &dyn Files,
+) -> Result<Vec<RoomCandidate>, GenError> {
+    let feature = &g.graph.nodes[node].room_type;
+    Ok(crate::node_tiles::candidates(g, node, node_o, feature, key, sides, tiles, types, files)?
+        .into_iter()
+        .map(|e| RoomCandidate { room: usize::MAX, tile: Some(e.tile), orientation: e.orientation, weight: e.weight, size: e.size })
+        .collect())
 }
 
 /// A placed room node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlacedRoom {
     pub node: usize,
+    /// Room index (`usize::MAX` for a tile).
     pub room: usize,
+    /// Tile-set index when the node took a tile instead of a room.
+    pub tile: Option<usize>,
     pub orientation: u8,
     pub pos: (i32, i32),
     pub size: (u8, u8),
@@ -691,6 +726,7 @@ fn node_alignment(
 /// `0x1420c87a0`: draws and places the room of `node` (graph `tiles` in tiles).
 pub fn place_node(
     set: &RoomSet,
+    tile_set: &TileSet,
     g: &PlacedGraph,
     node: usize,
     tiles: (i32, i32),
@@ -699,7 +735,7 @@ pub fn place_node(
     files: &dyn Files,
     rng: &mut TerrainRng,
 ) -> Result<PlacedRoom, GenError> {
-    let (mut list, mut sides) = room_candidates(set, g, node, types, files)?;
+    let (mut list, mut sides) = room_candidates(set, tile_set, g, node, types, files)?;
     let align = node_alignment(g, node, types, files)?;
     let mut max_size = 0;
     for e in g.slots(node).into_iter().flatten() {
@@ -745,7 +781,10 @@ pub fn place_node(
         if inside && !overlaps {
             // `0x1420c59e0`: keep the room off the map border by the largest edge size
             // (twice for virtual edges) on each side its key has an edge.
-            let key = set.rooms[c.room].key.oriented(c.orientation);
+            let mut key = match c.tile {
+                Some(t) => TileKey::from_tdt(&tile_set.tiles[t].tdt).oriented(c.orientation),
+                None => set.rooms[c.room].key.oriented(c.orientation),
+            };
             let mut margin_of = |side: usize| -> Result<Option<i32>, GenError> {
                 Ok(match &key.edges[side] {
                     None => None,
@@ -768,20 +807,26 @@ pub fn place_node(
             if let Some(m) = margin_of(1)? {
                 px = px.min(tiles.0 - m - w).max(0);
             }
+            let mut orientation = c.orientation;
             if node_orientation(&g.graph.nodes[node].orientation) < 8 {
                 fix_sides(&key, &mut sides, g, node, types, files)?;
+            } else if let Some(d) = crate::node_tiles::quarter_turn(g, node, &sides, (px, py), c.size, tiles) {
+                sides = sides.map(|s| if s == 4 { 4 } else { (s + d as usize) & 3 });
+                orientation = crate::node_tiles::turn(orientation, d);
+                key = key.oriented(d);
             }
             return Ok(PlacedRoom {
                 node,
                 room: c.room,
-                orientation: c.orientation,
+                tile: c.tile,
+                orientation,
                 pos: (px, py),
                 size: c.size,
                 sides,
                 key,
             });
         }
-        list.retain(|o| !(o.room == c.room && o.orientation == c.orientation));
+        list.retain(|o| !(o.room == c.room && o.tile == c.tile && o.orientation == c.orientation));
     }
 }
 

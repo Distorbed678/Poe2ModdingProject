@@ -16,7 +16,7 @@ use crate::{
     rooms::{EdgeView, RepelRect, TerrainTypes, angle_between, fits_edges, node_key, node_orientation, repel_push},
     routing::{EXIT_CELL, SIDE_DIR},
     smoothing::{LNode, LayoutGraph},
-    tileset::TileKey,
+    tileset::{TileKey, TileSet},
 };
 
 /// The layout graph as an [`EdgeView`] (heights from the `.tgr` nodes; split-off nodes 0).
@@ -90,20 +90,31 @@ pub struct NodeTile {
     pub align: i32,
 }
 
+/// A tile-set candidate for a node: tile index, orientation, weight, turned size.
 #[derive(Debug, Clone)]
-struct Entry {
-    tile: usize,
-    orientation: u8,
-    weight: u32,
-    size: (u8, u8),
+pub struct Entry {
+    pub tile: usize,
+    pub orientation: u8,
+    pub weight: u32,
+    pub size: (u8, u8),
 }
 
-/// `0x1420c76d0`, tile branch: the sizes the feature-less tiles with the key's edges come in
+/// `0x141d09700` non-empty: the tile set has tiles of `feature` with these edges (in some
+/// orientation).
+pub fn feature_has_edges(set: &TileSet, feature: &str, edges: &[Option<String>; 4]) -> bool {
+    set.tiles.iter().any(|t| {
+        t.weight != 0
+            && t.tdt.feature.as_deref().unwrap_or("").eq_ignore_ascii_case(feature)
+            && (0..8u8).any(|o| t.orientations & (1 << o) != 0 && TileKey::from_tdt(&t.tdt).oriented(o).edges == *edges)
+    })
+}
+
+/// `0x1420c76d0`, tile branch: the sizes the feature's tiles with the key's edges come in
 /// (`0x141d09700`, sorted), and per size every tile entry with those edges and that size
-/// (`0x141d0a7d0`; the size swapped when there is none), filtered by the node's orientation, or
-/// for `(any)` by `0x1420b87b0` (with the climb check, then without).
-fn candidates(view: &LayoutView, node: usize, key: &TileKey, sides: &[usize; 4], master: &Master, types: &mut TerrainTypes, files: &dyn Files) -> Result<Vec<Entry>, GenError> {
-    let set = &master.tiles;
+/// (`0x141d0a7d0`; the size swapped when there is none) of that feature, filtered by the node's
+/// orientation, or for `(any)` by `0x1420b87b0` (with the climb check, then without).
+#[allow(clippy::too_many_arguments)]
+pub fn candidates(view: &dyn EdgeView, node: usize, node_o: u8, feature: &str, key: &TileKey, sides: &[usize; 4], set: &TileSet, types: &mut TerrainTypes, files: &dyn Files) -> Result<Vec<Entry>, GenError> {
     let mut all = Vec::new();
     for (i, t) in set.tiles.iter().enumerate() {
         if t.weight == 0 {
@@ -115,14 +126,13 @@ fn candidates(view: &LayoutView, node: usize, key: &TileKey, sides: &[usize; 4],
                 continue;
             }
             let k = base.oriented(o);
-            if k.edges == key.edges {
-                let plain = t.tdt.feature.as_deref().unwrap_or("").is_empty();
-                all.push((i, o, t.weight, k, plain));
+            // The filter lambdas (`0x143505830`/`0x143505a10`) keep the node's feature only.
+            if k.edges == key.edges && t.tdt.feature.as_deref().unwrap_or("").eq_ignore_ascii_case(feature) {
+                all.push((i, o, t.weight, k, true));
             }
         }
     }
     let sizes: BTreeSet<(u8, u8)> = all.iter().filter(|a| a.4).map(|a| a.3.size).collect();
-    let node_o = view.graph.nodes.get(node).map_or(8, |n| node_orientation(&n.orientation));
     let mut out = Vec::new();
     for strict in [true, false] {
         for &(a, b) in &sizes {
@@ -145,7 +155,7 @@ fn candidates(view: &LayoutView, node: usize, key: &TileKey, sides: &[usize; 4],
 }
 
 /// `0x141d00f00` for a quarter turn: orientation `o` turned once more (`r` 1) or back (`r` 3).
-fn turn(o: u8, r: u8) -> u8 {
+pub(crate) fn turn(o: u8, r: u8) -> u8 {
     const ONE: [u8; 8] = [1, 2, 3, 0, 5, 6, 7, 4];
     const THREE: [u8; 8] = [3, 0, 1, 2, 7, 4, 5, 6];
     if o >= 8 {
@@ -155,7 +165,7 @@ fn turn(o: u8, r: u8) -> u8 {
 }
 
 /// `0x1420b8e20`: how far the node's edges point away from their sides (degrees).
-fn side_cost(view: &LayoutView, node: usize, sides: &[usize; 4]) -> i32 {
+pub(crate) fn side_cost(view: &dyn EdgeView, node: usize, sides: &[usize; 4]) -> i32 {
     let slots = view.slots(node);
     let (nx, ny) = view.pos(node);
     let mut cost = 0;
@@ -226,7 +236,8 @@ fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<Strin
 #[allow(clippy::too_many_arguments)]
 fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen: &[NodeTile], tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<NodeTile, GenError> {
     let (mut sides, key) = node_key(view, node, types, files)?;
-    let mut list = candidates(view, node, &key, &sides, master, types, files)?;
+    let node_o = view.graph.nodes.get(node).map_or(8, |n| node_orientation(&n.orientation));
+    let mut list = candidates(view, node, node_o, "", &key, &sides, &master.tiles, types, files)?;
     if list.is_empty() {
         return Err(GenError::Unsupported(format!("node {node}: no tile matches its edges {:?}", key.edges)));
     }
@@ -260,28 +271,9 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen
             let mut pos = (px, py);
             keep_off_border(&mut pos, (w, h), &key.edges.clone(), max_size, tiles, types, files)?;
             let mut orientation = c.orientation;
-            if view.graph.nodes.get(node).is_none_or(|n| node_orientation(&n.orientation) >= 8) {
-                // `0x1420c9d70`: a quarter turn either way when that points the edges better and
-                // puts none against the map border.
-                let turned = |d: u8| sides.map(|s| if s == 4 { 4 } else { (s + d as usize) & 3 });
-                let allowed = |sd: &[usize; 4]| {
-                    !((pos.0 == 0 && sd.contains(&3))
-                        || (pos.1 == 0 && sd.contains(&0))
-                        || (c.size.0 as i32 + pos.0 == tiles.0 && sd.contains(&1))
-                        || (c.size.1 as i32 + pos.1 == tiles.1 && sd.contains(&2)))
-                };
-                let (minus, plus) = (turned(3), turned(1));
-                let cost = side_cost(view, node, &sides);
-                let cost_minus = side_cost(view, node, &minus);
-                let turn_by = if allowed(&minus) && cost_minus < cost {
-                    if allowed(&plus) && side_cost(view, node, &plus) < cost_minus { Some(1) } else { Some(3) }
-                } else if allowed(&plus) && side_cost(view, node, &plus) < cost {
-                    Some(1)
-                } else {
-                    None
-                };
-                if let Some(d) = turn_by {
-                    sides = if d == 1 { plus } else { minus };
+            if node_o >= 8 {
+                if let Some(d) = quarter_turn(view, node, &sides, pos, c.size, tiles) {
+                    sides = sides.map(|s| if s == 4 { 4 } else { (s + d as usize) & 3 });
                     orientation = turn(orientation, d);
                     key = key.oriented(d);
                 }
@@ -292,6 +284,28 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen
         if let Some(k) = list.iter().position(|o| o.tile == c.tile && o.orientation == c.orientation) {
             list.remove(k);
         }
+    }
+}
+
+/// `0x1420c9d70`: a quarter turn (1 or 3) when that points the node's edges better at their
+/// sides and puts none against the map border the placement touches.
+pub(crate) fn quarter_turn(view: &dyn EdgeView, node: usize, sides: &[usize; 4], pos: (i32, i32), size: (u8, u8), tiles: (i32, i32)) -> Option<u8> {
+    let turned = |d: usize| sides.map(|s| if s == 4 { 4 } else { (s + d) & 3 });
+    let allowed = |sd: &[usize; 4]| {
+        !((pos.0 == 0 && sd.contains(&3))
+            || (pos.1 == 0 && sd.contains(&0))
+            || (size.0 as i32 + pos.0 == tiles.0 && sd.contains(&1))
+            || (size.1 as i32 + pos.1 == tiles.1 && sd.contains(&2)))
+    };
+    let (minus, plus) = (turned(3), turned(1));
+    let cost = side_cost(view, node, sides);
+    let cost_minus = side_cost(view, node, &minus);
+    if allowed(&minus) && cost_minus < cost {
+        if allowed(&plus) && side_cost(view, node, &plus) < cost_minus { Some(1) } else { Some(3) }
+    } else if allowed(&plus) && side_cost(view, node, &plus) < cost {
+        Some(1)
+    } else {
+        None
     }
 }
 
