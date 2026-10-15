@@ -91,6 +91,8 @@ pub struct TileMap {
     /// `.gt` flags by ground path (lower case), for grounds the lattice meets; missing grounds
     /// count as the default `0x0f`.
     pub ground_flags: HashMap<String, u8>,
+    /// `.et` flags by edge path (lower case): 0x80 wildcard, 4 virtual.
+    pub edge_flags: HashMap<String, u8>,
 }
 
 /// One tile corner (map +0x50 records: ground index, height, flags).
@@ -116,6 +118,7 @@ impl TileMap {
             piece_at: vec![None; n],
             lattice: vec![LatticePoint::default(); ((width + 1) * (height + 1)) as usize],
             ground_flags: HashMap::new(),
+            edge_flags: HashMap::new(),
         }
     }
 
@@ -130,7 +133,7 @@ impl TileMap {
         self.ground_flags.get(ground).copied().unwrap_or(0x0f)
     }
 
-    fn index(&self, x: i32, y: i32) -> Option<usize> {
+    pub fn index(&self, x: i32, y: i32) -> Option<usize> {
         (x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height)
             .then(|| (y as u32 * self.width + x as u32) as usize)
     }
@@ -140,7 +143,7 @@ impl TileMap {
     }
 
     /// Size of a tile with orientation `o` (odd orientations swap).
-    fn oriented_size(size: (u8, u8), o: u8) -> (i32, i32) {
+    pub fn oriented_size(size: (u8, u8), o: u8) -> (i32, i32) {
         if o & 1 == 1 && o < 8 {
             (size.1 as i32, size.0 as i32)
         } else {
@@ -284,6 +287,21 @@ impl Master {
                 if !out.contains_key(&key) {
                     let text = crate::text::decode_utf16(&files.read(&key)?);
                     out.insert(key, crate::rooms::ground_flags(&text));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// `.et` flags (0x80 wildcard, 4 virtual) of every edge type the tile set's tiles use.
+    pub fn edge_flag_table(&self, files: &dyn Files) -> Result<HashMap<String, u8>, GenError> {
+        let mut out = HashMap::new();
+        for t in &self.tiles.tiles {
+            for e in t.tdt.edges.iter().flatten() {
+                let key = e.to_ascii_lowercase();
+                if !out.contains_key(&key) {
+                    let et = crate::rooms::EdgeType::parse(&crate::text::decode_utf16(&files.read(&key)?));
+                    out.insert(key, (et.wildcard as u8) << 7 | (et.virtual_edge as u8) << 2);
                 }
             }
         }

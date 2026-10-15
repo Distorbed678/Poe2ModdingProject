@@ -12,6 +12,7 @@ pub mod export;
 pub mod generate;
 pub mod graph;
 pub mod hash;
+pub mod lattice;
 pub mod layout;
 pub mod rng;
 pub mod rooms;
