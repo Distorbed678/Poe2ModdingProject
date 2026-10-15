@@ -1,6 +1,6 @@
 //! Player start position.
 //!
-//! The server does not generate terrain yet (M4), so it cannot know where an area's start is.
+//! The server does not generate terrain yet (M5), so it cannot know where an area's start is.
 //! Dev bridge: the client DLL exports the layout it generated
 //! (`<layout_dir>/terrain_layout_<tile hash>.tsv`, matched with TerrainHashes: a
 //! `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path` per tile) and the server spawns the

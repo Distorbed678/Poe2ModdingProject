@@ -1,4 +1,4 @@
-//! Client position reports (dev bridge until the server simulates movement exactly, M4).
+//! Client position reports (dev bridge until the server simulates movement exactly, M5).
 //!
 //! The client DLL (`poe-hook` `position_sync`) sends one UDP datagram per simulation frame
 //! to the instance port with the player's position and current action. The server keys the

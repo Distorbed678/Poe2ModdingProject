@@ -29,5 +29,5 @@ dump_object_types = false
 # POE_HOOK_MOVEMENT_LOG environment variable).
 movement_log = false
 # Report the player's position and action to the local instance server every frame (UDP to
-# the instance port; dev bridge for movement until M4).
+# the instance port; dev bridge for movement until M5).
 position_sync = true

@@ -36,8 +36,8 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
 
    The client logs "Client-Safe Instance ID = …" and "Generating level N area "X" with seed S", then generates the terrain.
 
-   Some seeds fail to generate (`TerrainGenerationException`, e.g. "Mismatching ground types … Cannot place Mud over WideRiverWater" in `G1_1`), and the client then never sends TerrainHashes. The official server generates terrain itself, so it never sends such seeds. Until M4, the server picks seeds from `instance.known_seeds` (the area/seed pairs from live logs, `tools/re/clientlog_terrain.py`). Towns and hideouts always use seed 1.
-5. **C→S `0x009a` TerrainHashes** after terrain generation: `u8, u32 tile hash, u32 doodad hash`. Confirmed: the client logs "Tile hash: N" and "Doodad hash: N" with the same values. These are the reference values for server-side terrain generation (M4).
+   Some seeds fail to generate (`TerrainGenerationException`, e.g. "Mismatching ground types … Cannot place Mud over WideRiverWater" in `G1_1`), and the client then never sends TerrainHashes. The official server generates terrain itself, so it never sends such seeds. Until M5, the server picks seeds from `instance.known_seeds` (the area/seed pairs from live logs, `tools/re/clientlog_terrain.py`). Towns and hideouts always use seed 1.
+5. **C→S `0x009a` TerrainHashes** after terrain generation: `u8, u32 tile hash, u32 doodad hash`. Confirmed: the client logs "Tile hash: N" and "Doodad hash: N" with the same values. These are the reference values for server-side terrain generation (M5).
 
 ## After the area loads (verified 2026-10-13: the player is visible in town and in the Riverbank intro)
 The server sends, in this order (`InstanceServer::enter_world`):

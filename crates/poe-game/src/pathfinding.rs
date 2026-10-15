@@ -2,7 +2,7 @@
 //! shortened to the cells that are still in line of sight of each other.
 //!
 //! An approximation of the client's pathfinder (the client also walks around obstacles to
-//! reach a click or the WASD target); M4 replaces it with an exact port.
+//! reach a click or the WASD target); M5 replaces it with an exact port.
 
 use std::{cmp::Ordering, collections::BinaryHeap};
 

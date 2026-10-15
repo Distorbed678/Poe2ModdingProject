@@ -340,7 +340,7 @@ unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at:
 }
 
 /// Writes `terrain_layout_<tile hash>.tsv` next to the exe: a `size<TAB>w<TAB>h` line, then one
-/// `x<TAB>y<TAB>tile path` line per tile. Dev bridge until the server generates terrain (M4).
+/// `x<TAB>y<TAB>tile path` line per tile. Dev bridge until the server generates terrain (M5).
 unsafe fn export_layout(world: usize) {
     use crate::mem::{read, wide_string};
     // The terrain object is a member (or pointed-to member) of the world; find it by its

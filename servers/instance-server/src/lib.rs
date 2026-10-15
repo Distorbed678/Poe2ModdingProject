@@ -630,7 +630,7 @@ impl InstanceServer {
                     // The stat set's constant stats, and its implicit (flag) stats as 1. The
                     // client reads computed stats (e.g. `dodge_roll_travel_distance`), which
                     // the server derives from the base ones; until there is a stat calculator
-                    // (M7), each `..._base_...` stat is also sent under its name without
+                    // (M8), each `..._base_...` stat is also sent under its name without
                     // `base_` when that stat exists.
                     let mut named: Vec<(String, i32)> = granted
                         .constant_stats

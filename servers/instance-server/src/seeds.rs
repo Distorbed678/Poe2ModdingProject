@@ -2,7 +2,7 @@
 //!
 //! The client generates the area from (area, seed) and some seeds fail ("Mismatching ground
 //! types", `TerrainGenerationException`); the official server generates the terrain itself and
-//! never hands those out. Until the server generates terrain (M4), it can pick seeds that the
+//! never hands those out. Until the server generates terrain (M5), it can pick seeds that the
 //! client is known to accept, from a TSV of `area, level, seed, tile hash, doodad hash` rows
 //! (`tools/re/clientlog_terrain.py` extracts them from a live `Client.txt`).
 

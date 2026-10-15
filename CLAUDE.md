@@ -5,7 +5,7 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 ## Hard rules
 - **Never touch the Steam install** at `~/.local/share/Steam/steamapps/common/Path of Exile 2` or its Proton prefix (`compatdata/2694490`). Use only `GameFiles/`, the provided copy.
 - `GameFiles/` may be modified, but only through `cargo xtask deploy-client` / `revert-client`, which back files up first. Never hand-edit it.
-- **No traffic to official servers** for research. Reverse engineering is static (Ghidra), plus the client against *our* server.
+- **Official servers: read-only only** (rule changed by the user 2026-10-14). The debug DLL may observe and log official sessions, and nothing else: no sending, altering or injecting anything while connected to a non-local server (the DLL's read-only latch enforces this). Use the GameFiles copy (`cargo xtask deploy-client --official`), never the Steam install. The user plays official sessions; Claude does not log in to official servers on its own. Otherwise reverse engineering is static (Ghidra), plus the client against *our* server.
 - All external tools go in `Tools/` (see `Tools/README.md`; `Tools/fetch-tools.sh` reproduces them). Reference repos are in `Tools/reference/`.
 - Documentation goes in `Documentation/` (start at `Documentation/index.md`). Update it in the same commit as the code it describes. RE findings and addresses go in `Documentation/re/`.
 - Commit and push (`origin main`, private repo `Distorbed678/Poe2ModdingProject`) after each working step.
