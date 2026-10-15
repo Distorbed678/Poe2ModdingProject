@@ -26,7 +26,10 @@ use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
 /// The real `vkGetInstanceProcAddr` (the export before patching).
 static REAL_GIPA: AtomicUsize = AtomicUsize::new(0);
 
-static STATE: Mutex<VulkanState> = Mutex::new(unsafe { std::mem::zeroed() });
+static STATE: Mutex<VulkanState> = Mutex::new(VulkanState {
+    present_family: -1,
+    ..unsafe { std::mem::zeroed() }
+});
 static QUEUES: Mutex<Option<HashMap<u64, i32>>> = Mutex::new(None);
 static SURFACES: Mutex<Option<HashMap<u64, isize>>> = Mutex::new(None);
 
@@ -38,7 +41,9 @@ macro_rules! wrapped {
         fn wrap(name: &[u8], real: usize) -> Option<usize> {
             match name {
                 $($name => {
-                    $slot.store(real, Ordering::SeqCst);
+                    if $slot.swap(real, Ordering::SeqCst) != real {
+                        log::debug!("vulkan: wrapping {}", String::from_utf8_lossy(name));
+                    }
                     Some($wrapper as *const () as usize)
                 })*
                 _ => None,
@@ -53,6 +58,8 @@ wrapped! {
     b"vkGetDeviceQueue" => GET_DEVICE_QUEUE, get_device_queue;
     b"vkGetDeviceQueue2" => GET_DEVICE_QUEUE2, get_device_queue2;
     b"vkCreateWin32SurfaceKHR" => CREATE_SURFACE, create_win32_surface;
+    b"vkGetPhysicalDeviceSurfaceSupportKHR" => SURFACE_SUPPORT, surface_support;
+    b"vkGetPhysicalDeviceSurfaceCapabilitiesKHR" => SURFACE_CAPS, surface_caps;
     b"vkCreateSwapchainKHR" => CREATE_SWAPCHAIN, create_swapchain;
     b"vkDestroySwapchainKHR" => DESTROY_SWAPCHAIN, destroy_swapchain;
     b"vkQueuePresentKHR" => QUEUE_PRESENT, queue_present;
@@ -169,7 +176,7 @@ pub extern "C" fn host_queue_family(queue: u64) -> i32 {
         .unwrap()
         .as_ref()
         .and_then(|m| m.get(&queue).copied())
-        .unwrap_or(-1)
+        .unwrap_or_else(|| STATE.lock().unwrap().present_family)
 }
 
 /// A device function resolved without our wrappers.
@@ -296,6 +303,9 @@ unsafe extern "system" fn create_win32_surface(
     let f: vk::PFN_vkCreateWin32SurfaceKHR = real(&CREATE_SURFACE);
     let result = unsafe { f(instance, info, alloc, out) };
     if result == vk::Result::SUCCESS {
+        // The game may have created its instance before the export was patched: the
+        // surface's instance is the one in use.
+        STATE.lock().unwrap().instance = instance.as_raw();
         let hwnd = unsafe { (*info).hwnd } as isize;
         SURFACES
             .lock()
@@ -305,6 +315,36 @@ unsafe extern "system" fn create_win32_surface(
         log::info!("vulkan: surface for window {hwnd:#x}");
     }
     result
+}
+
+/// Present-support query (the game asks before creating its swapchain): records the
+/// physical device and a queue family that can present.
+unsafe extern "system" fn surface_support(
+    physical: vk::PhysicalDevice,
+    family: u32,
+    surface: vk::SurfaceKHR,
+    out: *mut vk::Bool32,
+) -> vk::Result {
+    let f: vk::PFN_vkGetPhysicalDeviceSurfaceSupportKHR = real(&SURFACE_SUPPORT);
+    let result = unsafe { f(physical, family, surface, out) };
+    if result == vk::Result::SUCCESS {
+        let mut s = STATE.lock().unwrap();
+        s.physical_device = physical.as_raw();
+        if unsafe { *out } != 0 && s.present_family < 0 {
+            s.present_family = family as i32;
+        }
+    }
+    result
+}
+
+unsafe extern "system" fn surface_caps(
+    physical: vk::PhysicalDevice,
+    surface: vk::SurfaceKHR,
+    out: *mut vk::SurfaceCapabilitiesKHR,
+) -> vk::Result {
+    let f: vk::PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR = real(&SURFACE_CAPS);
+    STATE.lock().unwrap().physical_device = physical.as_raw();
+    unsafe { f(physical, surface, out) }
 }
 
 /// Usage flags the surface supports (0 if they cannot be queried).

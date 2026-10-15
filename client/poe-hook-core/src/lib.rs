@@ -14,9 +14,16 @@ mod dump_types;
 mod exit_trace;
 mod hooks;
 mod host;
+mod inspect;
 mod net_trace;
+mod overlay;
+mod packets;
 mod position_sync;
+mod snapshot;
+mod timing;
 mod trace_calls;
+mod ui;
+mod util;
 
 use std::sync::{OnceLock, atomic::Ordering};
 
@@ -53,6 +60,7 @@ pub unsafe extern "C" fn poe_core_start(host: *const HostApi) -> *const CoreApi 
         host::read_only()
     );
     start_features(config(), &Module::main());
+    overlay::init();
     static API: CoreApi = CoreApi {
         abi_version: ABI_VERSION,
         on_present,
@@ -132,24 +140,37 @@ fn start_features(config: &Config, main: &Module) {
     report("auto_keys", !read_only, || auto_keys::init(keys));
 }
 
-extern "C" fn on_present(_queue: u64, _info: *const std::ffi::c_void) -> u64 {
-    0
+extern "C" fn on_present(queue: u64, info: *const std::ffi::c_void) -> u64 {
+    timing::present();
+    if !config().overlay.enabled {
+        return 0;
+    }
+    overlay::present(queue, info)
 }
 
-extern "C" fn on_swapchain_destroy(_swapchain: u64) {}
+extern "C" fn on_swapchain_destroy(swapchain: u64) {
+    overlay::swapchain_destroy(swapchain);
+}
 
 extern "C" fn on_window_message(
-    _hwnd: isize,
-    _msg: u32,
-    _wparam: usize,
-    _lparam: isize,
-    _result: *mut isize,
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+    result: *mut isize,
 ) -> bool {
-    false
+    match overlay::window_message(hwnd, msg, wparam, lparam) {
+        Some(r) => {
+            unsafe { result.write(r) };
+            true
+        }
+        None => false,
+    }
 }
 
 extern "C" fn stop() {
     log::info!("debug core stopping");
+    overlay::stop();
     crash::stop();
     hooks::remove_all();
     position_sync::stop();

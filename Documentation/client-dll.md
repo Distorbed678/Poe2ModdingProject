@@ -25,6 +25,20 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 - After a reload the core has missed the entity creations: it adopts the player (entity id 1 on our server) from its next frame tick.
 - The `auto_keys` key timeline only runs on the first load (a reload must not press Enter again).
 
+## Overlay (`[overlay]`)
+Dear ImGui (imgui-rs 0.12 = imgui 1.89.2, `imgui-rs-vulkan-renderer` 1.16), drawn by the core inside the game's `vkQueuePresentKHR`:
+- `overlay/gpu.rs`: a render pass that loads (does not clear) the swapchain image and keeps it in `PRESENT_SRC_KHR`; 3 frame slots (command buffer, fence, semaphore). The submit waits on the game's present semaphores and the present then waits on the slot's semaphore. Device functions come from the loader's real `vkGetInstanceProcAddr` (ash `Entry::from_static_fn`).
+- `overlay/input.rs`: window messages → imgui. Mouse and keyboard messages, including `WM_INPUT` (the game reads movement and skills through Raw Input), are kept from the game while imgui wants them (pointer over an overlay window, a focused text field). Button releases always reach the game.
+- `toggle_key` (default Insert) shows/hides it; `snapshot_key` (default Home) saves a snapshot. While hidden nothing is drawn except the `OFFICIAL: read-only` badge and short notices.
+- `scale` multiplies the font size (DejaVu Sans Mono 16 px, embedded; license in `poe-hook-core/assets/`). Window layout persists in `logs/poe-hook/imgui.ini`.
+- Tabs: Status (mode, latch, session folder, connections, Vulkan, Reload core / Snapshot buttons), Log (the shared log ring: level and text filters, copy).
+
+### Snapshots
+`<session>/snapshots/<time>/`: `screenshot.png` (copied from the presented image in the overlay's command buffer; needs the `TRANSFER_SRC` usage the loader adds), `log.txt`, `packets.txt`, `timings.csv` (the last `snapshot_seconds`) and `state.txt` (mode, connections, Vulkan, player).
+
+### Vulkan capture notes
+The game resolves some functions (instance and device creation) before the loader's export patch is in place, so the loader takes the instance from `vkCreateWin32SurfaceKHR`, the physical device from the surface queries, the device from `vkCreateSwapchainKHR` and a present-capable queue family from `vkGetPhysicalDeviceSurfaceSupportKHR`.
+
 ## Modes and the read-only latch
 `mode` in `poe-hook.toml` (set by `cargo xtask deploy-client [--official]`):
 - `private` (default): our server. Crypto bypass on, external connections refused.
