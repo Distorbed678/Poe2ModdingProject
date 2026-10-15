@@ -60,8 +60,6 @@ const SET_ORIENTATION: usize = 0x141ddc6a0;
 /// Game update vfunc (`this, ?, f32 xmm2, f32 dt xmm3`): adds dt to this +0x17cc, which the
 /// world update (`0x14169c0b0`) takes (and zeroes) as the frame-mode dt.
 const GAME_UPDATE: usize = 0x14167ea40;
-/// Raw stream write (`stream, data, len`).
-const STREAM_WRITE: usize = 0x142197e60;
 static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
@@ -89,7 +87,6 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
         (ENTITY_TICK, on_entity_tick),
         (GAME_UPDATE, on_game_update),
         (SET_ORIENTATION, on_set_orientation),
-        (STREAM_WRITE, on_stream_write),
     ] {
         crate::hooks::install(main.from_ghidra(addr), HookType::JmpBack(cb), 0)
             .map_err(|e| format!("hook {addr:#x}: {e}"))?;
@@ -105,47 +102,10 @@ fn begin_components(entity: usize) -> usize {
     poe_hook_shared::mem::read::<usize>(entity + 0x10).unwrap_or(0)
 }
 
-unsafe extern "win64" fn on_stream_write(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
-    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let r = unsafe { &*regs };
-    if r.r8 != 2 || poe_hook_shared::mem::read::<[u8; 2]>(r.rdx as usize) != Some([0, 0x1c]) {
-        return;
-    }
-    if DONE.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    let Some(m) = MAIN.get() else { return };
-    let refs: Vec<String> = poe_hook_shared::module::stack_refs(m, r.rsp as usize, 16)
-        .into_iter()
-        .map(|a| format!("{a:#x}"))
-        .collect();
-    log::info!("stream write 00 1c: {}", refs.join(" "));
-    // HNC side channel: stream +0xd0 -> bit queue whose +0 is the cipher object.
-    use poe_hook_shared::mem::read;
-    let hnc = read::<usize>(r.rcx as usize + 0xd0).unwrap_or(0);
-    let cipher = read::<usize>(hnc).unwrap_or(0);
-    let vt = read::<usize>(cipher).unwrap_or(0);
-    let g = |a: usize| if m.contains(a) { m.to_ghidra(a) } else { a };
-    let slots: Vec<String> = (0..6)
-        .map(|i| format!("{:#x}", g(read::<usize>(vt + i * 8).unwrap_or(0))))
-        .collect();
-    let head: Vec<String> = (0..12)
-        .map(|i| format!("{:x}", read::<usize>(cipher + i * 8).unwrap_or(0)))
-        .collect();
-    log::info!(
-        "  hnc {hnc:#x} cipher {cipher:#x} vtable {:#x} slots [{}] head [{}] stream+0x252={:?}",
-        g(vt),
-        slots.join(" "),
-        head.join(" "),
-        read::<u8>(r.rcx as usize + 0x252)
-    );
-}
-
 /// Movement research: who sets the player's facing (logged once per distinct call stack, with
 /// the movement log on).
 unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_set_orientation");
     use std::sync::Mutex;
     static SEEN: Mutex<Vec<Vec<usize>>> = Mutex::new(Vec::new());
     if !MOVEMENT_LOG.load(Ordering::Relaxed) {
@@ -174,7 +134,7 @@ unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_game_update(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_game_update");
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     static LAST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed) + 1;
@@ -194,7 +154,7 @@ unsafe extern "win64" fn on_game_update(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_frame_drain");
     use poe_hook_shared::mem::read;
     let world = unsafe { (*regs).rcx } as usize;
     // Frame-mode worlds (the game world): log a few calls with dt and pause flags.
@@ -242,7 +202,7 @@ unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_entity_tick");
     let entity = (unsafe { (*regs).rcx } as usize).wrapping_sub(0x58);
     // After a core reload the player was created before this core: adopt it from its tick
     // (our server gives the player id 1).
@@ -270,7 +230,7 @@ unsafe extern "win64" fn on_entity_tick(regs: *mut Registers, _: usize) {
 }
 
 unsafe extern "win64" fn on_entity_update(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_entity_update");
     let entity = unsafe { (*regs).rcx } as usize;
     if entity != 0 && entity == PLAYER.load(Ordering::Relaxed) {
         let n = PLAYER_UPDATES.fetch_add(1, Ordering::Relaxed) + 1;
@@ -286,11 +246,11 @@ type LoadAreaFn =
 /// Runs the area load, then exports the generated layout. Stack arguments (5th..8th) are
 /// passed through.
 unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let mut guard = crate::hook_guard!("dump_types::on_load_area");
     crate::entities::clear();
     let r = unsafe { &*regs };
     let f: LoadAreaFn = unsafe { std::mem::transmute(original) };
-    let ret = unsafe {
+    let ret = guard.original(|| unsafe {
         f(
             r.rcx as usize,
             r.rdx as usize,
@@ -301,7 +261,7 @@ unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at:
             r.get_stack(7) as usize,
             r.get_stack(8) as usize,
         )
-    };
+    });
     log::info!("area load {at:#x} returned");
     // The layout files feed our server's spawn placement; not needed on official servers.
     if !crate::host::read_only() {
@@ -570,7 +530,7 @@ fn track_player(entity: usize) {
 /// Logs each component of the entity being deserialized: object address, vtable and the
 /// component's initial-state reader (vtable +0x98), as Ghidra addresses.
 unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_read_initial_state");
     let r = unsafe { &*regs };
     let Some(m) = MAIN.get() else { return };
     unsafe {
@@ -828,13 +788,14 @@ fn hook_reader(m: &Module, ghidra: usize) {
 type ReaderFn = unsafe extern "win64" fn(usize, usize, usize, usize) -> usize;
 
 unsafe extern "win64" fn on_reader(regs: *mut Registers, original: usize, ghidra: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let mut guard = crate::hook_guard!("dump_types::on_reader");
     let r = unsafe { &*regs };
     let blob = r.rdx as *const usize;
     let start = unsafe { *blob.add(2) };
     log::info!("    reader {ghidra:#x} starts at blob pos {start}");
     let f: ReaderFn = unsafe { std::mem::transmute(original) };
-    let ret = unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) };
+    let ret = guard
+        .original(|| unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) });
     let end = unsafe { *blob.add(2) };
     log::info!(
         "    reader {ghidra:#x} read {} bytes ({start}..{end})",
@@ -944,7 +905,7 @@ unsafe fn wide(ptr: usize) -> String {
 }
 
 unsafe extern "win64" fn on_lookup(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("dump_types::on_lookup");
     let r = unsafe { &*regs };
     log::debug!("object type lookup key={:#010x}", r.r8 as u32);
     crate::entities::set_last_key(r.r8 as u32);
@@ -962,13 +923,19 @@ unsafe extern "win64" fn on_lookup(regs: *mut Registers, _: usize) {
             types.push((*(e as *const u32), wide(*((e + 8) as *const usize))));
         }
         if !DONE.swap(true, Ordering::SeqCst)
-            && let Some(path) = OUT.get()
-            && let Ok(mut f) = std::fs::File::create(path)
+            && let Some(path) = OUT.get().cloned()
         {
-            for (key, name) in &types {
-                let _ = writeln!(f, "{key:#010x}\t{name}");
-            }
-            log::info!("dumped {count} object types to {}", path.display());
+            // The file is written off the game thread.
+            let list = types.clone();
+            crate::hooks::spawn(move || {
+                let Ok(mut f) = std::fs::File::create(&path) else {
+                    return;
+                };
+                for (key, name) in &list {
+                    let _ = writeln!(f, "{key:#010x}\t{name}");
+                }
+                log::info!("dumped {} object types to {}", list.len(), path.display());
+            });
         }
         crate::entities::set_types(types);
     }

@@ -56,18 +56,130 @@ pub fn install(addr: usize, kind: HookType, user: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Marks a hook callback as running; held for the whole callback.
-pub struct Guard(());
+/// Marks a hook callback as running (held for the whole callback) and times it for the hook
+/// profiler ([`stats`]).
+pub struct Guard {
+    slot: usize,
+    start: Instant,
+    /// Time spent in the game's original function (Retn hooks), not ours.
+    excluded: Duration,
+}
+
+impl Guard {
+    /// Runs the hooked game function: its time is not counted as the hook's.
+    pub fn original<T>(&mut self, f: impl FnOnce() -> T) -> T {
+        let s = Instant::now();
+        let r = f();
+        self.excluded += s.elapsed();
+        r
+    }
+}
 
 impl Drop for Guard {
     fn drop(&mut self) {
+        let ns = self
+            .start
+            .elapsed()
+            .saturating_sub(self.excluded)
+            .as_nanos() as u64;
+        let s = &SLOTS[self.slot];
+        s.calls.fetch_add(1, Ordering::Relaxed);
+        s.total_ns.fetch_add(ns, Ordering::Relaxed);
+        s.max_ns.fetch_max(ns, Ordering::Relaxed);
+        if ns > SLOW_NS {
+            slow_call(self.slot, ns);
+        }
         IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
-pub fn enter() -> Guard {
+/// Starts a named, timed callback; use [`crate::hook_guard!`].
+pub fn enter(slot: usize) -> Guard {
     IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
-    Guard(())
+    Guard {
+        slot,
+        start: Instant::now(),
+        excluded: Duration::ZERO,
+    }
+}
+
+/// `let _guard = hook_guard!("module::callback");` at the top of every hook callback.
+#[macro_export]
+macro_rules! hook_guard {
+    ($name:literal) => {{
+        static SLOT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        $crate::hooks::enter(*SLOT.get_or_init(|| $crate::hooks::register($name)))
+    }};
+}
+
+// ---- profiler ----------------------------------------------------------------------------
+
+/// A callback slower than this is reported (a game thread is blocked meanwhile).
+const SLOW_NS: u64 = 50_000_000;
+const MAX_SLOTS: usize = 128;
+
+pub struct Slot {
+    pub calls: std::sync::atomic::AtomicU64,
+    pub total_ns: std::sync::atomic::AtomicU64,
+    pub max_ns: std::sync::atomic::AtomicU64,
+}
+
+static SLOTS: [Slot; MAX_SLOTS] = [const {
+    Slot {
+        calls: std::sync::atomic::AtomicU64::new(0),
+        total_ns: std::sync::atomic::AtomicU64::new(0),
+        max_ns: std::sync::atomic::AtomicU64::new(0),
+    }
+}; MAX_SLOTS];
+static NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+pub fn register(name: &'static str) -> usize {
+    let mut names = NAMES.lock().unwrap();
+    if let Some(i) = names.iter().position(|n| *n == name) {
+        return i;
+    }
+    names.push(name);
+    (names.len() - 1).min(MAX_SLOTS - 1)
+}
+
+fn slow_call(slot: usize, ns: u64) {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    let name = NAMES.lock().unwrap().get(slot).copied().unwrap_or("?");
+    log::warn!("slow hook: {name} took {:.1} ms", ns as f64 / 1e6);
+    let mut last = LAST.lock().unwrap();
+    if last.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
+        *last = Some(Instant::now());
+        crate::ui::notice(format!(
+            "Slow hook: {name} took {:.0} ms (Hooks tab)",
+            ns as f64 / 1e6
+        ));
+    }
+}
+
+/// Per callback: name, calls, total and maximum time (ns).
+pub fn stats() -> Vec<(&'static str, u64, u64, u64)> {
+    let names = NAMES.lock().unwrap().clone();
+    names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let s = &SLOTS[i.min(MAX_SLOTS - 1)];
+            (
+                *n,
+                s.calls.load(Ordering::Relaxed),
+                s.total_ns.load(Ordering::Relaxed),
+                s.max_ns.load(Ordering::Relaxed),
+            )
+        })
+        .collect()
+}
+
+pub fn reset_stats() {
+    for s in &SLOTS {
+        s.calls.store(0, Ordering::Relaxed);
+        s.total_ns.store(0, Ordering::Relaxed);
+        s.max_ns.store(0, Ordering::Relaxed);
+    }
 }
 
 pub fn running() -> bool {

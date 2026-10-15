@@ -21,7 +21,9 @@ mod net_trace;
 mod overlay;
 mod packets;
 mod position_sync;
+mod protocol;
 mod snapshot;
+mod symbols;
 mod timing;
 mod trace_calls;
 mod ui;
@@ -67,6 +69,10 @@ pub unsafe extern "C" fn poe_core_start(host: *const HostApi) -> *const CoreApi 
         host::reload_count(),
         host::read_only()
     );
+    // Build the symbol table off the game's threads (the first stack print would otherwise).
+    hooks::spawn(|| {
+        symbols::fmt(0);
+    });
     start_features(config(), &Module::main());
     overlay::init();
     static API: CoreApi = CoreApi {
@@ -127,7 +133,10 @@ fn start_features(config: &Config, main: &Module) {
             },
         )
     });
-    report("packets", config.packets.capture, || packets::init(main));
+    report("packets", config.packets.capture, || {
+        packets::init(main)?;
+        protocol::init(main)
+    });
     let dump_path = poe_hook_shared::exe_dir().join("object_types.txt");
     report("dump_object_types", f.dump_object_types, || {
         dump_types::init(main, dump_path)

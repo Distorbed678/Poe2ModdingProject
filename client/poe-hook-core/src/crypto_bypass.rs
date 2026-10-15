@@ -63,7 +63,7 @@ unsafe extern "win64" fn on_verify_and_derive(
     original: usize,
     _: usize,
 ) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("crypto_bypass::on_verify_and_derive");
     let r = unsafe { &*regs };
     // Official servers (read-only): the real handshake.
     if crate::host::read_only() {

@@ -250,7 +250,7 @@ unsafe extern "win64" fn on_create_window(
     original: usize,
     _: usize,
 ) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("auto_keys::on_create_window");
     let r = unsafe { &*regs };
     let title = match WINDOW_TITLE.get() {
         Some(t) if r.r8 != 0 => t.as_ptr(),
@@ -282,7 +282,7 @@ unsafe extern "win64" fn on_set_window_text(
     original: usize,
     _: usize,
 ) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("auto_keys::on_set_window_text");
     let r = unsafe { &*regs };
     let title = WINDOW_TITLE
         .get()
@@ -360,7 +360,7 @@ unsafe extern "win64" fn on_get_raw_input_data(
     original: usize,
     _: usize,
 ) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("auto_keys::on_get_raw_input_data");
     let r = unsafe { &*regs };
     let (handle, command, data, size, header_size) = (
         r.rcx as usize,
@@ -408,7 +408,7 @@ unsafe extern "win64" fn on_get_key_state(
     original: usize,
     _: usize,
 ) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("auto_keys::on_get_key_state");
     let vk = unsafe { &*regs }.rcx as i32;
     if (0..256).contains(&vk) && HELD[vk as usize].load(Ordering::Relaxed) {
         return 0x8000u16 as i16 as isize as usize;
@@ -424,7 +424,7 @@ unsafe extern "win64" fn on_get_cursor_pos(
     original: usize,
     _: usize,
 ) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("auto_keys::on_get_cursor_pos");
     let p = unsafe { &*regs }.rcx as *mut POINT;
     if CURSOR_SET.load(Ordering::Relaxed) && !p.is_null() {
         unsafe {

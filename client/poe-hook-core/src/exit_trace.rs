@@ -39,7 +39,7 @@ fn stack(rsp: u64) -> String {
         .map(|m| {
             poe_hook_shared::module::stack_refs(m, rsp as usize, 24)
                 .iter()
-                .map(|a| format!("{a:#x}"))
+                .map(|a| format!("{a:#x} {}", crate::symbols::fmt(*a)))
                 .collect::<Vec<_>>()
                 .join(" ")
         })
@@ -47,13 +47,13 @@ fn stack(rsp: u64) -> String {
 }
 
 unsafe extern "win64" fn on_exit_process(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("exit_trace::on_exit_process");
     let r = unsafe { &*regs };
     log::error!("ExitProcess({}) stack=[{}]", r.rcx as u32, stack(r.rsp));
 }
 
 unsafe extern "win64" fn on_terminate_process(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("exit_trace::on_terminate_process");
     let r = unsafe { &*regs };
     log::error!(
         "TerminateProcess(handle={:#x}, code={}) stack=[{}]",

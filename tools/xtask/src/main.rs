@@ -175,11 +175,38 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
     // config (an Enter at 20 s opened the chat box in normal play).
     set_hook_key(&hook_cfg, Some("features"), "auto_keys", "[]")?;
     std::fs::write(game.join(STEAM_APPID_FILE), STEAM_APPID)?;
+    if !official {
+        select_local_gateway(root, &config.gateway.display_name)?;
+    }
     println!(
         "deployed to {} ({})",
         game.display(),
         if official { "official, read-only" } else { "private server" }
     );
+    Ok(())
+}
+
+/// The client remembers the last gateway (`gateway_id` in its config, in our own test prefix);
+/// after an official session it would stay on an official realm that our gateway list lacks.
+fn select_local_gateway(root: &Path, name: &str) -> Result<()> {
+    let ini = root.join(
+        "Tools/proton-prefix/pfx/drive_c/users/steamuser/Documents/My Games/Path of Exile 2/poe2_production_Config.ini",
+    );
+    let Ok(text) = std::fs::read_to_string(&ini) else {
+        return Ok(());
+    };
+    let lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            if l.starts_with("gateway_id=") {
+                format!("gateway_id={name}")
+            } else {
+                l.to_owned()
+            }
+        })
+        .collect();
+    std::fs::write(&ini, lines.join("\n") + "\n")?;
+    println!("client gateway selection -> {name}");
     Ok(())
 }
 
