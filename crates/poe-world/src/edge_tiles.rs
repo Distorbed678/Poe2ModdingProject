@@ -1135,6 +1135,14 @@ impl EdgeTiler<'_> {
     }
 }
 
+/// `0x141d08470`: a tile's virtual exit on map side `side` with orientation `o`.
+pub fn virtual_exit(tdt: &crate::tdt::Tdt, o: u8, side: usize) -> i32 {
+    let own = own_side(o, side);
+    let dim = if own & 1 == 0 { tdt.size.0 } else { tdt.size.1 } as i32;
+    let v = tdt.edge_distances[4 + own] as i32;
+    if (4..8).contains(&o) && v < 3 * dim { 3 * dim - v - 1 } else { v }
+}
+
 /// `0x141d00fd0(1, 1, side, inverse orientation)`: a tile's own side shown at map side `side`.
 fn own_side(o: u8, side: usize) -> usize {
     const INVERSE: [usize; 9] = [0, 3, 2, 1, 4, 5, 6, 7, 8];

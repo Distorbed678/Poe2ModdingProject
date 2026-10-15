@@ -392,7 +392,24 @@ over `(w + 1) × (h + 1)` tile corners, +0x68 the ground table, indices in order
   is its top-left corner's) and de-repetition. The DLL dumps the lattice before each step
   (`lattice <step>` trace lines).
 
-**Verified:** the lattice after edge tiles equals the client's (4891 points).
+- Border floods (`0x1420b94d0` → `0x1420b9180`, `crates/poe-world/src/lattice.rs`): per placed
+  tile (columns, then rows), from each border corner (top and bottom left to right, then left
+  and right) the corner's ground floods breadth-first outward (straight on and to both sides) if
+  it has `.gt` flag 2, over corners with flag 1 clear (with `.gt` flag 8 also over tile corners
+  without a ground), stopped where `EdgeInTheWay` (`0x141fe0810`) sees a tile edge cross the
+  segment: the edge's exit (or, for virtual `.et`s, virtual exit) third lies at that cell of the
+  tile side (`0x141fdffe0`); corners strictly inside a tile pass only to other inside corners.
+- Unwalkable corners, flag 8 (`0x141fe0fd0`): from border corners whose ground is missing,
+  has `.gt` flag 4 or is `impassable_ground.gt`, an impassable flood (corners without a ground
+  take the impassable ground; corners with a ground lacking flag 4 are marked and later their
+  flag-4-less neighbours); then the whole border; impassable grounds inside flood the same way;
+  then every inside corner next to a marked one is marked unless its ground has flag 4 (a
+  two-deep ring around the Riverbank). Transition tiles (`0x141fe0b40`) and the tile-set option
+  `+0x165` are not ported; it fails with "No walkable area in the level" when fewer than
+  `max(10, w·h/500)` corners are walkable. This is the walkability base for collision.
+- `0x1420b9820`: every corner gets flag 1; ground-less ones take the graph's default ground.
+
+**Verified:** the lattice equals the client's at every step up to the fill (4891 points).
 
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet

@@ -172,6 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut map = TileMap::new(graph.width, graph.height);
     map.ground_flags = master.ground_flag_table(files)?;
+    map.edge_flags = master.edge_flag_table(files)?;
     for p in &placed {
         room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, &mut rng)?;
     }
@@ -607,10 +608,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Corner lattice after the edge tiles against the client's `lattice borders` snapshot.
-    compare_lattice(&map, &export_dir, "borders", |p| {
-        let f = if p.flags & 1 != 0 { p.flags | 4 } else { p.flags };
-        (p.ground.clone(), p.height, f)
-    })?;
+    // The region driver copies flag 1 to flag 4 before the post-tile passes.
+    for p in &mut map.lattice {
+        if p.flags & 1 != 0 { p.flags |= 4 } else { p.flags &= !4 }
+    }
+    let lattice_point = |p: &poe_world::generate::LatticePoint| (p.ground.clone(), p.height, p.flags);
+    compare_lattice(&map, &export_dir, "borders", lattice_point)?;
+    // Border floods (`0x1420b94d0`).
+    poe_world::lattice::border_floods(&mut map, &master.tiles);
+    compare_lattice(&map, &export_dir, "flood", lattice_point)?;
+    // Unwalkable corners (`0x141fe0fd0`; the height fix-ups of `0x1420c0a60` change nothing
+    // with all heights 0).
+    poe_world::lattice::mark_unwalkable(&mut map, &master.tiles);
+    compare_lattice(&map, &export_dir, "heights", lattice_point)?;
+    poe_world::lattice::settle(&mut map, None);
+    compare_lattice(&map, &export_dir, "92ce0", lattice_point)?;
+    // The driver clears flag 4 again; `0x141f92ce0`, `0x1420bdae0` and `0x1420be360` change
+    // nothing in the Riverbank.
+    for p in &mut map.lattice {
+        p.flags &= !4;
+    }
+    compare_lattice(&map, &export_dir, "fill", lattice_point)?;
 
     // Fill pass (`0x141f8f930`).
     if let Err(e) = poe_world::generate::fill_pass(&mut map, &mut master, files, &mut rng) {
