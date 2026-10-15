@@ -287,6 +287,26 @@ trace kinds `route_edge` and, with `POE_HOOK_ROUTE_GRIDS=1`, `route_grid` per ed
 **Verified:** seed 1000 routes all 19 edges exactly as the client (grid identical before each
 edge, same internal points); 5022 draws in step.
 
+**Edge smoothing** (`crates/poe-world/src/smoothing.rs`; DLL trace kinds `arc_start`, `arc_end`,
+`round`, `graph_after_smooth1`; `cargo run -p poe-world --example smooth_check -- <trace>`
+replays the logged arc steps). After routing, `0x1420bd650(layout, 1)` (no RNG):
+1. Room nodes were split per exit by `0x141ef2800` (the node takes its first edge's exit, every
+   other edge gets a new node at its exit, appended in tilise order), so the graph numbering is
+   original nodes then exit nodes.
+2. Arcs: virtual edges with a start (end) offset get points on a circle tangent to the offset
+   direction (`0x1420d1b70` / `0x1420d2470`: centre on the node's perpendicular, radius from the
+   chord, 45° steps, polar `0x1421c4f40` on the 256-entry sine table `0x142f10660` with swapped
+   interpolation weights and ±127 clamping, so the arc radius is half the computed one); end
+   arcs are appended last-first; repeated up to 5 times while anything changes.
+3. Corner rounding (`0x1420b3bd0` up to 5 times; per edge `0x1420b2f60`): degree-1 nodes' edges
+   first, then every slot of nodes with ≥ 2 edges; walking an edge (and on through degree-2
+   nodes), each corner B between A and C with a sharp enough angle is replaced by the tangent
+   points of a circle of radius `max width + 10` (one or both, the second inserted with
+   `0x1420ced20`), or removed / collapsed to the midpoint (`0x1420b2cd0`) when the tangents
+   would overrun.
+
+**Verified:** the whole graph after smoothing equals the client's (seed 1000).
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,

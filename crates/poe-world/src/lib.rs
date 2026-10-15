@@ -14,6 +14,7 @@ pub mod hash;
 pub mod layout;
 pub mod rng;
 pub mod rooms;
+pub mod smoothing;
 pub mod routing;
 pub mod tdt;
 mod text;
