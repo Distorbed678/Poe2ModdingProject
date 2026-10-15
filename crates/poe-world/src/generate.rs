@@ -128,6 +128,28 @@ impl TileMap {
             .then(|| (y as u32 * (self.width + 1) + x as u32) as usize)
     }
 
+    /// `0x141d0e130` with a ground: the corner takes it and is set.
+    pub fn set_ground(&mut self, x: i32, y: i32, g: &str) {
+        if let Some(i) = self.point_index(x, y) {
+            self.lattice[i].ground = Some(g.to_ascii_lowercase());
+            self.lattice[i].flags |= 1;
+        }
+    }
+
+    /// `0x141f9e780`: a room's ground overrides on its inside corners.
+    pub fn room_overrides(&mut self, room: &Room, origin: (i32, i32), o: u8) {
+        let (w, h) = (room.width() as i32, room.height() as i32);
+        for v in 1..h {
+            for u in 1..w {
+                let Some(&k) = room.lattice.get(((v - 1) * (w - 1) + (u - 1)) as usize) else { continue };
+                let Some(g) = (k > 0).then(|| room.arm.strings.get(k as usize - 1)).flatten() else { continue };
+                let (dx, dy) = crate::tileset::orient_point(o, w, h, u, v);
+                let g = g.clone();
+                self.set_ground(origin.0 + dx, origin.1 + dy, &g);
+            }
+        }
+    }
+
     /// `.gt` flags of a ground (`+0x24`).
     pub fn gt_flags(&self, ground: &str) -> u8 {
         self.ground_flags.get(ground).copied().unwrap_or(0x0f)
@@ -308,7 +330,7 @@ impl Master {
         Ok(out)
     }
 
-    fn header(&mut self, files: &dyn Files, path: &str) -> Result<&Tdt, GenError> {
+    pub(crate) fn header(&mut self, files: &dyn Files, path: &str) -> Result<&Tdt, GenError> {
         let key = path.to_ascii_lowercase();
         if !self.headers.contains_key(&key) {
             let tdt = Tdt::parse(&files.read(path)?).map_err(|e| data_err(path, e))?;
@@ -317,7 +339,7 @@ impl Master {
         Ok(&self.headers[&key])
     }
 
-    fn ground_name(&mut self, files: &dyn Files, gt: &str) -> Result<String, GenError> {
+    pub(crate) fn ground_name(&mut self, files: &dyn Files, gt: &str) -> Result<String, GenError> {
         let key = gt.to_ascii_lowercase();
         if let Some(n) = self.ground_names.get(&key) {
             return Ok(n.clone());
@@ -403,7 +425,7 @@ pub fn slot_key(k: &poe_data_tools::file_parsers::arm::types::SlotK) -> TileKey 
 
 /// The key of an `.arm` grid cell for the room pass, or None when the cell places nothing
 /// itself (uniform-ground `k` slots only mark their ground; `n`/`s`/`o` cells).
-fn cell_key(slot: &Slot) -> Option<(TileKey, String)> {
+pub(crate) fn cell_key(slot: &Slot) -> Option<(TileKey, String)> {
     match slot {
         Slot::K(k) => {
             Some((slot_key(k), k.slot_tag.clone().unwrap_or_default()))
@@ -421,7 +443,7 @@ fn cell_key(slot: &Slot) -> Option<(TileKey, String)> {
     }
 }
 
-fn uniform_ground(key: &TileKey, feature: &str) -> bool {
+pub(crate) fn uniform_ground(key: &TileKey, feature: &str) -> bool {
     feature.is_empty()
         && key.edges.iter().all(Option::is_none)
         && key.grounds.iter().all(|g| *g == key.grounds[0])
@@ -450,6 +472,7 @@ pub fn room_pass_oriented(
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
     let (w, h) = (room.width(), room.height());
+    let room_full = room;
     let room = &room.arm;
     for x in 0..w {
         for y in 0..h {
@@ -462,7 +485,9 @@ pub fn room_pass_oriented(
             let (bx, by) = orient_cell(o, w as i32, h as i32, x as i32 + sw - 1, y as i32 + sh - 1);
             let (mx, my) = (origin.0 + ax.min(bx), origin.1 + ay.min(by));
             if uniform_ground(&key, &feature) {
-                // Only the ground is marked (the fill pass places a tile here).
+                // Nothing is placed (the fill pass places a tile here). With its last argument
+                // set the client would also mark corners x in 0..w, y in 0..=h with the ground;
+                // node rooms pass it unset.
                 for dy in 0..key.size.1 as i32 {
                     for dx in 0..key.size.0 as i32 {
                         if let Some(i) = map.index(mx + dx, my + dy) {
@@ -492,6 +517,7 @@ pub fn room_pass_oriented(
             );
         }
     }
+    map.room_overrides(room_full, origin, o);
     Ok(())
 }
 
