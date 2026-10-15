@@ -21,6 +21,8 @@ use tokio::sync::watch;
 pub struct TicketCharacter {
     pub id: u32,
     pub name: String,
+    /// The character's league (sent in AreaInfo).
+    pub league: String,
     /// `Characters.IntegerId` of the class.
     pub class_id: u32,
     pub level: u32,
@@ -165,6 +167,7 @@ mod tests {
             location: None,
             id: 2,
             name: "test".into(),
+            league: "Standard".into(),
             class_id: 2,
             level: 1,
             intro_done: false,

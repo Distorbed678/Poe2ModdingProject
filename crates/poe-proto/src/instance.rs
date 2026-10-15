@@ -70,8 +70,8 @@ pub struct AreaInfo {
     pub instance_id: u32,
     /// `WorldAreas.HASH16` of the area (client +0x1c).
     pub area_hash: u16,
-    /// Client +0x38 (wide string, meaning TBD).
-    pub text_38: String,
+    /// Client +0x38: the character's league (official servers send it).
+    pub league: String,
     /// Terrain generation seed (client +0x20).
     pub seed: u32,
     /// Client +0x2a, +0x2c, +0x2b, +0x30 in wire order.
@@ -97,7 +97,7 @@ impl Message for AreaInfo {
         w.u8(self.unk_10)
             .u32(self.instance_id)
             .u16(self.area_hash)
-            .wstring(&self.text_38)
+            .wstring(&self.league)
             .u32(self.seed)
             .bytes(&self.bytes_a)
             .bytes(&self.flags)
@@ -116,7 +116,7 @@ impl Message for AreaInfo {
             unk_10: r.u8()?,
             instance_id: r.u32()?,
             area_hash: r.u16()?,
-            text_38: r.wstring()?,
+            league: r.wstring()?,
             seed: r.u32()?,
             bytes_a: r.array()?,
             flags: r.array()?,
