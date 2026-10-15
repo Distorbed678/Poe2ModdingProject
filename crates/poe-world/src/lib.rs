@@ -8,6 +8,7 @@
 //! - [`export`]: the client DLL's area exports, the reference for comparisons.
 
 pub mod export;
+pub mod generate;
 pub mod graph;
 pub mod hash;
 pub mod rng;
