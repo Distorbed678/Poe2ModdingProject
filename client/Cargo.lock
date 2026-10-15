@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ash"
+version = "0.38.0+1.3.281"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bb44936d800fea8f016d7f2311c6a4f97aebd5dc86f09906139ec848cf3a46f"
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,12 +151,35 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "poe-hook"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "ash",
  "ilhook",
  "log",
+ "poe-hook-shared",
+ "windows-sys",
+]
+
+[[package]]
+name = "poe-hook-core"
+version = "0.2.0"
+dependencies = [
+ "ash",
+ "ilhook",
+ "log",
+ "poe-hook-shared",
  "serde",
  "sha2",
+ "toml",
+ "windows-sys",
+]
+
+[[package]]
+name = "poe-hook-shared"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "serde",
  "toml",
  "windows-sys",
 ]

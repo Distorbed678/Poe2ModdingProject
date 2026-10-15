@@ -14,10 +14,10 @@
 
 use std::sync::OnceLock;
 
-use ilhook::x64::{CallbackOption, HookFlags, HookType, Hooker, Registers};
+use ilhook::x64::{HookType, Registers};
 use sha2::{Digest, Sha512};
 
-use crate::module::Module;
+use poe_hook_shared::module::Module;
 
 /// Prologue of the verify-and-derive routine (unique in 0.5.5e).
 const VERIFY_AND_DERIVE: &str = "40 55 53 56 57 41 54 41 56 41 57 48 8d ac 24 70 fe ff ff \
@@ -38,15 +38,8 @@ pub fn init(main: &Module) -> Result<(), String> {
         ));
     };
     log::info!("verify-and-derive at ghidra {:#x}", main.to_ghidra(addr));
-    let hooker = Hooker::new(
-        addr,
-        HookType::Retn(on_verify_and_derive),
-        CallbackOption::None,
-        0,
-        HookFlags::empty(),
-    );
-    let point = unsafe { hooker.hook() }.map_err(|e| format!("hook: {e:?}"))?;
-    Box::leak(Box::new(point));
+    crate::hooks::install(addr, HookType::Retn(on_verify_and_derive), 0)
+            .map_err(|e| format!("hook: {e}"))?;
     Ok(())
 }
 
@@ -67,10 +60,17 @@ unsafe fn msvc_string_bytes<'a>(s: *const u8) -> &'a [u8] {
 /// Replacement for `verify_and_derive(session, &server_public_key, &signature)`.
 unsafe extern "win64" fn on_verify_and_derive(
     regs: *mut Registers,
-    _original: usize,
+    original: usize,
     _: usize,
 ) -> usize {
+    let _guard = crate::hooks::enter();
     let r = unsafe { &*regs };
+    // Official servers (read-only): the real handshake.
+    if crate::host::read_only() {
+        type VerifyFn = unsafe extern "win64" fn(u64, u64, u64) -> usize;
+        let f: VerifyFn = unsafe { std::mem::transmute(original) };
+        return unsafe { f(r.rcx, r.rdx, r.r8) };
+    }
     let session = r.rcx as *const u8;
     let public_key = unsafe { msvc_string_bytes(r.rdx as *const u8) };
     let out = unsafe { *(session.add(SESSION_KEY_BUFFER) as *const *mut u8) };

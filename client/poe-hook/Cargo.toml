@@ -1,43 +1,18 @@
 [package]
 name = "poe-hook"
-description = "Client-side hook DLL for the PoE2 client, loaded as a version.dll proxy"
-edition = "2024"
-version = "0.1.0"
-license = "MIT OR Apache-2.0"
-publish = false
-
-# Built separately from the server workspace for x86_64-pc-windows-msvc:
-#   cargo xtask build-dll
-[workspace]
+description = "version.dll proxy for the PoE2 client: permanent hooks and the debug-core loader"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "poe_hook"
 crate-type = ["cdylib"]
 
 [dependencies]
-log = { version = "0.4", features = ["std", "serde"] }
-ilhook = "2"
-serde = { version = "1", features = ["derive"] }
-sha2 = "0.10"
-toml = "0.9"
-windows-sys = { version = "0.60", features = [
-    "Win32_Foundation",
-    "Win32_Networking_WinSock",
-    "Win32_System_IO",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_Kernel",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
-    "Win32_System_ProcessStatus",
-    "Win32_System_SystemInformation",
-    "Win32_System_SystemServices",
-    "Win32_System_Threading",
-    "Win32_Graphics_Gdi",
-    "Win32_UI_Input",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
-
-[profile.release]
-panic = "abort"
-debug = 1
+poe-hook-shared.workspace = true
+log.workspace = true
+ilhook.workspace = true
+ash.workspace = true
+windows-sys.workspace = true

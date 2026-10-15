@@ -4,7 +4,7 @@
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, VirtualQuery};
 
 /// Whether `len` bytes at `addr` are committed memory (cheap guard before raw reads).
-pub(crate) fn readable(addr: usize, len: usize) -> bool {
+pub fn readable(addr: usize, len: usize) -> bool {
     if addr < 0x10000 {
         return false;
     }
@@ -19,11 +19,11 @@ pub(crate) fn readable(addr: usize, len: usize) -> bool {
     n != 0 && mbi.State == MEM_COMMIT && addr + len <= mbi.BaseAddress as usize + mbi.RegionSize
 }
 
-pub(crate) fn read<T: Copy>(addr: usize) -> Option<T> {
+pub fn read<T: Copy>(addr: usize) -> Option<T> {
     readable(addr, size_of::<T>()).then(|| unsafe { (addr as *const T).read_unaligned() })
 }
 
-pub(crate) fn c_string(addr: usize, max: usize) -> Option<String> {
+pub fn c_string(addr: usize, max: usize) -> Option<String> {
     if !readable(addr, 1) {
         return None;
     }
@@ -39,7 +39,7 @@ pub(crate) fn c_string(addr: usize, max: usize) -> Option<String> {
 }
 
 /// NUL-terminated UTF-16 string at `addr` (at most `max` units).
-pub(crate) fn wide_string(addr: usize, max: usize) -> Option<String> {
+pub fn wide_string(addr: usize, max: usize) -> Option<String> {
     let mut out = Vec::new();
     for i in 0..max {
         let u: u16 = read(addr + i * 2)?;

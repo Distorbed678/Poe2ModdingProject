@@ -1,36 +1,57 @@
-# Client DLL (`client/poe-hook`)
+# Client DLLs (`client/`)
 
-The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`). `poe-hook` is built as `poe_hook.dll` and deployed as `GameFiles/version.dll`. Under Proton it needs `WINEDLLOVERRIDES=version=n,b`.
+The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`). Since the debug suite (M4, 2026-10-14) the client side is two DLLs in one Cargo workspace (`client/Cargo.toml`, separate from the server workspace):
 
-## Structure
+| Crate | Built as | Deployed as | Role |
+|---|---|---|---|
+| `poe-hook` | `poe_hook.dll` | `GameFiles/version.dll` | **Loader**, never unloaded: version.dll proxy, log sink, network guard and read-only latch, Vulkan and window hooks, loads and hot-reloads the core. Under Proton it needs `WINEDLLOVERRIDES=version=n,b`. |
+| `poe-hook-core` | `poe_hook_core.dll` | `GameFiles/poe_hook_core.dll` | **Debug core**, hot-reloadable: every feature and the overlay. |
+| `poe-hook-shared` | (library) | | Config (`poe-hook.toml`), the loader ↔ core C ABI (`abi.rs`), guarded memory reads, module/pattern helpers. |
+
+## Loader (`client/poe-hook`)
 | File | Role |
 |---|---|
-| `src/lib.rs` | `DllMain`. Loads the config, opens the log and installs the network hooks synchronously (only file I/O and patching of the already-mapped ws2_32), then starts a thread for the other features. The client's crash-report helper process connects out within milliseconds of starting, so the network guard must be active before the game runs. |
-| `src/proxy.rs` | Forwards all 16 version.dll exports to the system DLL, resolved lazily. |
-| `src/config.rs` | `poe-hook.toml` next to the exe. Falls back to defaults if missing. |
-| `src/logger.rs` | `poe-hook.log` next to the exe. Appends, with a `---- process <pid> ----` header per process, so a client restart (or the crash-report helper) does not erase the previous log. `run-client` clears it per launch. |
-| `src/module.rs` | Main-module base and size, Ghidra↔runtime address conversion (image base 0x140000000), byte-pattern scanning. |
-| `src/features/` | Feature modules, registered in `features/mod.rs`. |
+| `lib.rs` | `DllMain`. Loads the config, creates the session folder `logs/poe-hook/<date_time>_<pid>/`, opens the logs and installs the network guard synchronously (the client's crash-report helper connects out within milliseconds), then starts a thread that hooks Vulkan and loads the core. |
+| `proxy.rs` | Forwards all 16 version.dll exports to the system DLL, resolved lazily. |
+| `logsink.rs` | One sink for both DLLs: `poe-hook.log` next to the exe (appended per process with a `---- process <pid> ----` header; `run-client` clears it per launch), the session folder's `poe-hook.log`, and a 50 000-record ring the overlay's Log tab reads (it survives core reloads). |
+| `guard.rs` | Hooks `connect`/`WSAConnect`: refuses non-loopback connections in private mode (`block_external`), records every connection for the core, and sets the **read-only latch** (official mode, or the first external connection). |
+| `vulkan.rs` | Redirects `vkGetInstanceProcAddr`/`vkGetDeviceProcAddr` in `vulkan-1.dll`'s **export table** (jump stubs near the module; under Wine both exports forward to `winevulkan`). Inline hooks there hung the game: Wine's exports are tiny thunks. The game (`0x1410262d0`) resolves everything through them, so it gets our wrappers for instance/device/queue/surface/swapchain creation and `vkQueuePresentKHR`. The swapchain gets `COLOR_ATTACHMENT` and `TRANSFER_SRC` usage added when the surface supports them. |
+| `window.rs` | Subclasses the game window (from the Vulkan surface) and passes each message to the core first. |
+| `core.rs` | Loads `poe_hook_core.dll` from a temp copy (so the file can be replaced while the game runs) and reloads it when the file changes (`[reload] auto`) or the core asks (overlay button). Unload: the core's `stop`, then a write lock that waits for loader → core calls in flight, then `FreeLibrary`. |
 
-## Features
+## Core (`client/poe-hook-core`)
+- `poe_core_start(&HostApi) -> *const CoreApi` is its only export (`poe-hook-shared/src/abi.rs`; `ABI_VERSION` must match).
+- `hooks.rs`: every hook goes through `hooks::install`, which saves the target's first 16 bytes; `stop` writes them back, leaks the trampolines (a thread may still be in one), waits until no callback runs (each callback holds `hooks::enter()`), and joins the core's threads (`hooks::spawn`, which loop while `hooks::running()`).
+- After a reload the core has missed the entity creations: it adopts the player (entity id 1 on our server) from its next frame tick.
+- The `auto_keys` key timeline only runs on the first load (a reload must not press Enter again).
+
+## Modes and the read-only latch
+`mode` in `poe-hook.toml` (set by `cargo xtask deploy-client [--official]`):
+- `private` (default): our server. Crypto bypass on, external connections refused.
+- `official`: official servers, **read-only**. The latch is on from the start: no crypto bypass (the real handshake runs), no position sync, no test input or window-title hooks, no memory writes. External connections are allowed. The DLL only observes and logs.
+- In either mode the latch switches on by itself at the first external connection that goes through, and features that act (crypto bypass, position sync) check it again when they act.
+
+## Features (`[features]`)
 | Key | Default | Description |
 |---|---|---|
 | `crash_log` | on | Vectored handler. Logs fatal exceptions with Ghidra addresses, registers and game addresses on the stack (bounded by the thread's stack limits). It also logs C++ exceptions (type name and `what()`), and hooks `ExitProcess`/`TerminateProcess` to log exit codes with stack refs (`exit_trace`). |
-| `crypto_bypass` | on | Replaces the login verify-and-derive routine (found by its prologue pattern). The session key material becomes SHA-512(server public key), so no signature check or DH is needed. See [re/crypto.md](re/crypto.md). |
-| `net_trace` | on | Inline hooks on ws2_32 `send`/`WSASend`/`recv`/`WSARecv`/`connect`/`WSAConnect`. Logs payload prefixes and game addresses on the stack. |
+| `crypto_bypass` | on | Replaces the login verify-and-derive routine (found by its prologue pattern). The session key material becomes SHA-512(server public key), so no signature check or DH is needed. See [re/crypto.md](re/crypto.md). Off while read-only. |
+| `net_trace` | off | Inline hooks on ws2_32 `send`/`WSASend`/`recv`/`WSARecv`. Logs payload prefixes and game addresses on the stack. Connects are logged by the loader's guard. |
 | `net_trace_dump_bytes` | 256 | Bytes of payload shown per call. |
-| `block_external` | on | Refuses connections to non-loopback addresses, so the client does not reach official services (shop, telemetry, uploads). |
-| `position_sync` | on | Reports the player's position and actions to the instance server every frame (see [Position sync](#position-sync)). |
+| `block_external` | on | Private mode: refuses connections to non-loopback addresses, so the client does not reach official services (shop, telemetry, uploads). Ignored in official mode. |
+| `dump_object_types` | on | The research hooks on entities, frames and area loads (below). Position sync needs them. |
+| `position_sync` | on | Reports the player's position and actions to the instance server every frame (see [Position sync](#position-sync)). Never while read-only. |
 | `position_sync_port` | 0 | The instance server's port; only connections to it become the report target (0: the last loopback connection). `deploy-client` sets it from `server.toml`. |
 | `movement_log` | off | Per-frame movement log (see [Movement log](#movement-log)). |
 | `trace_addresses` | `[]` | "Logging breakpoints": Ghidra addresses whose calls are logged with the argument registers and the game call stack (`trace_calls`, up to `trace_limit` hits each). The `POE_HOOK_TRACE` environment variable (comma-separated) adds addresses without editing `GameFiles/`. Hook only at function starts or instruction boundaries that `ilhook` can relocate: a bad spot crashes the client (it did at `0x140ece810`). |
+| `auto_keys` | `[]` | Test input timeline `[[ms, vk], ...]`; tests pass `POE_HOOK_AUTO_KEYS="20000:13"` instead (`tools/test-run.sh`). `deploy-client` resets it to `[]`. Never while read-only. |
 
-Note: the game's own login/instance TCP traffic does not go through these ws2_32 exports (it is invisible to `net_trace`). The libcurl HTTPS traffic does go through them. The server-side hexdump (`RUST_LOG=poe_net=trace`) shows decrypted game traffic.
+Note: the game's own login/instance TCP traffic does not go through these ws2_32 exports (it is invisible to `net_trace`). The libcurl HTTPS traffic does go through them.
 
-Planned: packet trace at the cipher layer, asset overrides.
-
-## Building
-`cargo xtask build-dll` runs `Tools/cargo-xwin/bin/cargo-xwin xwin build --target x86_64-pc-windows-msvc --release`, keeping the MSVC SDK cache in `Tools/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
+## Building and deploying
+- `cargo xtask build-dll` runs `Tools/cargo-xwin/bin/cargo-xwin xwin build --workspace --target x86_64-pc-windows-msvc --release` in `client/`, keeping the MSVC SDK cache in `Tools/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
+- `cargo xtask deploy-client [--official] [--no-build]` installs both DLLs, the config and the gateway list (ours, or the original for `--official`).
+- `cargo xtask deploy-core [--no-build]` installs only the core; a running client reloads it within about a second.
 
 ## Crash reports
 After a crash the client writes `PoE-<time>-<pid>.dmp` (plus `.txt`, `.log.txt` and `.poecap` side files) under `My Games/Path of Exile 2/poe2_production` in the prefix. A helper process uploads them, both right after the crash and on the next launch. With `block_external` installed from `DllMain`, the upload connections are refused. `cargo xtask run-client` also moves pending dumps to `data/crash-dumps/` (git-ignored) before launching, so nothing is left to upload and the dumps stay available for debugging.
