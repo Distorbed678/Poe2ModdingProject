@@ -112,7 +112,7 @@ impl Tdt {
             t.edge_distances = r.bytes()?;
         }
         t.rest = data[r.pos..].to_vec();
-        if t.inherits.is_none() {
+        if t.inherits.is_none() && r.pos < data.len() {
             t.read_points(&mut r)?;
         }
         Ok(t)
