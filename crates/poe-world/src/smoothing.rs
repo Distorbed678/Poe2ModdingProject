@@ -225,6 +225,10 @@ pub fn arc_end(e: &mut SmoothEdge) -> bool {
 pub struct LNode {
     pub pos: Pos,
     pub slots: [Option<usize>; 4],
+    /// `+0x88`: a room node (or one of its exits), or a dead end pushed off the map.
+    pub fixed: bool,
+    /// `+0x89`: next to a virtual edge's end (`0x1420c7400`, then the virtual split).
+    pub virtual_end: bool,
 }
 
 /// An edge of the layout graph.
