@@ -86,6 +86,22 @@ pub struct TileMap {
     pub pieces: Vec<Piece>,
     /// Piece covering each cell.
     pub piece_at: Vec<Option<usize>>,
+    /// Tile corner points, `(width + 1) × (height + 1)` (map +0x50, 3 bytes each).
+    pub lattice: Vec<LatticePoint>,
+    /// `.gt` flags by ground path (lower case), for grounds the lattice meets; missing grounds
+    /// count as the default `0x0f`.
+    pub ground_flags: HashMap<String, u8>,
+}
+
+/// One tile corner (map +0x50 records: ground index, height, flags).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LatticePoint {
+    /// Ground type (`.gt` path, lower case).
+    pub ground: Option<String>,
+    pub height: i8,
+    /// Bit 0: set by a tile or a flood; bit 1: height set; bit 2: set before the post-tile
+    /// passes; bit 3: set by `0x1420c0a60`.
+    pub flags: u8,
 }
 
 impl TileMap {
@@ -98,7 +114,20 @@ impl TileMap {
             grounds: vec![None; n],
             pieces: Vec::new(),
             piece_at: vec![None; n],
+            lattice: vec![LatticePoint::default(); ((width + 1) * (height + 1)) as usize],
+            ground_flags: HashMap::new(),
         }
+    }
+
+    /// Lattice index of corner `(x, y)` (0..=width, 0..=height).
+    pub fn point_index(&self, x: i32, y: i32) -> Option<usize> {
+        (x >= 0 && y >= 0 && x as u32 <= self.width && y as u32 <= self.height)
+            .then(|| (y as u32 * (self.width + 1) + x as u32) as usize)
+    }
+
+    /// `.gt` flags of a ground (`+0x24`).
+    pub fn gt_flags(&self, ground: &str) -> u8 {
+        self.ground_flags.get(ground).copied().unwrap_or(0x0f)
     }
 
     fn index(&self, x: i32, y: i32) -> Option<usize> {
@@ -135,11 +164,12 @@ impl TileMap {
         x: i32,
         y: i32,
         path: &str,
-        size: (u8, u8),
+        tdt: &Tdt,
         o: u8,
         height: i16,
         tile: Option<usize>,
     ) {
+        let size = tdt.size;
         let piece = self.pieces.len();
         self.pieces.push(Piece {
             x,
@@ -162,6 +192,28 @@ impl TileMap {
                         height,
                         offset: (dx as u8, dy as u8),
                     });
+                }
+            }
+        }
+        // Corner points (`0x141d0bad0`): the tile's ground per point, and its height where the
+        // ground (old or new) is missing or takes heights (`.gt` flag 1).
+        for v in 0..=h {
+            for u in 0..=w {
+                let k = ((w + 1) * v + u) as usize;
+                let g = tdt.point_grounds.get(k).cloned().flatten().map(|g| g.to_ascii_lowercase());
+                let (dx, dy) = crate::tileset::orient_point(o, w, h, u, v);
+                let Some(i) = self.point_index(x + dx, y + dy) else { continue };
+                let old = self.lattice[i].ground.clone();
+                let takes_height = |m: &Self, g: &Option<String>| g.as_ref().is_none_or(|g| m.gt_flags(g) & 1 != 0);
+                let set_height = takes_height(self, &g) || takes_height(self, &old);
+                let p = &mut self.lattice[i];
+                p.flags |= 1;
+                if g.is_some() {
+                    p.ground = g;
+                }
+                if set_height {
+                    p.height = (tdt.point_heights.get(k).copied().unwrap_or(0) as i16 + height) as i8;
+                    p.flags |= 2;
                 }
             }
         }
@@ -221,6 +273,21 @@ impl Master {
             headers,
             ground_names: HashMap::new(),
         })
+    }
+
+    /// `.gt` flags of every ground the tile set's tiles use (for [`TileMap::ground_flags`]).
+    pub fn ground_flag_table(&self, files: &dyn Files) -> Result<HashMap<String, u8>, GenError> {
+        let mut out = HashMap::new();
+        for t in &self.tiles.tiles {
+            for g in t.tdt.point_grounds.iter().flatten().chain(t.tdt.grounds.iter().flatten()) {
+                let key = g.to_ascii_lowercase();
+                if !out.contains_key(&key) {
+                    let text = crate::text::decode_utf16(&files.read(&key)?);
+                    out.insert(key, crate::rooms::ground_flags(&text));
+                }
+            }
+        }
+        Ok(out)
     }
 
     fn header(&mut self, files: &dyn Files, path: &str) -> Result<&Tdt, GenError> {
@@ -400,7 +467,7 @@ pub fn room_pass_oriented(
                 mx,
                 my,
                 &def.path,
-                def.tdt.size,
+                &def.tdt,
                 c.orientation,
                 0,
                 Some(c.tile),
@@ -458,14 +525,15 @@ pub fn fill_pass(
                 if !path.to_ascii_lowercase().ends_with(".tdt") {
                     return Err(GenError::Unsupported(format!("fill room {path}")));
                 }
-                let size = master.header(files, &path)?.size;
+                let tdt = master.header(files, &path)?.clone();
+                let size = tdt.size;
                 // Orientation "any": square tiles draw one of 8 if they fit unrotated.
                 if size.0 != size.1 {
                     return Err(GenError::Unsupported(format!("non-square fill {path}")));
                 }
                 if map.fits(x, y, size, 0) {
                     let o = rng.below(8) as u8;
-                    map.place(x, y, &path, size, o, 0, None);
+                    map.place(x, y, &path, &tdt, o, 0, None);
                     break;
                 }
                 group.remove(index);
@@ -588,7 +656,7 @@ pub fn derepeat_pass(
                     piece.x,
                     piece.y,
                     &def.path,
-                    def.tdt.size,
+                    &def.tdt,
                     c.orientation,
                     0,
                     Some(c.tile),

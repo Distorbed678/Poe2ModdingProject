@@ -75,6 +75,17 @@ const ARC_END: usize = 0x1420d2470;
 const ROUND_CORNERS: usize = 0x1420b2f60;
 /// Edge tile placement stage (`0x1420b6950`: layout ...): the graph on entry.
 const EDGE_TILES: usize = 0x1420b6950;
+/// Steps between edge tiles and the fill pass that edit the corner lattice (ground index,
+/// height, flags per tile corner): snapshots before each (`lattice` trace lines).
+const LATTICE_STEPS: &[(usize, &str, usize)] = &[
+    (0x1420b94d0, "borders", 0x28),
+    (0x1420c0a60, "flood", 0x8),
+    (0x1420b9820, "heights", 0x28),
+    (0x141f92ce0, "92ce0", 0x0),
+    (0x1420bdae0, "bdae0", 0x28),
+    (0x1420be360, "be360", 0x28),
+    (0x141f93060, "fill", 0x8),
+];
 /// Tile set lookup by key (`0x141d0a4c0(tile set, key, feature)`), traced for edge tiles.
 const TILE_LOOKUP: usize = 0x141d0a4c0;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
@@ -182,6 +193,9 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(ROUND_CORNERS, HookType::Retn(on_edge_step), 2)?;
         hook(EDGE_TILES, HookType::JmpBack(on_edge_tiles), 0)?;
         hook(TILE_LOOKUP, HookType::JmpBack(on_tile_lookup), 0)?;
+        for (i, (addr, _, _)) in LATTICE_STEPS.iter().enumerate() {
+            hook(*addr, HookType::JmpBack(on_lattice_step), i)?;
+        }
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -413,6 +427,45 @@ unsafe extern "win64" fn on_candidates(regs: *mut Registers, _: usize) {
         &format!("total={total}"),
         &out.join(" "),
     );
+}
+
+/// Dumps the corner lattice of a map view (`[map, x0:i32, y0:i32, .., w @+0x18, h @+0x1c]`;
+/// map +0x40 row stride, +0x50 3-byte points, +0x68 ground handles) before a step.
+unsafe extern "win64" fn on_lattice_step(regs: *mut Registers, step: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_lattice_step");
+    if !on_generator_thread() {
+        return;
+    }
+    let (_, name, view_at) = LATTICE_STEPS[step];
+    let r = unsafe { &*regs };
+    let view = read::<usize>(r.rcx as usize + view_at).unwrap_or(0);
+    let map = read::<usize>(view).unwrap_or(0);
+    let (x0, y0) = (read::<i32>(view + 8).unwrap_or(0), read::<i32>(view + 0xc).unwrap_or(0));
+    let (w, h) = (read::<u32>(view + 0x18).unwrap_or(0), read::<u32>(view + 0x1c).unwrap_or(0));
+    let stride = read::<u64>(map + 0x40).unwrap_or(0) as usize;
+    let data = read::<usize>(map + 0x50).unwrap_or(0);
+    let (gb, ge) = (read::<usize>(map + 0x68).unwrap_or(0), read::<usize>(map + 0x70).unwrap_or(0));
+    let mut grounds = Vec::new();
+    let mut q = gb;
+    while q < ge && grounds.len() < 256 {
+        let h = read::<usize>(q).unwrap_or(0);
+        let p = if h == 0 { "-".to_string() } else { resource_path(h) };
+        grounds.push(p.rsplit('/').next().unwrap_or("").to_string());
+        q += 8;
+    }
+    trace_line("lattice", name, &format!("view {x0},{y0} {w}x{h}"), &grounds.join(","));
+    if w > 1024 || h > 1024 || stride == 0 {
+        return;
+    }
+    for y in 0..=h as usize {
+        let mut row = Vec::with_capacity(w as usize + 1);
+        for x in 0..=w as usize {
+            let at = data + (((y0 as usize + y) * stride) + x0 as usize + x) * 3;
+            let b: [u8; 3] = read(at).unwrap_or_default();
+            row.push(format!("{}.{}.{}", b[0], b[1] as i8, b[2]));
+        }
+        trace_line("lattice", name, &format!("row {y}"), &row.join(" "));
+    }
 }
 
 /// A tile key (`0x4e` bytes): edges[4], size, grounds[4] (at +0x22), heights, exits and

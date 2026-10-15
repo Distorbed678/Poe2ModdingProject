@@ -1125,7 +1125,7 @@ impl EdgeTiler<'_> {
             let total = list.iter().map(|c| c.weight).sum();
             let c = pick(list, rng.below(total)).expect("non-empty list");
             let def = &self.tileset.tiles[c.tile];
-            self.map.place(t.0, t.1, &def.path, def.tdt.size, c.orientation, 0, Some(c.tile));
+            self.map.place(t.0, t.1, &def.path, &def.tdt, c.orientation, 0, Some(c.tile));
         }
         Ok(())
     }

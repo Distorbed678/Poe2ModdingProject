@@ -25,6 +25,11 @@ pub struct Tdt {
     pub edge_distances: [u8; 8],
     /// Everything after the header.
     pub rest: Vec<u8>,
+    /// Ground type per corner point, `(w + 1) × (h + 1)` row-major in the tile's own
+    /// orientation (data +0xa8; empty when the file has none).
+    pub point_grounds: Vec<Option<String>>,
+    /// Height per corner point (data +0xc0; empty when the file has none).
+    pub point_heights: Vec<i8>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -107,8 +112,101 @@ impl Tdt {
             t.edge_distances = r.bytes()?;
         }
         t.rest = data[r.pos..].to_vec();
+        if t.inherits.is_none() {
+            t.read_points(&mut r)?;
+        }
         Ok(t)
     }
+
+    /// The body up to the corner points (`0x1429153f0`): flags, hull planes, sub-tiles (each
+    /// with an optional compressed byte map and a byte list), then per-point grounds (flag 2)
+    /// and heights (flag 1).
+    fn read_points(&mut self, r: &mut Reader) -> Result<(), TdtError> {
+        let v = self.version;
+        let mut flags = u16::from_le_bytes(r.bytes()?);
+        if v < 14 {
+            flags &= !0x100;
+        }
+        if v < 13 {
+            flags &= !0x200;
+        }
+        let hi = (flags >> 8) as u8;
+        if v > 9 {
+            r.u8()?;
+        }
+        if v >= 10 {
+            let n = r.u8()?;
+            if n > 4 {
+                return Err(TdtError { offset: r.pos, what: "invalid number of hull planes" });
+            }
+            if n >= 2 {
+                for _ in 0..n {
+                    r.u8()?;
+                }
+            }
+        }
+        if hi & 2 != 0 {
+            r.u8()?;
+        }
+        let count = u16::from_le_bytes(r.bytes()?);
+        for _ in 0..count {
+            let w4 = if v < 10 {
+                r.u8()?
+            } else {
+                u16::from_le_bytes(r.bytes()?) as u8
+            };
+            r.u8()?;
+            if hi & 2 != 0 {
+                r.bytes::<3>()?;
+            }
+            if w4 & 4 == 0 {
+                skip_byte_map(r, v)?;
+            }
+            if !(w4 & 1 != 0 && w4 & 2 != 0) {
+                let n = u16::from_le_bytes(r.bytes()?) as usize;
+                r.pos = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
+                    offset: r.pos,
+                    what: "sub-tile bytes truncated",
+                })?;
+            }
+        }
+        let n = (self.size.0 as usize + 1) * (self.size.1 as usize + 1);
+        if flags & 2 != 0 {
+            for _ in 0..n {
+                let g = r.string()?.filter(|s| !s.is_empty());
+                self.point_grounds.push(g);
+            }
+        }
+        if flags & 1 != 0 {
+            for _ in 0..n {
+                self.point_heights.push(r.u8()? as i8);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A sub-tile byte map (`0x1429179c0`): raw 0x211 bytes before version 10, else a header byte
+/// (type in bits 0..2, extra size bytes in bits 3..4, size in bits 5..7) and, for types 1..4, a
+/// compressed payload of that size.
+fn skip_byte_map(r: &mut Reader, version: u32) -> Result<(), TdtError> {
+    let n = if version < 10 {
+        0x211
+    } else {
+        let b = r.u8()?;
+        let kind = b & 7;
+        let extra = (b >> 3) & 3;
+        let mut size = ((b >> 5) & 7) as usize;
+        for k in 0..extra {
+            size |= (r.u8()? as usize) << (8 * k as usize + 3);
+        }
+        if kind == 0 { 0 } else { size }
+    };
+    r.pos = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
+        offset: r.pos,
+        what: "byte map truncated",
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
