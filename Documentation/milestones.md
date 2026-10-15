@@ -7,7 +7,7 @@
 | M2 | Instance server transfer, first zone loads with the player | done (2026-10-13) |
 | M3 | Movement: WASD, click-to-move and dodge roll; save area and position on exit | done (2026-10-14) |
 | M3.5 | Fixes before the terrain milestone: movement lag, full dodge roll, sprint, second-character creation | done (2026-10-14), sprint partial |
-| M4 | Debug suite: in-game imgui overlay (Vulkan) in the client DLL, packet capture and export for our and official servers (read-only), protocol coverage, inspectors, hot reload | in progress |
+| M4 | Debug suite: in-game imgui overlay (Vulkan) in the client DLL, packet capture and export for our and official servers (read-only), protocol coverage, inspectors, hot reload | built 2026-10-14; official session not tried yet |
 | M5 | Server-side terrain generation (reimplement the client generator) for collision | – |
 | M6 | Zone/instance transfer | – |
 | M7 | Inventory and items | – |
@@ -23,6 +23,11 @@ Renamed from terrain generation, which moves to M5 (later milestones shift by on
 - **Tabs:** Log, Packets, Protocol coverage (per opcode; official vs ours), Game log (`Client.txt`), Player inspector, Entity browser + memory watches, Timing graphs (frame time, packet arrival, playback backlog), Features (runtime toggles).
 - **Bug-report snapshot:** a hotkey saves the last ~30 s of packets, logs, graphs and a screenshot into one folder.
 - **Hot reload:** `version.dll` becomes a small loader that keeps the persistent hooks (network guard, Vulkan, window procedure); the debug core (`poe_hook_core.dll`) can be rebuilt and reloaded from the overlay without restarting the game.
+
+### M4 status (2026-10-14)
+- Done: loader/core split with hot reload, read-only latch and official deploy, dear-imgui-rs overlay (Status, Log, Packets, Coverage, Timing, Game log, Player, Entities, Watches, Features), packet capture with redaction and files, snapshots, `tools/re/packets_diff.py`. Details in [client-dll.md](client-dll.md).
+- Not tried yet: an official session (the user plays it).
+- Found by the capture, left for later (server unchanged on request): the instance opening is two messages, `0x000f` Hello (u32) and `0x000e` (12 bytes, u32 ticket, u32, u8); the server reads them as one.
 
 ## M0 checklist
 - [x] git repo, `.gitignore`, `CLAUDE.md`
