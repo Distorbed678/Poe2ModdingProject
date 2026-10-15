@@ -60,8 +60,6 @@ const SET_ORIENTATION: usize = 0x141ddc6a0;
 /// Game update vfunc (`this, ?, f32 xmm2, f32 dt xmm3`): adds dt to this +0x17cc, which the
 /// world update (`0x14169c0b0`) takes (and zeroes) as the frame-mode dt.
 const GAME_UPDATE: usize = 0x14167ea40;
-/// Game session send (`session, packet`): packet +8 is the u16 opcode.
-const SESSION_SEND: usize = 0x14211f880;
 /// Raw stream write (`stream, data, len`).
 const STREAM_WRITE: usize = 0x142197e60;
 static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -69,12 +67,20 @@ static DRAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::
 pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
     OUT.set(out).ok();
     crate::hooks::install(main.from_ghidra(LOOKUP), HookType::JmpBack(on_lookup), 0)
-            .map_err(|e| format!("hook: {e}"))?;
+        .map_err(|e| format!("hook: {e}"))?;
     MAIN.set(*main).ok();
-    crate::hooks::install(main.from_ghidra(READ_INITIAL_STATE), HookType::JmpBack(on_read_initial_state), 0)
-            .map_err(|e| format!("hook: {e}"))?;
-    crate::hooks::install(main.from_ghidra(ENTITY_UPDATE), HookType::JmpBack(on_entity_update), 0)
-            .map_err(|e| format!("hook entity update: {e}"))?;
+    crate::hooks::install(
+        main.from_ghidra(READ_INITIAL_STATE),
+        HookType::JmpBack(on_read_initial_state),
+        0,
+    )
+    .map_err(|e| format!("hook: {e}"))?;
+    crate::hooks::install(
+        main.from_ghidra(ENTITY_UPDATE),
+        HookType::JmpBack(on_entity_update),
+        0,
+    )
+    .map_err(|e| format!("hook entity update: {e}"))?;
     for (addr, cb) in [
         (
             FRAME_DRAIN,
@@ -82,7 +88,6 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
         ),
         (ENTITY_TICK, on_entity_tick),
         (GAME_UPDATE, on_game_update),
-        (SESSION_SEND, on_session_send),
         (SET_ORIENTATION, on_set_orientation),
         (STREAM_WRITE, on_stream_write),
     ] {
@@ -137,32 +142,6 @@ unsafe extern "win64" fn on_stream_write(regs: *mut Registers, _: usize) {
     );
 }
 
-unsafe extern "win64" fn on_session_send(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
-    use std::sync::Mutex;
-    static SEEN: Mutex<Vec<u16>> = Mutex::new(Vec::new());
-    let Some(m) = MAIN.get() else { return };
-    let r = unsafe { &*regs };
-    let Some(op) = poe_hook_shared::mem::read::<u16>(r.rdx as usize + 8) else {
-        return;
-    };
-    let mut seen = SEEN.lock().unwrap();
-    if seen.contains(&op) {
-        return;
-    }
-    seen.push(op);
-    let refs: Vec<String> = poe_hook_shared::module::stack_refs(m, r.rsp as usize, 12)
-        .into_iter()
-        .map(|a| format!("{a:#x}"))
-        .collect();
-    let vt = poe_hook_shared::mem::read::<usize>(r.rdx as usize).unwrap_or(0);
-    log::info!(
-        "session send opcode {op:#06x} vtable {:#x}: {}",
-        if m.contains(vt) { m.to_ghidra(vt) } else { vt },
-        refs.join(" ")
-    );
-}
-
 /// Movement research: who sets the player's facing (logged once per distinct call stack, with
 /// the movement log on).
 unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
@@ -175,7 +154,8 @@ unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
     let Some(m) = MAIN.get() else { return };
     let r = unsafe { &*regs };
     let player = PLAYER.load(Ordering::Relaxed);
-    let pos = poe_hook_shared::mem::read::<usize>(player + 0x10).and_then(poe_hook_shared::mem::read::<usize>);
+    let pos = poe_hook_shared::mem::read::<usize>(player + 0x10)
+        .and_then(poe_hook_shared::mem::read::<usize>);
     if player == 0 || pos != Some(r.rcx as usize) {
         return;
     }
@@ -822,7 +802,8 @@ fn hook_reader(m: &Module, ghidra: usize) {
     if !hooked.get_or_insert_with(HashSet::new).insert(ghidra) {
         return;
     }
-    if let Err(e) = crate::hooks::install(m.from_ghidra(ghidra), HookType::Retn(on_reader), ghidra) {
+    if let Err(e) = crate::hooks::install(m.from_ghidra(ghidra), HookType::Retn(on_reader), ghidra)
+    {
         log::error!("hook reader {ghidra:#x}: {e}");
     }
 }

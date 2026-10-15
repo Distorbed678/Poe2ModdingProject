@@ -22,4 +22,5 @@ windows-sys.workspace = true
 imgui = { package = "dear-imgui-rs", version = "0.20" }
 dear-imgui-ash = "0.20"
 dear-implot = "0.20"
+poe-proto = { path = "../../crates/poe-proto" }
 png = "0.17"

@@ -15,7 +15,8 @@ pub fn install(hwnd: isize) {
     if WINDOW.load(Ordering::SeqCst) == hwnd {
         return;
     }
-    let previous = unsafe { SetWindowLongPtrW(hwnd as HWND, GWLP_WNDPROC, proc as *const () as isize) };
+    let previous =
+        unsafe { SetWindowLongPtrW(hwnd as HWND, GWLP_WNDPROC, proc as *const () as isize) };
     if previous == 0 {
         log::error!("window {hwnd:#x}: subclass failed");
         return;

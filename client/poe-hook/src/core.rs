@@ -57,8 +57,7 @@ pub fn window_message(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> Op
     let core = CORE.read().unwrap();
     let c = core.as_ref()?;
     let mut result = 0;
-    (unsafe { &*c.api }.on_window_message)(hwnd, msg, wparam, lparam, &mut result)
-        .then_some(result)
+    (unsafe { &*c.api }.on_window_message)(hwnd, msg, wparam, lparam, &mut result).then_some(result)
 }
 
 extern "C" fn host_request_reload() {
@@ -125,10 +124,7 @@ fn load(file: &Path) {
         return;
     }
     let n = LOADS.fetch_add(1, Ordering::SeqCst);
-    let copy = std::env::temp_dir().join(format!(
-        "poe_hook_core-{}-{n}.dll",
-        std::process::id()
-    ));
+    let copy = std::env::temp_dir().join(format!("poe_hook_core-{}-{n}.dll", std::process::id()));
     if let Err(e) = std::fs::copy(file, &copy) {
         log::error!("copy {} -> {}: {e}", file.display(), copy.display());
         return;

@@ -123,7 +123,9 @@ pub fn record_copy(
     let wanted = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
     let Some(type_index) = (0..memory.memory_type_count).find(|&i| {
         req.memory_type_bits & (1 << i) != 0
-            && memory.memory_types[i as usize].property_flags.contains(wanted)
+            && memory.memory_types[i as usize]
+                .property_flags
+                .contains(wanted)
     }) else {
         unsafe { device.destroy_buffer(buffer, None) };
         return None;

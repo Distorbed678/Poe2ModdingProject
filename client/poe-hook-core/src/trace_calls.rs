@@ -31,8 +31,12 @@ pub fn init(main: &Module, addresses: &[String], limit: u32) -> Result<(), Strin
             ghidra,
             hits: AtomicU32::new(0),
         }));
-        crate::hooks::install(runtime, HookType::JmpBack(on_hit), target as *const Target as usize)
-            .map_err(|e| format!("hook {text}: {e}"))?;
+        crate::hooks::install(
+            runtime,
+            HookType::JmpBack(on_hit),
+            target as *const Target as usize,
+        )
+        .map_err(|e| format!("hook {text}: {e}"))?;
         log::info!("tracing {ghidra:#x}");
     }
     Ok(())

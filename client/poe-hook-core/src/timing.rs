@@ -57,7 +57,10 @@ pub fn present() {
     let now = Instant::now();
     let mut last = LAST.lock().unwrap();
     if let Some(prev) = last.replace(now) {
-        record(Series::FrameMs, now.duration_since(prev).as_secs_f32() * 1000.0);
+        record(
+            Series::FrameMs,
+            now.duration_since(prev).as_secs_f32() * 1000.0,
+        );
     }
 }
 

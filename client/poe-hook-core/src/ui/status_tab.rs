@@ -7,7 +7,11 @@ fn mode_line() -> String {
     format!(
         "mode {:?}, read-only {}",
         cfg.mode,
-        if crate::host::read_only() { "ON" } else { "off" }
+        if crate::host::read_only() {
+            "ON"
+        } else {
+            "off"
+        }
     )
 }
 
@@ -24,7 +28,10 @@ pub fn draw(ui: &Ui) {
         env!("CARGO_PKG_VERSION"),
         crate::host::reload_count()
     ));
-    ui.text(format!("session folder: {}", crate::host::session_dir().display()));
+    ui.text(format!(
+        "session folder: {}",
+        crate::host::session_dir().display()
+    ));
     ui.text(format!("{:.0} fps", ui.io().framerate()));
     if ui.button("Reload core") {
         crate::host::request_reload();

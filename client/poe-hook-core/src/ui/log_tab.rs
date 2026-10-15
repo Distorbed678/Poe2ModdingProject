@@ -86,7 +86,10 @@ impl LogView {
     pub fn draw(&mut self, ui: &Ui) {
         ui.set_next_item_width(320.0);
         ui.input_text("Filter", &mut self.filter).build();
-        for (i, name) in ["Error", "Warn", "Info", "Debug", "Trace"].iter().enumerate() {
+        for (i, name) in ["Error", "Warn", "Info", "Debug", "Trace"]
+            .iter()
+            .enumerate()
+        {
             ui.same_line();
             ui.checkbox(name, &mut self.levels[i]);
         }

@@ -77,9 +77,17 @@ pub fn init() -> Result<(), String> {
     }
     // Export-table patches, not inline hooks: Wine's exports are tiny thunks that a 14-byte
     // jump would overrun. `GetProcAddress` then hands the game our functions.
-    let real = patch_export(module as usize, b"vkGetInstanceProcAddr", get_instance_proc_addr as *const () as usize)?;
+    let real = patch_export(
+        module as usize,
+        b"vkGetInstanceProcAddr",
+        get_instance_proc_addr as *const () as usize,
+    )?;
     REAL_GIPA.store(real, Ordering::SeqCst);
-    let real = patch_export(module as usize, b"vkGetDeviceProcAddr", get_device_proc_addr as *const () as usize)?;
+    let real = patch_export(
+        module as usize,
+        b"vkGetDeviceProcAddr",
+        get_device_proc_addr as *const () as usize,
+    )?;
     GET_DEVICE_PROC_ADDR.store(real, Ordering::SeqCst);
     Ok(())
 }
@@ -109,10 +117,15 @@ fn patch_export(base: usize, name: &[u8], target: usize) -> Result<usize, String
             let mut original = base + *slot as usize;
             // A forwarder ("winevulkan.vkGetInstanceProcAddr" under Wine) points into the export
             // directory: resolve it through the target module.
-            let range = base + dir.VirtualAddress as usize..base + (dir.VirtualAddress + dir.Size) as usize;
+            let range =
+                base + dir.VirtualAddress as usize..base + (dir.VirtualAddress + dir.Size) as usize;
             if range.contains(&original) {
-                let text = CStr::from_ptr(original as *const c_char).to_string_lossy().into_owned();
-                let (dll, func) = text.split_once('.').ok_or(format!("bad forwarder {text}"))?;
+                let text = CStr::from_ptr(original as *const c_char)
+                    .to_string_lossy()
+                    .into_owned();
+                let (dll, func) = text
+                    .split_once('.')
+                    .ok_or(format!("bad forwarder {text}"))?;
                 let wide: Vec<u16> = format!("{dll}.dll\0").encode_utf16().collect();
                 let target_module = LoadLibraryW(wide.as_ptr());
                 let func = std::ffi::CString::new(func).unwrap();
@@ -148,7 +161,12 @@ fn near_stub(base: usize, target: usize) -> Result<usize, String> {
     let mut at = (base + 0x10_0000) & !0xffff;
     while at < base + 0x7000_0000 {
         let p = unsafe {
-            VirtualAlloc(at as *const _, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+            VirtualAlloc(
+                at as *const _,
+                0x1000,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_EXECUTE_READWRITE,
+            )
         } as usize;
         if p != 0 {
             let code: [u8; 6] = [0xff, 0x25, 0, 0, 0, 0];
@@ -186,7 +204,12 @@ fn real_device_proc(device: vk::Device, name: &CStr) -> vk::PFN_vkVoidFunction {
         return None;
     }
     let gipa: vk::PFN_vkGetInstanceProcAddr = real(&REAL_GIPA);
-    let gdpa = unsafe { gipa(vk::Instance::from_raw(instance), c"vkGetDeviceProcAddr".as_ptr()) }?;
+    let gdpa = unsafe {
+        gipa(
+            vk::Instance::from_raw(instance),
+            c"vkGetDeviceProcAddr".as_ptr(),
+        )
+    }?;
     let gdpa: vk::PFN_vkGetDeviceProcAddr = unsafe { std::mem::transmute(gdpa) };
     unsafe { gdpa(device, name.as_ptr()) }
 }
