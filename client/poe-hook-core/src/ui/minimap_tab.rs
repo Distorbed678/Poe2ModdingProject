@@ -35,10 +35,13 @@ impl MinimapView {
         ui.same_line();
         if ui.button("Export area") {
             let ok = crate::dump_types::export_layout_now();
-            crate::ui::notice(if ok {
-                "Area layout and grids exported next to the exe (terrain_*)".into()
-            } else {
-                "No area loaded".to_string()
+            crate::ui::notice(match crate::terrain_tools::export_now() {
+                Some(dir) => format!(
+                    "Area exported to {} (with server entities and walkability probe)",
+                    dir.display()
+                ),
+                None if ok => "Area layout and grids exported next to the exe (terrain_*)".into(),
+                None => "No area loaded".to_string(),
             });
         }
         let Some(grid) = Grid::current(self.layer) else {

@@ -41,6 +41,11 @@ turn_timing = true
 face_cursor = true
 # Debug link for the client DLL overlay (state view, dev commands); loopback only.
 debug_link = true
+# Terrain seed sweep (research): `<WorldAreas.Id> <seed> [count]` per line; empty = off
+# (env POE_SWEEP overrides). Each session generates the next listed layout and ends
+# (tools/re/sweep_drive.py logs the client in again).
+sweep = ""
+sweep_results = "data/sweep-results.tsv"
 
 [database]
 path = "data/server.sqlite"

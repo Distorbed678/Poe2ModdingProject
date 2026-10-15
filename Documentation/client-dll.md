@@ -125,6 +125,13 @@ Note: the game's own login/instance TCP traffic does not go through these ws2_32
 - `cargo xtask deploy-client [--official] [--no-build]` installs both DLLs, the config and the gateway list (ours, or the original for `--official`).
 - `cargo xtask deploy-core [--no-build]` installs only the core; a running client reloads it within about a second.
 
+## Terrain research (`terrain_tools.rs`)
+`[features] area_export` (on by default; read-only safe) writes every generated area to
+`<session>/areas/<n>_<hash16>_<seed>/` (layout, doodads, grids, generator objects, walkability
+probe) and checks the export by recomputing the client's tile and doodad hashes.
+`[features] generator_trace` / `POE_HOOK_GEN_TRACE=1` adds `generator_trace.tsv` (every terrain
+RNG draw and generator phase). Details and the seed sweep: [re/terrain.md](re/terrain.md).
+
 ## Crash reports
 After a crash the client writes `PoE-<time>-<pid>.dmp` (plus `.txt`, `.log.txt` and `.poecap` side files) under `My Games/Path of Exile 2/poe2_production` in the prefix. A helper process uploads them, both right after the crash and on the next launch. With `block_external` installed from `DllMain`, the upload connections are refused. `cargo xtask run-client` also moves pending dumps to `data/crash-dumps/` (git-ignored) before launching, so nothing is left to upload and the dumps stay available for debugging.
 
