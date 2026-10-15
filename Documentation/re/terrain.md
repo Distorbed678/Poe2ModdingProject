@@ -327,6 +327,35 @@ replays the logged arc steps). After routing, `0x1420bd650(layout, 1)` (no RNG):
 
 **Verified:** the graph before tile placement equals the client's; 5055 draws in step.
 
+Node flags (`+0x88` "fixed", `+0x89` "virtual end"): fixed = room nodes and their exit
+nodes, plus dead ends pushed off the map; virtual end = next to a virtual edge in the topology
+graph (`0x1420c7400`, `.et` flag 4). The virtual split copies both flags to each new node, and
+at a chain's far end sets virtual end on both far nodes unless the far node lies on the map
+border (the clone's far node also copies fixed).
+
+**Edge tiles** (`crates/poe-world/src/edge_tiles.rs`, `0x1420b6950`):
+1. Occupancy grid (`0x141ef5700`, 0x20-byte cells: cost, parent, f, g, h, closed, occupied,
+   open-set link): cells under room tiles are occupied. Per edge (`0x1420b6660`): +80 cost on
+   every tile its line crosses (`0x141ef6ab0`, tiles rounded down to the `.et` size); an edge
+   with a fixed from node goes to list A (from that end) and its fixed end tiles are taken
+   (`0x141ef67a0`); otherwise a fixed to node puts it in A from the other end; otherwise list B
+   (from the from end if it is a dead end).
+2. `below(|A|)` (discarded), A shuffled (`uniform(n−k)` per slot), stably sorted by priority
+   then split edges first. A then B: each chain (`0x1420b5f30`, walking through degree-2 nodes,
+   `0x1420c4960`) is skipped if it stays within the end tiles of two touching rooms
+   (`0x1420b41b0`); free dead ends inside the map repeat their position as a point
+   (`0x1420b43b0`); the path builder (`0x1420b4510`) keeps one point per tile and cuts loops.
+3. Fit (`0x1420b5250`): from the start node's tile, searches (`0x141ef5c80`) from each path
+   point back to the previous one: seeds are all later points (cost `avg×100 + points left`,
+   the first 0, estimate `isqrt(d²)×100`), steps cost `(avg + jitter + size)×100` with an
+   estimate of plain `isqrt(d²)` and `jitter = ((x+1)·r₁ + (y+1)·r₂) mod 707 / 101`, where
+   `r = v² + (v+1)²`, `v = below(16384) + 20000` (two per search). The open set is ordered by
+   (f, cell). Found tiles are taken (+80); edges of the path get −60 first (`0x141ef6bf0`) and
+   each passed segment −20 (`0x141ef7000`); failures backtrack (at most 10 steps). Paths that
+   fit cost +80 on their inner tiles; those that do not are retried after the others.
+
+**Verified:** all 103 edge tile positions (17 paths) equal the client's; 5158 draws in step.
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,

@@ -70,7 +70,7 @@ impl LayoutGraph {
         }
     }
 
-    fn endpoint(&self, e: usize, w: usize) -> usize {
+    pub fn endpoint(&self, e: usize, w: usize) -> usize {
         if w == 0 { self.edges[e].from } else { self.edges[e].to }
     }
 
@@ -88,7 +88,7 @@ impl LayoutGraph {
     }
 
     fn add_node(&mut self, pos: Pos) -> usize {
-        self.nodes.push(LNode { pos, slots: [None; 4] });
+        self.nodes.push(LNode { pos, slots: [None; 4], fixed: false, virtual_end: false });
         self.nodes.len() - 1
     }
 
@@ -284,6 +284,8 @@ fn split_chain(
             }
         };
         let new = g.add_node(vend[1]);
+        g.nodes[new].fixed = g.nodes[node].fixed;
+        g.nodes[new].virtual_end = g.nodes[node].virtual_end;
         if cur == 0 { clone.from = new } else { clone.to = new }
         clone.split = true;
         let ci = g.edges.len();
@@ -301,6 +303,11 @@ fn split_chain(
         let next_split = next.is_some_and(|n| g.edges[n].split);
         if g.edges[e].vends[far].is_some() || next_split {
             g.edges[e].fixed = true;
+            // Both far ends are next to a virtual end unless the far node is on the map border.
+            let (x, y) = g.nodes[far_node].pos;
+            let (tx, ty) = (x / 23, y / 23);
+            let tiles = (size.0 / 23, size.1 / 23);
+            let inside = !(tx == 0 || ty == 0 || tx == tiles.0 - 1 || ty == tiles.1 - 1);
             if let Some(v) = g.edges[e].vends[far] {
                 g.nodes[far_node].pos = v[1];
                 let nn = g.add_node(v[0]);
@@ -314,6 +321,10 @@ fn split_chain(
                 g.attach(nn, ci);
                 if far == 0 { g.edges[ci].from = nn } else { g.edges[ci].to = nn }
             }
+            let clone_far = g.endpoint(ci, far);
+            g.nodes[far_node].virtual_end = inside;
+            g.nodes[clone_far].virtual_end = inside;
+            g.nodes[clone_far].fixed = g.nodes[far_node].fixed;
             split_points(g, e, ci, cur, true, (-1, -1), size, rng);
             return;
         }

@@ -351,7 +351,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 slots[k] = Some(route_index[ei]);
             }
         }
-        lg.nodes.push(poe_world::smoothing::LNode { pos: placed_graph.nodes[i], slots });
+        // `0x1420c7400`: next to a virtual edge in the topology graph.
+        let mut virtual_end = false;
+        for &ei in &graph.nodes[i].edges {
+            virtual_end |= types.edge(files, &graph.edges[ei as usize].edge_type)?.virtual_edge;
+        }
+        let fixed = placed.iter().any(|p| p.node == i);
+        lg.nodes.push(poe_world::smoothing::LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end });
     }
     for (gi, e) in graph.edges.iter().enumerate() {
         let ri = route_index[gi];
@@ -386,7 +392,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 first = false;
             } else {
                 let nn = lg.nodes.len();
-                lg.nodes.push(poe_world::smoothing::LNode { pos, slots: [Some(e), None, None, None] });
+                lg.nodes.push(poe_world::smoothing::LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false });
                 if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
                 lg.nodes[node].slots[k] = None;
             }
@@ -514,6 +520,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             off.0 = -1;
         }
         lg.nodes[n].pos = pos;
+        lg.nodes[n].fixed = true;
         lg.edges[e].offsets[w] = off;
     }
     poe_world::smoothing::compact_slots(&mut lg);
@@ -532,8 +539,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let idx: usize = it.next().unwrap().parse()?;
         if l[2] == "node" {
             let pos = it.next().unwrap();
-            let ours = lg.nodes.get(idx).map(|n| format!("{},{}", n.pos.0, n.pos.1)).unwrap_or_default();
-            if ours == pos { same += 1 } else { diff += 1; println!("tiles node {idx}: ours {ours} client {pos}"); }
+            let flags = args.split("flags [").nth(1).and_then(|r| r.split(']').next()).unwrap_or("");
+            let theirs = format!("{pos} {}", flags.split(", ").take(2).collect::<Vec<_>>().join(","));
+            let ours = lg.nodes.get(idx).map(|n| format!("{},{} {},{}", n.pos.0, n.pos.1, n.fixed as u8, n.virtual_end as u8)).unwrap_or_default();
+            if ours == theirs { same += 1 } else { diff += 1; println!("tiles node {idx}: ours {ours} client {theirs}"); }
         } else {
             let ends = it.next().unwrap();
             let et = it.next().unwrap();
@@ -548,6 +557,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!("graph before tiles: {same} same, {diff} different");
+
+    // Edge tiles (`0x1420b6950`): chains into tile paths; compare the path tiles with the
+    // client's edge tile placements (`place` lines at 0x1420b85bf, in path order).
+    let mut sizes = Vec::new();
+    for e in &lg.edges {
+        sizes.push(types.edge(files, &e.edge_type)?.size as u32);
+    }
+    let mut tiler = poe_world::edge_tiles::EdgeTiler::new(&mut lg, &map, sizes);
+    if let Err(e) = tiler.run(&mut rng) {
+        println!("edge tiles: {e}");
+    }
+    let ours: Vec<(i32, i32)> = tiler
+        .order
+        .iter()
+        .flat_map(|p| {
+            let skip = (!p.is_loop) as usize;
+            p.tiles[skip..p.tiles.len() - skip].to_vec()
+        })
+        .collect();
+    let theirs: Vec<(i32, i32)> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter(|l| l.split('\t').nth(1) == Some("place") && l.split('\t').nth(2) == Some("1420b85bf"))
+        .map(|l| {
+            let mut a = l.split('\t').nth(3).unwrap().split_whitespace();
+            (a.next().unwrap().parse().unwrap(), a.next().unwrap().parse().unwrap())
+        })
+        .collect();
+    let same = ours.iter().zip(&theirs).take_while(|(a, b)| a == b).count();
+    println!("edge tile paths: {} tiles ({} chains), client {}; first {} in step", ours.len(), tiler.order.len(), theirs.len(), same);
+    if same < theirs.len() {
+        let mut k = 0;
+        for (i, p) in tiler.order.iter().enumerate() {
+            let skip = (!p.is_loop) as usize;
+            let n = p.tiles.len() - 2 * skip;
+            if k + n > same {
+                println!("path {i} (edge {} end {}): {:?}", p.edge, p.end, p.tiles);
+                println!("  client: {:?}", &theirs[k..(k + n + 3).min(theirs.len())]);
+                break;
+            }
+            k += n;
+        }
+    }
 
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {
