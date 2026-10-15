@@ -632,10 +632,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Fill pass (`0x141f8f930`).
     let pieces_before_fill = map.pieces.len();
-    match poe_world::fill::fill_pass(&mut map, &mut master, files, &mut rng) {
-        Ok(rooms) => println!("fill pass: {} pieces, {} fill rooms", map.pieces.len() - pieces_before_fill, rooms.len()),
-        Err(e) => println!("fill pass: {e} (after {} pieces)", map.pieces.len() - pieces_before_fill),
-    }
+    let fill_rooms = match poe_world::fill::fill_pass(&mut map, &mut master, files, &mut rng) {
+        Ok(rooms) => {
+            println!("fill pass: {} pieces, {} fill rooms", map.pieces.len() - pieces_before_fill, rooms.len());
+            rooms
+        }
+        Err(e) => {
+            println!("fill pass: {e} (after {} pieces)", map.pieces.len() - pieces_before_fill);
+            Vec::new()
+        }
+    };
+    // De-repetition (`0x141fdd7c0`): node rooms, then fill rooms.
+    use poe_world::generate::RoomPlacement;
+    let mut room_list: Vec<RoomPlacement> = placed
+        .iter()
+        .map(|p| RoomPlacement { room: &set.rooms[p.room].room, origin: p.pos, orientation: p.orientation })
+        .collect();
+    room_list.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
+    let pieces_before_derepeat = map.pieces.len();
+    poe_world::generate::derepeat_pass(&mut map, &master, &room_list, &mut rng);
+    println!("de-repetition: {} re-picks", map.pieces.len() - pieces_before_derepeat);
 
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {

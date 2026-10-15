@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     edge_cost_grid(&map, &mut rng);
     rng.below(0);
     fill_pass(&mut map, &mut master, &files, &mut rng)?;
-    derepeat_pass(&mut map, &master, &[(&room, (0, 0))], &mut rng);
+    derepeat_pass(&mut map, &master, &[poe_world::generate::RoomPlacement { room: &room, origin: (0, 0), orientation: 0 }], &mut rng);
     println!(
         "draws: {}; tile hash ours {} client {}",
         rng.draws,
