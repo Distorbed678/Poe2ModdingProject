@@ -192,6 +192,20 @@ pub struct InstanceConfig {
     /// client puts it on a cell centre at every turn).
     #[serde(default)]
     pub turn_timing: bool,
+    /// Turn the player toward the cursor (except while it walks by click-to-move or rolls),
+    /// from the cursor position in the client's position reports (dev bridge, see
+    /// `cursor_to_grid`).
+    #[serde(default)]
+    pub face_cursor: bool,
+    /// Cursor (client pixels from the window centre, scaled to a 1440-pixel-high window) to
+    /// grid offset from the player: `gx = a·sx + b·sy + c`, `gy = d·sx + e·sy + f` as
+    /// `[a, b, c, d, e, f]` (calibrated from dodge-roll targets, 2026-10-15).
+    #[serde(default = "default_cursor_to_grid")]
+    pub cursor_to_grid: [f32; 6],
+}
+
+fn default_cursor_to_grid() -> [f32; 6] {
+    [0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]
 }
 
 fn default_turn_cell() -> String {

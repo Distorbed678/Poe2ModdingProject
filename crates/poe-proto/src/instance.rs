@@ -1045,6 +1045,33 @@ impl Message for UpdateActionTarget {
     }
 }
 
+/// S→C simulation message for the Positioned component (`0x1df`, reader `0x141f6af00`,
+/// handler `0x141dda640`): header, `f32 angle, u8 locked`. The client sets the entity's facing
+/// (Positioned +0x44c, radians: `atan2(dy, dx) + π/2` of a grid direction) unless it is locked,
+/// then sets or clears the lock (+0x1e5 bit 1); while locked, movement does not turn it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SetOrientation {
+    pub header: SimulationHeader,
+    pub angle: f32,
+    pub locked: bool,
+}
+
+impl Message for SetOrientation {
+    const NAME: &'static str = "SetOrientation";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        self.header.encode(w);
+        w.u32(self.angle.to_bits()).u8(self.locked as u8);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self {
+            header: SimulationHeader::decode(r)?,
+            angle: f32::from_bits(r.u32()?),
+            locked: r.u8()? != 0,
+        })
+    }
+}
+
 /// C→S: the sprint/dodge key (Space) went down or up (sender `0x14016e780`):
 /// `u8 local player, u8 held`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

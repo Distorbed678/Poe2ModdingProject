@@ -55,6 +55,8 @@ const ENTITY_UPDATE: usize = 0x141e71090;
 const FRAME_DRAIN: usize = 0x1421306c0;
 /// Per-entity tail update in frame mode (`entity + 0x58, dt`), from `0x1421370f0`.
 const ENTITY_TICK: usize = 0x141e7d7f0;
+/// Positioned::SetOrientation (`this`, angle): writes +0x44c unless the orientation is locked.
+const SET_ORIENTATION: usize = 0x141ddc6a0;
 /// Game update vfunc (`this, ?, f32 xmm2, f32 dt xmm3`): adds dt to this +0x17cc, which the
 /// world update (`0x14169c0b0`) takes (and zeroes) as the frame-mode dt.
 const GAME_UPDATE: usize = 0x14167ea40;
@@ -102,6 +104,7 @@ pub fn init(main: &Module, out: PathBuf) -> Result<(), String> {
         (ENTITY_TICK, on_entity_tick),
         (GAME_UPDATE, on_game_update),
         (SESSION_SEND, on_session_send),
+        (SET_ORIENTATION, on_set_orientation),
         (STREAM_WRITE, on_stream_write),
     ] {
         let hooker = Hooker::new(
@@ -189,6 +192,35 @@ unsafe extern "win64" fn on_session_send(regs: *mut Registers, _: usize) {
     log::info!(
         "session send opcode {op:#06x} vtable {:#x}: {}",
         if m.contains(vt) { m.to_ghidra(vt) } else { vt },
+        refs.join(" ")
+    );
+}
+
+/// Movement research: who sets the player's facing (logged once per distinct call stack, with
+/// the movement log on).
+unsafe extern "win64" fn on_set_orientation(regs: *mut Registers, _: usize) {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<Vec<usize>>> = Mutex::new(Vec::new());
+    if !MOVEMENT_LOG.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(m) = MAIN.get() else { return };
+    let r = unsafe { &*regs };
+    let player = PLAYER.load(Ordering::Relaxed);
+    let pos = crate::mem::read::<usize>(player + 0x10).and_then(crate::mem::read::<usize>);
+    if player == 0 || pos != Some(r.rcx as usize) {
+        return;
+    }
+    let refs = crate::module::stack_refs(m, r.rsp as usize, 8);
+    let mut seen = SEEN.lock().unwrap();
+    if seen.contains(&refs) || seen.len() > 40 {
+        return;
+    }
+    seen.push(refs.clone());
+    let refs: Vec<String> = refs.iter().map(|a| format!("{a:#x}")).collect();
+    log::info!(
+        "player SetOrientation angle={:.3}: {}",
+        f32::from_bits(r.xmm1 as u32),
         refs.join(" ")
     );
 }
@@ -483,6 +515,7 @@ fn track_player(entity: usize) {
         let start = std::time::Instant::now();
         let mut last = None;
         let mut last_actions = String::new();
+        let mut last_facing = (i32::MIN, 0u32);
         while PLAYER.load(Ordering::SeqCst) == entity {
             std::thread::sleep(std::time::Duration::from_millis(20));
             let Some(comps) = read::<usize>(entity + 0x10) else {
@@ -523,6 +556,17 @@ fn track_player(entity: usize) {
                 read::<u8>(actor + 0x915).unwrap_or(0),
                 read::<u8>(actor + 0x916).unwrap_or(0)
             );
+            // Facing: Positioned +0x44c (radians, written by SetOrientation 0x141ddc6a0 unless
+            // the orientation is locked, +0x1e5 bit 1); logged when it changes by > 0.05.
+            let angle = read::<f32>(pos + 0x44c).unwrap_or(0.0);
+            if (angle - f32::from_bits(last_facing.1)).abs() > 0.05 || last_facing.0 == i32::MIN {
+                last_facing = (0, angle.to_bits());
+                log::info!(
+                    "player facing t={}ms angle={angle:.3} locked={} pos={pos:#x}",
+                    start.elapsed().as_millis(),
+                    read::<u8>(pos + 0x1e5).unwrap_or(0) >> 1 & 1
+                );
+            }
             let summary = format!("{} {state}", slots.join(" "));
             if summary != last_actions {
                 log::info!(

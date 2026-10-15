@@ -64,6 +64,8 @@ MoveDirectionUpdate = 0x0064
 StartAction = 0x01c8
 # New target location of an entity's current action.
 UpdateActionTarget = 0x01cb
+# Positioned: facing angle + lock (the server turns the player toward the cursor with it).
+SetOrientation = 0x01df
 # An entity's sprint key state (dodge roll -> sprint).
 SprintState = 0x02e7
 # An entity's stats change (Stats component).

@@ -190,6 +190,11 @@ impl InstanceServer {
         player.frame_seconds = self.config.instance.tick_ms as f32 / 1000.0;
         player.turn_cell = player::TurnCell::parse(&self.config.instance.turn_cell);
         player.turn_timing = self.config.instance.turn_timing;
+        player.face_cursor = self
+            .config
+            .instance
+            .face_cursor
+            .then_some(self.config.instance.cursor_to_grid);
         if saved.is_some() {
             // Same layout, so the saved cell is normally walkable; otherwise use the nearest
             // open spot.
@@ -403,12 +408,18 @@ impl InstanceServer {
                 ),
             ),
             player::Reply::Sprint(m) => self.trace(port, "out-sprint", format_args!("{}", m.held)),
+            player::Reply::Orientation(m) => self.trace(
+                port,
+                "out-facing",
+                format_args!("{:.3}\t{}", m.angle, m.locked),
+            ),
         }
         let table = &self.protocol.instance;
         Ok(match reply {
             player::Reply::Direction(m) => table.encode(m)?,
             player::Reply::Start(m) => table.encode(m)?,
             player::Reply::Sprint(m) => table.encode(m)?,
+            player::Reply::Orientation(m) => table.encode(m)?,
         })
     }
 }

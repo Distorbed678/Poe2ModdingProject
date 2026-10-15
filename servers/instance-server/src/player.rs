@@ -11,8 +11,8 @@ use poe_game::movement::{Motion, Mover, Open};
 use poe_proto::{
     entity::Skill,
     instance::{
-        MoveDirection, MoveDirectionUpdate, SimulationHeader, SprintInput, SprintState,
-        StartAction, UpdateActionTarget, UpdateSkillTarget, UseSkill,
+        MoveDirection, MoveDirectionUpdate, SetOrientation, SimulationHeader, SprintInput,
+        SprintState, StartAction, UpdateActionTarget, UpdateSkillTarget, UseSkill,
     },
 };
 use tracing::{debug, info};
@@ -32,6 +32,7 @@ pub enum Reply {
     Direction(MoveDirectionUpdate),
     Start(StartAction),
     Sprint(SprintState),
+    Orientation(SetOrientation),
 }
 
 /// The action the player is running (started by a StartAction).
@@ -90,6 +91,10 @@ pub struct Player {
     pub turn_timing: bool,
     /// A held-back turn and the frame it goes out in.
     pending_turn: Option<(MoveDirection, i64)>,
+    /// Turn toward the cursor with this projection (`[instance] cursor_to_grid`), if enabled.
+    pub face_cursor: Option<[f32; 6]>,
+    /// The facing last sent: angle and whether it is locked.
+    facing: Option<(f32, bool)>,
     /// Length of a simulation frame in seconds (`tick_ms`).
     pub frame_seconds: f32,
     /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
@@ -144,6 +149,8 @@ struct Turn {
     dir: (f32, f32),
 }
 
+/// Smallest change of the cursor facing that is sent (radians, about 3 degrees).
+const FACING_STEP: f32 = 0.05;
 /// A turn is held back a frame only if that puts it this much (cells) nearer a cell centre.
 const TURN_TIMING_MARGIN: f32 = 0.1;
 
@@ -199,6 +206,8 @@ impl Player {
             turn_cell: TurnCell::Heading,
             turn_timing: false,
             pending_turn: None,
+            face_cursor: None,
+            facing: None,
             walkable: None,
             frame_offset: None,
             in_roll: false,
@@ -323,6 +332,7 @@ impl Player {
             self.mover.advance(dt, &Open);
         }
         let mut out = Vec::new();
+        out.extend(self.face_cursor_replies());
         // A turn held back for a better frame (`turn`) goes out in the frame it was meant for.
         if let Some((req, frame)) = self.pending_turn
             && self.apply_frame >= frame
@@ -542,6 +552,66 @@ impl Player {
         let n = (f - report_frame).clamp(0, MAX_LEAD_FRAMES) as f32;
         let v = self.velocity;
         ((self.mover.x + v.0 * n, self.mover.y + v.1 * n), v)
+    }
+
+    /// Facing the cursor (as on the official servers): the player faces the cursor, also while
+    /// walking with WASD, except while it walks by click-to-move or rolls (then movement turns
+    /// it). The facing is locked so movement does not turn it; a locked facing cannot be
+    /// changed (SetOrientation is skipped), so a new angle is sent as unlock, then set + lock.
+    fn face_cursor_replies(&mut self) -> Vec<Reply> {
+        let (Some(proj), Some(r)) = (self.face_cursor, self.client) else {
+            return Vec::new();
+        };
+        let locked = self.facing.is_some_and(|f| f.1);
+        let header = self.header();
+        let message = |angle: f32, locked: bool| {
+            Reply::Orientation(SetOrientation {
+                header,
+                angle,
+                locked,
+            })
+        };
+        let click_moving = self.held_dir.is_some()
+            || (self
+                .current
+                .is_some_and(|c| Some(c.skill) == self.move_skill)
+                && self.wasd == (0, 0)
+                && (r.action != 0 || r.action2 != 0));
+        if self.in_roll || click_moving {
+            if locked {
+                let angle = self.facing.map_or(0.0, |f| f.0);
+                self.facing = Some((angle, false));
+                return vec![message(angle, false)];
+            }
+            return Vec::new();
+        }
+        let Some(c) = r.cursor else {
+            return Vec::new();
+        };
+        // Pixels from the window centre, scaled to the 1440-pixel window the map was fitted on.
+        let scale = 1440.0 / c.height as f32;
+        let sx = (c.x as f32 - c.width as f32 / 2.0) * scale;
+        let sy = (c.y as f32 - c.height as f32 / 2.0) * scale;
+        let gx = proj[0] * sx + proj[1] * sy + proj[2];
+        let gy = proj[3] * sx + proj[4] * sy + proj[5];
+        if gx.hypot(gy) < 1.5 {
+            return Vec::new(); // the cursor is on the player
+        }
+        let angle = (gy.atan2(gx) + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU);
+        let turn = self.facing.is_none_or(|(a, _)| {
+            let d = (angle - a).rem_euclid(std::f32::consts::TAU);
+            d.min(std::f32::consts::TAU - d) > FACING_STEP
+        });
+        if locked && !turn {
+            return Vec::new();
+        }
+        self.facing = Some((angle, true));
+        let mut out = Vec::new();
+        if locked {
+            out.push(message(angle, false));
+        }
+        out.push(message(angle, true));
+        out
     }
 
     /// A walk direction change. With `turn_timing`, a turn may be held back by one frame: the
@@ -960,8 +1030,58 @@ mod tests {
             action,
             action2: 0,
             flags: 0,
+            cursor: None,
             at: std::time::Instant::now(),
         })
+    }
+
+    #[test]
+    fn faces_the_cursor_locked_and_unlocks_for_rolls() {
+        let mut p = player();
+        p.face_cursor = Some([0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]);
+        let report = |x: i16, y: i16| crate::sync::ClientReport {
+            frame: 1,
+            x: 100.5,
+            y: 100.5,
+            action: 0,
+            action2: 0,
+            flags: 0,
+            cursor: Some(crate::sync::Cursor {
+                x,
+                y,
+                width: 2560,
+                height: 1440,
+            }),
+            at: std::time::Instant::now(),
+        };
+        let facing = |out: &[Reply]| -> Vec<(f32, bool)> {
+            out.iter()
+                .filter_map(|r| match r {
+                    Reply::Orientation(o) => Some((o.angle, o.locked)),
+                    _ => None,
+                })
+                .collect()
+        };
+        // Cursor up on the screen: grid (+x, +y), facing about 3π/4, locked.
+        p.apply_report(Some(report(1280, 300)));
+        let f = facing(&p.tick(0.033));
+        assert!(
+            matches!(&f[..], [(a, true)] if (a - 2.356).abs() < 0.1),
+            "{f:?}"
+        );
+        // Same cursor: nothing new.
+        assert!(facing(&p.tick(0.033)).is_empty());
+        // A new direction: unlock, then set and lock.
+        p.apply_report(Some(report(700, 720)));
+        let f = facing(&p.tick(0.033));
+        assert!(
+            matches!(&f[..], [(_, false), (a, true)] if (a - 3.93).abs() < 0.15),
+            "{f:?}"
+        );
+        // A dodge roll: unlocked so the roll turns the player.
+        p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
+        let f = facing(&p.tick(0.033));
+        assert!(matches!(&f[..], [(_, false)]), "{f:?}");
     }
 
     #[test]
@@ -976,6 +1096,7 @@ mod tests {
             action: 0,
             action2: 0x2909,
             flags: 0,
+            cursor: None,
             at: std::time::Instant::now(),
         };
         // Walking +y at 1.233 cells per frame; reports for frames 1 and 2 have arrived.

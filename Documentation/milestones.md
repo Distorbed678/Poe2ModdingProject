@@ -72,6 +72,7 @@ Details are in [protocol/movement.md](protocol/movement.md) and [protocol/login.
   - **Server collision removed** at the user's request: no walkability grid, A* or wall sliding in the server simulation until M4 (the grid only places a restored position).
   - **Exit to log in screen** went to character selection: the client sends `0x355` + `0x1b` and shows the log-in screen only when its login connection is closed. The server now decodes both and closes the login connection on `0x1b`.
   - WASD measured smooth (steady 33 ms frames, constant 1.23-cell steps). The remaining unevenness comes from the client itself (sliding along walls, corners).
+- **Facing the cursor** (2026-10-15): the player faces the cursor like on the official servers (not while walking by click-to-move or rolling). The client does not do this by itself here and sends no cursor data, so the DLL reports the cursor and the server sets the facing with `0x1df` (locked).
 - **Second character:** the create screen shows a league step for second and later characters. It was empty because Hardcore was sent as a separate league. It is now a variant of Standard (entry +0x80 = base league id, +0xe1 bit 1), shown as the Hardcore checkbox on the Standard banner. The create result is opcode `0x13` (the server sent `0x16`, a different message, so the screen stayed open after Continue). New characters are stored with their start area (`[player] start_area`). A new character now goes straight into the game.
 
 ## M3 scope (agreed 2026-10-14)
