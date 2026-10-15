@@ -9,6 +9,7 @@
 
 pub mod edge_tiles;
 pub mod export;
+pub mod fill;
 pub mod generate;
 pub mod graph;
 pub mod hash;

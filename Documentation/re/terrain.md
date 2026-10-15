@@ -411,6 +411,27 @@ over `(w + 1) × (h + 1)` tile corners, +0x68 the ground table, indices in order
 
 **Verified:** the lattice equals the client's at every step up to the fill (4891 points).
 
+**Fill** (`crates/poe-world/src/fill.rs`):
+- `0x141f93060`: rows top to bottom, cells left to right, skipping the rest of a placed tile's
+  width. A cell's ground is its top-left corner's; it is "walkable" when that ground is missing
+  or has `.gt` flag 4 and the corner has no flag 8.
+- `0x141f8f930`: grounds with `.gt` flag 0x10 count as none; the group is the `.gft` section
+  named like the ground (`.gt` first line), else `default` (`0x141f93960`; tiles and rooms are
+  looked up separately). Without fill rooms: `below(total)` over the tiles, orientation
+  (`0x141f90d60`), on failure the entry is dropped and it repeats. With fill rooms: one list,
+  tiles then rooms (rooms with doodads only when walkable), same loop with the room orientation
+  (`0x141f90f60`). Orientation "any": square → `below(8)` if it fits unrotated; otherwise the
+  orientations that fit (0x55 unrotated, 0xaa rotated) and `below(840)` picks among them
+  (`0x1421c3d00`). Tiles may hang one cell past the region's far sides (`0x141f9e5f0`); the
+  same-neighbour test (`0x141f8f7c0`) looks only at the target cell and never fires. Fill tile
+  height: middle of the corner heights (`0x141f90950`). A fill room (`0x141f8c8c0`) places its
+  cells x outer, y inner, skips cells already taken, re-picks up to five times until a tile
+  fits, writes its ground overrides (`0x141f9e780`) and gives its corners without a ground the
+  fill's ground; if its own cell is still empty the fill repeats there.
+
+**Verified:** the Riverbank fill equals the client's (561 pieces, 13 fill rooms); 6393 draws in
+step.
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,

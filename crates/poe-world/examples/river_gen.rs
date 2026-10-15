@@ -631,8 +631,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     compare_lattice(&map, &export_dir, "fill", lattice_point)?;
 
     // Fill pass (`0x141f8f930`).
-    if let Err(e) = poe_world::generate::fill_pass(&mut map, &mut master, files, &mut rng) {
-        println!("fill pass: {e}");
+    let pieces_before_fill = map.pieces.len();
+    match poe_world::fill::fill_pass(&mut map, &mut master, files, &mut rng) {
+        Ok(rooms) => println!("fill pass: {} pieces, {} fill rooms", map.pieces.len() - pieces_before_fill, rooms.len()),
+        Err(e) => println!("fill pass: {e} (after {} pieces)", map.pieces.len() - pieces_before_fill),
     }
 
     let log = rng.log.take().unwrap_or_default();
