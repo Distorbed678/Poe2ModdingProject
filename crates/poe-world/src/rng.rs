@@ -60,6 +60,9 @@ pub struct TerrainRng {
     pub disabled: bool,
     /// Draws so far (raw 32-bit values), for comparing with the client's generator trace.
     pub draws: u64,
+    /// When set, every bounded draw (`below`/`range`) is recorded as `(n, result)`, for
+    /// lining up with the trace's `below`/`range` lines.
+    pub log: Option<Vec<(u32, u32)>>,
 }
 
 impl TerrainRng {
@@ -68,6 +71,7 @@ impl TerrainRng {
             mt: Mt19937::new(seed),
             disabled: false,
             draws: 0,
+            log: None,
         }
     }
 
@@ -93,23 +97,57 @@ impl TerrainRng {
 
     /// `0..n` (`0x141f9c270`; 0 counts as 1).
     pub fn below(&mut self, n: u32) -> u32 {
-        if self.disabled {
-            return 0;
+        let v = if self.disabled {
+            0
+        } else {
+            self.uniform(n.max(1))
+        };
+        if let Some(log) = &mut self.log {
+            log.push((n, v));
         }
-        self.uniform(n.max(1))
+        v
     }
 
     /// `a..=b` (`0x141f9c340`; `b < a` counts as `b = a`).
     pub fn range(&mut self, a: u32, b: u32) -> u32 {
-        if self.disabled {
-            return a;
+        let v = if self.disabled {
+            a
+        } else {
+            let b = b.max(a);
+            let span = b.wrapping_sub(a);
+            if span == u32::MAX {
+                self.raw()
+            } else {
+                a.wrapping_add(self.uniform(span + 1))
+            }
+        };
+        if let Some(log) = &mut self.log {
+            log.push((b.wrapping_sub(a).wrapping_add(1), v));
         }
-        let b = b.max(a);
-        let span = b.wrapping_sub(a);
-        if span == u32::MAX {
-            return self.raw();
+        v
+    }
+}
+
+/// The topology choice's index (`0x141025cf0`): a C `rand`-style LCG seeded with `seed`
+/// (`x = x·1103515245 + 12345`, 15 bits `(x >> 16) & 0x7fff` per step), enough bits for
+/// `n - 1`, values `>= n` rejected; `n < 2` gives 0 without stepping.
+pub fn lcg_index(seed: u32, n: u32) -> u32 {
+    if n < 2 {
+        return 0;
+    }
+    let bits = 32 - (n - 1).leading_zeros();
+    let mut x = seed;
+    loop {
+        let (mut v, mut got) = (0u32, 0u32);
+        while got < bits {
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            let take = (bits - got).min(15);
+            v |= (((x >> 16) & 0x7fff) & ((1 << take) - 1)) << got;
+            got += take;
         }
-        a.wrapping_add(self.uniform(span + 1))
+        if v < n {
+            return v;
+        }
     }
 }
 
@@ -140,5 +178,11 @@ mod tests {
         assert_eq!(rng.uniform(2), 0);
         assert_eq!(rng.uniform(1), 0);
         assert_eq!(rng.draws, 3);
+    }
+
+    /// Riverbank (`G1_1`, 5 topologies), seed 1000: sub-seed 2807145907 picks `intro_3`.
+    #[test]
+    fn topology_index() {
+        assert_eq!(lcg_index(2_807_145_907, 5), 2);
     }
 }
