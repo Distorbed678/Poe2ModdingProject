@@ -3,6 +3,7 @@
 
 mod coverage_tab;
 mod features_tab;
+mod game_tab;
 mod gamelog_tab;
 mod hooks_tab;
 mod inspect_tab;
@@ -51,6 +52,7 @@ pub struct App {
     hooks: hooks_tab::HooksView,
     protocol: protocol_tab::ProtocolView,
     scanner: scanner_tab::ScannerView,
+    stats: game_tab::StatsView,
 }
 
 impl App {
@@ -66,6 +68,7 @@ impl App {
             hooks: hooks_tab::HooksView::new(),
             protocol: protocol_tab::ProtocolView::new(),
             scanner: scanner_tab::ScannerView::new(),
+            stats: game_tab::StatsView::new(),
         }
     }
 
@@ -109,6 +112,12 @@ impl App {
                     }
                     if let Some(_t) = ui.tab_item("Player") {
                         inspect_tab::draw_player(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Stats") {
+                        self.stats.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Actions") {
+                        game_tab::draw_actions(ui);
                     }
                     if let Some(_t) = ui.tab_item("Entities") {
                         self.entities.draw(ui);

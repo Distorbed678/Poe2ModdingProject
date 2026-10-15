@@ -175,6 +175,7 @@
 14216e290	`scalar_deleting_destructor'
 14216fed0	`scalar_deleting_destructor'
 142170320	`scalar_deleting_destructor'
+142181f20	Stats component message handler
 1421842a0	S→C 0x1fe SetPause reader; applied via world vfunc +0x200 0x14168aaf0
 142184650	`scalar_deleting_destructor'
 1421851d0	`scalar_deleting_destructor'
@@ -193,6 +194,7 @@
 1421c50b0	HNC bit queue: key material XOR table 0x142f10960 + swaps, Salsa20 pair
 1421c5360	HNC incoming byte parser ("HNC Protocol Violated")
 1421c5950	message reader (registry, stream)
+1426ac920	stat container set (container, key, value)
 1426f2220	GEAL script interpreter loop
 142756110	`scalar_deleting_destructor'
 142756150	`scalar_deleting_destructor'

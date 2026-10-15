@@ -73,3 +73,53 @@ pub fn player_text() -> String {
         None => "player: not found yet\n".into(),
     }
 }
+
+/// The player's stats: (key, value) of each stat set; set 0 is the entity's own stats.
+/// Stats component (by name) +0x1c8 → set 0 container, other sets in the 16-byte entry list
+/// +0x1e8..+0x1f0 (container +0xd8 = set id). A container holds a sorted array of
+/// `(i32 key, i32 value)` at +0xf8..+0x100 (setter `0x1426ac920`, handler `0x142181f20`).
+pub fn player_stats() -> Vec<(u32, Vec<(u32, i32)>)> {
+    let entity = crate::dump_types::player();
+    if entity == 0 {
+        return Vec::new();
+    }
+    let names = crate::entities::component_names(entity);
+    let Some(index) = names.iter().find(|(_, n)| n == "Stats").map(|(i, _)| *i) else {
+        return Vec::new();
+    };
+    let Some(stats) = crate::entities::components(entity).get(index).copied() else {
+        return Vec::new();
+    };
+    let pairs = |container: usize| -> Vec<(u32, i32)> {
+        let (Some(b), Some(e)) = (
+            read::<usize>(container + 0xf8),
+            read::<usize>(container + 0x100),
+        ) else {
+            return Vec::new();
+        };
+        if e < b || e - b > 0x10_0000 {
+            return Vec::new();
+        }
+        (b..e)
+            .step_by(8)
+            .filter_map(|p| Some((read::<u32>(p)?, read::<i32>(p + 4)?)))
+            .collect()
+    };
+    let mut out = Vec::new();
+    if let Some(c) = read::<usize>(stats + 0x1c8).filter(|&c| c != 0) {
+        out.push((0, pairs(c)));
+    }
+    let (b, e) = (
+        read::<usize>(stats + 0x1e8).unwrap_or(0),
+        read::<usize>(stats + 0x1f0).unwrap_or(0),
+    );
+    if e >= b && e - b <= 64 * 16 {
+        for entry in (b..e).step_by(16) {
+            if let Some(c) = read::<usize>(entry).filter(|&c| c != 0) {
+                let set = read::<u32>(c + 0xd8).unwrap_or(0);
+                out.push((set, pairs(c)));
+            }
+        }
+    }
+    out
+}
