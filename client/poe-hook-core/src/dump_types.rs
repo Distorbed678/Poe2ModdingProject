@@ -303,7 +303,10 @@ unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at:
         )
     };
     log::info!("area load {at:#x} returned");
-    unsafe { export_layout(r.rcx as usize) };
+    // The layout files feed our server's spawn placement; not needed on official servers.
+    if !crate::host::read_only() {
+        unsafe { export_layout(r.rcx as usize) };
+    }
     ret
 }
 
@@ -438,6 +441,9 @@ static MAIN: OnceLock<Module> = OnceLock::new();
 
 /// Per-frame player position logging (config `movement_log`).
 pub static MOVEMENT_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `[features] entity_trace`: log each entity's components and the blob span each component
+/// reader consumes (research; slow, off by default).
+pub static ENTITY_TRACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Movement research: the player's world position at the start of each of its updates
 /// (one per simulation frame), logged when it changed.
@@ -752,6 +758,11 @@ unsafe extern "win64" fn on_read_initial_state(regs: *mut Registers, _: usize) {
                     );
                 }
             });
+        }
+        // Per-entity tracing (component spans, reader hooks, terrain dumps) is heavy: it froze
+        // the game for seconds per spawn on official servers. Opt-in only.
+        if !ENTITY_TRACE.load(Ordering::Relaxed) {
+            return;
         }
         // The read loop only visits the first `serialized` components (type +0x28 -> +0x78);
         // the rest are client-only and their +0x98 slot is not a reader.

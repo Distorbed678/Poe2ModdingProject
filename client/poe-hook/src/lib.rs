@@ -49,6 +49,7 @@ pub extern "system" fn DllMain(_module: HINSTANCE, reason: u32, _reserved: *mut 
             Err(e) => log::error!("network guard: failed: {e}"),
         }
         std::thread::spawn(move || {
+            logsink::flusher();
             if config.overlay.enabled {
                 match vulkan::init() {
                     Ok(()) => log::info!("vulkan hooks: enabled"),

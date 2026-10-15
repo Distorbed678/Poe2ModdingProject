@@ -58,6 +58,10 @@ pub struct FeatureConfig {
     /// Research hooks on entities and frames (object-type dump, entity components, terrain
     /// layout export, player frame tick). Position sync and the player inspector need them.
     pub dump_object_types: bool,
+    /// With `dump_object_types`: per-entity tracing (each entity's components, the blob span
+    /// every component reader consumes, terrain dumps on the Positioned reader). Slow: it
+    /// froze the game for ~2 s per spawned entity on official servers.
+    pub entity_trace: bool,
     /// Log the player's position every simulation frame (movement research; also enabled by
     /// the `POE_HOOK_MOVEMENT_LOG` environment variable).
     pub movement_log: bool,
@@ -84,6 +88,7 @@ impl Default for FeatureConfig {
             trace_addresses: Vec::new(),
             trace_limit: 20,
             dump_object_types: true,
+            entity_trace: false,
             movement_log: false,
             position_sync: true,
             position_sync_port: 0,
