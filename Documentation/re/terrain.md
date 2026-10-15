@@ -108,3 +108,29 @@ objects, not sent by the server.
   `0x141d04eb0`), hence one layout per session.
 - **Dev command** `area <id> <seed>` (`tools/re/send_dev.py auto area G1_1 12345`) sends a new
   AreaInfo on a live connection: it crashes the client for the reason above; kept for experiments.
+
+## Server port (`crates/poe-world`)
+Status (2026-10-15): foundations, each checked against the client.
+- `rng`: `std::mt19937` and MSVC `uniform_int`, equal to the traced draws (unit tests).
+- `hash`: tile and doodad hashes; `cargo run -p poe-world --example check_exports` recomputes
+  them for every DLL area export (42 match; the only 2 that differ are doodad files from before
+  the parallel world-map capture fix).
+- `graph` (`.tgr`), `tdt` (`.tdt` header: size in tiles, edge types per side, ground types per
+  corner; `--example tdt_info`). `.arm`, `.tst`, `.gft`, `.tsi`, `.et`, `.gt` come from
+  `poe_data_tools`.
+- A `.tdt` tile spans `size` tiles of 23×23 cells (most are 3×3, the encampment 15×18); each
+  covered tile record names the `.tdt` and its sub-tile index.
+
+### Area data chain
+WorldAreas `Topologies` → Topologies `DGRFile` (`.tgr`; an area with several topologies picks
+one) → the graph's `MasterFile` (`.tsi`: `TileSet` `.tst`, `FillTiles` `.gft`, `RoomSet` `.rs`,
+materials) → rooms (`.arm`) placed at graph nodes, edges (`.et`) routed between them, the rest
+filled. Clearfell Encampment (`G1_town`): one topology `town_W_1.tgr` (33×30 tiles, one node
+"town" at cell (12, 12)), the room `town_1.arm` covers the whole map; the tile hash changes with
+the seed (fill tiles and orientations are random), the doodad hash does not.
+
+### Town trace (seed 1, ~1,860 draws)
+24 draws in prepare (seed 0), the real seed, one draw over the whole u32 range (`0x141ff9609`),
+one `n=8` (orientation), ~40 small draws (`n` 1/2/8, `0x141f8ed4d`), 990 draws of `n=1024`, then
+pairs of a weighted fill-tile pick (`0x141f900a7`; `n` = the fill group's total weight, 300 for
+`default` = `Blank.tdt`, 3 for the three `Slash` fills) and an orientation (`0x141f90de4`, `n=8`).
