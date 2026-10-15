@@ -602,111 +602,242 @@ const MIRROR: [[u8; 2]; 8] = [
 /// Neighbour directions in the pass's order: up, right, down, left (in tile-size steps).
 const NEIGHBOURS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
-/// `0x141fde4b0` (last argument 0): whether `tile` with orientation `o` at `piece`'s corner
-/// would mirror its up or left neighbour (the same tile in the mirror orientation one tile-size
-/// away).
-fn mirrors_up_or_left(map: &TileMap, master: &Master, piece: &Piece, tile: usize, o: u8) -> bool {
-    let size = master.tiles.tiles[tile].tdt.size;
-    let (w, h) = TileMap::oriented_size(size, o);
-    [(0usize, (0, -1)), (3usize, (-1, 0))]
-        .iter()
-        .any(|&(dir, (dx, dy))| {
-            let Some(i) = map.index(piece.x + dx * w, piece.y + dy * h) else {
-                return false;
-            };
-            let Some(n) = map.piece_at[i] else {
-                return false;
-            };
-            let n = &map.pieces[n];
-            n.tile == Some(tile) && MIRROR[o as usize][!dir & 1] == n.orientation
-        })
+/// A room as the de-repetition pass sees it: where it lies, turned.
+pub struct RoomPlacement<'a> {
+    pub room: &'a Room,
+    /// The turned room's corner.
+    pub origin: (i32, i32),
+    pub orientation: u8,
 }
 
-/// De-repetition (`0x141fdd7c0` → `0x141fdfa60`): row by row over placed tile-set pieces
-/// bigger than 1×1, if a neighbour one tile-size away is the same tile in the mirror
-/// orientation across the shared side, the piece is re-picked from its key's candidates
-/// minus those that would mirror that neighbour (`below(total)`).
-pub fn derepeat_pass(
-    map: &mut TileMap,
-    master: &Master,
-    rooms: &[(&Room, (i32, i32))],
-    rng: &mut TerrainRng,
-) {
-    // Lattice points (tile corners, (w+1)×(h+1)) with a room ground override.
-    let lw = map.width as i32 + 1;
-    let mut marked = vec![false; (lw * (map.height as i32 + 1)) as usize];
-    for (room, (ox, oy)) in rooms {
-        for y in 1..room.height() {
-            for x in 1..room.width() {
-                let (px, py) = (ox + x as i32, oy + y as i32);
-                if room.overridden(x, y) && px < lw && py <= map.height as i32 {
-                    marked[(py * lw + px) as usize] = true;
+/// The tile on a cell's origin: tile-set tile (by path), orientation, oriented size.
+fn origin_tile(map: &TileMap, x: i32, y: i32) -> Option<(usize, (i32, i32))> {
+    let i = map.index(x, y)?;
+    let c = map.cells[i].as_ref()?;
+    if c.offset != (0, 0) {
+        return None;
+    }
+    let p = map.piece_at[i]?;
+    let piece = &map.pieces[p];
+    Some((p, TileMap::oriented_size(piece.size, piece.orientation)))
+}
+
+/// `0x141fde4b0`: tile-set tile `tile` with orientation `o` at `pos` would mirror a neighbour
+/// one tile-size away (up and left only, or all four sides): the same tile in the mirror
+/// orientation across the shared side.
+fn mirrors(map: &TileMap, master: &Master, pos: (i32, i32), tile: usize, o: u8, all: bool) -> bool {
+    let path = &master.tiles.tiles[tile].path;
+    let (w, h) = TileMap::oriented_size(master.tiles.tiles[tile].tdt.size, o);
+    let dirs: &[usize] = if all { &[0, 1, 2, 3] } else { &[0, 3] };
+    dirs.iter().any(|&dir| {
+        let (dx, dy) = NEIGHBOURS[dir];
+        let Some((p, _)) = origin_tile(map, pos.0 + dx * w, pos.1 + dy * h) else { return false };
+        let n = &map.pieces[p];
+        n.path.eq_ignore_ascii_case(path) && MIRROR[o as usize][!dir & 1] == n.orientation
+    })
+}
+
+struct Derepeat<'a> {
+    master: &'a Master,
+    /// Cells inside a placed room's rectangle.
+    in_room: Vec<bool>,
+    /// Corners with a room ground override.
+    overridden: Vec<bool>,
+}
+
+impl Derepeat<'_> {
+    /// `0x141fde210`: any cell of the block lies in a room.
+    fn in_room(&self, map: &TileMap, pos: (i32, i32), (w, h): (i32, i32)) -> bool {
+        (pos.1..pos.1 + h).any(|y| (pos.0..pos.0 + w).any(|x| map.index(x, y).is_some_and(|i| self.in_room[i])))
+    }
+
+    /// `0x141fde360`: any corner of the block (far sides included) has a ground override.
+    fn touches_override(&self, map: &TileMap, pos: (i32, i32), (w, h): (i32, i32)) -> bool {
+        (pos.1..=pos.1 + h).any(|y| (pos.0..=pos.0 + w).any(|x| map.point_index(x, y).is_some_and(|i| self.overridden[i])))
+    }
+
+    fn key_of(&self, map: &TileMap, p: usize) -> Option<TileKey> {
+        let piece = &map.pieces[p];
+        let tdt = &self.master.tiles.tiles[piece.tile?].tdt;
+        Some(TileKey::from_tdt(tdt).oriented(piece.orientation))
+    }
+
+    /// `0x141fde880` (its corner ground fix-ups are not ported).
+    fn replace(&self, map: &mut TileMap, pos: (i32, i32), tile: usize, o: u8) {
+        let def = &self.master.tiles.tiles[tile];
+        map.place(pos.0, pos.1, &def.path, &def.tdt, o, 0, Some(tile));
+    }
+
+    /// `0x141fdfa60`: re-pick the tile at `pos` (it mirrors the neighbour at `npos` across
+    /// side `dir`) from its key's candidates minus mirroring ones; with none, try moving an edge
+    /// crossing (`0x141fdef90`).
+    fn repick(&self, map: &mut TileMap, pos: (i32, i32), npos: (i32, i32), dir: usize, rng: &mut TerrainRng) {
+        let (p, size) = origin_tile(map, pos.0, pos.1).unwrap();
+        let Some(key) = self.key_of(map, p) else { return };
+        let (np, _) = origin_tile(map, npos.0, npos.1).unwrap();
+        let (npath, no) = (map.pieces[np].path.clone(), map.pieces[np].orientation);
+        let list: Vec<_> = self
+            .master
+            .tiles
+            .candidates("", &key)
+            .iter()
+            .filter(|c| {
+                !mirrors(map, self.master, pos, c.tile, c.orientation, false)
+                    && !(self.master.tiles.tiles[c.tile].path.eq_ignore_ascii_case(&npath)
+                        && MIRROR[c.orientation as usize][!dir & 1] == no)
+                    && c.weight != 0
+            })
+            .copied()
+            .collect();
+        if !list.is_empty() {
+            let total = list.iter().map(|c| c.weight).sum();
+            let c = pick(&list, rng.below(total)).unwrap();
+            self.replace(map, pos, c.tile, c.orientation);
+        } else if !self.in_room(map, pos, size) {
+            self.shift_edge(map, pos, size, &key, dir, rng);
+        }
+    }
+
+    /// `0x141fdef90`: on another side with a (non-virtual) edge and a same-size neighbour that
+    /// is free to change, every other exit position whose tiles do not mirror up or left is a
+    /// candidate; one is picked and kept if the neighbour has a tile with the matching exit.
+    fn shift_edge(&self, map: &mut TileMap, pos: (i32, i32), size: (i32, i32), key: &TileKey, dir: usize, rng: &mut TerrainRng) {
+        let mut list: Vec<(crate::tileset::Candidate, usize)> = Vec::new();
+        for d in 0..4 {
+            if d == dir {
+                continue;
+            }
+            let Some(edge) = &key.edges[d] else { continue };
+            if map.edge_flags.get(edge).copied().unwrap_or(0) & 4 != 0 {
+                continue;
+            }
+            let n = (pos.0 + NEIGHBOURS[d].0 * size.0, pos.1 + NEIGHBOURS[d].1 * size.1);
+            let Some((np, nsize)) = origin_tile(map, n.0, n.1) else { continue };
+            if nsize != size {
+                continue;
+            }
+            let Some(nt) = map.pieces[np].tile else { continue };
+            if self.master.tiles.tiles[nt].tdt.feature.as_deref().is_some_and(|f| !f.is_empty()) {
+                continue;
+            }
+            if self.touches_override(map, n, nsize) || self.in_room(map, n, nsize) {
+                continue;
+            }
+            let count = if d & 1 == 0 { key.size.0 } else { key.size.1 } as u32 * 3;
+            for e in 0..count as u8 {
+                if e == key.exits[d] {
+                    continue;
+                }
+                let mut k2 = key.clone();
+                k2.exits[d] = e;
+                for c in self.master.tiles.candidates("", &k2) {
+                    if !mirrors(map, self.master, pos, c.tile, c.orientation, false) && c.weight != 0 {
+                        list.push((*c, d));
+                    }
+                }
+            }
+        }
+        let mut total: u32 = list.iter().map(|(c, _)| c.weight).sum();
+        while !list.is_empty() {
+            let mut r = rng.below(total);
+            let mut k = list.len() - 1;
+            for (i, (c, _)) in list.iter().enumerate() {
+                if r < c.weight {
+                    k = i;
+                    break;
+                }
+                r -= c.weight;
+            }
+            let (c, d) = list[k];
+            let new_key = TileKey::from_tdt(&self.master.tiles.tiles[c.tile].tdt).oriented(c.orientation);
+            let span = if d & 1 == 0 { new_key.size.0 } else { new_key.size.1 };
+            let n = (pos.0 + NEIGHBOURS[d].0 * size.0, pos.1 + NEIGHBOURS[d].1 * size.1);
+            let (np, _) = origin_tile(map, n.0, n.1).unwrap();
+            if let Some(mut nk) = self.key_of(map, np) {
+                nk.exits[(d + 2) & 3] = span.wrapping_mul(3).wrapping_sub(new_key.exits[d]).wrapping_sub(1);
+                let cpath = &self.master.tiles.tiles[c.tile].path;
+                let list2: Vec<_> = self
+                    .master
+                    .tiles
+                    .candidates("", &nk)
+                    .iter()
+                    .filter(|c2| {
+                        !mirrors(map, self.master, n, c2.tile, c2.orientation, true)
+                            && !(self.master.tiles.tiles[c2.tile].path == *cpath
+                                && MIRROR[c.orientation as usize][!d & 1] == c2.orientation)
+                            && c2.weight != 0
+                    })
+                    .copied()
+                    .collect();
+                if !list2.is_empty() {
+                    self.replace(map, pos, c.tile, c.orientation);
+                    let t2 = list2.iter().map(|c| c.weight).sum();
+                    let c2 = pick(&list2, rng.below(t2)).unwrap();
+                    self.replace(map, n, c2.tile, c2.orientation);
+                    return;
+                }
+            }
+            let i = list.iter().position(|(e, ed)| e.tile == c.tile && e.orientation == c.orientation && *ed == d).unwrap();
+            total -= list[i].0.weight;
+            list.remove(i);
+        }
+    }
+}
+
+/// De-repetition (`0x141fdd7c0`): cells row by row; a tile-set tile bigger than 1×1 without a
+/// feature, not of uniform ground, not touching a room ground override, that mirrors a
+/// neighbour one tile-size away (same tile, mirror orientation across the shared side; sides
+/// up, right, down, left) is re-picked (`0x141fdfa60`).
+pub fn derepeat_pass(map: &mut TileMap, master: &Master, rooms: &[RoomPlacement], rng: &mut TerrainRng) {
+    let mut in_room = vec![false; map.cells.len()];
+    let mut overridden = vec![false; map.lattice.len()];
+    for r in rooms {
+        let (w, h) = (r.room.width() as i32, r.room.height() as i32);
+        let (ow, oh) = TileMap::oriented_size((w as u8, h as u8), r.orientation);
+        for y in r.origin.1..r.origin.1 + oh {
+            for x in r.origin.0..r.origin.0 + ow {
+                if let Some(i) = map.index(x, y) {
+                    in_room[i] = true;
+                }
+            }
+        }
+        for v in 1..h {
+            for u in 1..w {
+                if r.room.lattice.get(((v - 1) * (w - 1) + (u - 1)) as usize).is_some_and(|&k| k != 0) {
+                    let (dx, dy) = crate::tileset::orient_point(r.orientation, w, h, u, v);
+                    if let Some(i) = map.point_index(r.origin.0 + dx, r.origin.1 + dy) {
+                        overridden[i] = true;
+                    }
                 }
             }
         }
     }
-    let mut origins: Vec<usize> = (0..map.pieces.len())
-        .filter(|&p| map.pieces[p].tile.is_some() && map.pieces[p].size != (1, 1))
-        .collect();
-    origins.sort_by_key(|&p| (map.pieces[p].y, map.pieces[p].x));
-    for p in origins {
-        let piece = map.pieces[p].clone();
-        let tile = piece.tile.unwrap();
-        let def = &master.tiles.tiles[tile];
-        if def.tdt.feature.as_deref().is_some_and(|f| !f.is_empty()) {
-            continue;
-        }
-        let key = TileKey::from_tdt(&def.tdt).oriented(piece.orientation);
-        if uniform_ground(&key, "") {
-            continue;
-        }
-        let (w, h) = TileMap::oriented_size(piece.size, piece.orientation);
-        let touches_override = (piece.y..=piece.y + h).any(|py| {
-            (piece.x..=piece.x + w).any(|px| {
-                px >= 0 && py >= 0 && px < lw && marked.get((py * lw + px) as usize) == Some(&true)
-            })
-        });
-        if touches_override {
-            continue;
-        }
-        for (dir, (dx, dy)) in NEIGHBOURS.iter().enumerate() {
-            let Some(ni) = map.index(piece.x + dx * w, piece.y + dy * h) else {
-                continue;
-            };
-            let Some(n) = map.piece_at[ni] else { continue };
-            let neighbour = &map.pieces[n];
-            if neighbour.tile != Some(tile)
-                || neighbour.orientation != MIRROR[piece.orientation as usize][!dir & 1]
-            {
+    let d = Derepeat { master, in_room, overridden };
+    for y in 0..map.height as i32 {
+        for x in 0..map.width as i32 {
+            let Some((p, size)) = origin_tile(map, x, y) else { continue };
+            if size == (1, 1) {
                 continue;
             }
-            let axis = (!dir & 1) as usize;
-            let neighbour_o = neighbour.orientation;
-            let list: Vec<_> = master
-                .tiles
-                .candidates("", &key)
-                .iter()
-                .filter(|c| {
-                    !mirrors_up_or_left(map, master, &piece, c.tile, c.orientation)
-                        && !(c.tile == tile && MIRROR[c.orientation as usize][axis] == neighbour_o)
-                })
-                .copied()
-                .collect();
-            if !list.is_empty() {
-                let total = list.iter().map(|c| c.weight).sum();
-                let c = pick(&list, rng.below(total)).unwrap();
-                let def = &master.tiles.tiles[c.tile];
-                map.place(
-                    piece.x,
-                    piece.y,
-                    &def.path,
-                    &def.tdt,
-                    c.orientation,
-                    0,
-                    Some(c.tile),
-                );
+            let Some(tile) = map.pieces[p].tile else { continue };
+            let def = &master.tiles.tiles[tile];
+            if def.tdt.feature.as_deref().is_some_and(|f| !f.is_empty()) {
+                continue;
             }
-            break;
+            let key = TileKey::from_tdt(&def.tdt).oriented(map.pieces[p].orientation);
+            if uniform_ground(&key, "") || d.touches_override(map, (x, y), size) {
+                continue;
+            }
+            let (path, o) = (map.pieces[p].path.clone(), map.pieces[p].orientation);
+            for (dir, (dx, dy)) in NEIGHBOURS.iter().enumerate() {
+                let n = (x + dx * size.0, y + dy * size.1);
+                let Some((np, _)) = origin_tile(map, n.0, n.1) else { continue };
+                let nb = &map.pieces[np];
+                if nb.path.eq_ignore_ascii_case(&path) && nb.orientation == MIRROR[o as usize][!dir & 1] {
+                    d.repick(map, (x, y), n, dir, rng);
+                    break;
+                }
+            }
         }
     }
 }

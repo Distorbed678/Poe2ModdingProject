@@ -432,6 +432,19 @@ over `(w + 1) × (h + 1)` tile corners, +0x68 the ground table, indices in order
 **Verified:** the Riverbank fill equals the client's (561 pieces, 13 fill rooms); 6393 draws in
 step.
 
+**De-repetition** (`0x141fdd7c0`, all rooms including fill rooms): cells row by row, live
+(replacements are seen by later cells). A re-pick (`0x141fdfa60`) that finds no candidate and
+whose tile is outside every room rectangle (`0x141fde210`) tries moving an edge crossing
+(`0x141fdef90`): for each other side with a non-virtual edge and a same-size, featureless
+neighbour away from rooms and overrides, every other exit position gives candidates (not
+mirroring up or left); `below(total)` picks one, and if the neighbour's key with the matching
+exit (`3·size − exit − 1` on the opposite side) has candidates not mirroring any side, both are
+replaced (`below` again for the neighbour); otherwise the pick is dropped and it repeats.
+Ground overrides are checked at the room's turned corners. The corner ground fix-ups of the
+replacement (`0x141fde880`) are not ported.
+
+**Verified:** Riverbank de-repetition equals the client's; 6412 draws in step.
+
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet
 ported: graph edges (routing over the cost grid), several rooms, rotated rooms, fill rooms,
