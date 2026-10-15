@@ -114,3 +114,17 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x1402c76b0` | escape menu buttons: +0x2f0 exit to log in screen (logout 0), +0x2f8 exit game (`0x140eac930`, logout 2 + WM_CLOSE), +0x300 exit to character selection (logout 1) |
 | `0x14211fad0` | sends `0x355` ExitReport (once per session) |
 | `0x141f479b0` | `0x355` serializer: `u8, u16 len, bytes` |
+
+## Facing (2026-10-15)
+| Address | What |
+|---|---|
+| `0x141ddc6a0` | Positioned::SetOrientation(angle): writes +0x44c (radians, `atan2(dy, dx) + π/2`) unless locked (+0x1e5 bit 1) |
+| `0x141dda640` | Positioned simulation handler: `0x1dd`/`0x1de` position, **`0x1df` SetOrientation (f32, u8 locked)**, `0x1e0` knockback-like move, `0x1e7` +0x440/+0x48c, `0x2ef` flags |
+| `0x141f6af00` | `0x1df` reader |
+| `0x141de3020` | movement step: turns the entity toward its path (orientation mode +0x1e3 or the request's; 2 = backwards) |
+| `0x141dd8820` | Positioned initial data (facing +0x44c, flags0 bit 7 → lock) |
+| `0x141e534b0` | Actor RecalculateStance ("Aiming", "AimingUpwards", "Ranged", "Mounted", "Unarmed") |
+| `0x14214a2ea` | Actor `0x1cc` (u16 action id, u8) → Actor vfunc +0x130 (end action?) |
+| `0x14214a400` | Actor `0x1fc` (f32, u16) → Actor vfunc +0x100 |
+| `0x14210fbb0` | skill target update sender: `0x1a8` (lockstep, relative), `0x1a9` (absolute), `0x1aa` (entity) |
+| `0x14210ee60` | chat sender (`0x16`, wstring; "@whisper") |

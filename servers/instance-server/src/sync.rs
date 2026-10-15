@@ -33,14 +33,27 @@ pub struct ClientReport {
     pub action2: u16,
     /// Actor +0x2a2 (bit 5: sprint key held as set by `0x2e7`).
     pub flags: u16,
+    /// The cursor in the game window's client area and the area's size (PSY2 reports).
+    pub cursor: Option<Cursor>,
     pub at: Instant,
+}
+
+/// The cursor in the game window: client-area position and size in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cursor {
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
 }
 
 impl ClientReport {
     /// Parses a datagram: `b"PSY1", u16 tcp port, u16 flags, u32 frame, f32 x, f32 y,
-    /// u16 action, u16 action2` (little-endian). Returns the TCP port and the report.
+    /// u16 action, u16 action2` (little-endian); `b"PSY2"` adds `i16 cursor x, i16 cursor y,
+    /// u16 window width, u16 window height`. Returns the TCP port and the report.
     pub fn parse(data: &[u8]) -> Option<(u16, Self)> {
-        if data.len() < 24 || &data[..4] != b"PSY1" {
+        let v2 = data.len() >= 32 && &data[..4] == b"PSY2";
+        if !v2 && (data.len() < 24 || &data[..4] != b"PSY1") {
             return None;
         }
         let u16_at = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
@@ -54,6 +67,14 @@ impl ClientReport {
                 y: f32::from_bits(u32_at(16)),
                 action: u16_at(20),
                 action2: u16_at(22),
+                cursor: v2
+                    .then(|| Cursor {
+                        x: u16_at(24) as i16,
+                        y: u16_at(26) as i16,
+                        width: u16_at(28),
+                        height: u16_at(30),
+                    })
+                    .filter(|c| c.width > 0 && c.height > 0),
                 at: Instant::now(),
             },
         ))
@@ -190,6 +211,20 @@ mod tests {
             (port, r.frame, r.cell(), r.action, r.flags),
             (6112, 7, (12, 300), 0xed4c, 0x20)
         );
+        assert_eq!(r.cursor, None);
         assert!(ClientReport::parse(&d[..20]).is_none());
+        // PSY2: with the cursor.
+        d[3] = b'2';
+        for v in [1500u16, 300, 2560, 1440] {
+            d.extend(v.to_le_bytes());
+        }
+        let (_, r) = ClientReport::parse(&d).unwrap();
+        let cursor = Cursor {
+            x: 1500,
+            y: 300,
+            width: 2560,
+            height: 1440,
+        };
+        assert_eq!(r.cursor, Some(cursor));
     }
 }

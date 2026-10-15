@@ -558,7 +558,7 @@ fn click(x: u16, y: u16) {
 }
 
 /// First visible top-level window of this process.
-fn game_window() -> Option<HWND> {
+pub(crate) fn game_window() -> Option<HWND> {
     unsafe extern "system" fn visit(hwnd: HWND, out: LPARAM) -> i32 {
         let mut pid = 0;
         unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };

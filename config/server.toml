@@ -36,6 +36,9 @@ turn_cell = "natural"
 # Hold a turn back by up to one frame when that lands it nearer a cell centre (smaller
 # snaps at turns, some turns 33 ms later).
 turn_timing = true
+# Turn the player toward the cursor, except while walking by click-to-move or rolling (the
+# client reports the cursor with its position; mapped to grid cells by cursor_to_grid).
+face_cursor = true
 
 [database]
 path = "data/server.sqlite"

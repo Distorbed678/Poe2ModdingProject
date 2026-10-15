@@ -9,9 +9,13 @@
 //! Transport: one UDP datagram per frame to the game's loopback connection to the instance
 //! server (`position_sync_port`; the server listens for UDP on the same port), so it only ever
 //! goes to a local server. Without a configured port, the last loopback connection is used,
-//! which breaks when the game later connects to another local service. Payload (little-endian, 24 bytes):
-//! `b"PSY1", u16 our TCP port of that connection, u16 flags, u32 frame counter, f32 grid x,
-//! f32 grid y, u16 current action type, u16 second action type`.
+//! which breaks when the game later connects to another local service.
+//!
+//! Payload (little-endian, 32 bytes): `b"PSY2", u16 our TCP port of that connection,
+//! u16 flags, u32 frame counter, f32 grid x, f32 grid y, u16 current action type,
+//! u16 second action type`, then the cursor: `i16 x, i16 y` in the game window's client area
+//! and `u16 width, u16 height` of it (zero when unknown); the server turns the player toward
+//! the cursor from it.
 
 use std::sync::{
     Mutex,
@@ -93,8 +97,8 @@ pub fn report(entity: usize, frame: u32) {
     };
     // Actor +0x2a2 bit 5: sprint key held (set by the server's 0x2e7).
     let flags = read::<u8>(actor + 0x2a2).unwrap_or(0) as u16;
-    let mut msg = Vec::with_capacity(24);
-    msg.extend_from_slice(b"PSY1");
+    let mut msg = Vec::with_capacity(32);
+    msg.extend_from_slice(b"PSY2");
     msg.extend_from_slice(&local_port.to_le_bytes());
     msg.extend_from_slice(&flags.to_le_bytes());
     msg.extend_from_slice(&frame.to_le_bytes());
@@ -102,6 +106,11 @@ pub fn report(entity: usize, frame: u32) {
     msg.extend_from_slice(&y.to_le_bytes());
     msg.extend_from_slice(&action(0x238).to_le_bytes());
     msg.extend_from_slice(&action(0x240).to_le_bytes());
+    let (cx, cy, w, h) = cursor().unwrap_or_default();
+    msg.extend_from_slice(&cx.to_le_bytes());
+    msg.extend_from_slice(&cy.to_le_bytes());
+    msg.extend_from_slice(&w.to_le_bytes());
+    msg.extend_from_slice(&h.to_le_bytes());
     let mut s = SOCK.load(Ordering::Relaxed);
     if s == INVALID_SOCKET {
         s = unsafe { socket(AF_INET as i32, SOCK_DGRAM, IPPROTO_UDP) };
@@ -120,4 +129,35 @@ pub fn report(entity: usize, frame: u32) {
             size_of::<SOCKADDR_IN>() as i32,
         )
     };
+}
+
+/// The cursor in the game window's client area and the area's size: (x, y, width, height).
+fn cursor() -> Option<(i16, i16, u16, u16)> {
+    use windows_sys::Win32::{
+        Foundation::{HWND, POINT, RECT},
+        Graphics::Gdi::ScreenToClient,
+        UI::WindowsAndMessaging::{GetClientRect, GetCursorPos},
+    };
+    static WINDOW: AtomicUsize = AtomicUsize::new(0);
+    let mut hwnd = WINDOW.load(Ordering::Relaxed);
+    if hwnd == 0 {
+        hwnd = super::auto_keys::game_window()? as usize;
+        WINDOW.store(hwnd, Ordering::Relaxed);
+    }
+    let hwnd = hwnd as HWND;
+    let mut p = POINT { x: 0, y: 0 };
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetCursorPos(&mut p) != 0
+            && ScreenToClient(hwnd, &mut p) != 0
+            && GetClientRect(hwnd, &mut r) != 0
+    };
+    ok.then(|| {
+        (
+            p.x.clamp(-32768, 32767) as i16,
+            p.y.clamp(-32768, 32767) as i16,
+            (r.right - r.left).clamp(0, 65535) as u16,
+            (r.bottom - r.top).clamp(0, 65535) as u16,
+        )
+    })
 }
