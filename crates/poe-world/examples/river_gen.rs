@@ -292,23 +292,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect()
         })
         .collect();
-    for (k, client) in grids.iter().enumerate() {
-        let ours = router.snapshot();
-        let diff: Vec<usize> = (0..ours.len()).filter(|&i| ours[i] != client[i]).collect();
-        if !diff.is_empty() {
-            println!("grid before edge {k}: {} tiles differ", diff.len());
-            for &i in diff.iter().take(30) {
-                println!("  ({},{}): ours {:?} client {:?}", i as i32 % tiles.0, i as i32 / tiles.0, ours[i], client[i]);
+    for k in 0..route.len() {
+        if let Some(client) = grids.get(k) {
+            let ours = router.snapshot();
+            let diff: Vec<usize> = (0..ours.len()).filter(|&i| ours[i] != client[i]).collect();
+            if !diff.is_empty() {
+                println!("grid before edge {k}: {} tiles differ", diff.len());
             }
-            break;
         }
-        if k < route.len() {
-            let ok = router.route(&mut route[k], &mut rng);
-            println!("edge {k} routed {ok}: {:?}", route[k].points);
+        let ok = router.route(&mut route[k], &mut rng);
+        if !ok {
+            println!("edge {k} failed to route (retries not handled here)");
         }
     }
-    let _ = &mut route;
-    if grids.is_empty() {
+    if false {
     match poe_world::routing::route_reserved(&mut router, &mut route, &mut rng) {
         Ok(()) => {
             println!("routed {} edges", route.len());
@@ -319,6 +316,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("routing: {e}"),
     }
     }
+
+    // The layout graph in the client's numbering (`0x141ef2800` splits room nodes per exit).
+    let mut lg = poe_world::smoothing::LayoutGraph::default();
+    for (i, _) in graph.nodes.iter().enumerate() {
+        let mut slots = [None; 4];
+        for (k, &ei) in graph.nodes[i].edges.iter().take(4).enumerate() {
+            let ei = ei as usize;
+            if route_index.get(ei).copied().unwrap_or(usize::MAX) != usize::MAX {
+                slots[k] = Some(route_index[ei]);
+            }
+        }
+        lg.nodes.push(poe_world::smoothing::LNode { pos: placed_graph.nodes[i], slots });
+    }
+    for (gi, e) in graph.edges.iter().enumerate() {
+        let ri = route_index[gi];
+        if ri == usize::MAX {
+            continue;
+        }
+        let et = types.edge(files, &e.edge_type)?.clone();
+        lg.edges.push(poe_world::smoothing::LEdge {
+            from: e.from as usize,
+            to: e.to as usize,
+            points: route[ri].points.clone(),
+            offsets: route[ri].offsets,
+            edge_type: e.edge_type.to_ascii_lowercase(),
+            virtual_edge: et.virtual_edge,
+            width: (e.tail.first().copied().unwrap_or(0), e.tail.get(1).copied().unwrap_or(0)),
+        });
+    }
+    for p in &placed {
+        let node = p.node;
+        let mut first = true;
+        let slots = lg.nodes[node].slots;
+        for (k, s) in slots.iter().enumerate() {
+            let Some(e) = *s else { continue };
+            let which = (lg.edges[e].from != node) as usize;
+            let pos = route[e].ends[which];
+            if first {
+                lg.nodes[node].pos = pos;
+                first = false;
+            } else {
+                let nn = lg.nodes.len();
+                lg.nodes.push(poe_world::smoothing::LNode { pos, slots: [Some(e), None, None, None] });
+                if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
+                lg.nodes[node].slots[k] = None;
+            }
+        }
+    }
+    poe_world::smoothing::smooth(&mut lg);
+    // Compare with the client's graph after smoothing.
+    let dump: Vec<Vec<String>> = std::fs::read_to_string(Path::new(&export_dir).join("generator_trace.tsv"))?
+        .lines()
+        .filter(|l| l.split('\t').nth(1) == Some("graph_after_smooth1"))
+        .map(|l| l.split('\t').map(String::from).collect())
+        .collect();
+    let (mut same, mut diff) = (0, 0);
+    for l in &dump {
+        let args = &l[3];
+        let pts = l.get(4).cloned().unwrap_or_default();
+        if l[2] == "node" {
+            let mut it = args.split_whitespace();
+            let idx: usize = it.next().unwrap().parse()?;
+            let pos = it.next().unwrap();
+            let ours = lg.nodes.get(idx).map(|n| format!("{},{}", n.pos.0, n.pos.1)).unwrap_or_default();
+            if ours == pos { same += 1 } else { diff += 1; println!("node {idx}: ours {ours} client {pos}"); }
+        } else {
+            let idx: usize = args.split_whitespace().next().unwrap().parse()?;
+            let ours = lg.edges.get(idx).map(|e| e.points.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+            if ours == pts { same += 1 } else { diff += 1; println!("edge {idx}: ours [{ours}]\n  client [{pts}]"); }
+        }
+    }
+    println!("graph after smoothing: {same} same, {diff} different");
 
     let log = rng.log.take().unwrap_or_default();
     for (i, (ours, theirs)) in log.iter().zip(&trace).enumerate() {

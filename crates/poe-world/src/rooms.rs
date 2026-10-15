@@ -236,7 +236,7 @@ const ANGLE: [u16; 255] = [
 ];
 
 /// `0x1421c4e50`: the angle between two vectors.
-fn angle(a: (i32, i32), b: (i32, i32)) -> u16 {
+pub fn angle_between(a: (i32, i32), b: (i32, i32)) -> u16 {
     if a == (0, 0) || b == (0, 0) {
         return 0;
     }
@@ -299,7 +299,7 @@ pub fn node_key(
                         if per_side[n].len() == want {
                             let (px, py) = g.towards(node, slots[slot].unwrap());
                             let d = SIDE_DIR[n];
-                            let cost = angle((d.0 * 10, d.1 * 10), (px - nx, py - ny));
+                            let cost = angle_between((d.0 * 10, d.1 * 10), (px - nx, py - ny));
                             moves.push((cost, s, n, slot));
                         }
                     }

@@ -64,6 +64,17 @@ const NODE_CANDIDATES: usize = 0x1420c76d0;
 /// Edge routing (`0x1420cd460`: router, edge) → bool: the edge's ends (+0x20/+0x28 nodes,
 /// position +0x4c), end offsets (+0x70/+0x78) and internal points (+8..+0x10) afterwards.
 const ROUTE_EDGE: usize = 0x1420cd460;
+/// Virtual-edge splitting (`0x1420bc400`: layout (+0x20 graph), ...): the graph afterwards.
+const SPLIT_VIRTUAL: usize = 0x1420bc400;
+/// Edge smoothing after routing (`0x1420bd650`: layout, flag): the graph afterwards.
+const SMOOTH_EDGES: usize = 0x1420bd650;
+/// Arc at a virtual edge's start / end (`0x1420d1b70` / `0x1420d2470`: ctx, edge) and corner
+/// rounding (`0x1420b2f60`: ctx, edge, from end).
+const ARC_START: usize = 0x1420d1b70;
+const ARC_END: usize = 0x1420d2470;
+const ROUND_CORNERS: usize = 0x1420b2f60;
+/// Edge tile placement stage (`0x1420b6950`: layout ...): the graph on entry.
+const EDGE_TILES: usize = 0x1420b6950;
 /// Generator vfunc +0x38: adds a created object (doodad or tile entity) to the world:
 /// `(generator, entity, region)`.
 const ADD_OBJECT: usize = 0x141ff7770;
@@ -162,6 +173,12 @@ pub fn init(main: &Module, export: bool, trace: bool) -> Result<(), String> {
         hook(NODE_PLACE, HookType::Retn(on_node_place), 0)?;
         hook(NODE_CANDIDATES, HookType::Retn(on_node_candidates), 0)?;
         hook(ROUTE_EDGE, HookType::Retn(on_route_edge), 0)?;
+        hook(SPLIT_VIRTUAL, HookType::Retn(on_split_virtual), 0)?;
+        hook(SMOOTH_EDGES, HookType::Retn(on_smooth_edges), 0)?;
+        hook(ARC_START, HookType::Retn(on_edge_step), 0)?;
+        hook(ARC_END, HookType::Retn(on_edge_step), 1)?;
+        hook(ROUND_CORNERS, HookType::Retn(on_edge_step), 2)?;
+        hook(EDGE_TILES, HookType::JmpBack(on_edge_tiles), 0)?;
         hook(RNG_RANGE, HookType::JmpBack(on_rng_call), 1)?;
         for (i, (addr, _)) in PHASES.iter().enumerate() {
             hook(*addr, HookType::JmpBack(on_phase), i)?;
@@ -528,6 +545,128 @@ fn edge_points(e: usize) -> String {
 }
 
 type RouteFn = unsafe extern "win64" fn(usize, usize) -> usize;
+
+/// Dumps a layout graph (nodes, then edges) as trace lines of `kind`.
+fn dump_graph(kind: &str, graph: usize) {
+    let vec = |at: usize| -> Vec<usize> {
+        let (b, e) = (read::<usize>(at).unwrap_or(0), read::<usize>(at + 8).unwrap_or(0));
+        let mut out = Vec::new();
+        let mut q = b;
+        while q < e && out.len() < 4096 {
+            out.push(read::<usize>(q).unwrap_or(0));
+            q += 8;
+        }
+        out
+    };
+    let nodes = vec(graph + 0x28);
+    let edges = vec(graph + 0x10);
+    let node_id = |n: usize| nodes.iter().position(|&x| x == n).map_or(-1, |i| i as i64);
+    let edge_id = |e: usize| edges.iter().position(|&x| x == e).map_or(-1, |i| i as i64);
+    for (i, &n) in nodes.iter().enumerate() {
+        let pos: [i32; 2] = read(n + 0x4c).unwrap_or_default();
+        let slots: Vec<i64> = (0..4)
+            .map(|k| read::<usize>(n + 0x58 + k * 8).unwrap_or(0))
+            .map(|e| if e == 0 { -1 } else { edge_id(e) })
+            .collect();
+        let flags: [u8; 4] = read(n + 0x88).unwrap_or_default();
+        trace_line(
+            kind,
+            "node",
+            &format!("{i} {},{} slots {:?} h {} flags {:?}", pos[0], pos[1], slots, read::<i32>(n + 0x48).unwrap_or(0), flags),
+            "",
+        );
+    }
+    for (i, &e) in edges.iter().enumerate() {
+        let from = node_id(read::<usize>(e + 0x20).unwrap_or(0));
+        let to = node_id(read::<usize>(e + 0x28).unwrap_or(0));
+        let et = read::<usize>(e + 0x38).map(resource_path).unwrap_or_default();
+        let vends: [i32; 8] = read(e + 0x4c).unwrap_or_default();
+        let vflags: [u8; 3] = read(e + 0x48).unwrap_or_default();
+        let off: [i32; 4] = read(e + 0x70).unwrap_or_default();
+        let width: [i32; 2] = read(e + 0x80).unwrap_or_default();
+        let split = read::<u8>(e + 0x6d).unwrap_or(0);
+        trace_line(
+            kind,
+            "edge",
+            &format!(
+                "{i} {from}->{to} {} vflags {:?} vends {:?} off {:?} width {:?} split {split}",
+                et.rsplit('/').next().unwrap_or(""),
+                vflags,
+                vends,
+                off,
+                width
+            ),
+            &edge_points(e),
+        );
+    }
+}
+
+type LayoutFn = unsafe extern "win64" fn(usize, usize) -> usize;
+
+unsafe extern "win64" fn on_split_virtual(regs: *mut Registers, original: usize, _: usize) -> usize {
+    let mut guard = crate::hook_guard!("terrain_tools::on_split_virtual");
+    let r = unsafe { &*regs };
+    let (layout, a2) = (r.rcx as usize, r.rdx as usize);
+    let f: LayoutFn = unsafe { std::mem::transmute(original) };
+    let ret = guard.original(|| unsafe { f(layout, a2) });
+    if on_generator_thread() {
+        dump_graph("graph_after_split", read::<usize>(layout + 0x20).unwrap_or(0));
+    }
+    ret
+}
+
+unsafe extern "win64" fn on_smooth_edges(regs: *mut Registers, original: usize, _: usize) -> usize {
+    let mut guard = crate::hook_guard!("terrain_tools::on_smooth_edges");
+    let r = unsafe { &*regs };
+    let (layout, a2) = (r.rcx as usize, r.rdx as usize);
+    let f: LayoutFn = unsafe { std::mem::transmute(original) };
+    let ret = guard.original(|| unsafe { f(layout, a2) });
+    if on_generator_thread() {
+        dump_graph(&format!("graph_after_smooth{}", a2 as u8), read::<usize>(layout + 0x20).unwrap_or(0));
+    }
+    ret
+}
+
+type EdgeStepFn = unsafe extern "win64" fn(usize, usize, usize) -> usize;
+
+/// Logs an edge before and after a smoothing step.
+unsafe extern "win64" fn on_edge_step(regs: *mut Registers, original: usize, which: usize) -> usize {
+    let mut guard = crate::hook_guard!("terrain_tools::on_edge_step");
+    let r = unsafe { &*regs };
+    let (ctx, edge, a3) = (r.rcx as usize, r.rdx as usize, r.r8 as usize);
+    let traced = on_generator_thread();
+    let ends = |e: usize| {
+        let p = |n: usize| -> [i32; 2] { read(n + 0x4c).unwrap_or_default() };
+        let from = p(read::<usize>(e + 0x20).unwrap_or(0));
+        let to = p(read::<usize>(e + 0x28).unwrap_or(0));
+        format!("{},{}->{},{}", from[0], from[1], to[0], to[1])
+    };
+    let before = traced.then(|| (ends(edge), edge_points(edge)));
+    let f: EdgeStepFn = unsafe { std::mem::transmute(original) };
+    let ret = guard.original(|| unsafe { f(ctx, edge, a3) });
+    if let Some((e0, p0)) = before {
+        let name = ["arc_start", "arc_end", "round"][which];
+        let off: [i32; 4] = read(edge + 0x70).unwrap_or_default();
+        trace_line(
+            name,
+            &format!("{a3}"),
+            &format!("{e0} off {off:?} before [{p0}] after {}", ends(edge)),
+            &edge_points(edge),
+        );
+    }
+    ret
+}
+
+unsafe extern "win64" fn on_edge_tiles(regs: *mut Registers, _: usize) {
+    let _guard = crate::hook_guard!("terrain_tools::on_edge_tiles");
+    if !on_generator_thread() {
+        return;
+    }
+    let r = unsafe { &*regs };
+    // `0x1420b6950(&state)`: state +0x30 is the layout (its +0x20 the graph).
+    let layout = read::<usize>(r.rcx as usize + 0x30).unwrap_or(0);
+    dump_graph("graph_before_tiles", read::<usize>(layout + 0x20).unwrap_or(0));
+}
 
 static GRID_DUMPED: AtomicBool = AtomicBool::new(false);
 
