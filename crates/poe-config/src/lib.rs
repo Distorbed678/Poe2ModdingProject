@@ -240,10 +240,17 @@ pub struct AccountsConfig {
     /// in-game escape menu shows a "Get Full Access" button.
     #[serde(default = "yes")]
     pub full_access: bool,
+    /// Stash tab names an account gets (sent in InitialState; official: "1".."4").
+    #[serde(default = "default_stash_tabs")]
+    pub stash_tabs: Vec<String>,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn default_stash_tabs() -> Vec<String> {
+    ["1", "2", "3", "4"].map(String::from).to_vec()
 }
 
 #[derive(Debug, Clone, Deserialize)]

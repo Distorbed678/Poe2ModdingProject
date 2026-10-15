@@ -30,7 +30,7 @@ use poe_proto::{
         AddInventory, AddObject, AimTarget, AreaInfo, CharacterState, ChatJoinRequest, ChatJoined,
         EnableEncryption, ExitReport, FrameReport, Hello, InitialState, Inventory, LeaveGame,
         LocalPlayers, MoveDirection, PauseRequest, PingReply, PlayerEntity, PlayerState, SetPause,
-        SimulationHeader, SimulationTick, SkillReleased, SprintInput, TerrainHashes,
+        SimulationHeader, SimulationTick, SkillReleased, SprintInput, StashTab, TerrainHashes,
         UpdateSkillTarget, UpdateSkillTargetEntity, UseSkill,
     },
 };
@@ -847,11 +847,17 @@ impl InstanceServer {
 
         // InitialState must follow 0x24 and the player entity (its handler uses the entity).
         // `frame_ms` is the length of each simulation frame.
+        // Flag values not understood yet are the official ones (official-comparison.md).
         let initial = InitialState {
             frame_ms: self.config.instance.tick_ms as u32,
+            flags: 0x07,
             characters: vec![CharacterState {
+                stash_tabs: (self.config.accounts.stash_tabs.iter().enumerate())
+                    .map(|(i, name)| StashTab::plain(i as u16, name))
+                    .collect(),
                 flags: [
-                    0,
+                    // Bits 3 and 5 (+0x3ece, +0x3ed0); bit 6: account mode 0 (else 3).
+                    0x68,
                     if self.config.accounts.full_access {
                         poe_proto::instance::CHARACTER_FULL_ACCESS
                     } else {
@@ -863,6 +869,9 @@ impl InstanceServer {
             }],
             players: vec![PlayerState {
                 player_id: 1,
+                // Character 0, bit 6 (entry +7).
+                character: 0x40,
+                flags: 0x07,
                 ..Default::default()
             }],
             ..Default::default()

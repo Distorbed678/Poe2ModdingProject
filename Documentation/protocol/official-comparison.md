@@ -8,8 +8,8 @@ server's traffic, and what was changed to match. Tools: the DLL's Packets/Protoc
 
 ## Layout check
 Every official message we have a decoder for decodes without errors or leftover bytes, except
-three whose richer forms we do not support (our server sends the simple forms): `AreaInfo`
-optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
+two whose richer forms we do not support (our server sends the simple forms): `AreaInfo`
+optional blocks and `AddInventory` items.
 
 ## Fixed (2026-10-14/15)
 | What | Official | Ours before | Now |
@@ -23,6 +23,7 @@ optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
 | Login `0x0017` | u16 `0x0014` right after `InstanceDetails` | not sent | sent |
 | `AddObject` header (player) | (0xffffffff, 0, 0) | (0, 0xff, 0) | official; verified with and without the first-visit intro (the old (0, 0, 0) crash does not come back) |
 | AreaInfo league (+0x38) | the character's league | empty | the character's league |
+| InitialState | flags 7, four stash tabs "1".."4", character flags `68 40 00`, player entry `0x40`/`7` | flags 0, no tabs, `00 40 00`, `0`/`0` | official (`[accounts] stash_tabs`) |
 | Entry order | `LocalPlayers`, `PlayerEntity`, inventories | `PlayerEntity` after the inventories | official |
 
 ## Open (by priority)
@@ -43,7 +44,7 @@ optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
    `0x02a6`, `0x0352`, `0x0358`, `0x0222`.
 3. **AreaInfo** 221 vs 39 bytes: the layout is now known (instance.md); missing are the
    object-type preload list (needs the area's spawns), a u16 key list, scalar bytes and the
-   optional blocks. **InitialState** 121 vs 29 bytes.
+   optional blocks.
 4. **CharacterList**: `unk_51` (64), `unk_40` (85) and a 92-byte appearance/gear blob; league
    flag row of the current league.
 5. Skills, monsters, items, sprint buff: later milestones; the captures have the sequences.

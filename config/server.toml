@@ -57,6 +57,8 @@ max_characters = 24
 flags = [0x63, 0x03]
 # Full game access (in game: no "Get Full Access" button in the escape menu).
 full_access = true
+# Stash tabs every account has (until stashes are stored): official new accounts get "1".."4".
+stash_tabs = ["1", "2", "3", "4"]
 
 [gateway]
 # Entry written into GameFiles/gateway_list.txt (replaces the official list while deployed).
