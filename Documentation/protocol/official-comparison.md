@@ -21,6 +21,8 @@ optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
 | `0x0062` size | 4, 8 or 12 bytes by mode | fixed 4 in `client_body_sizes` (would misread the batch) | decoded by mode |
 | Login `0x003c` | four zero u32 before the key-exchange reply | not sent | sent |
 | Login `0x0017` | u16 `0x0014` right after `InstanceDetails` | not sent | sent |
+| `AddObject` header (player) | (0xffffffff, 0, 0) | (0, 0xff, 0) | official; verified with and without the first-visit intro (the old (0, 0, 0) crash does not come back) |
+| Entry order | `LocalPlayers`, `PlayerEntity`, inventories | `PlayerEntity` after the inventories | official |
 
 ## Open (by priority)
 1. **Cursor reports.** Our client sends `0062 01 01` (mode 1) but never mode 2 cells. On official
@@ -33,10 +35,7 @@ optional blocks, `InitialState` 0x68-byte records, `AddInventory` items.
    looks like the skill bar), `0x003a`, `0x02db`, `0x00c4`, `0x02d8`, `0x0325` (5.5 KB),
    `0x005a`, `0x0329`, `0x0320`, `0x031d`, `0x0271`, `0x00de` (per-inventory data),
    `0x02a6`, `0x0352`, `0x02f9`, `0x0358`, `0x0222`.
-3. **AddObject header**: official (0xffffffff, 0, 0), ours (0, 0xff, 0) (kept: the bisect above
-   blamed it wrongly at first; retest).
-4. **Order**: official sends `PlayerEntity` before the inventories, ours after AddInventory.
-5. **AreaInfo** 221 vs 39 bytes, **InitialState** 121 vs 29 bytes (richer forms to decode).
-6. **CharacterList**: `unk_51` (64), `unk_40` (85) and a 92-byte appearance/gear blob; league
+3. **AreaInfo** 221 vs 39 bytes, **InitialState** 121 vs 29 bytes (richer forms to decode).
+4. **CharacterList**: `unk_51` (64), `unk_40` (85) and a 92-byte appearance/gear blob; league
    flag row of the current league.
-7. Skills, monsters, items, sprint buff: later milestones; the captures have the sequences.
+5. Skills, monsters, items, sprint buff: later milestones; the captures have the sequences.

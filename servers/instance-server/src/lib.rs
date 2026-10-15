@@ -757,6 +757,13 @@ impl InstanceServer {
             players: vec![(LOCAL_PLAYER, character.name.clone())],
         };
         conn.send(&table.encode(&players)?).await?;
+        // Official order: the player's entity id, then its inventories.
+        conn.send(&table.encode(&PlayerEntity {
+            unk: LOCAL_PLAYER,
+            local_index: LOCAL_PLAYER,
+            entity_id: player.entity_id,
+        })?)
+        .await?;
 
         // The inventories an official server creates (protocol/<version>/inventories.tsv),
         // else one empty inventory per Inventories.dat slot.
@@ -806,11 +813,7 @@ impl InstanceServer {
             self.store.set_intro_done(character.id)?;
         }
         let entity_id = player.entity_id;
-        let mut out = table.encode(&PlayerEntity {
-            unk: LOCAL_PLAYER,
-            local_index: LOCAL_PLAYER,
-            entity_id,
-        })?;
+        let mut out = Vec::new();
         out.extend(table.encode(&AddObject {
             header: SimulationHeader {
                 entity_id,
@@ -820,9 +823,8 @@ impl InstanceServer {
                 // the WashedUp action from the Player reader) applies queued packets whose
                 // ordering matches the current position (0, 0, 0). With 0 here the player was
                 // added twice ("Replacing awake object") and the client crashed. Official servers
-                // send (0xffffffff, 0, 0); with that (and PlayerEntity before the inventories)
-                // the client never started the world (2026-10-14), so this stays.
-                unk_18: 0xff,
+                // send (0xffffffff, 0, 0): after everything else in the frame.
+                unk_14: 0xffff_ffff,
                 ..Default::default()
             },
             type_key: class.object_type_key(),
