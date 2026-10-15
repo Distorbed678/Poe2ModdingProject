@@ -9,6 +9,7 @@ mod inspect_tab;
 mod log_tab;
 mod packets_tab;
 mod protocol_tab;
+mod scanner_tab;
 mod status_tab;
 mod timing_tab;
 
@@ -49,6 +50,7 @@ pub struct App {
     watches: inspect_tab::WatchesView,
     hooks: hooks_tab::HooksView,
     protocol: protocol_tab::ProtocolView,
+    scanner: scanner_tab::ScannerView,
 }
 
 impl App {
@@ -63,12 +65,14 @@ impl App {
             watches: inspect_tab::WatchesView::new(),
             hooks: hooks_tab::HooksView::new(),
             protocol: protocol_tab::ProtocolView::new(),
+            scanner: scanner_tab::ScannerView::new(),
         }
     }
 
     pub fn draw(&mut self, ui: &Ui, visible: bool, plots: &dear_implot::PlotContext) {
         // Logs are pulled every drawn frame so nothing is missed while hidden.
         self.log.pull();
+        self.scanner.update();
         if crate::host::read_only() {
             badge(ui);
         }
@@ -112,6 +116,9 @@ impl App {
                     if let Some(_t) = ui.tab_item("Watches") {
                         self.watches.draw(ui);
                     }
+                    if let Some(_t) = ui.tab_item("Scanner") {
+                        self.scanner.draw(ui);
+                    }
                     if let Some(_t) = ui.tab_item("Hooks") {
                         self.hooks.draw(ui);
                     }
@@ -128,6 +135,11 @@ impl App {
 pub fn table_opts() -> imgui::TableOptions {
     imgui::TableOptions::from(imgui::TableFlags::RESIZABLE | imgui::TableFlags::ROW_BG)
         .sizing_policy(imgui::TableSizingPolicy::FixedFit)
+}
+
+/// Shows a memory region in the Scanner tab.
+pub fn scanner_request(expr: String, len: usize) {
+    scanner_tab::request(expr, len);
 }
 
 /// Copies text to the system clipboard.

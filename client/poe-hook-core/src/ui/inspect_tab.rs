@@ -40,6 +40,7 @@ pub fn draw_player(ui: &Ui) {
 pub struct EntitiesView {
     filter: String,
     alive_only: bool,
+    selected: Option<usize>,
 }
 
 impl EntitiesView {
@@ -47,6 +48,7 @@ impl EntitiesView {
         Self {
             filter: String::new(),
             alive_only: true,
+            selected: None,
         }
     }
 
@@ -91,7 +93,14 @@ impl EntitiesView {
                 for i in clipper.display_start()..clipper.display_end() {
                     let (e, l) = &rows[i as usize];
                     ui.table_next_column();
-                    ui.text(format!("{:#x}", e.id));
+                    if ui
+                        .selectable_config(format!("{:#x}##ent{}", e.id, e.ptr))
+                        .selected(self.selected == Some(e.ptr))
+                        .span_all_columns(true)
+                        .build()
+                    {
+                        self.selected = Some(e.ptr);
+                    }
                     ui.table_next_column();
                     if l.alive {
                         ui.text(format!("{:#x}", e.ptr));
@@ -114,6 +123,52 @@ impl EntitiesView {
                         ui.tooltip_text(format!("component vtables:\n{}", list.join("\n")));
                     }
                 }
+            }
+        }
+        if let Some(ptr) = self.selected {
+            ui.separator();
+            components(ui, ptr);
+        }
+    }
+}
+
+/// The selected entity's components: name, address, vtable; "scan" sends one to the Scanner.
+fn components(ui: &Ui, ptr: usize) {
+    let names = crate::entities::component_names(ptr);
+    let comps = crate::entities::components(ptr);
+    ui.text(format!("Components of {ptr:#x} ({}):", comps.len()));
+    let main = crate::dump_types::main_module();
+    if let Some(_t) = ui.begin_table_header_with_flags(
+        "components",
+        [
+            imgui::TableColumnSetup::new("#"),
+            imgui::TableColumnSetup::new("name"),
+            imgui::TableColumnSetup::new("address"),
+            imgui::TableColumnSetup::new("vtable"),
+            imgui::TableColumnSetup::new(""),
+        ],
+        crate::ui::table_opts(),
+    ) {
+        for (i, c) in comps.iter().enumerate() {
+            let name = names
+                .iter()
+                .find(|(n, _)| *n == i)
+                .map_or("?", |(_, s)| s.as_str());
+            let vt = poe_hook_shared::mem::read::<usize>(*c).unwrap_or(0);
+            ui.table_next_column();
+            ui.text(i.to_string());
+            ui.table_next_column();
+            ui.text(name);
+            ui.table_next_column();
+            ui.text(format!("{c:#x}"));
+            ui.table_next_column();
+            ui.text(match main.filter(|m| m.contains(vt)) {
+                Some(m) => format!("{:#x}", m.to_ghidra(vt)),
+                None => format!("{vt:#x}"),
+            });
+            ui.table_next_column();
+            if ui.small_button(format!("scan##c{i}")) {
+                crate::ui::scanner_request(format!("{c:#x}"), 0x600);
             }
         }
     }
