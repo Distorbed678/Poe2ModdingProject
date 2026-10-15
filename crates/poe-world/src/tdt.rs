@@ -7,6 +7,11 @@
 //! `feature`, edge types down/right/up/left, `u8 size x, u8 size y`, ground types
 //! down-left/down-right/up-right/up-left, 4 bytes, 8 edge-distance bytes. The rest (sub-tile
 //! data, doodads, entities) is kept raw for now.
+//!
+//! A tile that inherits another (`*_Reorient_N.tdt`) has a `u8` of override flags after the
+//! `inherits` reference (`0x1429153f0`) and carries only the overridden parts: 1 `tgt`, 8 the
+//! header from `feature` on and the corner points, 0x10 the size and sub-tile geometry, 0x20 the
+//! orientation mask. [`Tdt::resolve`] applies them to the parent.
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Tdt {
@@ -30,6 +35,11 @@ pub struct Tdt {
     pub point_grounds: Vec<Option<String>>,
     /// Height per corner point (data +0xc0; empty when the file has none).
     pub point_heights: Vec<i8>,
+    /// Orientations the tile may be used in (data +0x171, bit per orientation; 0 or 0xff:
+    /// all), intersected with the `.tst` rotation list by the tile-set index (`0x141d09ab0`).
+    pub orientation_mask: u8,
+    /// Override flags of an inheriting tile (see the module docs).
+    pub inherit_flags: u8,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -98,8 +108,16 @@ impl Tdt {
             ..Default::default()
         };
         t.inherits = r.string()?.filter(|s| !s.is_empty());
-        if t.inherits.is_none() {
+        let inherit = t.inherits.is_some();
+        if inherit {
+            t.inherit_flags = r.u8()?;
+        }
+        let iflags = t.inherit_flags;
+        let has = move |bit: u8| !inherit || iflags & bit != 0;
+        if has(1) {
             t.tgt = r.string()?.filter(|s| !s.is_empty());
+        }
+        if has(8) {
             t.feature = r.string()?.filter(|s| !s.is_empty());
             for e in &mut t.edges {
                 *e = r.string()?.filter(|s| !s.is_empty());
@@ -110,12 +128,46 @@ impl Tdt {
             }
             t.unk = r.bytes()?;
             t.edge_distances = r.bytes()?;
+        } else if t.inherit_flags & 0x10 != 0 {
+            t.size = (r.u8()?, r.u8()?);
         }
         t.rest = data[r.pos..].to_vec();
-        if t.inherits.is_none() && r.pos < data.len() {
+        if r.pos < data.len() {
             t.read_points(&mut r)?;
         }
         Ok(t)
+    }
+
+    /// This inheriting tile's overrides applied to its (resolved) parent.
+    pub fn resolve(&self, parent: &Tdt) -> Tdt {
+        let f = self.inherit_flags;
+        let mut t = parent.clone();
+        t.inherits = self.inherits.clone();
+        t.inherit_flags = f;
+        if f & 1 != 0 {
+            t.tgt = self.tgt.clone();
+        }
+        if f & 8 != 0 {
+            t.feature = self.feature.clone();
+            t.edges = self.edges.clone();
+            t.size = self.size;
+            t.grounds = self.grounds.clone();
+            t.unk = self.unk;
+            t.edge_distances = self.edge_distances;
+            t.point_grounds = self.point_grounds.clone();
+            t.point_heights = self.point_heights.clone();
+        } else if f & 0x10 != 0 {
+            t.size = self.size;
+        }
+        if f & 0x20 != 0 && self.version > 9 {
+            t.orientation_mask = self.orientation_mask;
+        }
+        t
+    }
+
+    /// Orientation mask `m` (bit per orientation) restricted by this tile's own mask.
+    pub fn restrict_orientations(&self, m: u8) -> u8 {
+        if (1..0xff).contains(&self.orientation_mask) { m & self.orientation_mask } else { m }
     }
 
     /// The body up to the corner points (`0x1429153f0`): flags, hull planes, sub-tiles (each
@@ -131,10 +183,12 @@ impl Tdt {
             flags &= !0x200;
         }
         let hi = (flags >> 8) as u8;
-        if v > 9 {
-            r.u8()?;
+        let (inherit, iflags) = (self.inherits.is_some(), self.inherit_flags);
+        let has = move |bit: u8| !inherit || iflags & bit != 0;
+        if v > 9 && has(0x20) {
+            self.orientation_mask = r.u8()?;
         }
-        if v >= 10 {
+        if has(0x10) && v >= 10 {
             let n = r.u8()?;
             if n > 4 {
                 return Err(TdtError { offset: r.pos, what: "invalid number of hull planes" });
@@ -145,30 +199,41 @@ impl Tdt {
                 }
             }
         }
-        if hi & 2 != 0 {
+        if has(1) && hi & 2 != 0 {
             r.u8()?;
         }
-        let count = u16::from_le_bytes(r.bytes()?);
-        for _ in 0..count {
-            let w4 = if v < 10 {
-                r.u8()?
-            } else {
-                u16::from_le_bytes(r.bytes()?) as u8
-            };
-            r.u8()?;
-            if hi & 2 != 0 {
-                r.bytes::<3>()?;
+        if has(8) || has(0x10) {
+            let count = u16::from_le_bytes(r.bytes()?);
+            let full = has(0x10) || (has(1) && hi & 2 != 0);
+            for _ in 0..count {
+                let w4 = match (full, v < 10) {
+                    (false, _) => 0,
+                    (true, true) => r.u8()?,
+                    (true, false) => u16::from_le_bytes(r.bytes()?) as u8,
+                };
+                if has(8) {
+                    r.u8()?;
+                }
+                if has(1) && hi & 2 != 0 {
+                    r.bytes::<3>()?;
+                }
+                if !has(0x10) {
+                    continue;
+                }
+                if w4 & 4 == 0 {
+                    skip_byte_map(r, v)?;
+                }
+                if !(w4 & 1 != 0 && w4 & 2 != 0) {
+                    let n = u16::from_le_bytes(r.bytes()?) as usize;
+                    r.pos = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
+                        offset: r.pos,
+                        what: "sub-tile bytes truncated",
+                    })?;
+                }
             }
-            if w4 & 4 == 0 {
-                skip_byte_map(r, v)?;
-            }
-            if !(w4 & 1 != 0 && w4 & 2 != 0) {
-                let n = u16::from_le_bytes(r.bytes()?) as usize;
-                r.pos = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
-                    offset: r.pos,
-                    what: "sub-tile bytes truncated",
-                })?;
-            }
+        }
+        if !has(8) {
+            return Ok(());
         }
         let n = (self.size.0 as usize + 1) * (self.size.1 as usize + 1);
         if flags & 2 != 0 {

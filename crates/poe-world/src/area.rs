@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use poe_data::{GameData, Value};
 
 use crate::{
+    node_tiles,
     edge_tiles::{EdgeInfo, EdgeTiler},
     fill::fill_pass,
     generate::{GenError, Master, RoomPlacement, TileMap, derepeat_pass, room_pass_oriented},
@@ -298,28 +299,33 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
     let lookup = |t: &str| split_types.get(&t.to_ascii_lowercase()).cloned().unwrap_or_default();
     split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), rng);
 
-    // Rounding, border dead ends (`0x1420cade0`), slot compaction, rounding, end points.
+    // Rounding, border dead ends and node tiles (`0x1420cade0`), slot compaction, rounding,
+    // end points.
     smoothing::round_corners(&mut lg);
+    let mut tile_nodes = Vec::new();
     for n in 0..graph.nodes.len() {
         if !graph.nodes[n].room_type.is_empty() {
             continue;
         }
         let edges: Vec<usize> = lg.nodes[n].slots.iter().flatten().copied().collect();
-        if edges.len() != 1 {
-            continue;
+        let mut near = false;
+        if let [e] = edges[..] {
+            let b = types.edge(files, &lg.edges[e].edge_type)?.size as i32;
+            let (x, y) = lg.nodes[n].pos;
+            let (tx, ty) = ((x / 23).min(tiles.0 - 1), (y / 23).min(tiles.1 - 1));
+            near = !(b <= tx && b <= ty && tx < tiles.0 - b && ty < tiles.1 - b);
         }
-        let e = edges[0];
-        let et = types.edge(files, &lg.edges[e].edge_type)?.clone();
-        let b = et.size as i32;
-        let (x, y) = lg.nodes[n].pos;
-        let (tx, ty) = ((x / 23).min(tiles.0 - 1), (y / 23).min(tiles.1 - 1));
-        let near = !(b <= tx && b <= ty && tx < tiles.0 - b && ty < tiles.1 - b);
-        if et.virtual_edge && !near {
+        if !node_tiles::needs_tile(&lg, n, near, &mut types, files)? {
             continue;
         }
         if !near {
-            return Err(data(format!("node {n}: a dead end inside the map (tile node) is not ported")));
+            tile_nodes.push(n);
+            continue;
         }
+        let e = edges[0];
+        let b = types.edge(files, &lg.edges[e].edge_type)?.size as i32;
+        let (x, y) = lg.nodes[n].pos;
+        let (tx, ty) = ((x / 23).min(tiles.0 - 1), (y / 23).min(tiles.1 - 1));
         let w = (lg.edges[e].from != n) as usize;
         let mut pos = lg.nodes[n].pos;
         let mut off = lg.edges[e].offsets[w];
@@ -343,6 +349,7 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
         lg.nodes[n].fixed = true;
         lg.edges[e].offsets[w] = off;
     }
+    node_tiles::place_node_tiles(&mut lg, graph, &tile_nodes, &master, &mut map, tiles, &mut types, files, rng)?;
     smoothing::compact_slots(&mut lg);
     smoothing::round_corners(&mut lg);
     smoothing::add_end_points(&mut lg);
