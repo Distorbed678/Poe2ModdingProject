@@ -83,7 +83,7 @@ fn default_chat_channel() -> u16 {
 }
 
 /// Player start position (see `instance-server::spawn`). Until the server generates terrain
-/// (M4) it relies on the layout exported by the client DLL.
+/// (M5) it relies on the layout exported by the client DLL.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SpawnConfig {
     /// Directory where the DLL writes `terrain_layout_<tile hash>.tsv`; empty disables the
@@ -175,7 +175,7 @@ pub struct InstanceConfig {
     #[serde(default)]
     pub known_seeds: PathBuf,
     /// Accept the client DLL's per-frame position reports (UDP on the instance port) and
-    /// follow them (movement dev bridge until the server simulates movement exactly, M4).
+    /// follow them (movement dev bridge until the server simulates movement exactly, M5).
     #[serde(default = "default_true")]
     pub position_sync: bool,
     /// Movement trace (dev): every client position report, movement input and movement reply

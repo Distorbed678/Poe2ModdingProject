@@ -41,7 +41,7 @@ pub struct FeatureConfig {
     /// research; also enabled by the `POE_HOOK_MOVEMENT_LOG` environment variable).
     pub movement_log: bool,
     /// With `dump_object_types`: report the player's position and action to the local
-    /// instance server every frame (movement dev bridge until M4, see position_sync.rs).
+    /// instance server every frame (movement dev bridge until M5, see position_sync.rs).
     pub position_sync: bool,
     /// The instance server's port: only connections to it become the report target (0: the
     /// last loopback connection). Set by `cargo xtask deploy-client` from `server.toml`.

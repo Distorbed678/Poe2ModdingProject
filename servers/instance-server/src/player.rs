@@ -98,7 +98,7 @@ pub struct Player {
     /// Length of a simulation frame in seconds (`tick_ms`).
     pub frame_seconds: f32,
     /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
-    /// (the server has no collision until M4).
+    /// (the server has no collision until M5).
     pub walkable: Option<crate::spawn::Grid>,
     /// Server frames sent minus the client's frame number when its report arrives (the
     /// smallest seen; 0 so far).
@@ -325,7 +325,7 @@ impl Player {
             return Vec::new();
         }
         let was = self.mover.motion;
-        // No collision until the server has the terrain (M4): the simulation moves in straight
+        // No collision until the server has the terrain (M5): the simulation moves in straight
         // lines. Without terrain it would walk through walls, so once reports have arrived the
         // player is only ever where the client last reported it.
         if !self.synced {

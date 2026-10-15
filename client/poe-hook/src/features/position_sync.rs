@@ -1,4 +1,4 @@
-//! Dev bridge for movement (until the server simulates movement exactly, M4): reports the
+//! Dev bridge for movement (until the server simulates movement exactly, M5): reports the
 //! player's position and current action to the instance server every simulation frame.
 //!
 //! The client runs in lockstep, but the server's pathfinding and collision only approximate

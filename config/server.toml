@@ -23,7 +23,7 @@ public_port = 6112
 # Simulation frame interval in ms (one 0x2f4 tick marker per frame; also sent in
 # InitialState as the frame length).
 tick_ms = 33
-# Terrain seeds known to generate (dev bridge until server-side generation, M4); some random
+# Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
 # seeds fail in the client. Extracted from a live Client.txt by tools/re/clientlog_terrain.py.
 known_seeds = "data/terrain-vectors.tsv"
 # Movement trace (dev): client position reports, inputs and movement replies as TSV
@@ -98,7 +98,7 @@ Boots1 = [2, 2]
 Belt1 = [2, 1]
 Flask1 = [5, 1]
 
-# Player start position. Dev bridge until server-side terrain generation (M4): the client DLL
+# Player start position. Dev bridge until server-side terrain generation (M5): the client DLL
 # exports the generated layout and the player starts on the area's start tile, or else on
 # the playable tile nearest the map centre.
 [spawn]

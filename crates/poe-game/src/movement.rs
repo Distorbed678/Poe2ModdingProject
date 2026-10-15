@@ -10,7 +10,7 @@
 //! The client walks along paths from its pathfinder, for clicks and for WASD (whose target is
 //! the position plus the input vector, in cells). This follows paths from
 //! [`crate::pathfinding`], an approximation: it matches the client in the open and can drift
-//! near walls until the server has an exact port of the client's pathfinder (M4).
+//! near walls until the server has an exact port of the client's pathfinder (M5).
 
 use crate::pathfinding::find_path;
 
