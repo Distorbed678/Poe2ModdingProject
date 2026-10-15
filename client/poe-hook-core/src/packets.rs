@@ -98,6 +98,8 @@ pub struct Msg {
     pub redacted: bool,
     /// Captured while the read-only latch was on (official servers).
     pub official: bool,
+    /// Fields from the field tracer (offset, size, calling function).
+    pub fields: Vec<crate::protocol::Field>,
 }
 
 impl Msg {
@@ -116,7 +118,8 @@ static STORE: Mutex<VecDeque<Arc<Msg>>> = Mutex::new(VecDeque::new());
 static STREAMS: Mutex<Option<HashMap<usize, Channel>>> = Mutex::new(None);
 /// Per stream: messages written to the send buffer since its last flush (start, end, opcode;
 /// `end` is `None` while the send is still serializing).
-static SENDS: Mutex<Option<HashMap<usize, Vec<(usize, Option<usize>, u16)>>>> = Mutex::new(None);
+type Send = (usize, Option<usize>, u16, Vec<crate::protocol::Field>);
+static SENDS: Mutex<Option<HashMap<usize, Vec<Send>>>> = Mutex::new(None);
 static WRITER: Mutex<Option<Sender<Arc<Msg>>>> = Mutex::new(None);
 static COVERAGE: Mutex<Option<Coverage>> = Mutex::new(None);
 
@@ -261,7 +264,14 @@ fn set_channel(stream: usize, channel: Channel) {
         .insert(stream, channel);
 }
 
-fn record(dir: Dir, channel: Channel, data: Vec<u8>, opcode_len: usize, framed: bool) {
+fn record(
+    dir: Dir,
+    channel: Channel,
+    data: Vec<u8>,
+    opcode_len: usize,
+    framed: bool,
+    fields: Vec<crate::protocol::Field>,
+) {
     if data.len() < opcode_len.max(1) {
         return;
     }
@@ -290,7 +300,9 @@ fn record(dir: Dir, channel: Channel, data: Vec<u8>, opcode_len: usize, framed: 
         framed,
         redacted,
         official: crate::host::read_only(),
+        fields,
     });
+    crate::protocol::observe(&msg);
     note_player(&msg);
     crate::timing::record(
         match dir {
@@ -318,22 +330,30 @@ fn record(dir: Dir, channel: Channel, data: Vec<u8>, opcode_len: usize, framed: 
 type ReadFn = unsafe extern "win64" fn(usize, usize) -> usize;
 
 unsafe extern "win64" fn on_read_message(regs: *mut Registers, original: usize, _: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let mut guard = crate::hook_guard!("packets::on_read_message");
     let r = unsafe { &*regs };
     let (registry, stream) = (r.rcx as usize, r.rdx as usize);
     let before = read::<usize>(stream + 0x268);
     let caller = read::<usize>(r.rsp as usize).unwrap_or(0);
     let f: ReadFn = unsafe { std::mem::transmute(original) };
-    let ret = unsafe { f(registry, stream) };
+    crate::protocol::begin(stream, false, 0);
+    let ret = guard.original(|| unsafe { f(registry, stream) });
+    let fields = crate::protocol::end();
     if ret & 0xff == 1
         && let Some(before) = before
     {
-        capture_received(registry, stream, before, caller);
+        capture_received(registry, stream, before, caller, fields);
     }
     ret
 }
 
-fn capture_received(registry: usize, stream: usize, before: usize, caller: usize) {
+fn capture_received(
+    registry: usize,
+    stream: usize,
+    before: usize,
+    caller: usize,
+    fields: Vec<crate::protocol::Field>,
+) {
     let (Some(base), Some(end), Some(after)) = (
         read::<usize>(stream + 0x298),
         read::<usize>(stream + 0x2a0),
@@ -370,13 +390,13 @@ fn capture_received(registry: usize, stream: usize, before: usize, caller: usize
     } else {
         2
     };
-    record(Dir::In, channel, data, opcode_len, true);
+    record(Dir::In, channel, data, opcode_len, true, fields);
 }
 
 type SendFn = unsafe extern "win64" fn(usize, usize, usize, usize) -> usize;
 
 unsafe extern "win64" fn on_session_send(regs: *mut Registers, original: usize, _: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let mut guard = crate::hook_guard!("packets::on_session_send");
     let r = unsafe { &*regs };
     let (session, packet) = (r.rcx as usize, r.rdx as usize);
     let stream = read::<usize>(session + 0x20f8).unwrap_or(0);
@@ -389,10 +409,13 @@ unsafe extern "win64" fn on_session_send(regs: *mut Registers, original: usize, 
             .get_or_insert_with(HashMap::new)
             .entry(stream)
             .or_default()
-            .push((start, None, opcode));
+            .push((start, None, opcode, Vec::new()));
     }
     let f: SendFn = unsafe { std::mem::transmute(original) };
-    let ret = unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) };
+    crate::protocol::begin(stream, true, start.unwrap_or(0));
+    let ret = guard
+        .original(|| unsafe { f(r.rcx as usize, r.rdx as usize, r.r8 as usize, r.r9 as usize) });
+    let fields = crate::protocol::end();
     if let (Some(start), Some(end)) = (start, read::<usize>(stream + 0x258))
         && let Some(list) = SENDS
             .lock()
@@ -406,12 +429,13 @@ unsafe extern "win64" fn on_session_send(regs: *mut Registers, original: usize, 
     {
         // A flush inside the send (buffer full) resets the offsets: unframed then.
         open.1 = (end > start).then_some(end);
+        open.3 = fields;
     }
     ret
 }
 
 unsafe extern "win64" fn on_flush(regs: *mut Registers, _: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("packets::on_flush");
     let stream = unsafe { (*regs).rbx } as usize;
     let (Some(base), Some(sent), Some(len)) = (
         read::<usize>(stream + 0x280),
@@ -435,34 +459,40 @@ unsafe extern "win64" fn on_flush(regs: *mut Registers, _: usize) {
         .unwrap_or_default();
     let mut channel = channel_of(stream);
     let mut at = sent;
-    for (start, end, opcode) in bounds {
+    for (start, end, opcode, fields) in bounds {
         // A send still serializing ends at the current length.
         let end = end.unwrap_or(len).min(len);
         if start < at || end <= start {
             continue;
         }
         if start > at {
-            emit_out(stream, &mut channel, &buf[at..start], false);
+            emit_out(stream, &mut channel, &buf[at..start], false, Vec::new());
         }
         let data = &buf[start..end];
         if data.len() >= 2 && u16::from_be_bytes([data[0], data[1]]) != opcode {
             log::debug!("packets: send boundary opcode {opcode:#06x} != buffer");
         }
-        emit_out(stream, &mut channel, data, true);
+        emit_out(stream, &mut channel, data, true, fields);
         at = end;
     }
     if at < len {
-        emit_out(stream, &mut channel, &buf[at..len], false);
+        emit_out(stream, &mut channel, &buf[at..len], false, Vec::new());
     }
 }
 
-fn emit_out(stream: usize, channel: &mut Option<Channel>, data: &[u8], framed: bool) {
+fn emit_out(
+    stream: usize,
+    channel: &mut Option<Channel>,
+    data: &[u8],
+    framed: bool,
+    fields: Vec<crate::protocol::Field>,
+) {
     if data.len() < 2 {
         return;
     }
     let c = *channel.get_or_insert_with(|| channel_of(stream).unwrap_or(Channel::Other));
     if framed {
-        record(Dir::Out, c, data.to_vec(), 2, true);
+        record(Dir::Out, c, data.to_vec(), 2, true, fields);
         return;
     }
     // Sent outside the session (frame reports, login): split where the layout is known.
@@ -471,7 +501,7 @@ fn emit_out(stream: usize, channel: &mut Option<Channel>, data: &[u8], framed: b
         let n = known_len(c, rest)
             .unwrap_or(rest.len())
             .clamp(2, rest.len());
-        record(Dir::Out, c, rest[..n].to_vec(), 2, false);
+        record(Dir::Out, c, rest[..n].to_vec(), 2, false, Vec::new());
         rest = &rest[n..];
     }
 }
@@ -568,11 +598,24 @@ fn restore() {
                 framed: field(line, "framed")? == "true",
                 redacted: field(line, "redacted")? == "true",
                 official: field(line, "official")? == "true",
+                fields: field(line, "fields")
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .filter_map(|f| {
+                        let mut p = f.split(':');
+                        Some(crate::protocol::Field {
+                            offset: p.next()?.parse().ok()?,
+                            len: p.next()?.parse().ok()?,
+                            caller: usize::from_str_radix(p.next()?, 16).ok()?,
+                        })
+                    })
+                    .collect(),
                 data,
             })
         };
         if let Some(m) = parse() {
             note_player(&m);
+            crate::protocol::observe(&m);
             SEQ.fetch_max(m.seq, Ordering::Relaxed);
             store.push_back(Arc::new(m));
         }
@@ -587,8 +630,14 @@ fn restore() {
 
 fn json_line(m: &Msg) -> String {
     let hex: String = m.data.iter().map(|b| format!("{b:02x}")).collect();
+    // offset:size:caller (caller = Ghidra address of the read/write call's return address).
+    let fields: Vec<String> = m
+        .fields
+        .iter()
+        .map(|f| format!("{}:{}:{:x}", f.offset, f.len, f.caller))
+        .collect();
     format!(
-        "{{\"seq\":{},\"t\":{},\"dir\":\"{}\",\"chan\":\"{}\",\"op\":\"{:#06x}\",\"name\":\"{}\",\"len\":{},\"framed\":{},\"redacted\":{},\"official\":{},\"hex\":\"{hex}\"}}",
+        "{{\"seq\":{},\"t\":{},\"dir\":\"{}\",\"chan\":\"{}\",\"op\":\"{:#06x}\",\"name\":\"{}\",\"len\":{},\"framed\":{},\"redacted\":{},\"official\":{},\"fields\":\"{}\",\"hex\":\"{hex}\"}}",
         m.seq,
         m.unix_ms,
         m.dir.name(),
@@ -598,7 +647,8 @@ fn json_line(m: &Msg) -> String {
         m.len,
         m.framed,
         m.redacted,
-        m.official
+        m.official,
+        fields.join(" ")
     )
 }
 
@@ -658,6 +708,7 @@ fn save_coverage() {
     if let Some(c) = COVERAGE.lock().unwrap().as_mut() {
         c.save();
     }
+    crate::protocol::export();
 }
 
 /// Core stop: no more messages are accepted (the writer drains and exits on its own).

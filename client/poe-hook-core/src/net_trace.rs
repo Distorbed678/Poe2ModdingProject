@@ -69,7 +69,7 @@ fn backtrace(rsp: u64) -> String {
     };
     poe_hook_shared::module::stack_refs(main, rsp as usize, 16)
         .iter()
-        .map(|a| format!("{a:#x}"))
+        .map(|a| format!("{a:#x} {}", crate::symbols::fmt(*a)))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -135,7 +135,7 @@ type WsaRecvFn = unsafe extern "system" fn(
     *const c_void,
 ) -> i32;
 unsafe extern "win64" fn on_send(regs: *mut Registers, original: usize, _: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("net_trace::on_send");
     let r = unsafe { &*regs };
     let (sock, buf, len, flags) = (r.rcx, r.rdx as *const u8, r.r8 as i32, r.r9 as i32);
     if len > 0 {
@@ -148,7 +148,7 @@ unsafe extern "win64" fn on_send(regs: *mut Registers, original: usize, _: usize
 }
 
 unsafe extern "win64" fn on_wsa_send(regs: *mut Registers, original: usize, _: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("net_trace::on_wsa_send");
     let r = unsafe { &*regs };
     let (sock, bufs, count, sent) = (r.rcx, r.rdx as *const WSABUF, r.r8 as u32, r.r9 as *mut u32);
     let (flags, ov, cb) = unsafe {
@@ -169,7 +169,7 @@ unsafe extern "win64" fn on_wsa_send(regs: *mut Registers, original: usize, _: u
 }
 
 unsafe extern "win64" fn on_recv(regs: *mut Registers, original: usize, _: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("net_trace::on_recv");
     let r = unsafe { &*regs };
     let (sock, buf, len, flags) = (r.rcx, r.rdx as *mut u8, r.r8 as i32, r.r9 as i32);
     let f: RecvFn = unsafe { std::mem::transmute(original) };
@@ -183,7 +183,7 @@ unsafe extern "win64" fn on_recv(regs: *mut Registers, original: usize, _: usize
 }
 
 unsafe extern "win64" fn on_wsa_recv(regs: *mut Registers, original: usize, _: usize) -> usize {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("net_trace::on_wsa_recv");
     let r = unsafe { &*regs };
     let (sock, bufs, count, received) =
         (r.rcx, r.rdx as *const WSABUF, r.r8 as u32, r.r9 as *mut u32);

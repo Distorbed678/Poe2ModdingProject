@@ -43,7 +43,7 @@ pub fn init(main: &Module, addresses: &[String], limit: u32) -> Result<(), Strin
 }
 
 unsafe extern "win64" fn on_hit(regs: *mut Registers, user: usize) {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("trace_calls::on_hit");
     let target = unsafe { &*(user as *const Target) };
     let n = target.hits.fetch_add(1, Ordering::Relaxed);
     if n >= *LIMIT.get().unwrap_or(&20) {
@@ -55,7 +55,7 @@ unsafe extern "win64" fn on_hit(regs: *mut Registers, user: usize) {
         .map(|m| {
             poe_hook_shared::module::stack_refs(m, r.rsp as usize, 20)
                 .iter()
-                .map(|a| format!("{a:#x}"))
+                .map(|a| format!("{a:#x} {}", crate::symbols::fmt(*a)))
                 .collect::<Vec<_>>()
                 .join(" ")
         })

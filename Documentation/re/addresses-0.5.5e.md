@@ -128,3 +128,15 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14214a400` | Actor `0x1fc` (f32, u16) → Actor vfunc +0x100 |
 | `0x14210fbb0` | skill target update sender: `0x1a8` (lockstep, relative), `0x1a9` (absolute), `0x1aa` (entity) |
 | `0x14210ee60` | chat sender (`0x16`, wstring; "@whisper") |
+
+## Streams and packet capture (2026-10-14, debug DLL)
+| Address | What | Notes |
+|---|---|---|
+| `0x1421c5950` | message reader `(registry, stream)` | reads the opcode, lets the registered handlers deserialize, advances the receive ring (+0x268) by the message size; low byte of the result 1 = a whole message was read |
+| `0x1420e6bc0` | login session receive loop | caller of the message reader on the login connection |
+| `0x142120b70` | instance session receive loop | caller of the message reader on the instance connection |
+| `0x142197d30` | stream read `(stream, dst, len)` | copies from the receive ring at +0x268 + +0x278 (bytes read in this message); sets +0x252 on underflow |
+| `0x142197e60` | stream write `(stream, src, len)` | appends to the send buffer (+0x280, length +0x258); flushes when full |
+| `0x142197fc0` | stream flush `(stream, err, force)` | plaintext tap (+0x190), cipher (+0x1b8 slot 1, in place), then `send` on the socket (+0) |
+| `0x142198037` | inside the stream flush | after the lock, before the cipher: pending plaintext `[+0x280] + [+0x260 .. +0x258]`, rbx = stream |
+| `0x1410262d0` | Vulkan loader | `LoadLibrary("vulkan-1.dll")` and `GetProcAddress("vkGetInstanceProcAddr")` |

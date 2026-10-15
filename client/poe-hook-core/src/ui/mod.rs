@@ -4,9 +4,11 @@
 mod coverage_tab;
 mod features_tab;
 mod gamelog_tab;
+mod hooks_tab;
 mod inspect_tab;
 mod log_tab;
 mod packets_tab;
+mod protocol_tab;
 mod status_tab;
 mod timing_tab;
 
@@ -45,6 +47,8 @@ pub struct App {
     gamelog: gamelog_tab::GameLogView,
     entities: inspect_tab::EntitiesView,
     watches: inspect_tab::WatchesView,
+    hooks: hooks_tab::HooksView,
+    protocol: protocol_tab::ProtocolView,
 }
 
 impl App {
@@ -57,6 +61,8 @@ impl App {
             gamelog: gamelog_tab::GameLogView::new(),
             entities: inspect_tab::EntitiesView::new(),
             watches: inspect_tab::WatchesView::new(),
+            hooks: hooks_tab::HooksView::new(),
+            protocol: protocol_tab::ProtocolView::new(),
         }
     }
 
@@ -85,6 +91,9 @@ impl App {
                     if let Some(_t) = ui.tab_item("Packets") {
                         self.packets.draw(ui);
                     }
+                    if let Some(_t) = ui.tab_item("Protocol") {
+                        self.protocol.draw(ui);
+                    }
                     if let Some(_t) = ui.tab_item("Coverage") {
                         self.coverage.draw(ui);
                     }
@@ -102,6 +111,9 @@ impl App {
                     }
                     if let Some(_t) = ui.tab_item("Watches") {
                         self.watches.draw(ui);
+                    }
+                    if let Some(_t) = ui.tab_item("Hooks") {
+                        self.hooks.draw(ui);
                     }
                     if let Some(_t) = ui.tab_item("Features") {
                         features_tab::draw(ui);

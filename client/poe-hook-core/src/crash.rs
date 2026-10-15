@@ -51,7 +51,7 @@ pub fn stop() {
 }
 
 unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
-    let _guard = crate::hooks::enter();
+    let _guard = crate::hook_guard!("crash::handler");
     let (record, context) = unsafe { (&*(*info).ExceptionRecord, &*(*info).ContextRecord) };
     let code = record.ExceptionCode;
     let fatal = [
@@ -70,7 +70,11 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     }
     let main = MAIN.get().copied();
     let fmt = |addr: usize| match main {
-        Some(m) if m.contains(addr) => format!("{addr:#x} (ghidra {:#x})", m.to_ghidra(addr)),
+        Some(m) if m.contains(addr) => format!(
+            "{addr:#x} (ghidra {:#x} {})",
+            m.to_ghidra(addr),
+            crate::symbols::fmt(m.to_ghidra(addr))
+        ),
         _ => format!("{addr:#x}"),
     };
     let rip = context.Rip as usize;
@@ -107,9 +111,9 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     if let Some(m) = main {
         let frames: Vec<String> = poe_hook_shared::module::stack_refs(&m, context.Rsp as usize, 16)
             .iter()
-            .map(|a| format!("{a:#x}"))
+            .map(|a| format!("{a:#x} {}", crate::symbols::fmt(*a)))
             .collect();
-        msg += &format!("\n  stack refs: {}", frames.join(" "));
+        msg += &format!("\n  stack refs: {}", frames.join(" | "));
     }
     log::error!("{msg}");
     EXCEPTION_CONTINUE_SEARCH
@@ -144,9 +148,9 @@ fn log_cpp_exception(
         }
         let frames: Vec<String> = poe_hook_shared::module::stack_refs(&m, unsafe { get_rsp() }, 16)
             .iter()
-            .map(|a| format!("{a:#x}"))
+            .map(|a| format!("{a:#x} {}", crate::symbols::fmt(*a)))
             .collect();
-        msg += &format!("\n  stack refs: {}", frames.join(" "));
+        msg += &format!("\n  stack refs: {}", frames.join(" | "));
     }
     log::warn!("{msg}");
 }
