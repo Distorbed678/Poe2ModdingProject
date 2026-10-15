@@ -29,7 +29,7 @@ optional blocks and `AddInventory` items.
 ## Open (by priority)
 1. **Player component deltas at entry**: official servers send flag words (`0x0002`, 5 entries;
    key 0x08 added after the first Move) and combat stance 1, then stance 0 with `+0x3e7 = 1`;
-   after kills, deltas with mask `0x0201` (`u32` 17, 34, 51, experience?, and +0x209 set). Ours sends only the
+   after kills, deltas with mask `0x0201` (experience 17, 34, 51 and +0x209 set). Ours sends only the
    stance.
 2. **Messages official servers send at entry that we do not** (all decoded sizes in the
    session's `protocol.tsv`). Known so far: `0x0021` = MonsterVarieties rows to preload (`u8`,
@@ -45,6 +45,6 @@ optional blocks and `AddInventory` items.
 3. **AreaInfo** 221 vs 39 bytes: the layout is now known (instance.md); missing are the
    object-type preload list (needs the area's spawns), a u16 key list, scalar bytes and the
    optional blocks.
-4. **CharacterList**: `unk_51` (64), `unk_40` (85) and a 92-byte appearance/gear blob; league
-   flag row of the current league.
+4. **CharacterList**: experience (+0x40) is now sent. Still missing for characters that have
+   played: `unk_51` 0x40, the 91-byte gear blob (component 8 delta format) and the stat pairs.
 5. Skills, monsters, items, sprint buff: later milestones; the captures have the sequences.
