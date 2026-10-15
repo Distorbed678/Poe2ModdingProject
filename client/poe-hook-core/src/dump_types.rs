@@ -159,6 +159,7 @@ unsafe extern "win64" fn on_frame_drain(regs: *mut Registers, _: usize) {
     let world = unsafe { (*regs).rcx } as usize;
     // Frame-mode worlds (the game world): log a few calls with dt and pause flags.
     if read::<u8>(world + 0x661).is_some_and(|m| m != 0) {
+        GAME_WORLD.store(world, Ordering::Relaxed);
         if let Some(frames) = read::<u64>(world + 0x6a8) {
             crate::timing::record(crate::timing::Series::Backlog, frames as f32);
         }
@@ -273,7 +274,38 @@ unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at:
 
 /// Writes `terrain_layout_<tile hash>.tsv` next to the exe: a `size<TAB>w<TAB>h` line, then one
 /// `x<TAB>y<TAB>tile path` line per tile. Dev bridge until the server generates terrain (M5).
-unsafe fn export_layout(world: usize) {
+/// The game world of the current area (frame-mode world seen by the frame drain).
+static GAME_WORLD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn game_world() -> usize {
+    GAME_WORLD.load(Ordering::Relaxed)
+}
+
+/// The world's terrain object (found by its vtable, embedded or behind a pointer).
+pub fn terrain(world: usize) -> Option<usize> {
+    use poe_hook_shared::mem::read;
+    let m = MAIN.get()?;
+    let terrain_vt = m.from_ghidra(TERRAIN_VTABLE);
+    (0..0x2000).step_by(8).find_map(|off| {
+        let v = read::<usize>(world + off)?;
+        if v == terrain_vt {
+            return Some(world + off);
+        }
+        (read::<usize>(v)? == terrain_vt).then_some(v)
+    })
+}
+
+/// Exports the layout and grids of the current area now (overlay button; also read-only).
+pub fn export_layout_now() -> bool {
+    let world = game_world();
+    if world == 0 {
+        return false;
+    }
+    unsafe { export_layout(world) };
+    true
+}
+
+pub(crate) unsafe fn export_layout(world: usize) {
     use poe_hook_shared::mem::{read, wide_string};
     // The terrain object is a member (or pointed-to member) of the world; find it by its
     // vtable instead of assuming an offset.
