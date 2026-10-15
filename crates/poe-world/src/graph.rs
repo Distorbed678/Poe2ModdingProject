@@ -11,6 +11,16 @@
 //! <x> <y> <k> <edge>*k "<room type>" <orientation> <d> "<tag>"*d <ints...>      (n lines)
 //! <a> <b> <p> (<x> <y>)*p <i> <i> <i> "<.et>" <i> <i>                          (m lines)
 //! ```
+//! `.dgr` (dungeon graph) files have the same layout plus dungeon fields, which the client
+//! reads with `0x14292e8e0` into the same graph: a `Default%: <branching> <extra door>
+//! <fuzzy>` line after the ground types (and, from version 23, an
+//! `open_extra_doors_into_impenetrable_rooms` bool line); node lines end with a void flag
+//! (`Y`/`N`) and, from version 22, a branching bool; edge lines end after the `.et` with
+//! branching chances, depth limit, branching type, extra door % and type, fuzzy %,
+//! impenetrability, impenetrable and void flags and accessibility. Those come after the
+//! numbers and are kept as raw tokens (`extra`). The `.tgr`-only numbers (node fixed axes,
+//! edge widths) are absent there.
+//!
 //! Node positions are in grid cells (23 per tile). Orientation is `I`, `R90`..`R270`, `F...`
 //! for flipped ones, or `(any)` / `(best)` (the generator chooses).
 
@@ -26,6 +36,8 @@ pub struct Graph {
     pub ground_types: [String; 3],
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// `.dgr` defaults: branching %, extra door %, fuzzy % (absent for `.tgr`).
+    pub dungeon_defaults: Option<[i32; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +53,8 @@ pub struct Node {
     pub tags: Vec<String>,
     /// The numbers after the tags (first: existence chance in %).
     pub values: Vec<i32>,
+    /// `.dgr` tokens after the numbers.
+    pub extra: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,8 +67,10 @@ pub struct Edge {
     pub values: Vec<i32>,
     /// Edge type (`.et`).
     pub edge_type: String,
-    /// The numbers after the edge type.
+    /// The numbers after the edge type (`.tgr`).
     pub tail: Vec<i32>,
+    /// `.dgr` tokens after the edge type.
+    pub extra: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,8 +116,19 @@ impl Graph {
                 .map(|l| l.trim_matches('"').to_string())
                 .unwrap_or_default()
         });
+        let mut first = 8;
+        let mut dungeon_defaults = None;
+        if let Some(rest) = lines.get(8).and_then(|l| l.strip_prefix("Default%:")) {
+            let t = tokens(rest);
+            let mut d = [0; 3];
+            for (k, v) in d.iter_mut().enumerate() {
+                *v = int(8, t.get(k).map_or("", String::as_str))?;
+            }
+            dungeon_defaults = Some(d);
+            first = if version > 22 { 10 } else { 9 };
+        }
         let mut nodes = Vec::with_capacity(n);
-        for i in 8..8 + n {
+        for i in first..first + n {
             let t = tokens(lines.get(i).ok_or_else(|| err(i, "missing node"))?);
             let mut it = t.iter();
             let mut next = || it.next().ok_or_else(|| err(i, "short node line"));
@@ -115,7 +142,7 @@ impl Graph {
             let orientation = next()?.clone();
             let d = int(i, next()?)? as usize;
             let tags = (0..d).map(|_| next().cloned()).collect::<Result<_, _>>()?;
-            let values = it.map(|s| int(i, s)).collect::<Result<_, _>>()?;
+            let (values, extra) = numbers_then_rest(it);
             nodes.push(Node {
                 x,
                 y,
@@ -124,10 +151,11 @@ impl Graph {
                 orientation,
                 tags,
                 values,
+                extra,
             });
         }
         let mut edges = Vec::with_capacity(m);
-        for i in 8 + n..8 + n + m {
+        for i in first + n..first + n + m {
             let line = lines.get(i).ok_or_else(|| err(i, "missing edge"))?;
             let t = tokens(line);
             let mut it = t.iter();
@@ -149,7 +177,13 @@ impl Graph {
                     Err(_) => break s.clone(),
                 }
             };
-            let tail = it.map(|s| int(i, s)).collect::<Result<_, _>>()?;
+            let (mut tail, mut extra) = numbers_then_rest(it);
+            if dungeon_defaults.is_some() {
+                // The numbers after a `.dgr` edge type are dungeon fields, not widths.
+                let mut all: Vec<String> = tail.drain(..).map(|v| v.to_string()).collect();
+                all.append(&mut extra);
+                extra = all;
+            }
             edges.push(Edge {
                 from,
                 to,
@@ -157,6 +191,7 @@ impl Graph {
                 values,
                 edge_type,
                 tail,
+                extra,
             });
         }
         Ok(Self {
@@ -167,8 +202,22 @@ impl Graph {
             ground_types,
             nodes,
             edges,
+            dungeon_defaults,
         })
     }
+}
+
+/// Leading numbers of a token list, then the remaining tokens.
+fn numbers_then_rest<'a>(it: impl Iterator<Item = &'a String>) -> (Vec<i32>, Vec<String>) {
+    let mut values = Vec::new();
+    let mut rest = Vec::new();
+    for s in it {
+        match (rest.is_empty(), s.parse::<i32>()) {
+            (true, Ok(v)) => values.push(v),
+            _ => rest.push(s.clone()),
+        }
+    }
+    (values, rest)
 }
 
 #[cfg(test)]
@@ -195,7 +244,23 @@ mod tests {
         .unwrap();
         let e = &g.edges[0];
         assert_eq!(e.points, vec![(1162, 127)]);
+        assert_eq!(e.tail, vec![0, 0]);
         assert_eq!(e.values, vec![100, 0, 0]);
         assert_eq!(e.edge_type, "Metadata/a.et");
+    }
+
+    #[test]
+    fn dungeon_graph() {
+        let g = Graph::parse(
+            "version 25\nSize: 5 6\nMasterFile: \"m.tsi\"\nNodes: 2\nEdges: 1\n\"\"\n\"\"\n\"\"\nDefault%: 0 0 0\n0\n104 104 1 0 \"entrance_flip\" FI 2 \"entrance1\" \"default\" 100 0 0 0 0 0 0 0 0 N 0\n150 104 1 0 \"\" (any) 0 100 0 0 0 0 0 0 0 0 N 0\n0 1 0 100 0 0 \"a.et\" 30 40 1 \"\" 100 \"a.et\" 0 0 P N 1\n",
+        )
+        .unwrap();
+        assert_eq!(g.dungeon_defaults, Some([0, 0, 0]));
+        assert_eq!(g.nodes[0].values.len(), 9);
+        assert_eq!(g.nodes[0].extra, vec!["N", "0"]);
+        let e = &g.edges[0];
+        assert_eq!(e.values, vec![100, 0, 0]);
+        assert!(e.tail.is_empty());
+        assert_eq!(e.extra.len(), 11);
     }
 }
