@@ -25,7 +25,7 @@ pub fn draw(ui: &Ui) {
         crate::host::reload_count()
     ));
     ui.text(format!("session folder: {}", crate::host::session_dir().display()));
-    ui.text(format!("{:.0} fps", ui.io().framerate));
+    ui.text(format!("{:.0} fps", ui.io().framerate()));
     if ui.button("Reload core") {
         crate::host::request_reload();
     }

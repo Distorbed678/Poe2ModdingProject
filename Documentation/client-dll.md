@@ -26,10 +26,13 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 - The `auto_keys` key timeline only runs on the first load (a reload must not press Enter again).
 
 ## Overlay (`[overlay]`)
-Dear ImGui (imgui-rs 0.12 = imgui 1.89.2, `imgui-rs-vulkan-renderer` 1.16), drawn by the core inside the game's `vkQueuePresentKHR`:
-- `overlay/gpu.rs`: a render pass that loads (does not clear) the swapchain image and keeps it in `PRESENT_SRC_KHR`; 3 frame slots (command buffer, fence, semaphore). The submit waits on the game's present semaphores and the present then waits on the slot's semaphore. Device functions come from the loader's real `vkGetInstanceProcAddr` (ash `Entry::from_static_fn`).
+Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-rs) 0.20 (`dear-imgui-ash` Vulkan backend, `dear-implot` for graphs; chosen 2026-10-14 over the older imgui-rs 0.12), drawn by the core inside the game's `vkQueuePresentKHR`:
+- **One overlay thread** owns the imgui context and all overlay Vulkan objects: dear-imgui-rs keeps context and font-atlas state in thread-locals, and the game presents from several threads (a frame built on another thread panicked: "requires explicit managed font-atlas ownership"). The present hook sends the frame to that thread and blocks until it returns the semaphore; the game's present call holds the queue meanwhile.
+- `overlay/gpu.rs`: a render pass (kept across swapchain rebuilds while the format is unchanged) that loads (does not clear) the swapchain image and keeps it in `PRESENT_SRC_KHR`; 3 frame slots (command buffer, fence, semaphore). The submit waits on the game's present semaphores and the present then waits on the slot's semaphore. Device functions come from the loader's real `vkGetInstanceProcAddr` (ash `Entry::from_static_fn`).
 - `overlay/input.rs`: window messages → imgui. Mouse and keyboard messages, including `WM_INPUT` (the game reads movement and skills through Raw Input), are kept from the game while imgui wants them (pointer over an overlay window, a focused text field). Button releases always reach the game.
 - `toggle_key` (default Insert) shows/hides it; `snapshot_key` (default Home) saves a snapshot. While hidden nothing is drawn except the `OFFICIAL: read-only` badge and short notices.
+- The backend's `framebuffer_srgb` option is set for the game's `B8G8R8A8_SRGB` swapchain, so colors are right.
+- Release builds abort on panic; the core installs a panic hook that logs the message and backtrace first.
 - `scale` multiplies the font size (DejaVu Sans Mono 16 px, embedded; license in `poe-hook-core/assets/`). Window layout persists in `logs/poe-hook/imgui.ini`.
 - Tabs: Status (mode, latch, session folder, connections, Vulkan, Reload core / Snapshot buttons), Log (the shared log ring: level and text filters, copy).
 

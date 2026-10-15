@@ -5,6 +5,7 @@
 //! direction. Message layouts are Rust types implementing [`Message`]; each names itself
 //! and the opcode is looked up in the table.
 
+pub mod describe;
 pub mod entity;
 pub mod instance;
 pub mod login;
