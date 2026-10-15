@@ -145,6 +145,28 @@ pairs of a weighted fill-tile pick (`0x141f900a7`; `n` = the fill group's total 
    `0x141ff89e0` loads the chosen graph (another `below(count)` and `below(0x348)` only when no
    topology was passed); `0x141ff8310` turns the graph into a region record (0x98 bytes, in the
    generation state's region list).
+   Details (`crates/poe-world/src/area.rs` `topologies`, `generate_with`):
+   - `0x141fdfe30` keeps the topologies whose last Topologies column (topology +0x40, league
+     or mode) equals the area's mode; if none match, it keeps those marked 0x39 ("any"). With
+     neither it retries with mode 1. Act areas use 1, and their league variants use other
+     values (54).
+   - `0x141fa6440` matches the world map. `0x141fa6150` lists the directions of the area's
+     connections (WorldAreas connections → their map pins), one entry per connection. Each
+     topology's direction list (Topologies list column, +0x24) is compared in order, turned
+     by each allowed orientation (+0x34 list; 8 = all). There are three passes: exact
+     (`0x141fa6960`), with topology wildcards 8 (`0x141fa6a50`), then also adjacent
+     directions (`0x141fa6b40`). The LCG index picks among those candidates. Only when there
+     are none does `0x141ff90f0` pick from the whole list. The map-pin part is not ported, so
+     `G1_2` seed 1001 picks topology 15 (`felling_S_N_W`) in the client, while the plain index
+     gives 3.
+   - Stats on the area (generator +0x38 → +0x128, filled from AreaInfo's flags0 bit 7 stat
+     records, `0x1423baa70`: varuint count, then big-endian u16 key and value per stat):
+     `map_force_topology` (key 0xb92, Stats row 2961) = 1-based index into the filtered list,
+     and `map_force_orientation` (0xb93) = orientation + 1. A forced topology still draws the
+     `below(0xffffffff)` value. The server can use these to choose the layout itself
+     (`generate_with(.., forced)`).
+   - `.dgr` and `.tgr` graphs take the same path (`0x141ff2c50` → `0x1420bec40`); `.dgr`
+     only adds dungeon fields (`0x14292e8e0`, kept as raw tokens in `graph.rs`).
 3. Graph nodes are placed by `0x1420c87a0`: candidates matching the node's TileEdgeKey
    (`0x1420c76d0`, 0x68-byte entries, weight at +0x60), weighted pick `below(total)`, position =
    node cell / 23 minus half the candidate's size (+0x31/+0x32), clamped to the map; must fit
@@ -363,6 +385,29 @@ otherwise go to a separate list. `0x1420cade0` walks the tile list. A dead end n
 
 Riverbank seed 1001 needs this for one node: the narrow river changes from `S` to `M`, so the
 node takes `NarrowRiver_Mud/StMS_01.tdt` (3×3, o5).
+
+**Typed nodes without a room, junctions, hashed edges** (found on `G1_2`):
+- Room types: when no room of the node's type fits, `0x1420c76d0` falls back to tile-set tiles
+  whose feature is the room type (e.g. `endcap` → `Mudburrow/Trail_End_01_02.tdt`). The
+  adjustment check `0x1420c5540` accepts a key when tiles of that feature or rooms of that type
+  have it. The filter lambdas also keep only tiles of that feature.
+- `0x1420c9d70`: an `(any)` placement may turn a quarter (orientation table `0x141d00f00`). The
+  turned key, including its size, is what later steps use (the recentring in `0x1420cbe60`).
+- Exploding (`0x1420cb200`, before routing): junctions (three or more edges, none virtual) and
+  virtual nodes that no tile fits at the room stage (`0x1420caa40` places those that fit; not
+  ported). Their edges first drop points within 23 cells of the node (`0x1420c6b80`). Each
+  edge then gets a point 23 cells out of the node on its side (`0x1420d1220`, clamped to the
+  map), at the start of `from` edges and at the end of the others.
+- `.et` fourth number (+0x4d, e.g. `woods.et` `0 3 0 1`): the edge's tiles take their exits from
+  the coordinate hash `0x1421969e0` instead of the path curve (`0x1420b7490` is not called for
+  them).
+- Tile-set index keys (`0x141d09900`) drop grounds whose `.gt` has flag 0x10 (the fifth bool,
+  e.g. `wideriver_trim.gt`). `TileDef::key` holds that key.
+- Overlays (master `Overlays` `.toy`, master +0x200; `0x141fa1a70` → `0x141fa1ba0` →
+  `0x141fa1e60` candidate positions, `0x141fa23e0` placement): run after the lattice passes and
+  before the fill. There are weighted position draws (`below(total)`), a weighted overlay pick
+  (padded to 100 with "nothing"), and an orientation `below(0x348)`. Not ported yet: `G1_2`
+  seed 1001 matches the client up to the first overlay draw (4054 draws, all 87 edge tiles).
 
 **Inheriting tiles** (`0x1429153f0`): a `.tdt` with an `inherits` path (for example
 `ZombieIntroFeature_Reorient_1.tdt`) has an override-flags byte after it and carries only what
