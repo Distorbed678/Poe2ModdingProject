@@ -149,7 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        let p = place_node(&set, &placed_graph, n, tiles, &placed, &mut types, files, &mut rng)?;
+        let p = place_node(&set, &master.tiles, &placed_graph, n, tiles, &placed, &mut types, files, &mut rng)?;
         println!(
             "node {n} {:?}: {} o{} at {:?}",
             graph.nodes[n].room_type, set.rooms[p.room].path, p.orientation, p.pos
