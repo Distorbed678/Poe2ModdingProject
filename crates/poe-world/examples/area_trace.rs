@@ -1,11 +1,11 @@
 //! Generates an area and lines its RNG draws up with a client generator trace (an area export
 //! of the DLL with `POE_HOOK_GEN_TRACE=1`): `cargo run --release -p poe-world --example
-//! area_trace -- <area> <seed> <export dir> [forced topology, 1-based | all]`. Prints our result or error, then the first draw
+//! area_trace -- <area> <seed> <export dir> [forced topology, 1-based[:orientation] | all]`. Prints our result or error, then the first draw
 //! that differs with the trace lines around it.
 
 use std::path::Path;
 
-use poe_world::{area::Stage, generate::TileMap, rng::TerrainRng, smoothing::LayoutGraph};
+use poe_world::{area::{Forced, Stage}, generate::TileMap, rng::TerrainRng, smoothing::LayoutGraph};
 
 /// Compares the edge tiles with the trace's `place` lines of `0x1420b85bf`.
 fn compare_edges(map: &TileMap, before: usize, lines: &[Vec<String>]) {
@@ -127,18 +127,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trace = trace_draws(&lines);
     if force.as_deref() == Some("all") {
         // Which topology the client used: the one staying in step longest.
-        let n = poe_world::area::topologies(&gd, &area)?.len() as u32;
-        for f in 1..=n {
-            let mut rng = TerrainRng::new(seed);
-            rng.log = Some(Vec::new());
-            let r = poe_world::area::generate_with(&gd, &area, &mut rng, Some(f));
-            let log = rng.log.take().unwrap_or_default();
-            let k = log.iter().zip(&trace).take_while(|(o, t)| o.0 == t.2 && o.1 == t.3).count();
-            println!("topology {f}: {k} draws in step, {}", match r { Ok(g) => format!("tile hash {}", g.map.tile_hash()), Err(e) => format!("error: {e}") });
+        let entries = poe_world::area::topology_entries(&gd, &area, 1)?;
+        for (f, (_, mask)) in (1..).zip(&entries) {
+            for o in (0..8u8).filter(|o| mask & (1 << o) != 0) {
+                let mut rng = TerrainRng::new(seed);
+                rng.log = Some(Vec::new());
+                let forced = Forced { topology: Some(f), orientation: Some(o) };
+                let r = poe_world::area::generate_with(&gd, &area, &mut rng, Some(forced));
+                let log = rng.log.take().unwrap_or_default();
+                let k = log.iter().zip(&trace).take_while(|(o, t)| o.0 == t.2 && o.1 == t.3).count();
+                println!("topology {f} o{o}: {k} draws in step, {}", match r { Ok(g) => format!("tile hash {}", g.map.tile_hash()), Err(e) => format!("error: {e}") });
+            }
         }
         return Ok(());
     }
-    let forced = force.map(|f| f.parse::<u32>()).transpose()?;
+    // `<topology>[:<orientation>]`
+    let forced = match force {
+        Some(f) => {
+            let mut it = f.split(':');
+            let topology = it.next().map(|v| v.parse::<u32>()).transpose()?;
+            let orientation = it.next().map(|v| v.parse::<u8>()).transpose()?;
+            Some(Forced { topology, orientation })
+        }
+        None => None,
+    };
     let mut rng = TerrainRng::new(seed);
     rng.log = Some(Vec::new());
     let mut probe = |stage: Stage| match stage {

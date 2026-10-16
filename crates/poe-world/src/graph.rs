@@ -38,6 +38,8 @@ pub struct Graph {
     pub edges: Vec<Edge>,
     /// `.dgr` defaults: branching %, extra door %, fuzzy % (absent for `.tgr`).
     pub dungeon_defaults: Option<[i32; 3]>,
+    /// Region orientation the graph was turned by ([`crate::region::turn_graph`]; 0 = none).
+    pub region: u8,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +205,7 @@ impl Graph {
             nodes,
             edges,
             dungeon_defaults,
+            region: 0,
         })
     }
 }
