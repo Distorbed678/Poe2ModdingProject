@@ -430,6 +430,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             }
         }
     }
+    corridors(files, graph, removed, &fields, &rooms, &sizes, &mut grid, &mut types, rng)?;
     Ok(grid)
 }
 
@@ -711,4 +712,131 @@ pub fn size_report(set: &RoomSet) -> String {
         .map(|(door, sizes)| format!("{door}: total {} {:?}", sizes.iter().map(|s| s.1).sum::<u32>(), sizes))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Per placed room (`0x1420a5e50` records, 0x30 bytes): a random cost and search state.
+#[derive(Debug, Clone, Default)]
+struct Record {
+    cost: u32,
+}
+
+/// The corridor stage of `0x1420ac3e0` (step 4): edge batches, the shuffle (`0x141fa8b60`), then
+/// per batch (`0x1420a2c70` → `0x1420acdd0`): placeholders on every free cell (`0x1420a6140`),
+/// records (`0x1420a6030`) and the edge connections (`0x1420a3a20`, not ported).
+#[allow(clippy::too_many_arguments)]
+fn corridors(
+    files: &dyn Files,
+    graph: &Graph,
+    removed: &[bool],
+    fields: &[EdgeFields],
+    rooms: &[DungeonRoom],
+    sizes: &[(String, Vec<((u32, u32), u32)>)],
+    grid: &mut Grid,
+    types: &mut TerrainTypes,
+    rng: &mut TerrainRng,
+) -> Result<(), GenError> {
+    let _ = rooms;
+    // `0x1420a5e50`: one record per placed room with a `below(128)` cost.
+    let mut records: Vec<Record> = Vec::new();
+    let grow = |records: &mut Vec<Record>, grid: &Grid, rng: &mut TerrainRng| {
+        while records.len() < grid.rooms.len() {
+            records.push(Record { cost: rng.below(128) });
+        }
+    };
+    grow(&mut records, grid, rng);
+    // `0x141fa8df0`: non-void edges by priority (ascending), then three containers (edge types
+    // with exactly one room size, other types, the default type), each ordered by
+    // `0x141fa7920` with equal keys kept in edge order.
+    let priority = |e: usize| graph.edges[e].values.get(2).copied().unwrap_or(0) as i8;
+    let mut keys: Vec<(i8, u8, (bool, i32, u8, String), usize)> = Vec::new();
+    for e in 0..graph.edges.len() {
+        if removed[e] || fields[e].void {
+            continue;
+        }
+        let t = graph.edges[e].edge_type.to_ascii_lowercase();
+        let n_sizes = sizes.iter().find(|s| s.0 == t).map_or(0, |s| s.1.len());
+        let container = if t.is_empty() { 2 } else if n_sizes == 1 { 0 } else { 1 };
+        let hc = types.edge(files, &t)?.height_change;
+        let impen = fields[e].impenetrable.eq_ignore_ascii_case("I");
+        keys.push((priority(e), container, (impen, fields[e].impenetrability, hc, t), e));
+    }
+    // Impenetrable first, then higher impenetrability, higher height change, type name.
+    keys.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.cmp(&b.1))
+            .then(b.2.0.cmp(&a.2.0))
+            .then(b.2.1.cmp(&a.2.1))
+            .then(b.2.2.cmp(&a.2.2))
+            .then(a.2.3.cmp(&b.2.3))
+            .then(a.3.cmp(&b.3))
+    });
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    for (i, k) in keys.iter().enumerate() {
+        if i > 0 && keys[i - 1].0 == k.0 && keys[i - 1].1 == k.1 && keys[i - 1].2 == k.2 {
+            batches.last_mut().unwrap().push(k.3);
+        } else {
+            batches.push(vec![k.3]);
+        }
+    }
+    // `0x141fc00f0`: a discarded `below(n)`, a forward Fisher-Yates shuffle, then a stable sort
+    // by priority.
+    for b in &mut batches {
+        rng.below(b.len() as u32);
+        let n = b.len();
+        for i in 0..n {
+            let k = rng.uniform((n - i) as u32) as usize;
+            b.swap(i, i + k);
+        }
+        b.sort_by_key(|&e| priority(e));
+    }
+    if let Some(b) = batches.first() {
+        let t = graph.edges[b[0]].edge_type.to_ascii_lowercase();
+        let list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| s.0 == t).map(|s| s.1.clone()).unwrap_or_default();
+        fill_placeholders(grid, &list, rng)?;
+        grow(&mut records, grid, rng);
+        return Err(unsupported(format!("dungeon: edge connection (0x1420a3a20) not ported ({} rooms, {} records, batch {:?})", grid.rooms.len(), records.len(), b)));
+    }
+    Ok(())
+}
+
+/// `0x1420a6140`: every free unit cell (row by row) gets a placeholder of a size drawn from the
+/// edge type's list (up to five draws until one fits; else the list's first size, else 1×1).
+fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], rng: &mut TerrainRng) -> Result<(), GenError> {
+    if list.is_empty() {
+        return Ok(());
+    }
+    let total: u32 = list.iter().map(|s| s.1).sum();
+    let fits = |grid: &Grid, (x, y): (i32, i32), (w, h): (u32, u32)| {
+        x >= 0 && y >= 0 && x as u32 + w <= grid.w && y as u32 + h <= grid.h && (0..h as i32).all(|dy| (0..w as i32).all(|dx| grid.state((x + dx, y + dy)) == Some(0)))
+    };
+    for y in 0..grid.h as i32 {
+        let mut x = 0;
+        while x < grid.w as i32 {
+            if grid.state((x, y)) != Some(0) {
+                x += 1;
+                continue;
+            }
+            let mut chosen = None;
+            for _ in 0..5 {
+                let mut r = rng.below(total);
+                let mut k = list.len() - 1;
+                for (j, s) in list.iter().enumerate() {
+                    if r < s.1 {
+                        k = j;
+                        break;
+                    }
+                    r -= s.1;
+                }
+                if fits(grid, (x, y), list[k].0) {
+                    chosen = Some(list[k].0);
+                    break;
+                }
+            }
+            let size = chosen.unwrap_or(list[0].0);
+            let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None })?;
+            x += size.0 as i32;
+        }
+    }
+    Ok(())
 }
