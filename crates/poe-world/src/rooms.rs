@@ -764,17 +764,12 @@ pub fn place_node(
         }
         let c = list[i].clone();
         let (w, h) = (c.size.0 as i32, c.size.1 as i32);
-        // Centred, then snapped to the node's alignment (`0x141fe7400`; region orientation 0:
-        // a remainder above half rounds up), then clamped to the map.
-        let snap = |v: i32| {
-            if align <= 1 {
-                return v;
-            }
-            let r = v.rem_euclid(align);
-            v - r + if r > align / 2 { align } else { 0 }
-        };
-        let px = snap((cx - w / 2).max(0)).max(0).min(tiles.0 - w);
-        let py = snap((cy - h / 2).max(0)).max(0).min(tiles.1 - h);
+        // Centred, then snapped to the node's alignment (`0x141fe7400`), then clamped to the map.
+        let ro = g.graph.region;
+        let c0 = (crate::region::centred(ro, cx, w, true).max(0), crate::region::centred(ro, cy, h, false).max(0));
+        let (sx, sy) = crate::region::snap(ro, c0, align);
+        let px = sx.max(0).min(tiles.0 - w);
+        let py = sy.max(0).min(tiles.1 - h);
         let inside = px >= 0 && py >= 0 && px + w <= tiles.0 && py + h <= tiles.1;
         let overlaps = placed.iter().any(|p| {
             px < p.pos.0 + p.size.0 as i32
@@ -1117,17 +1112,11 @@ pub fn repel(
         let (w, h) = (p.size.0 as i32, p.size.1 as i32);
         let cy = (ny / 23).min(tiles.1 - 1);
         let cx = (nx / 23).min(tiles.0 - 1);
-        let x = (cx - w / 2).max(0).min(tiles.0 - w);
-        let y = (cy - h / 2).max(0).min(tiles.1 - h);
+        let ro = g.graph.region;
+        let x = crate::region::centred(ro, cx, w, true).max(0).min(tiles.0 - w);
+        let y = crate::region::centred(ro, cy, h, false).max(0).min(tiles.1 - h);
         let align = node_alignment(g, p.node, types, files)?;
-        let snap = |v: i32| {
-            if align <= 1 {
-                return v;
-            }
-            let r = v.rem_euclid(align);
-            v - r + if r > align / 2 { align } else { 0 }
-        };
-        let (sx, sy) = (snap(x), snap(y));
+        let (sx, sy) = crate::region::snap(ro, (x, y), align);
         if sx < tiles.0 && sx + w <= tiles.0 && sy < tiles.1 && sy + h <= tiles.1 {
             p.pos = (sx, sy);
         }

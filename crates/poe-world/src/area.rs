@@ -54,6 +54,12 @@ pub fn topologies(gd: &GameData, area_id: &str) -> Result<Vec<String>, GenError>
 }
 
 pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<String>, GenError> {
+    Ok(topology_entries(gd, area_id, mode)?.into_iter().map(|t| t.0).collect())
+}
+
+/// [`topologies_for`] with each topology's allowed region orientations (bit per orientation,
+/// Topologies list column 6 at topology +0x34; 8 = all).
+pub fn topology_entries(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<(String, u8)>, GenError> {
     let areas = gd.table("WorldAreas").map_err(data)?;
     let area = areas.find_by_str("Id", area_id).map_err(data)?.ok_or_else(|| data(format!("no area {area_id}")))?;
     let topologies = gd.table("Topologies").map_err(data)?;
@@ -66,6 +72,15 @@ pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<Str
     for &r in &rows {
         let row = topologies.row(r).ok_or_else(|| data("bad topology row"))?;
         let path = row.str("DGRFile").map_err(data)?;
+        let mut mask = 0u8;
+        if let Value::List(l) = row.get_index(6).map_err(data)? {
+            for v in l {
+                if let Value::Int(o) = v {
+                    mask |= if o == 8 { 0xff } else { 1 << (o & 7) };
+                }
+            }
+        }
+        let path = (path, mask);
         match row.get_index(last).map_err(data)? {
             Value::Int(v) if v == mode => exact.push(path),
             Value::Int(0x39) => any.push(path),
@@ -76,7 +91,7 @@ pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<Str
         return Ok(exact);
     }
     if any.is_empty() && mode != 1 {
-        return topologies_for(gd, area_id, 1);
+        return topology_entries(gd, area_id, 1);
     }
     Ok(any)
 }
@@ -84,6 +99,14 @@ pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<Str
 /// Generates area `area_id` with `seed` (`TerrainGen_Run` up to the tile hash).
 pub fn generate(gd: &GameData, area_id: &str, seed: u32) -> Result<Generated, GenError> {
     generate_with(gd, area_id, &mut TerrainRng::new(seed), None)
+}
+
+/// A layout choice the server makes for the client: `map_force_topology` (1-based index into
+/// [`topologies`]) and `map_force_orientation` (stat value − 1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Forced {
+    pub topology: Option<u32>,
+    pub orientation: Option<u8>,
 }
 
 /// [`generate`] with a caller's RNG (for draw logs) and optionally a forced topology
@@ -94,27 +117,257 @@ pub fn generate(gd: &GameData, area_id: &str, seed: u32) -> Result<Generated, Ge
 /// directions of the connected areas' map pins against each topology's direction list, three
 /// passes from exact to adjacent) and only falls back to the index draw here when nothing
 /// matches; that choice is not ported yet.
-pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<u32>) -> Result<Generated, GenError> {
+pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>) -> Result<Generated, GenError> {
     generate_probed(gd, area_id, rng, forced, &mut |_| {})
 }
 
 /// [`generate_with`] reporting intermediate [`Stage`]s to `probe`, for comparing with the
 /// client's trace.
-pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<u32>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
-    let graphs = topologies(gd, area_id)?;
+pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
+    let forced = forced.unwrap_or_default();
+    let graphs = topology_entries(gd, area_id, 1)?;
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));
     }
     let files = gd.files();
     let sub = rng.below(u32::MAX);
-    let index = match forced {
+    let index = match forced.topology {
         Some(f) if f >= 1 && (f as usize) <= graphs.len() => f as usize - 1,
         _ => lcg_index(sub, graphs.len() as u32) as usize,
     };
-    let dgr = graphs[index].clone();
-    let graph = Graph::parse_bytes(&crate::generate::Files::read(files, &dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
+    let (dgr, mask) = graphs[index].clone();
+    // Region orientation: forced, else what the world-map match gives (not ported: the lowest
+    // allowed one, right for the act 1 areas checked). Without a match the client draws it from
+    // the topology's list (`0x141ff90f0`: `region::pick(mask, lcg_index(sub, 0x348))`).
+    let orientation = forced.orientation.filter(|&o| o < 8).unwrap_or(if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() as u8 });
+    let mut graph = Graph::parse_bytes(&crate::generate::Files::read(files, &dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
+    let mut types = TerrainTypes::default();
+    let mut symmetric = std::collections::HashMap::new();
+    for e in &graph.edges {
+        let key = e.edge_type.to_ascii_lowercase();
+        if !symmetric.contains_key(&key) {
+            let v = edge_symmetric(&mut types, files, &key)?;
+            symmetric.insert(key, v);
+        }
+    }
+    crate::region::turn_graph(&mut graph, orientation, &|t| symmetric.get(&t.to_ascii_lowercase()).copied().unwrap_or(false));
     let map = generate_graph_probed(files, &graph, rng, probe)?;
     Ok(Generated { graph: dgr, map, draws: rng.draws })
+}
+
+/// `0x141fe9970`: existence rolls (nodes, node +0x44 = value 0: 0 removes, ≥100 keeps, else
+/// `below(100)`; then every edge with a non-zero chance), the `shuffle` groups and the `unique`
+/// groups. Removed nodes leave the graph (later node indices move up, as the client erases
+/// them) and take their edges with them; removed edges stay as `true` in the returned flags.
+fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenError> {
+    let mut drop_node = vec![false; graph.nodes.len()];
+    for (i, n) in graph.nodes.iter().enumerate() {
+        let chance = n.values.first().copied().unwrap_or(100);
+        drop_node[i] = chance == 0 || (chance < 100 && rng.below(100) as i32 >= chance);
+    }
+    let mut removed: Vec<bool> = graph
+        .edges
+        .iter()
+        .map(|e| {
+            let exist = e.values.first().copied().unwrap_or(100);
+            !(exist != 0 && (rng.below(100) as i32) < exist)
+        })
+        .collect();
+    let mut g = graph.clone();
+    let mut dropped = vec![false; g.nodes.len()];
+    for n in 0..g.nodes.len() {
+        if drop_node[n] {
+            remove_node(&mut g, &mut removed, &mut dropped, n);
+        }
+    }
+    let drop_node_before = dropped.clone();
+    shuffle_nodes(&mut g, &drop_node_before, rng);
+    // `unique<N>[#count]` (`0x141feb3b0`): keep `count` random nodes of group N.
+    let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
+    for (i, n) in g.nodes.iter().enumerate() {
+        if dropped[i] {
+            continue;
+        }
+        let Some(t) = n.tags.iter().find(|t| t.len() >= 6 && t[..6].eq_ignore_ascii_case("unique")) else { continue };
+        let mut rest = &t[6..];
+        if rest.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+            return Err(data(format!("node {i}: lettered unique tag {t:?} (session history) is not ported")));
+        }
+        let mut count = 1u32;
+        if let Some((a, b)) = rest.split_once('#') {
+            rest = a;
+            count = b.trim().parse().unwrap_or(1);
+        }
+        let k = if rest.is_empty() { 0 } else { match rest.trim().parse::<usize>() { Ok(v) => v, Err(_) => continue } };
+        if groups.len() <= k {
+            groups.resize(k + 1, (0, Vec::new()));
+        }
+        groups[k].0 = groups[k].0.max(count);
+        groups[k].1.push(i);
+    }
+    for (count, mut list) in groups {
+        if (count as usize) < list.len() {
+            for _ in 0..count {
+                let k = rng.below(list.len() as u32) as usize;
+                list.remove(k);
+            }
+            for n in list {
+                remove_node(&mut g, &mut removed, &mut dropped, n);
+            }
+        }
+    }
+    let drop_node = dropped;
+    // Erase the dropped nodes.
+    let mut new_index = vec![usize::MAX; g.nodes.len()];
+    let mut k = 0;
+    for i in 0..g.nodes.len() {
+        if !drop_node[i] {
+            new_index[i] = k;
+            k += 1;
+        }
+    }
+    for (e, edge) in g.edges.iter_mut().enumerate() {
+        let (f, t) = (new_index[edge.from as usize], new_index[edge.to as usize]);
+        if f == usize::MAX || t == usize::MAX {
+            removed[e] = true;
+        }
+        edge.from = f.min(u32::MAX as usize) as u32;
+        edge.to = t.min(u32::MAX as usize) as u32;
+    }
+    let mut i = 0;
+    g.nodes.retain(|_| {
+        i += 1;
+        !drop_node[i - 1]
+    });
+    Ok((g, removed))
+}
+
+/// A node's live edge slots (`.tgr` order, first four, removed edges empty).
+fn live_slots(g: &Graph, removed: &[bool], n: usize) -> [Option<usize>; 4] {
+    let mut s = [None; 4];
+    for (k, &e) in g.nodes[n].edges.iter().take(4).enumerate() {
+        if !removed[e as usize] {
+            s[k] = Some(e as usize);
+        }
+    }
+    s
+}
+
+/// `0x141feb9d0`: removes a node. Two edges of one type with the far nodes at the node's
+/// height merge into one through it (`0x141fec1c0`: the first edge takes the second's far
+/// node, the node's position and the second edge's points); a room node with two or more
+/// edges only loses its room; anything else goes with its edges (`0x141fec520`).
+fn remove_node(g: &mut Graph, removed: &mut [bool], dropped: &mut [bool], n: usize) {
+    let slots: Vec<usize> = live_slots(g, removed, n).into_iter().flatten().collect();
+    let height = |g: &Graph, i: usize| g.nodes[i].values.get(1).copied().unwrap_or(0);
+    let other = |g: &Graph, e: usize| if g.edges[e].from as usize == n { g.edges[e].to as usize } else { g.edges[e].from as usize };
+    if slots.len() == 2 {
+        let (e1, e2) = (slots[0], slots[1]);
+        let (o1, o2) = (other(g, e1), other(g, e2));
+        if g.edges[e1].edge_type.eq_ignore_ascii_case(&g.edges[e2].edge_type) && height(g, o1) == height(g, n) && height(g, o2) == height(g, n) {
+            let e1_from = g.edges[e1].from as usize == n;
+            let e2_from = g.edges[e2].from as usize == n;
+            // e2's slot at its far node: cleared, then e1 takes that node's first free slot.
+            removed[e2] = true;
+            let free = live_slots(g, removed, o2).iter().position(|s| s.is_none());
+            if let Some(k) = free {
+                if k < g.nodes[o2].edges.len() {
+                    g.nodes[o2].edges[k] = e1 as u32;
+                } else {
+                    g.nodes[o2].edges.push(e1 as u32);
+                }
+            }
+            if e1_from { g.edges[e1].from = o2 as u32 } else { g.edges[e1].to = o2 as u32 }
+            // Points: the node, then e2's (running away from the node).
+            let pos = (g.nodes[n].x, g.nodes[n].y);
+            let mut far: Vec<(i32, i32)> = g.edges[e2].points.clone();
+            if !e2_from {
+                far.reverse();
+            }
+            // `far` now runs node → o2.
+            let pts = &mut g.edges[e1].points;
+            if e1_from {
+                // e1 now starts at o2: o2 … node, then e1's own points.
+                let mut v: Vec<(i32, i32)> = far.into_iter().rev().collect();
+                v.push(pos);
+                v.extend(pts.iter().copied());
+                *pts = v;
+            } else {
+                pts.push(pos);
+                pts.extend(far);
+            }
+            dropped[n] = true;
+            return;
+        }
+    }
+    if slots.len() >= 2 && !g.nodes[n].room_type.is_empty() {
+        g.nodes[n].room_type.clear();
+        g.nodes[n].tags.clear();
+        g.nodes[n].orientation = "(any)".into();
+        return;
+    }
+    for e in slots {
+        removed[e] = true;
+    }
+    dropped[n] = true;
+}
+
+/// The `shuffle` / `shuffle<N>` groups (by N, in node order): while a group holds two or more
+/// nodes, two draws pick nodes that leave it, and two different ones swap room type and tags
+/// (positions and orientations stay).
+fn shuffle_nodes(g: &mut Graph, dropped: &[bool], rng: &mut TerrainRng) {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (i, n) in g.nodes.iter().enumerate() {
+        if dropped[i] {
+            continue;
+        }
+        let Some(t) = n.tags.iter().find(|t| t.starts_with("shuffle")) else { continue };
+        let rest = &t["shuffle".len()..];
+        let k = if rest.is_empty() {
+            0
+        } else {
+            match rest.trim().parse::<i32>() {
+                Ok(v) if v >= 0 => v as usize,
+                _ => continue,
+            }
+        };
+        if groups.len() <= k {
+            groups.resize(k + 1, Vec::new());
+        }
+        groups[k].push(i);
+    }
+    for mut list in groups {
+        while list.len() > 1 {
+            let n = list.len() as u32;
+            let a = list[rng.below(n) as usize];
+            let b = list[rng.below(n) as usize];
+            list.retain(|&x| x != a);
+            list.retain(|&x| x != b);
+            if a != b {
+                let (ra, ta) = (g.nodes[a].room_type.clone(), g.nodes[a].tags.clone());
+                g.nodes[a].room_type = g.nodes[b].room_type.clone();
+                g.nodes[a].tags = g.nodes[b].tags.clone();
+                g.nodes[b].room_type = ra;
+                g.nodes[b].tags = ta;
+            }
+        }
+    }
+}
+
+/// `0x141d14d10`: an edge type that a mirrored region leaves alone (no height change, the same
+/// ground either side, and for a virtual edge a symmetric split).
+fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, et: &str) -> Result<bool, GenError> {
+    let t = types.edge(files, et)?.clone();
+    if t.height_change != 0 || t.grounds[0] != t.grounds[1] {
+        return Ok(false);
+    }
+    if !t.virtual_edge {
+        return Ok(true);
+    }
+    if t.splits[0].0 != t.splits[1].0 || t.splits[0].1 != t.splits[1].1 {
+        return Ok(false);
+    }
+    edge_symmetric(types, files, &t.splits[0].0)
 }
 
 /// Everything after the topology choice, for one graph.
@@ -123,15 +376,8 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
 }
 
 fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
-    // Edge existence (`0x141feeaf0`).
-    let removed: Vec<bool> = graph
-        .edges
-        .iter()
-        .map(|e| {
-            let exist = e.values.first().copied().unwrap_or(100);
-            !(exist != 0 && (rng.below(100) as i32) < exist)
-        })
-        .collect();
+    let (pruned, removed) = prune(graph, rng)?;
+    let graph = &pruned;
     let mut nodes: Vec<JitterNode> = graph
         .nodes
         .iter()

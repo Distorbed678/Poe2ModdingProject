@@ -198,15 +198,6 @@ fn alignment(view: &LayoutView, node: usize, types: &mut TerrainTypes, files: &d
     Ok(a)
 }
 
-/// `0x141fe7400` (region orientation 0): a remainder above half the alignment rounds up.
-fn snap(v: i32, align: i32) -> i32 {
-    if align <= 1 {
-        return v;
-    }
-    let r = v.rem_euclid(align);
-    v - r + if r > align / 2 { align } else { 0 }
-}
-
 /// `0x1420c59e0`: keep a tile `margin` tiles (twice for virtual edges) off the map border on
 /// each side its key has an edge.
 fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<String>; 4], margin: i32, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
@@ -262,8 +253,11 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen
         }
         let c = list[i].clone();
         let (w, h) = (c.size.0 as i32, c.size.1 as i32);
-        let px = snap((cx - w / 2).max(0), align).max(0).min(tiles.0 - w);
-        let py = snap((cy - h / 2).max(0), align).max(0).min(tiles.1 - h);
+        let ro = view.graph.region;
+        let c0 = (crate::region::centred(ro, cx, w, true).max(0), crate::region::centred(ro, cy, h, false).max(0));
+        let (sx, sy) = crate::region::snap(ro, c0, align);
+        let px = sx.max(0).min(tiles.0 - w);
+        let py = sy.max(0).min(tiles.1 - h);
         let inside = px >= 0 && py >= 0 && px + w <= tiles.0 && py + h <= tiles.1;
         let overlaps = chosen.iter().any(|p| px < p.pos.0 + p.size.0 as i32 && p.pos.0 < px + w && py < p.pos.1 + p.size.1 as i32 && p.pos.1 < py + h);
         if inside && map.free(px, py, w, h) && !overlaps {
@@ -328,7 +322,7 @@ pub fn place_node_tiles(lg: &mut LayoutGraph, graph: &Graph, nodes: &[usize], ma
     }
     repel(lg, graph, &mut chosen, map, tiles, types, files)?;
     for t in &chosen {
-        place(lg, t, master, map, types, files)?;
+        place(lg, graph.region, t, master, map, types, files)?;
     }
     Ok(chosen)
 }
@@ -413,9 +407,10 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
         let (w, h) = (t.size.0 as i32, t.size.1 as i32);
         let cx = (nx / 23).min(tiles.0 - 1);
         let cy = (ny / 23).min(tiles.1 - 1);
-        let x = (cx - w / 2).max(0).min(tiles.0 - w);
-        let y = (cy - h / 2).max(0).min(tiles.1 - h);
-        let (sx, sy) = (snap(x, t.align), snap(y, t.align));
+        let ro = graph.region;
+        let x = crate::region::centred(ro, cx, w, true).max(0).min(tiles.0 - w);
+        let y = crate::region::centred(ro, cy, h, false).max(0).min(tiles.1 - h);
+        let (sx, sy) = crate::region::snap(ro, (x, y), t.align);
         if sx < tiles.0 && sx + w <= tiles.0 && sy < tiles.1 && sy + h <= tiles.1 && map.free(sx, sy, w, h) {
             t.pos = (sx, sy);
         }
@@ -436,8 +431,8 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
 
 /// `0x1420c9970`: the tile into the map, the node's edges cut at the tile and ended at its
 /// exits (`0x1420c5750`, `0x1420c5b50`), the node split per exit (`0x141ef2800`).
-fn place(lg: &mut LayoutGraph, t: &NodeTile, master: &Master, map: &mut TileMap, types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
-    let pos = (snap(t.pos.0, t.align), snap(t.pos.1, t.align));
+fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &mut TileMap, types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
+    let pos = crate::region::snap(region, t.pos, t.align);
     let def = &master.tiles.tiles[t.tile];
     map.place(pos.0, pos.1, &def.path, &def.tdt, t.orientation, 0, Some(t.tile));
     let (rx, ry) = (pos.0 * 23, pos.1 * 23);

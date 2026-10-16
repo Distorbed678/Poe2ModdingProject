@@ -16,6 +16,7 @@ pub mod graph;
 pub mod hash;
 pub mod lattice;
 pub mod outer_buffer;
+pub mod region;
 pub mod layout;
 pub mod node_tiles;
 pub mod rng;
