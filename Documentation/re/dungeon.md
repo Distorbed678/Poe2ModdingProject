@@ -45,7 +45,69 @@ not started (this file records the reverse engineering as it goes).
 - `0x1420966f0` (edge pick): the node's side edges weighted by edge +0x54 (`below(sum)`,
   `0x142096813`; two weight-100 edges give `below(200)`); returns the edge's +0x70 resource.
 
+## File fields (`0x14292e8e0`)
+
+- Header after the three ground lines: `Default%:` branching, extra door, fuzzy %; version > 22: a
+  bool `open_extra_doors_into_impenetrable_rooms`.
+- Node: the `.tgr` fields (`0x142aa4ad0`: x, y, edge indices, type, orientation, descriptions,
+  exist %, height, priority, deletion behaviour, lock orientation, random offset ×4), then void
+  (`N`/`Y`) and branching (0/1). The builder `0x142096220` keeps type at node +0x20, orientation
+  +0x40, priority +0x42 (sort key), exist % +0x44, height +0x48, void +0x88, branching +0x89.
+- Edge: the `.tgr` fields (`0x142aa5470`: from, to, points, exist %, chirality, priority, type),
+  then branching chance2, chance1, depth limit, branching type, extra door %, extra door type
+  (default `Metadata/Terrain/Dungeon/rooms.et`), fuzzy %, impenetrability, impenetrable value
+  (`P`/…), void, accessibility. The builder `0x1420962d0` stores: +0x30 exist %, +0x38 type,
+  +0x40 priority, +0x41 chirality, +0x48 chance1, +0x4c chance2, +0x50 depth limit, +0x54 extra
+  door %, +0x58 fuzzy %, +0x5c impenetrability, +0x60 impenetrable, +0x61 void, +0x62
+  accessible, +0x68 branching type, +0x70 extra door type.
+- Node side slots (+0x58..+0x78): `0x141d1c580` gives each edge, in file order, the first free
+  slot of both its nodes (so a node's slots are its edges by edge index).
+
+## Rooms (`RoomSet`, `0x141f9aa30` / `0x141f99b20` / `0x141f98bb0`)
+
+- The room type is the `.arm` tag (the quoted string after the sizes; `specialchance N` /
+  `special…` prefixes mark special rooms). Shrine, mission, preunique and injector types go to
+  separate lists.
+- `.arm` exit data (`0x142931cf0`): 2×(units X + units Y) entries around the room, each a door
+  type (string index, 0 = none), a height, (v>29) a height override flag, and for chiral door
+  types a chirality and (v>29) its override. Order: top left→right, right top→bottom, bottom
+  right→left, left bottom→top (`0x1420af280`).
+- Per type, every orientation the `.rs` entry allows becomes a candidate (0x60 bytes: room,
+  orientation, units W×H turned, exits turned, `.rs` weight). Turning (`0x141f964f0`,
+  `0x141d00fd0`): index i → (i' + A[o]·h + B[o]·w) mod 2(w+h), with i' = 2(w+h)−1−i for
+  mirrored orientations (4..7), A = [0,1,1,2,0,1,1,2], B = [0,0,1,1,1,1,2,2]; mirroring flips
+  chirality on chiral door types.
+- `GetPossibleRooms(type, exits, n)` (`0x141f9b8f0`, filter `0x141f9b7a0`): candidates whose exit
+  multiset (door type, height, chirality) contains the node's required exits.
+  `GetExactRooms` (`0x141f9b130`) serves `(best)` nodes; `GetFeatureRooms` (`0x141f8b740`) is the
+  fallback (all 8 orientations, weight 1).
+
+## Typed nodes (`0x1420ae750`)
+
+1. Required exits: per side slot, the edge's type, max(height of its nodes) − node height, and
+   chirality (`0x141f96730`: (edge from == node) xor edge chirality, chiral door types only).
+2. Candidates as above; each is kept when the node orientation is `(any)`/`(best)` or equal to
+   the candidate's, and the room fits (`0x1420af280`): its unit cells are free (state ≤ 1) and at
+   least as many of its doors lead into the grid as the node has edges. A door facing a placed
+   room whose matching door differs marks the candidate; marked candidates are dropped when
+   unmarked ones remain.
+3. `below(total)` (`0x1420aebc9`). Origin (`0x1420aefc0`): the node's unit cell minus the room's
+   extent on mirrored axes (region orientation table), clamped into the grid. If a room next to
+   that rectangle is the same `.arm` (`0x1420b1550`), one more `below(total)`.
+4. `0x1420966f0`: the node's side slots weighted by extra door % (`below(sum)`, `0x142096813`),
+   giving the extra door type.
+5. Stamp (`0x1420a73d0`, `0x1420a6fb0`): grid cells = room index + 2; the placed record keeps
+   origin, size, orientation and the exits turned back through the inverse orientation
+   (`0x142f087d0`).
+
+Nodes are placed typed first, then typeless (`0x1420aa500`), each list stable-sorted by priority
+(descending).
+
 ## Trace landmarks (G1_3 seed 1001)
+
+The client used topology 2 (`mudburrows_NW.dgr`) with orientation 4: the placed rooms (entrance
+1×2 at unit (4,4), boss 2×2 at (0,0), `nospecial` at (2,0) and (0,2)) and the draws (room picks
+1, 4, 1, 4; extra door sums 200 each) fit only that.
 
 The draws match the `.tgr` path for the first 11 (existence rolls `0x141feeb10`); the dungeon
 starts at draw 11 (`0x1420aebc9`). Later call sites: `0x1420aff12` (`below(2964)`),
