@@ -168,6 +168,11 @@ struct DungeonRoom {
     mask: u8,
     units: (u32, u32),
     exits: Vec<Exit>,
+    /// The root slot's corner grounds (room data +0x13a): top-left, top-right, bottom-right,
+    /// bottom-left.
+    corners: [Option<String>; 4],
+    /// Room data +9: no tag, one ground on all corners, no doors (a filler room).
+    blank: bool,
 }
 
 /// A room candidate (`RoomSet` entry): a room turned by `o`.
@@ -283,7 +288,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         .map(|r| {
             let arm = &r.room.arm;
             let units = (arm.numbers1.first().copied().unwrap_or(1), arm.numbers1.get(1).copied().unwrap_or(1));
-            let exits = arm
+            let exits: Vec<Exit> = arm
                 .thingies
                 .iter()
                 // Version > 29 puts a height override flag before the chirality.
@@ -297,7 +302,12 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             let generic = !special && !matches!(tag.as_str(), "shrine" | "mission" | "stonecircle" | "preunique") && !tag.starts_with("telepad_injector") && !tag.starts_with("room_injector") && !tag.starts_with("tile_injector");
             let unique = arm.bools.first().copied().unwrap_or(false);
-            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits }
+            let corners: [Option<String>; 4] = match &arm.root_slot {
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) => k.corners.clone().map(|c| c.ground.map(|g| g.to_ascii_lowercase().replace('\\', "/"))),
+                _ => Default::default(),
+            };
+            let blank = r.tag.is_empty() && corners.iter().all(|c| *c == corners[0]) && exits.iter().all(|e: &Exit| e.door.is_none());
+            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits, corners, blank }
         })
         .collect();
     for r in &rooms {
@@ -516,10 +526,18 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
     corridors(files, graph, removed, &fields, &rooms, &sizes, &mut grid, &mut types, rng)?;
-    // `0x1420a9590` (open door counts) and `0x1420b19f0` (ground spreading) draw nothing; then
-    // the special rooms (`0x1420aa710`). The request-driven steps after it (`0x1420aab60` /
-    // `0x1420aacf0` extra rooms, `0x1420abf60` shrines) have nothing to place for a plain area.
+    // `0x1420a9590` (open door counts) draws nothing; filler rooms (`0x1420b19f0`), the special
+    // rooms (`0x1420aa710`; the request-driven steps after it, `0x1420aab60` / `0x1420aacf0`
+    // extra rooms and `0x1420abf60` shrines, have nothing to place for a plain area), then the
+    // reserved cells are freed and the filler rooms run again.
+    filler_rooms(&rooms, &mut grid, &mut types, files, rng)?;
     special_rooms(files, &rooms, &mut grid, &mut types, rng)?;
+    for c in grid.cells.iter_mut() {
+        if *c == 1 {
+            *c = 0;
+        }
+    }
+    filler_rooms(&rooms, &mut grid, &mut types, files, rng)?;
     Ok(grid)
 }
 
@@ -2060,4 +2078,191 @@ fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exi
         }
     }
     defaults == 0 || skipped != defaults
+}
+
+/// `0x1420b19f0`: room sides whose two corners share a ground spread it into the empty cells
+/// beyond (`0x1420b1bd0`, per room in order: right, bottom, left, top sides); grounds with
+/// `.gt` flag 2 first, each pass repeated while it places anything.
+fn filler_rooms(rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let _ = types;
+    let mut flags: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
+    let mut gt = |g: &str| -> Result<u8, GenError> {
+        if let Some(&f) = flags.get(g) {
+            return Ok(f);
+        }
+        let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(g)?));
+        flags.insert(g.to_string(), f);
+        Ok(f)
+    };
+    // `0x142f087d0` (inverse orientation) and the corner turn table.
+    const INV: [usize; 9] = [0, 3, 2, 1, 4, 5, 6, 7, 8];
+    const T: [[usize; 4]; 9] = [[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1], [3, 0, 1, 2], [1, 0, 3, 2], [2, 1, 0, 3], [3, 2, 1, 0], [0, 3, 2, 1], [0, 1, 2, 3]];
+    for pass in [true, false] {
+        loop {
+            let mut placed = false;
+            let mut i = 0;
+            while i < grid.rooms.len() {
+                let p = grid.rooms[i].clone();
+                i += 1;
+                if p.is_placeholder() {
+                    continue;
+                }
+                let Some(r) = rooms.iter().find(|r| r.path == p.path) else { continue };
+                let t = T[INV[(p.orientation as usize).min(8)]];
+                let c: [Option<String>; 4] = [0, 1, 2, 3].map(|k| r.corners[t[k]].clone());
+                let (x, y, w, h) = (p.origin.0, p.origin.1, p.size.0 as i32, p.size.1 as i32);
+                let n = p.exits.len() as i32;
+                let mut side = |grid: &mut Grid, g: &Option<String>, cells: Vec<((i32, i32), i32)>, rng: &mut TerrainRng| -> Result<bool, GenError> {
+                    let f = match g {
+                        Some(g) => gt(g)? & 2 != 0,
+                        None => false,
+                    };
+                    if f != pass {
+                        return Ok(false);
+                    }
+                    let mut any = false;
+                    for (pos, k) in cells {
+                        let height = p.height + p.exits[k as usize].height;
+                        any |= spread(rooms, grid, pos, g.clone(), height, &mut gt, rng)?;
+                    }
+                    Ok(any)
+                };
+                if x + w < grid.w as i32 && c[1] == c[2] {
+                    placed |= side(grid, &c[1], (0..h).map(|k| ((x + w, y + k), w + k)).collect(), rng)?;
+                }
+                if y + h < grid.h as i32 && c[2] == c[3] {
+                    placed |= side(grid, &c[2], (0..w).map(|k| ((x + k, y + h), 2 * w + h - 1 - k)).collect(), rng)?;
+                }
+                if x != 0 && c[3] == c[0] {
+                    placed |= side(grid, &c[3], (0..h).map(|k| ((x - 1, y + k), n - k - 1)).collect(), rng)?;
+                }
+                if y != 0 && c[0] == c[1] {
+                    placed |= side(grid, &c[0], (0..w).map(|k| ((x + k, y - 1), k)).collect(), rng)?;
+                }
+            }
+            if !placed {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `0x1420b23a0`: a filler room of `ground` at the empty cell `pos`: a size from the ground's
+/// size list (`below(total)`, dropped and redrawn when it does not fit), placed so that it
+/// covers `pos` (`0x1420b2bb0`).
+fn spread(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), ground: Option<String>, height: i32, gt: &mut dyn FnMut(&str) -> Result<u8, GenError>, rng: &mut TerrainRng) -> Result<bool, GenError> {
+    if grid.state(pos) != Some(0) {
+        return Ok(false);
+    }
+    let accessible = match &ground {
+        None => true,
+        Some(g) => gt(g)? & 4 != 0,
+    };
+    // The ground's size list (`0x141f98bb0`, room set +0x98): per filler room in `.rs` order
+    // its size, and the turned size when it is not square, each with the room's weight.
+    let mut sizes: Vec<((u32, u32), u32)> = Vec::new();
+    for r in rooms.iter().filter(|r| r.blank && r.corners[0] == ground) {
+        let (w, h) = r.units;
+        sizes.push(((w, h), r.weight));
+        if w != h {
+            sizes.push(((h, w), r.weight));
+        }
+    }
+    sizes.retain(|e| e.1 != 0);
+    if sizes.is_empty() {
+        return Ok(false);
+    }
+    let pick = |list: &[((u32, u32), u32)], mut v: u32| {
+        for e in list {
+            if v < e.1 {
+                return e.0;
+            }
+            v -= e.1;
+        }
+        list[list.len() - 1].0
+    };
+    let total: u32 = sizes.iter().map(|e| e.1).sum();
+    let mut size = pick(&sizes, rng.below(total));
+    if place_filler(rooms, grid, pos, size, &ground, height, accessible, rng)? {
+        return Ok(true);
+    }
+    if sizes.len() == 1 {
+        return Ok(false);
+    }
+    // A size that does not fit drops its first entry; the rest is drawn from again.
+    let mut list = sizes;
+    if let Some(k) = list.iter().position(|e| e.0 == size) {
+        list.remove(k);
+    }
+    while !list.is_empty() {
+        let total: u32 = list.iter().map(|e| e.1).sum();
+        size = pick(&list, rng.below(total));
+        if let Some(k) = list.iter().position(|e| e.0 == size) {
+            list.remove(k);
+        }
+        if place_filler(rooms, grid, pos, size, &ground, height, accessible, rng)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// `0x1420b2bb0` / `0x1420b2930`: the first free spot of `size` covering `pos` (its corner at
+/// `pos`, then shifted left, up, up-left); the room drawn by weight among the ground's filler
+/// rooms of that size, its orientation by `below(840)` among those giving the size.
+#[allow(clippy::too_many_arguments)]
+fn place_filler(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), size: (u32, u32), ground: &Option<String>, height: i32, accessible: bool, rng: &mut TerrainRng) -> Result<bool, GenError> {
+    let (w, h) = (size.0 as i32, size.1 as i32);
+    let (x, y) = pos;
+    let spots: Vec<(i32, i32)> = match (w >= 2, h >= 2) {
+        (false, false) => vec![(x, y)],
+        (false, true) => vec![(x, y), (x, y - h + 1)],
+        (true, false) => vec![(x, y), (x - w + 1, y)],
+        (true, true) => vec![(x, y), (x - w + 1, y), (x, y - h + 1), (x - w + 1, y - h + 1)],
+    };
+    for o in spots {
+        if o.0 < 0 || o.1 < 0 || o.0 + w > grid.w as i32 || o.1 + h > grid.h as i32 || !(0..h).all(|dy| (0..w).all(|dx| grid.state((o.0 + dx, o.1 + dy)) == Some(0))) {
+            continue;
+        }
+        // `0x141f9bb50`: the ground's filler rooms of this size.
+        let mut list: Vec<(usize, u8, u32)> = Vec::new();
+        for (ri, r) in rooms.iter().enumerate() {
+            if !r.blank || r.corners[0] != *ground {
+                continue;
+            }
+            let mut mask = 0u8;
+            for ob in 0..8u8 {
+                if r.mask != 0 && r.mask >> ob & 1 == 0 {
+                    continue;
+                }
+                let s = if ob & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
+                if s == size {
+                    mask |= 1 << ob;
+                }
+            }
+            if mask != 0 {
+                list.push((ri, mask, r.weight));
+            }
+        }
+        if list.is_empty() {
+            return Ok(false);
+        }
+        let total: u32 = list.iter().map(|e| e.2).sum();
+        let mut v = rng.below(total);
+        let mut k = list.len() - 1;
+        for (j, e) in list.iter().enumerate() {
+            if v < e.2 {
+                k = j;
+                break;
+            }
+            v -= e.2;
+        }
+        let ob = crate::region::pick(list[k].1, rng.below(840));
+        let r = &rooms[list[k].0];
+        let exits = grid.turned(r.units.0, r.units.1, &r.exits, ob);
+        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: o, size, orientation: ob, exits, extra_door: None, height, accessible, blocked: false, extra_pct: 0, door_type: None, special: false })?;
+        return Ok(true);
+    }
+    Ok(false)
 }
