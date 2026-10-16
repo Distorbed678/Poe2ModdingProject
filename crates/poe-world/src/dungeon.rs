@@ -1879,9 +1879,10 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
                 }
                 for pos in corners {
                     if split_fits(grid, rooms, *size, exits, pos) {
-                        match split.iter_mut().find(|e| e.0 == pos) {
-                            Some(e) => e.1.push((si, o as u8, *size)),
-                            None => split.push((pos, vec![(si, o as u8, *size)])),
+                        // `0x1420cef60`: kept sorted by x·65536 + y.
+                        match split.binary_search_by_key(&(pos.0 * 0x10000 + pos.1), |e| e.0.0 * 0x10000 + e.0.1) {
+                            Ok(k) => split[k].1.push((si, o as u8, *size)),
+                            Err(k) => split.insert(k, (pos, vec![(si, o as u8, *size)])),
                         }
                     }
                 }
