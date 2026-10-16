@@ -359,7 +359,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             virtual_end |= types.edge(files, &graph.edges[ei as usize].edge_type)?.virtual_edge;
         }
         let fixed = placed.iter().any(|p| p.node == i);
-        lg.nodes.push(poe_world::smoothing::LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end });
+        lg.nodes.push(poe_world::smoothing::LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end, orig: Some(i) });
     }
     for (gi, e) in graph.edges.iter().enumerate() {
         let ri = route_index[gi];
@@ -394,7 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 first = false;
             } else {
                 let nn = lg.nodes.len();
-                lg.nodes.push(poe_world::smoothing::LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false });
+                lg.nodes.push(poe_world::smoothing::LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None });
                 if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
                 lg.nodes[node].slots[k] = None;
             }

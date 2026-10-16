@@ -229,6 +229,8 @@ pub struct LNode {
     pub fixed: bool,
     /// `+0x89`: next to a virtual edge's end (`0x1420c7400`, then the virtual split).
     pub virtual_end: bool,
+    /// The `.tgr` node this is (None for nodes made later).
+    pub orig: Option<usize>,
 }
 
 /// An edge of the layout graph.
@@ -257,6 +259,26 @@ pub struct LEdge {
 pub struct LayoutGraph {
     pub nodes: Vec<LNode>,
     pub edges: Vec<LEdge>,
+    /// Logical links of tile-less virtual nodes (`0x1420c5ee0`): up to four nodes each (the
+    /// two edge ends, then the nodes the virtual split makes of them, `0x1420baf40`).
+    pub links: Vec<[Option<usize>; 4]>,
+    /// Links per node (`+0x90`/`+0x94`).
+    pub node_links: std::collections::BTreeMap<usize, Vec<usize>>,
+}
+
+impl LayoutGraph {
+    /// `0x1420baf40`: `node` split off `new`; the links holding `node` take `new` as its partner.
+    pub fn link_split(&mut self, node: usize, new: usize) {
+        let Some(ls) = self.node_links.get(&node).cloned() else { return };
+        for l in ls {
+            let link = &mut self.links[l];
+            if link[0] == Some(node) && link[2].is_none() {
+                link[2] = Some(new);
+            } else if link[1] == Some(node) && link[3].is_none() {
+                link[3] = Some(new);
+            }
+        }
+    }
 }
 
 impl LayoutGraph {

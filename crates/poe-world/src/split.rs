@@ -88,7 +88,7 @@ impl LayoutGraph {
     }
 
     fn add_node(&mut self, pos: Pos) -> usize {
-        self.nodes.push(LNode { pos, slots: [None; 4], fixed: false, virtual_end: false });
+        self.nodes.push(LNode { pos, slots: [None; 4], fixed: false, virtual_end: false, orig: None });
         self.nodes.len() - 1
     }
 
@@ -284,6 +284,7 @@ fn split_chain(
             }
         };
         let new = g.add_node(vend[1]);
+        g.link_split(node, new);
         g.nodes[new].fixed = g.nodes[node].fixed;
         g.nodes[new].virtual_end = g.nodes[node].virtual_end;
         if cur == 0 { clone.from = new } else { clone.to = new }
@@ -322,6 +323,9 @@ fn split_chain(
                 if far == 0 { g.edges[ci].from = nn } else { g.edges[ci].to = nn }
             }
             let clone_far = g.endpoint(ci, far);
+            if clone_far != far_node {
+                g.link_split(far_node, clone_far);
+            }
             g.nodes[far_node].virtual_end = inside;
             g.nodes[clone_far].virtual_end = inside;
             g.nodes[clone_far].fixed = g.nodes[far_node].fixed;

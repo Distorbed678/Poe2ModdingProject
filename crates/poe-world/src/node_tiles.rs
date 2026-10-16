@@ -25,6 +25,13 @@ pub struct LayoutView<'a> {
     pub graph: &'a Graph,
 }
 
+impl LayoutView<'_> {
+    /// The `.tgr` node a layout node is.
+    pub fn gnode(&self, n: usize) -> Option<&crate::graph::Node> {
+        self.lg.nodes.get(n).and_then(|x| x.orig).and_then(|o| self.graph.nodes.get(o))
+    }
+}
+
 impl EdgeView for LayoutView<'_> {
     fn slots(&self, node: usize) -> [Option<usize>; 4] {
         self.lg.nodes[node].slots
@@ -54,7 +61,7 @@ impl EdgeView for LayoutView<'_> {
         if ed.from == node { ed.to } else { ed.from }
     }
     fn height(&self, node: usize) -> i32 {
-        self.graph.nodes.get(node).and_then(|n| n.values.get(1).copied()).unwrap_or(0)
+        self.gnode(node).and_then(|n| n.values.get(1).copied()).unwrap_or(0)
     }
 }
 
@@ -182,7 +189,7 @@ pub(crate) fn side_cost(view: &dyn EdgeView, node: usize, sides: &[usize; 4]) ->
 
 /// The node's alignment (`0x141ef3290`): an `align<N>` tag, else its largest edge size.
 fn alignment(view: &LayoutView, node: usize, types: &mut TerrainTypes, files: &dyn Files) -> Result<i32, GenError> {
-    if let Some(n) = view.graph.nodes.get(node) {
+    if let Some(n) = view.gnode(node) {
         for t in &n.tags {
             if let Some(v) = t.strip_prefix("align").and_then(|v| v.parse::<i32>().ok()) {
                 if v != 0 {
@@ -227,7 +234,7 @@ fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<Strin
 #[allow(clippy::too_many_arguments)]
 fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen: &[NodeTile], tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<NodeTile, GenError> {
     let (mut sides, key) = node_key(view, node, types, files)?;
-    let node_o = view.graph.nodes.get(node).map_or(8, |n| node_orientation(&n.orientation));
+    let node_o = view.gnode(node).map_or(8, |n| node_orientation(&n.orientation));
     let mut list = candidates(view, node, node_o, "", &key, &sides, &master.tiles, types, files)?;
     if list.is_empty() {
         return Err(GenError::Unsupported(format!("node {node}: no tile matches its edges {:?}", key.edges)));
@@ -304,8 +311,8 @@ pub(crate) fn quarter_turn(view: &dyn EdgeView, node: usize, sides: &[usize; 4],
 }
 
 /// Fixed axes of a node (`+0x8b`/`+0x8c`, the `.tgr` node values 9 and 10).
-fn fixed_axes(graph: &Graph, n: usize) -> (bool, bool) {
-    graph.nodes.get(n).map_or((false, false), |n| (n.values.get(9).copied().unwrap_or(0) != 0, n.values.get(10).copied().unwrap_or(0) != 0))
+fn fixed_axes(graph: &Graph, lg: &LayoutGraph, n: usize) -> (bool, bool) {
+    lg.nodes[n].orig.and_then(|o| graph.nodes.get(o)).map_or((false, false), |n| (n.values.get(9).copied().unwrap_or(0) != 0, n.values.get(10).copied().unwrap_or(0) != 0))
 }
 
 /// Places the tiles of `nodes` (in order) and rewires the layout graph to their exits.
@@ -384,7 +391,7 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
         let Some(push) = push else { continue };
         let (x, y) = lg.nodes[n].pos;
         let inside = x >= 0 && y >= 0 && x < wc && y < hc;
-        let (fx, fy) = fixed_axes(graph, n);
+        let (fx, fy) = fixed_axes(graph, lg, n);
         let mut q = (x, y);
         if !fx {
             q.0 += push.0;
@@ -475,7 +482,7 @@ fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &
             first = false;
         } else {
             let nn = lg.nodes.len();
-            lg.nodes.push(LNode { pos: end, slots: [Some(e), None, None, None], fixed: true, virtual_end: false });
+            lg.nodes.push(LNode { pos: end, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None });
             if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
             lg.nodes[node].slots[slot] = None;
         }
@@ -521,4 +528,315 @@ pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32)
         }
     }
     Ok(())
+}
+
+/// `0x1420c6cd0`, after smoothing: a virtual node no tile fitted. With three or more edges,
+/// its edges first drop the points within the widest edge's maximum width of it
+/// (`0x1420c6b80`); then, for each pair of neighbouring slots, a virtual edge next to a
+/// non-virtual one gets a virtual end point a random width (`below(max − min + 1) + min` of the
+/// virtual edge) from the node towards the other edge (`0x1420c6420`), filled into its end two
+/// points at a time and ordered (`0x1420c6860`). Last (any edge count ≥ 2), the node splits:
+/// each edge after the first moves to a new node at the same place (`0x1420c5ee0`).
+pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let slots = lg.nodes[n].slots;
+    let live: Vec<usize> = (0..4).filter(|&k| slots[k].is_some()).collect();
+    if live.len() < 2 {
+        return Err(GenError::Unsupported(format!("tile-less virtual node {n} with {} edges", live.len())));
+    }
+    let node = lg.nodes[n].pos;
+    if live.len() > 2 {
+        let r = live.iter().map(|&k| lg.edges[slots[k].unwrap()].width.1).max().unwrap_or(0);
+        for &k in &live {
+            let e = slots[k].unwrap();
+            let from = lg.edges[e].from == n;
+            let near = |p: &(i32, i32)| {
+                let (dx, dy) = ((p.0 - node.0).abs(), (p.1 - node.1).abs());
+                ((dx * dx + dy * dy) as u32) < (r * r) as u32
+            };
+            let pts = &mut lg.edges[e].points;
+            if from {
+                if let Some(i) = pts.iter().rposition(|p| near(p)) {
+                    pts.drain(..=i);
+                }
+            } else if let Some(i) = pts.iter().position(|p| near(p)) {
+                pts.truncate(i);
+            }
+        }
+        // The point next to the node on an edge, and the edge's end at the node.
+        let towards = |lg: &LayoutGraph, e: usize| -> (i32, i32) {
+            let ed = &lg.edges[e];
+            if ed.from == n {
+                ed.points.first().copied().unwrap_or(lg.nodes[ed.to].pos)
+            } else {
+                ed.points.last().copied().unwrap_or(lg.nodes[ed.from].pos)
+            }
+        };
+        let toward = |p: (i32, i32), w: i32| -> (i32, i32) {
+            let (dx, dy) = (p.0 - node.0, p.1 - node.1);
+            let d2 = dy * dy + dx * dx;
+            if ((w * w * 100) as u32) < ((d2 * 0x51) as u32) {
+                let d = crate::voronoi::isqrt(d2 as u32) as i32;
+                (dx * w / d + node.0, dy * w / d + node.1)
+            } else {
+                (dx * 9 / 10 + node.0, dy * 9 / 10 + node.1)
+            }
+        };
+        let mut pending: Vec<(usize, usize, (i32, i32))> = Vec::new();
+        for i in 0..live.len() {
+            let (a, b) = (slots[live[i]].unwrap(), slots[live[(i + 1) % live.len()]].unwrap());
+            let (va, vb) = (lg.edges[a].virtual_edge, lg.edges[b].virtual_edge);
+            match (va, vb) {
+                (false, false) => {}
+                (false, true) => {
+                    let (lo, hi) = lg.edges[b].width;
+                    let w = rng.below((hi - lo + 1) as u32) as i32 + lo;
+                    let v = toward(towards(lg, a), w);
+                    pending.push((b, (lg.edges[b].from != n) as usize, v));
+                }
+                (true, false) => {
+                    let (lo, hi) = lg.edges[a].width;
+                    let w = rng.below((hi - lo + 1) as u32) as i32 + lo;
+                    let v = toward(towards(lg, b), w);
+                    pending.push((a, (lg.edges[a].from != n) as usize, v));
+                }
+                (true, true) => {
+                    return Err(GenError::Unsupported(format!("tile-less virtual node {n}: two virtual edges side by side (0x1420c64f0) not ported")));
+                }
+            }
+        }
+        // `0x1420c6860`: two points per end, ordered by the side of the edge they fall on.
+        let mut first: std::collections::HashMap<(usize, usize), (i32, i32)> = Default::default();
+        for (e, end, v) in pending {
+            match first.remove(&(e, end)) {
+                None => {
+                    first.insert((e, end), v);
+                }
+                Some(mut p) => {
+                    let mut q2 = v;
+                    let ed = &lg.edges[e];
+                    let m = lg.nodes[if end == 0 { ed.from } else { ed.to }].pos;
+                    let q = if ed.from == if end == 0 { ed.from } else { ed.to } {
+                        ed.points.first().copied().unwrap_or(lg.nodes[ed.to].pos)
+                    } else {
+                        ed.points.last().copied().unwrap_or(lg.nodes[ed.from].pos)
+                    };
+                    let mut c = (p.1 - q.1) * (m.0 - q.0) - (p.0 - q.0) * (m.1 - q.1);
+                    let c2 = (m.0 - q.0) * (q2.1 - q.1) - (m.1 - q.1) * (q2.0 - q.0);
+                    if (c2 < 0) == (c < 0) {
+                        c = ((p.0 + q2.0) / 2 - m.0) * (p.1 - m.1) - (p.0 - m.0) * ((p.1 + q2.1) / 2 - m.1);
+                    }
+                    if c < 0 {
+                        std::mem::swap(&mut p, &mut q2);
+                    }
+                    lg.edges[e].vends[end] = Some([p, q2]);
+                }
+            }
+        }
+        if !first.is_empty() {
+            return Err(GenError::Unsupported(format!("tile-less virtual node {n}: an edge end got one virtual point")));
+        }
+    }
+    // `0x1420c5ee0`: one node per edge; neighbouring edges with a virtual one between them
+    // stay logically linked (their end nodes).
+    let ends: Vec<usize> = live.iter().map(|&k| slots[k].unwrap()).collect();
+    let mut end_nodes = vec![n];
+    for &k in live.iter().skip(1) {
+        let e = slots[k].unwrap();
+        let nn = lg.nodes.len();
+        lg.nodes.push(LNode { pos: node, slots: [Some(e), None, None, None], fixed: false, virtual_end: false, orig: None });
+        if lg.edges[e].from == n { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
+        lg.nodes[n].slots[k] = None;
+        end_nodes.push(nn);
+    }
+    for i in 0..ends.len() {
+        let j = (i + 1) % ends.len();
+        if lg.edges[ends[i]].virtual_edge || lg.edges[ends[j]].virtual_edge {
+            let (a, b) = (end_nodes[i], end_nodes[j]);
+            let l = lg.links.len();
+            lg.links.push([Some(a), Some(b), None, None]);
+            for x in [a, b] {
+                let v = lg.node_links.entry(x).or_default();
+                if v.len() >= 2 {
+                    return Err(GenError::Unsupported(format!("too many logical links for node {x}")));
+                }
+                v.push(l);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `0x142196290`: squared distance of `p` from the segment `a`–`b` as a fraction
+/// `(numerator, denominator)`.
+fn seg_dist(p: (i32, i32), a: (i32, i32), b: (i32, i32)) -> (i64, i64) {
+    let sq = |x: i64, y: i64| x * x + y * y;
+    let (px, py, ax, ay, bx, by) = (p.0 as i64, p.1 as i64, a.0 as i64, a.1 as i64, b.0 as i64, b.1 as i64);
+    if ax != bx {
+        let (dx, dy) = (bx - ax, by - ay);
+        let len2 = dx * dx + dy * dy;
+        let t = (px - ax) * dx + (py - ay) * dy;
+        if t < 1 {
+            (sq(px - ax, py - ay), 1)
+        } else if t < len2 {
+            let c = dy * (px - ax) - dx * (py - ay);
+            (c * c, len2)
+        } else {
+            (sq(px - bx, py - by), 1)
+        }
+    } else {
+        let (lo, hi) = if by < ay { ((bx, by), (ax, ay)) } else { ((ax, ay), (bx, by)) };
+        if py < lo.1 {
+            (sq(px - lo.0, py - lo.1), 1)
+        } else if py < hi.1 {
+            ((px - lo.0) * (px - lo.0), 1)
+        } else {
+            (sq(px - hi.0, py - hi.1), 1)
+        }
+    }
+}
+
+/// Live edges of a layout node, in slot order.
+fn degree(lg: &LayoutGraph, n: usize) -> usize {
+    lg.nodes[n].slots.iter().flatten().count()
+}
+
+/// Moves edge `e`'s end at `from` to `to` (`from`'s slot cleared, `to`'s first free slot).
+fn move_end(lg: &mut LayoutGraph, e: usize, from: usize, to: usize) {
+    if lg.edges[e].from == from { lg.edges[e].from = to } else { lg.edges[e].to = to }
+    if let Some(s) = lg.nodes[from].slots.iter_mut().find(|s| **s == Some(e)) {
+        *s = None;
+    }
+    if let Some(s) = lg.nodes[to].slots.iter_mut().find(|s| s.is_none()) {
+        *s = Some(e);
+    }
+}
+
+/// `0x1420bcff0`, after the virtual split: each logical link joins the nodes it holds at the
+/// same place (`0x1420bc630`, `0x1420bd1f0`: the node with one edge hands it to the other);
+/// a link without such pairs (`0x1420bc9a0`) hands the split virtual node nearest the plain
+/// edge to the plain node, which moves there. Emptied nodes are erased (later indices move
+/// up). Returns the linked nodes left with more than two edges (they join the tile list,
+/// `0x1420bd530`) and the old → new index map.
+pub fn resolve_links(lg: &mut LayoutGraph) -> Result<(Vec<usize>, Vec<Option<usize>>), GenError> {
+    let mut removed = vec![false; lg.nodes.len()];
+    let mut emptied: Vec<usize> = Vec::new();
+    let mut empty = |removed: &mut Vec<bool>, n: usize| {
+        if !removed[n] {
+            removed[n] = true;
+            emptied.push(n);
+        }
+    };
+    for l in 0..lg.links.len() {
+        let link = lg.links[l];
+        let (Some(p0), Some(p1)) = (link[0], link[1]) else {
+            return Err(GenError::Unsupported("bad logical link".into()));
+        };
+        let cand: Vec<usize> = link.iter().flatten().copied().filter(|&n| !removed[n]).collect();
+        let mut pairs = Vec::new();
+        for i in 0..cand.len() {
+            for j in i + 1..cand.len() {
+                if lg.nodes[cand[i]].pos == lg.nodes[cand[j]].pos {
+                    pairs.push((cand[i], cand[j]));
+                }
+            }
+        }
+        if pairs.is_empty() {
+            // `0x1420bc9a0`
+            let (plain, v1, v2) = match (link[2], link[3]) {
+                (None, Some(s3)) => (p0, p1, s3),
+                (Some(s2), None) => (p1, p0, s2),
+                _ => return Err(GenError::Unsupported("logical link without exactly one split node".into())),
+            };
+            let deg = degree(lg, plain);
+            let pp = lg.nodes[plain].pos;
+            let choose_v1 = match deg {
+                1 => {
+                    if removed[v1] && removed[v2] {
+                        continue;
+                    }
+                    let e = lg.nodes[plain].slots.iter().flatten().copied().next().unwrap();
+                    let ed = &lg.edges[e];
+                    let q = if ed.from == plain {
+                        ed.points.first().copied().unwrap_or(lg.nodes[ed.to].pos)
+                    } else {
+                        ed.points.last().copied().unwrap_or(lg.nodes[ed.from].pos)
+                    };
+                    if removed[v2] {
+                        true
+                    } else if !removed[v1] {
+                        let a = seg_dist(lg.nodes[v1].pos, q, pp);
+                        let b = seg_dist(lg.nodes[v2].pos, q, pp);
+                        a.0 * b.1 < b.0 * a.1
+                    } else {
+                        false
+                    }
+                }
+                d if d > 2 => continue,
+                _ => {
+                    let d2 = |n: usize| {
+                        let (dx, dy) = ((lg.nodes[n].pos.0 - pp.0) as i64, (lg.nodes[n].pos.1 - pp.1) as i64);
+                        dx * dx + dy * dy
+                    };
+                    d2(v1) < d2(v2)
+                }
+            };
+            let chosen = if choose_v1 { v1 } else { v2 };
+            let edges: Vec<usize> = lg.nodes[chosen].slots.iter().flatten().copied().collect();
+            for e in edges {
+                move_end(lg, e, chosen, plain);
+            }
+            lg.nodes[plain].pos = lg.nodes[chosen].pos;
+            lg.nodes[plain].virtual_end = false;
+            empty(&mut removed, chosen);
+        } else {
+            for (p, q) in pairs {
+                let (from, to) = if degree(lg, p) == 1 { (p, q) } else { (q, p) };
+                for x in [p, q] {
+                    for &li in lg.node_links.get(&x).cloned().unwrap_or_default().iter() {
+                        for slot in lg.links[li].iter_mut() {
+                            if *slot == Some(from) {
+                                *slot = Some(to);
+                            }
+                        }
+                    }
+                }
+                if let Some(e) = lg.nodes[from].slots.iter().flatten().copied().next() {
+                    move_end(lg, e, from, to);
+                }
+                if degree(lg, from) == 0 {
+                    empty(&mut removed, from);
+                }
+            }
+        }
+    }
+    let mut tiles = Vec::new();
+    for link in lg.links.clone() {
+        for n in link.into_iter().flatten() {
+            if !removed[n] && degree(lg, n) > 2 && !tiles.contains(&n) {
+                tiles.push(n);
+            }
+        }
+    }
+    lg.links.clear();
+    lg.node_links.clear();
+    // Erase the emptied nodes.
+    let mut map = vec![None; lg.nodes.len()];
+    let mut k = 0;
+    for (i, m) in map.iter_mut().enumerate() {
+        if !removed[i] {
+            *m = Some(k);
+            k += 1;
+        }
+    }
+    let mut i = 0;
+    lg.nodes.retain(|_| {
+        i += 1;
+        !removed[i - 1]
+    });
+    for e in lg.edges.iter_mut() {
+        e.from = map[e.from].ok_or_else(|| GenError::Unsupported("edge at an erased node".into()))?;
+        e.to = map[e.to].ok_or_else(|| GenError::Unsupported("edge at an erased node".into()))?;
+    }
+    let tiles = tiles.into_iter().filter_map(|n| map[n]).collect();
+    Ok((tiles, map))
 }
