@@ -48,7 +48,7 @@ impl EdgeFields {
             fuzzy: int(6)?,
             impenetrability: int(7)?,
             impenetrable: s(8),
-            void: s(9).eq_ignore_ascii_case("Y"),
+            void: s(9).eq_ignore_ascii_case("V"),
             accessible: int(10)? != 0,
         })
     }
@@ -208,12 +208,14 @@ pub struct PlacedRoom {
     pub door_type: Option<String>,
     /// Kind 8 (+0x14): a special room placed over a generic one (`0x1420a7da0`).
     pub special: bool,
+    /// A `graph` node's subgraph (`0x1420adfd0`): the rectangle another graph fills later.
+    pub subgraph: Option<String>,
 }
 
 impl PlacedRoom {
     /// A placeholder (no `.arm` yet; room +0 null).
     pub fn is_placeholder(&self) -> bool {
-        self.path.is_empty()
+        self.path.is_empty() && self.subgraph.is_none()
     }
 }
 
@@ -355,7 +357,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     typeless.sort_by_key(|&n| std::cmp::Reverse(priority(n)));
     let _ = &typeless;
 
-    let void = |n: usize| graph.nodes[n].extra.first().is_some_and(|v| v.eq_ignore_ascii_case("Y"));
+    let void = |n: usize| graph.nodes[n].extra.first().is_some_and(|v| v.eq_ignore_ascii_case("V"));
     // `0x142095d90`: an accessible edge, or an `accessible` / `default` / `entrance…` /
     // `sideentrance…` tag.
     let node_accessible = |n: usize| {
@@ -375,6 +377,23 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             continue;
         }
         let node = &graph.nodes[n];
+        // `0x1420adfd0`: a `graph` node reserves its subgraph's rectangle (tags: graph file or
+        // file group, width, height; turned with the region).
+        if node.room_type.eq_ignore_ascii_case("graph") {
+            let tag = |i: usize| node.tags.get(i).cloned().unwrap_or_default();
+            let file = tag(0);
+            let lower = file.to_ascii_lowercase();
+            if !lower.ends_with(".dgr") && !lower.ends_with(".tgr") {
+                return Err(unsupported(format!("dungeon node {n}: subgraph file group {file:?} (FileGroups not ported)")));
+            }
+            let (mut w, mut h): (u32, u32) = (tag(1).trim().parse().unwrap_or(1), tag(2).trim().parse().unwrap_or(1));
+            if graph.region & 1 == 1 && graph.region < 8 {
+                std::mem::swap(&mut w, &mut h);
+            }
+            let origin = origin_for(&grid, graph.region, unit(n), (w, h));
+            grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door: None, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, subgraph: Some(file) })?;
+            continue;
+        }
         let no = node_orientation(&node.orientation);
         let empty = Exit { door: None, height: 0, chiral: false };
         let exit_for = |e: usize| {
@@ -462,7 +481,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let (c, origin, _) = kept[k].clone();
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
-        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false })?;
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, subgraph: None })?;
     }
     // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
@@ -512,7 +531,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             if clear && !(0..graph.nodes.len()).any(swallows) {
                 let extra_door = extra_door_pick(&slots[n], &fields, rng);
-                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()), special: false })?;
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()), special: false, subgraph: None })?;
                 break;
             }
             let size = list[k].0;
@@ -1753,7 +1772,7 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Opt
             }
             let size = chosen.unwrap_or(list[0].0);
             let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
-            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone(), special: false })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone(), special: false, subgraph: None })?;
             x += size.0 as i32;
         }
     }
@@ -1925,7 +1944,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
         }
         let r = &rooms[si];
         let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
-        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: pos, size, orientation: o, exits, extra_door: None, height, accessible: true, blocked: false, extra_pct: 0, door_type: None, special: true })?;
+        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: pos, size, orientation: o, exits, extra_door: None, height, accessible: true, blocked: false, extra_pct: 0, door_type: None, special: true, subgraph: None })?;
         return Ok(Some(grid.rooms.len() - 1));
     }
     let k = rng.below(exact.len() as u32) as usize;
@@ -2262,7 +2281,7 @@ fn place_filler(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), size: (
         let ob = crate::region::pick(list[k].1, rng.below(840));
         let r = &rooms[list[k].0];
         let exits = grid.turned(r.units.0, r.units.1, &r.exits, ob);
-        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: o, size, orientation: ob, exits, extra_door: None, height, accessible, blocked: false, extra_pct: 0, door_type: None, special: false })?;
+        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: o, size, orientation: ob, exits, extra_door: None, height, accessible, blocked: false, extra_pct: 0, door_type: None, special: false, subgraph: None })?;
         return Ok(true);
     }
     Ok(false)
