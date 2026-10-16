@@ -38,6 +38,8 @@ pub struct Graph {
     pub edges: Vec<Edge>,
     /// `.dgr` defaults: branching %, extra door %, fuzzy % (absent for `.tgr`).
     pub dungeon_defaults: Option<[i32; 3]>,
+    /// `.dgr` (version > 22): the `open_extra_doors_into_impenetrable_rooms` line.
+    pub extra_header: Option<String>,
     /// Region orientation the graph was turned by ([`crate::region::turn_graph`]; 0 = none).
     pub region: u8,
 }
@@ -120,6 +122,7 @@ impl Graph {
         });
         let mut first = 8;
         let mut dungeon_defaults = None;
+        let mut extra_header = None;
         if let Some(rest) = lines.get(8).and_then(|l| l.strip_prefix("Default%:")) {
             let t = tokens(rest);
             let mut d = [0; 3];
@@ -128,6 +131,9 @@ impl Graph {
             }
             dungeon_defaults = Some(d);
             first = if version > 22 { 10 } else { 9 };
+            if version > 22 {
+                extra_header = lines.get(9).map(|l| l.trim().to_string());
+            }
         }
         let mut nodes = Vec::with_capacity(n);
         for i in first..first + n {
@@ -205,6 +211,7 @@ impl Graph {
             nodes,
             edges,
             dungeon_defaults,
+            extra_header,
             region: 0,
         })
     }
