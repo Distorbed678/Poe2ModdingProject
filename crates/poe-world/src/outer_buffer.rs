@@ -513,11 +513,13 @@ pub fn outer_buffer(
 }
 
 /// `0x141fd5ff0`: region cells still empty (dungeon grid cells without a room) take the outer
-/// ground's first fill tile (`0x141fd6990`; orientation "any" counts as 0). With `repair` and an
-/// outer ground whose heights do not follow the tiles (no `.gt` flag 1), each new tile takes the
-/// middle of its cell's set corner heights (cells without any wait for their neighbours), and
-/// then those tiles and the fill's tiles of that ground are levelled to the middle of their
-/// corners, again while some tile moved by more than one storey (up to 15 rounds).
+/// ground's first fill tile (`0x141fd6990`; orientation "any" counts as 0). A 3×3 tile on a
+/// region whose corner and size are 1 mod 3 is aligned one cell outside the region (and may
+/// overhang it by one). With `repair` and an outer ground whose heights do not follow the tiles
+/// (no `.gt` flag 1), each new tile takes the middle of its cell's set corner heights (cells
+/// without any wait for their neighbours), and then those tiles and the fill's tiles of that
+/// ground are levelled to the middle of their corners, again while some tile moved by more
+/// than one storey (up to 15 rounds).
 fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
     let Some((path, o)) = master.first_fill_tile(files, Some(ground))? else {
         return Err(GenError::Unsupported("no fill tile found for outer fill ground type".into()));
@@ -525,47 +527,60 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
     let o = if o == 8 { 0 } else { o };
     let tdt = master.header(files, &path)?.clone();
     let (tw, th) = TileMap::oriented_size(tdt.size, o);
+    let (x0, y0, w, h) = (rect.0, rect.1, rect.2 - rect.0, rect.3 - rect.1);
+    let aligned = (tw, th) == (3, 3) && x0 % 3 == 1 && y0 % 3 == 1 && w % 3 == 1 && h % 3 == 1;
+    let a = aligned as i32;
+    // `0x141fd6990`: inside the region (one cell of slack when aligned) and free.
+    let fits = |map: &TileMap, x: i32, y: i32| {
+        let (lo, hi_x, hi_y) = if aligned { (-1, w + 1, h + 1) } else { (0, w, h) };
+        x >= lo && y >= lo && x + tw <= hi_x && y + th <= hi_y && (0..th).all(|dy| (0..tw).all(|dx| match map.index(x0 + x + dx, y0 + y + dy) {
+            Some(i) => map.cells[i].is_none(),
+            None => !map.spilled(x0 + x + dx, y0 + y + dy),
+        }))
+    };
     let ground = ground.to_ascii_lowercase();
     if !repair || map.gt_flags(&ground) & 1 != 0 {
-        for y in rect.1..rect.3 {
-            for x in rect.0..rect.2 {
-                if x + tw <= rect.2 && y + th <= rect.3 && map.free(x, y, tw, th) {
-                    map.place(x, y, &path, &tdt, o, 0, None);
+        for y in -a..h - h % th {
+            for x in -a..w - w % tw {
+                if fits(map, x, y) {
+                    map.place(x0 + x, y0 + y, &path, &tdt, o, 0, None);
                 }
             }
         }
         return Ok(());
     }
-    if (tw, th) != (1, 1) {
-        return Err(GenError::Unsupported(format!("outer fill tile {path} is not 1x1 (height repair)")));
-    }
-    // `0x141fd6990`: the tile's corners take its height first.
-    let place = |map: &mut TileMap, x: i32, y: i32, h: i32| {
-        if !map.free(x, y, tw, th) {
+    // The tile's corners take its height first.
+    let place = |map: &mut TileMap, x: i32, y: i32, ht: i32| {
+        if !fits(map, x, y) {
             return;
         }
         for py in y..=y + th {
             for px in x..=x + tw {
-                if let Some(k) = map.point_index(px, py) {
-                    map.lattice[k].height = h as i8;
+                if let Some(k) = map.point_index(x0 + px, y0 + py) {
+                    map.lattice[k].height = ht as i8;
                     map.lattice[k].flags |= 2;
                 }
             }
         }
-        map.place(x, y, &path, &tdt, o, h as i16, None);
+        map.place(x0 + x, y0 + y, &path, &tdt, o, ht as i16, None);
     };
     let mut fixed: Vec<(i32, i32)> = Vec::new();
     let mut waiting: Vec<(i32, i32)> = Vec::new();
     let mut ready: Vec<(i32, i32, i32)> = Vec::new();
-    // `0x141fd7060`.
-    let scan = |map: &TileMap, c: (i32, i32), waiting: &mut Vec<(i32, i32)>, ready: &mut Vec<(i32, i32, i32)>| match crate::generate::middle(&map.tile_corner_heights(c.0, c.1)) {
-        None => waiting.push(c),
-        Some(h) => ready.push((c.0, c.1, h)),
+    // `0x141fd7060`: cells on the fill tile grid.
+    let scan = |map: &TileMap, c: (i32, i32), waiting: &mut Vec<(i32, i32)>, ready: &mut Vec<(i32, i32, i32)>| {
+        if (c.0 + a) % tw != 0 || (c.1 + a) % th != 0 {
+            return;
+        }
+        match crate::generate::middle(&map.tile_corner_heights(x0 + c.0, y0 + c.1)) {
+            None => waiting.push(c),
+            Some(ht) => ready.push((c.0, c.1, ht)),
+        }
     };
-    for y in rect.1..rect.3 {
-        for x in rect.0..rect.2 {
-            let Some(i) = map.index(x, y) else { continue };
-            match &map.cells[i] {
+    for y in -a..h {
+        for x in -a..w {
+            let cell = map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref());
+            match cell {
                 None => scan(map, (x, y), &mut waiting, &mut ready),
                 Some(c) if c.path.eq_ignore_ascii_case(&path) => fixed.push((x, y)),
                 Some(_) => {}
@@ -573,20 +588,20 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         }
     }
     while !waiting.is_empty() {
-        for (x, y, h) in ready.drain(..) {
-            place(map, x, y, h);
+        for (x, y, ht) in ready.drain(..) {
+            place(map, x, y, ht);
             fixed.push((x, y));
         }
         let before = waiting.len();
         for c in std::mem::take(&mut waiting) {
             scan(map, c, &mut waiting, &mut ready);
         }
-        if waiting.len() == before {
+        if waiting.len() == before && ready.is_empty() {
             return Err(GenError::Unsupported("could not fix heights in dungeon".into()));
         }
     }
-    for (x, y, h) in ready.drain(..) {
-        place(map, x, y, h);
+    for (x, y, ht) in ready.drain(..) {
+        place(map, x, y, ht);
         fixed.push((x, y));
     }
     // `0x141fd71c0` rounds.
@@ -594,11 +609,11 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         let mut small = true;
         let mut changes: Vec<((i32, i32), i32)> = Vec::new();
         for &(x, y) in &fixed {
-            let h = crate::generate::middle(&map.tile_corner_heights(x, y)).unwrap_or(0);
-            let cur = map.index(x, y).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height as i32);
-            if h != cur {
-                changes.push(((x, y), h));
-                if (h - cur).abs() > 1 {
+            let ht = crate::generate::middle(&map.tile_corner_heights(x0 + x, y0 + y)).unwrap_or(0);
+            let cur = map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height as i32);
+            if ht != cur {
+                changes.push(((x, y), ht));
+                if (ht - cur).abs() > 1 {
                     small = false;
                 }
             }
@@ -606,9 +621,9 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         if changes.is_empty() {
             break;
         }
-        for ((x, y), h) in changes {
-            if map.index(x, y).and_then(|i| map.cells[i].as_ref()).is_some_and(|c| c.offset == (0, 0)) {
-                map.set_heights(x, y, &tdt, h as i16);
+        for ((x, y), ht) in changes {
+            if map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).is_some_and(|c| c.offset == (0, 0)) {
+                map.set_heights(x0 + x, y0 + y, &tdt, ht as i16);
             }
         }
         if small {

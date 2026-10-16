@@ -67,7 +67,10 @@ fn mask_pick(mask: u8, r: u32) -> u8 {
 impl Fill<'_> {
     fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
         (0..h).all(|dy| {
-            (0..w).all(|dx| self.map.index(x + dx, y + dy).is_none_or(|i| self.map.cells[i].is_none()))
+            (0..w).all(|dx| match self.map.index(x + dx, y + dy) {
+                Some(i) => self.map.cells[i].is_none(),
+                None => !self.map.spilled(x + dx, y + dy),
+            })
         })
     }
 
@@ -78,8 +81,6 @@ impl Fill<'_> {
             && y >= -1
             && x + w <= self.map.width as i32 + 1
             && y + h <= self.map.height as i32 + 1
-            && x >= 0
-            && y >= 0
             && self.free(x, y, w, h)
     }
 
@@ -281,7 +282,12 @@ impl Fill<'_> {
                 }
                 let Some((key, feature)) = cell_key(&room.arm.grid[cy][cx]) else { continue };
                 let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
-                let key = key.oriented(o);
+                let mut key = key.oriented(o);
+                // The lowest corner's height goes to the tile (slot +0x72).
+                let low = key.heights.iter().map(|&v| v as i8).min().unwrap_or(0);
+                for v in &mut key.heights {
+                    *v = (*v as i8 - low) as u8;
+                }
                 let (ax, ay) = orient_cell(o, w as i32, h as i32, cx as i32, cy as i32);
                 let (bx, by) = orient_cell(o, w as i32, h as i32, cx as i32 + sw - 1, cy as i32 + sh - 1);
                 let (mx, my) = (x + ax.min(bx), y + ay.min(by));
@@ -307,7 +313,7 @@ impl Fill<'_> {
                 }
                 let c = chosen.ok_or_else(|| GenError::Unsupported(format!("no tile fits at ({mx},{my}) for fill room {path}")))?;
                 let def = self.master.tiles.tiles[c.tile].clone();
-                self.map.place(mx, my, &def.path, &def.tdt, c.orientation, 0, Some(c.tile));
+                self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16, Some(c.tile));
             }
         }
         self.map.room_overrides(&room, (x, y), o);
@@ -368,7 +374,7 @@ pub fn fill_cells(
     let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None };
     for c in cells {
         let (x, y) = c.pos;
-        if !f.map.index(x, y).is_some_and(|i| f.map.cells[i].is_none()) {
+        if !f.free(x, y, 1, 1) {
             continue;
         }
         let ground = c.ground.clone().or_else(|| {
