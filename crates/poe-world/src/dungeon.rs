@@ -193,6 +193,8 @@ pub struct PlacedRoom {
     pub blocked: bool,
     /// +0x10: extra door chance (%).
     pub extra_pct: u32,
+    /// +0x40: the door type a placeholder's room must take (its node's or corridor's edge type).
+    pub door_type: Option<String>,
 }
 
 impl PlacedRoom {
@@ -403,7 +405,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let (c, origin, _) = kept[k].clone();
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
-        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n) })?;
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None })?;
     }
     // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
@@ -453,7 +455,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             if clear && !(0..graph.nodes.len()).any(swallows) {
                 let extra_door = extra_door_pick(&slots[n], &fields, rng);
-                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n) })?;
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()) })?;
                 break;
             }
             let size = list[k].0;
@@ -844,21 +846,18 @@ fn corridors(
     }
     let mut paths: Vec<Corridor> = Vec::new();
     let mark_used = |grid: &Grid, records: &mut [Record]| {
-        // `0x1420a6030`: rooms with an `.arm` count as used; so do placeholders of tagged nodes
-        // (also impenetrable).
+        // `0x1420a6030`: rooms with an `.arm` count as used (placeholders with a tag list would
+        // too, but only typed nodes' rooms carry their tags, and those have an `.arm`).
         for (i, r) in grid.rooms.iter().enumerate() {
             if !r.is_placeholder() {
                 records[i].used = true;
-            } else if r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()) {
-                records[i].used = true;
-                records[i].impen = true;
             }
         }
     };
     for b in &batches {
         let t = graph.edges[b[0]].edge_type.to_ascii_lowercase();
         let list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| s.0 == t).map(|s| s.1.clone()).unwrap_or_default();
-        fill_placeholders(grid, &list, rng)?;
+        fill_placeholders(grid, &list, Some(t.clone()), rng)?;
         grow(&mut records, grid, rng);
         mark_used(grid, &mut records);
         for &e in b {
@@ -888,14 +887,143 @@ fn corridors(
             continue;
         }
         let list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| &s.0 == key).map(|s| s.1.clone()).unwrap_or_default();
-        fill_placeholders(grid, &list, rng)?;
+        fill_placeholders(grid, &list, Some(key.clone()), rng)?;
         grow(&mut records, grid, rng);
         mark_used(grid, &mut records);
         branch(graph, fields, key, &generic, grid, &mut records, &paths, rng)?;
         compact(grid, &mut records, &mut paths);
     }
     extra_doors(grid, &generic, open_into_impenetrable(graph), rng)?;
+    assign_rooms(files, graph, rooms, grid, &records, types, rng)?;
     Ok(())
+}
+
+/// `0x1420b0fe0` per used room (`0x1420da7c0`): a placeholder takes a non-unique generic room
+/// whose doors match its own (`RoomSet` size buckets, `0x141f9b280` / `0x141f9b430`), drawn by
+/// weight, with an orientation drawn from the matching ones (`below(840)`); a second draw when a
+/// neighbour is the same room.
+fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &mut Grid, records: &[Record], types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<(), GenError> {
+    // Size buckets: (room, o, size, turned doors, weight) in room order, then orientation.
+    let mut entries: Vec<(usize, u8, (u32, u32), Vec<Exit>, u32)> = Vec::new();
+    for (ri, r) in rooms.iter().enumerate() {
+        if !r.generic || r.unique {
+            continue;
+        }
+        for o in 0..8u8 {
+            if r.mask >> o & 1 == 0 {
+                continue;
+            }
+            let n = r.exits.len() as u32;
+            let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
+            for i in 0..n {
+                exits[turn_index(r.units.0, r.units.1, i, o) as usize] = r.exits[i as usize].clone();
+            }
+            let size = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
+            entries.push((ri, o, size, exits, r.weight));
+        }
+    }
+    for i in 0..grid.rooms.len() {
+        let p = &grid.rooms[i];
+        if !records.get(i).is_some_and(|r| r.used) || !p.is_placeholder() {
+            continue;
+        }
+        let Some(door_type) = p.door_type.clone() else { continue };
+        let optional = |types: &mut TerrainTypes, d: &str| types.edge(files, d).map(|t| t.can_end).unwrap_or(false);
+        let strict = !(p.extra_pct == 0 && optional(types, &door_type));
+        let mut list = match_rooms(files, &entries, p, if strict { 2 } else { 1 }, types);
+        if list.is_empty() && !strict {
+            list = match_rooms(files, &entries, p, 0, types);
+        }
+        if list.is_empty() && strict {
+            list = match_rooms(files, &entries, p, 1, types);
+            if list.is_empty() {
+                list = match_rooms(files, &entries, p, 0, types);
+            }
+        }
+        if list.is_empty() {
+            return Err(unsupported(format!("dungeon: no room fits placeholder {i} at {:?}", p.origin)));
+        }
+        let total: u32 = list.iter().map(|l| l.2).sum();
+        let draw = |rng: &mut TerrainRng| {
+            let mut r = rng.below(total);
+            let mut k = list.len() - 1;
+            for (j, l) in list.iter().enumerate() {
+                if r < l.2 {
+                    k = j;
+                    break;
+                }
+                r -= l.2;
+            }
+            let o = crate::region::pick(list[k].1, rng.below(840));
+            (k, o)
+        };
+        let (mut k, mut o) = draw(rng);
+        let origin = origin_for(grid, graph.region, p.origin, p.size);
+        if list.len() > 1 && repeats(grid, &rooms[list[k].0].path, origin, p.size) {
+            (k, o) = draw(rng);
+        }
+        let r = &rooms[list[k].0];
+        let n = r.exits.len() as u32;
+        let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
+        for j in 0..n {
+            exits[turn_index(r.units.0, r.units.1, j, o) as usize] = r.exits[j as usize].clone();
+        }
+        let p = &mut grid.rooms[i];
+        p.path = r.path.clone();
+        p.orientation = o;
+        p.exits = exits;
+    }
+    Ok(())
+}
+
+/// `0x141f9b430`: entries of the placeholder's size whose doors include its doors (type,
+/// height); `mode` 2 allows no other doors, 1 only optional ones (`.et` flag 0x10), 0 any.
+/// Orientations of one room merge (mask); its weight is (empty matches² × 10 + 1) × the `.rs`
+/// weight of its first matching orientation.
+fn match_rooms(files: &dyn Files, entries: &[(usize, u8, (u32, u32), Vec<Exit>, u32)], p: &PlacedRoom, mode: u8, types: &mut TerrainTypes) -> Vec<(usize, u8, u32)> {
+    let mut out: Vec<(usize, u8, u32)> = Vec::new();
+    for (room, o, size, exits, weight) in entries {
+        if *size != p.size || exits.len() != p.exits.len() {
+            continue;
+        }
+        let mut empty = 0u32;
+        let mut ok = true;
+        for (want, have) in p.exits.iter().zip(exits) {
+            match (&want.door, &have.door) {
+                (Some(w), Some(h)) => {
+                    if w != h || want.height != have.height {
+                        ok = false;
+                        break;
+                    }
+                }
+                (Some(_), None) => {
+                    ok = false;
+                    break;
+                }
+                (None, None) => empty += 1,
+                (None, Some(h)) => {
+                    let optional = types.edge(files, h).map(|t| t.can_end).unwrap_or(false);
+                    if mode == 2 || (mode == 1 && !optional) {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if last.0 == *room => last.1 |= 1 << o,
+            _ => {
+                let w = (empty * empty * 10 + 1) * weight;
+                if w != 0 {
+                    out.push((*room, 1 << o, w));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The `.dgr` header's `open_extra_doors_into_impenetrable_rooms` (version > 22).
@@ -1196,6 +1324,7 @@ fn grow_branch(grid: &mut Grid, records: &mut [Record], generic: &[(u32, u32, Ve
         return Ok(());
     }
     grid.rooms[c.room].height = c.height;
+    grid.rooms[c.room].door_type = Some(door.to_string());
     grid.rooms[c.room].accessible = c.accessible;
     grid.rooms[c.room].blocked = c.impen;
     grid.rooms[c.room].extra_pct = grid.rooms[c.room].extra_pct.max(c.extra_pct);
@@ -1271,6 +1400,9 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
                 grid.rooms[c].extra_pct = f.extra_door;
                 let t = if f.extra_door_type.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { f.extra_door_type.to_ascii_lowercase() };
                 grid.rooms[c].extra_door = Some(t);
+                if grid.rooms[c].door_type.as_deref().is_none_or(|d| d == "metadata/terrain/dungeon/rooms.et") {
+                    grid.rooms[c].door_type = Some(door.clone());
+                }
             }
         }
         if let Some(p) = prev {
@@ -1488,7 +1620,7 @@ fn compact(grid: &mut Grid, records: &mut Vec<Record>, paths: &mut [Corridor]) {
 
 /// `0x1420a6140`: every free unit cell (row by row) gets a placeholder of a size drawn from the
 /// edge type's list (up to five draws until one fits; else the list's first size, else 1×1).
-fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], rng: &mut TerrainRng) -> Result<(), GenError> {
+fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Option<String>, rng: &mut TerrainRng) -> Result<(), GenError> {
     if list.is_empty() {
         return Ok(());
     }
@@ -1521,7 +1653,7 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], rng: &mut Terr
             }
             let size = chosen.unwrap_or(list[0].0);
             let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
-            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0 })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone() })?;
             x += size.0 as i32;
         }
     }
