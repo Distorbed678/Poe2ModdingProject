@@ -162,6 +162,23 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
 /// `below(100)`; then every edge with a non-zero chance), the `shuffle` groups and the `unique`
 /// groups. Removed nodes leave the graph (later node indices move up, as the client erases
 /// them) and take their edges with them; removed edges stay as `true` in the returned flags.
+/// `0x141fea2e0` / `0x141fee830` (`.dgr`, before the existence rolls): each node with a random
+/// offset (values 5..9: x min, y min, x max, y max) moves by min + `range(0, max - min)` on x,
+/// then on y.
+fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
+    for n in &mut graph.nodes {
+        let v = |i: usize| n.values.get(i).copied().unwrap_or(0);
+        let (x0, y0, x1, y1) = (v(5), v(6), v(7), v(8));
+        if x0 == x1 && y0 == y1 && x0 == 0 && y0 == 0 {
+            continue;
+        }
+        let dx = if x0 < x1 { x0 + rng.range(0, (x1 - x0) as u32) as i32 } else { x0 };
+        let dy = if y0 < y1 { y0 + rng.range(0, (y1 - y0) as u32) as i32 } else { y0 };
+        n.x += dx;
+        n.y += dy;
+    }
+}
+
 fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenError> {
     let mut drop_node = vec![false; graph.nodes.len()];
     for (i, n) in graph.nodes.iter().enumerate() {
@@ -460,6 +477,14 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
 }
 
 fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
+    let mut moved;
+    let graph = if graph.dungeon_defaults.is_some() {
+        moved = graph.clone();
+        random_offsets(&mut moved, rng);
+        &moved
+    } else {
+        graph
+    };
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
     if graph.dungeon_defaults.is_some() {
