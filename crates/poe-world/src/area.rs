@@ -393,14 +393,48 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
     edge_symmetric(types, files, &t.splits[0].0)
 }
 
-/// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then (not ported) its tile pass.
+/// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
+/// (`crate::dungeon_tiles`).
 fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
     let tsi_path = graph.master_file.clone();
-    let tsi = tsi_entries(&files.read(&tsi_path)?);
+    let tsi_bytes = files.read(&tsi_path)?;
+    let tsi = tsi_entries(&tsi_bytes);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
-    let set = RoomSet::load(files, &format!("{dir}/{}", tsi.get("RoomSet").ok_or_else(|| data("no RoomSet"))?))?;
+    let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
+    let set = RoomSet::load(files, &rel("RoomSet").ok_or_else(|| data("no RoomSet"))?)?;
     let grid = crate::dungeon::layout(files, graph, removed, &set, rng)?;
-    Err(GenError::Unsupported(format!("dungeon tile pass not ported ({} rooms placed)", grid.rooms.len())))
+    if std::env::var("POE_DBG").is_ok() {
+        for (i, r) in grid.rooms.iter().enumerate() {
+            eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
+        }
+    }
+    let master = Master::load(files, &rel("TileSet").ok_or_else(|| data("no TileSet"))?, &rel("FillTiles").ok_or_else(|| data("no FillTiles"))?)?;
+    let ecf = match rel("EdgeCombination") {
+        Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
+        None => Default::default(),
+    };
+    let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
+    let step = unit - grid.overlap;
+    let mut map = TileMap::new(grid.w * step + grid.overlap, grid.h * step + grid.overlap);
+    map.ground_flags = master.ground_flag_table(files)?;
+    map.edge_flags = master.edge_flag_table(files)?;
+    let mut rooms = std::collections::HashMap::new();
+    for r in &grid.rooms {
+        if !r.path.is_empty() && !rooms.contains_key(&r.path) {
+            rooms.insert(r.path.clone(), crate::generate::load_room(files, &r.path)?);
+        }
+    }
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap };
+    pass.run(&grid, &rooms, &mut map, rng)?;
+    if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
+        let mut out = String::new();
+        for p in &map.pieces {
+            let h = map.get(p.x as u32, p.y as u32).map_or(0, |c| c.height);
+            out += &format!("{} {} o{} h{}\t{}\n", p.x, p.y, p.orientation, h, p.path);
+        }
+        std::fs::write(path, out).ok();
+    }
+    Err(GenError::Unsupported(format!("dungeon fill not ported ({} tiles placed)", map.pieces.len())))
 }
 
 /// Everything after the topology choice, for one graph.

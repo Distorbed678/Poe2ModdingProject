@@ -9,6 +9,7 @@
 
 pub mod area;
 pub mod dungeon;
+pub mod dungeon_tiles;
 pub mod edge_tiles;
 pub mod export;
 pub mod fill;
