@@ -1,0 +1,523 @@
+//! Dungeon layouts (`.dgr` topologies, `0x1420ac3e0`): rooms on a grid of room units, joined by
+//! corridors. Findings: `Documentation/re/dungeon.md`. Ported so far: typed-node room placement.
+
+use std::collections::HashMap;
+
+use crate::{
+    generate::{Files, GenError},
+    graph::Graph,
+    rng::TerrainRng,
+    rooms::{RoomSet, TerrainTypes, node_orientation},
+};
+
+fn unsupported(s: impl Into<String>) -> GenError {
+    GenError::Unsupported(s.into())
+}
+
+/// A `.dgr` edge's dungeon fields (the tokens after the edge type).
+#[derive(Debug, Clone, Default)]
+pub struct EdgeFields {
+    pub chance2: i32,
+    pub chance1: i32,
+    pub depth_limit: i32,
+    pub branching_type: String,
+    /// Edge +0x54.
+    pub extra_door: u32,
+    /// Edge +0x70 (empty: `Metadata/Terrain/Dungeon/rooms.et`).
+    pub extra_door_type: String,
+    pub fuzzy: i32,
+    pub impenetrability: i32,
+    pub impenetrable: String,
+    pub void: bool,
+    pub accessible: bool,
+}
+
+impl EdgeFields {
+    pub fn parse(extra: &[String]) -> Result<Self, GenError> {
+        let int = |i: usize| -> Result<i32, GenError> {
+            extra.get(i).and_then(|s| s.parse().ok()).ok_or_else(|| unsupported(format!(".dgr edge field {i} in {extra:?}")))
+        };
+        let s = |i: usize| extra.get(i).cloned().unwrap_or_default();
+        Ok(Self {
+            chance2: int(0)?,
+            chance1: int(1)?,
+            depth_limit: int(2)?,
+            branching_type: s(3),
+            extra_door: int(4)? as u32,
+            extra_door_type: s(5),
+            fuzzy: int(6)?,
+            impenetrability: int(7)?,
+            impenetrable: s(8),
+            void: s(9).eq_ignore_ascii_case("Y"),
+            accessible: int(10)? != 0,
+        })
+    }
+}
+
+/// One door around a room: the door's edge type (lower case), height and chirality flag
+/// (`ExitDatum`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Exit {
+    pub door: Option<String>,
+    pub height: i32,
+    pub chiral: bool,
+}
+
+/// `0x141d00fd0`: where ring position `i` of a `w`×`h` room goes when the room is turned by `o`.
+pub fn turn_index(w: u32, h: u32, i: u32, o: u8) -> u32 {
+    const A: [u32; 9] = [0, 1, 1, 2, 0, 1, 1, 2, 0];
+    const B: [u32; 9] = [0, 0, 1, 1, 1, 1, 2, 2, 0];
+    let n = 2 * (w + h);
+    let o = o.min(8) as usize;
+    let i = if (4..8).contains(&o) { n - 1 - i } else { i };
+    (i + A[o] * h + B[o] * w) % n
+}
+
+/// The unit cell outside ring position `u` of a `w`×`h` room at `origin` (`0x1420af280`):
+/// top left→right, right top→bottom, bottom right→left, left bottom→top.
+fn ring_cell(origin: (i32, i32), (w, h): (u32, u32), u: u32) -> (i32, i32) {
+    let (x, y) = origin;
+    let (w, h, u) = (w as i32, h as i32, u as i32);
+    if u < w {
+        (x + u, y - 1)
+    } else if u < w + h {
+        (x + w, y + (u - w))
+    } else if u < 2 * w + h {
+        (x - 1 + 2 * w + h - u, y + h)
+    } else {
+        (x - 1, y - 1 + 2 * (w + h) - u)
+    }
+}
+
+/// The room cell just inside ring position `u`.
+fn ring_inner(origin: (i32, i32), size: (u32, u32), u: u32) -> (i32, i32) {
+    let (cx, cy) = ring_cell(origin, size, u);
+    let (w, h) = (size.0 as i32, size.1 as i32);
+    (cx.clamp(origin.0, origin.0 + w - 1), cy.clamp(origin.1, origin.1 + h - 1))
+}
+
+/// `0x142f10760`: angle (0x8000 = π) for `cos·127 + 127`, 0..=255.
+const ACOS: [u16; 256] = [
+    0x8000, 0x7ae2, 0x78c2, 0x7720, 0x75bf, 0x7487, 0x736d, 0x7269, 0x7176, 0x7092, 0x6fb9, 0x6eeb,
+    0x6e25, 0x6d67, 0x6cb0, 0x6bff, 0x6b54, 0x6aad, 0x6a0b, 0x696d, 0x68d3, 0x683c, 0x67a8, 0x6718,
+    0x668a, 0x65ff, 0x6576, 0x64f0, 0x646c, 0x63ea, 0x636a, 0x62eb, 0x626f, 0x61f4, 0x617a, 0x6102,
+    0x608c, 0x6017, 0x5fa3, 0x5f31, 0x5ebf, 0x5e4f, 0x5de0, 0x5d72, 0x5d05, 0x5c99, 0x5c2e, 0x5bc4,
+    0x5b5a, 0x5af2, 0x5a8a, 0x5a23, 0x59bd, 0x5958, 0x58f3, 0x588f, 0x582c, 0x57c9, 0x5767, 0x5705,
+    0x56a4, 0x5644, 0x55e4, 0x5585, 0x5526, 0x54c8, 0x546a, 0x540c, 0x53af, 0x5353, 0x52f7, 0x529b,
+    0x5240, 0x51e5, 0x518a, 0x5130, 0x50d6, 0x507d, 0x5024, 0x4fcb, 0x4f72, 0x4f1a, 0x4ec2, 0x4e6a,
+    0x4e13, 0x4dbc, 0x4d65, 0x4d0e, 0x4cb8, 0x4c61, 0x4c0b, 0x4bb6, 0x4b60, 0x4b0b, 0x4ab6, 0x4a61,
+    0x4a0c, 0x49b7, 0x4963, 0x490f, 0x48bb, 0x4867, 0x4813, 0x47bf, 0x476b, 0x4718, 0x46c5, 0x4671,
+    0x461e, 0x45cb, 0x4578, 0x4526, 0x44d3, 0x4480, 0x442e, 0x43db, 0x4389, 0x4336, 0x42e4, 0x4291,
+    0x423f, 0x41ed, 0x419b, 0x4149, 0x40f6, 0x40a4, 0x4052, 0x4000, 0x3fae, 0x3f5c, 0x3f0a, 0x3eb7,
+    0x3e65, 0x3e13, 0x3dc1, 0x3d6f, 0x3d1c, 0x3cca, 0x3c77, 0x3c25, 0x3bd2, 0x3b80, 0x3b2d, 0x3ada,
+    0x3a88, 0x3a35, 0x39e2, 0x398f, 0x393b, 0x38e8, 0x3895, 0x3841, 0x37ed, 0x3799, 0x3745, 0x36f1,
+    0x369d, 0x3649, 0x35f4, 0x359f, 0x354a, 0x34f5, 0x34a0, 0x344a, 0x33f5, 0x339f, 0x3348, 0x32f2,
+    0x329b, 0x3244, 0x31ed, 0x3196, 0x313e, 0x30e6, 0x308e, 0x3035, 0x2fdc, 0x2f83, 0x2f2a, 0x2ed0,
+    0x2e76, 0x2e1b, 0x2dc0, 0x2d65, 0x2d09, 0x2cad, 0x2c51, 0x2bf4, 0x2b96, 0x2b38, 0x2ada, 0x2a7b,
+    0x2a1c, 0x29bc, 0x295c, 0x28fb, 0x2899, 0x2837, 0x27d4, 0x2771, 0x270d, 0x26a8, 0x2643, 0x25dd,
+    0x2576, 0x250e, 0x24a6, 0x243c, 0x23d2, 0x2367, 0x22fb, 0x228e, 0x2220, 0x21b1, 0x2141, 0x20cf,
+    0x205d, 0x1fe9, 0x1f74, 0x1efe, 0x1e86, 0x1e0c, 0x1d91, 0x1d15, 0x1c96, 0x1c16, 0x1b94, 0x1b10,
+    0x1a8a, 0x1a01, 0x1976, 0x18e8, 0x1858, 0x17c4, 0x172d, 0x1693, 0x15f5, 0x1553, 0x14ac, 0x1401,
+    0x1350, 0x1299, 0x11db, 0x1115, 0x1047, 0x0f6e, 0x0e8a, 0x0d97, 0x0c93, 0x0b79, 0x0a41, 0x08e0,
+    0x073e, 0x051e, 0x0000, 0x0000,
+];
+
+/// `0x14196e010`: integer square root.
+fn isqrt(v: u32) -> u32 {
+    let mut r = (v as f64).sqrt() as u32;
+    while r.saturating_mul(r) > v {
+        r -= 1;
+    }
+    while (r + 1).saturating_mul(r + 1) <= v {
+        r += 1;
+    }
+    r
+}
+
+/// `0x1421c4e50`: the angle between two vectors (`ACOS` units; 0 for a zero vector).
+fn angle(a: (i32, i32), b: (i32, i32)) -> u16 {
+    if a == (0, 0) || b == (0, 0) {
+        return 0;
+    }
+    let la = a.0.wrapping_mul(a.0).wrapping_add(a.1.wrapping_mul(a.1));
+    let lb = b.0.wrapping_mul(b.0).wrapping_add(b.1.wrapping_mul(b.1));
+    let s = isqrt(lb.wrapping_mul(la) as u32).max(1) as i32;
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let twice_dot = lb - dy * dy - dx * dx + la;
+    let idx = (twice_dot.wrapping_mul(0x7f) / s) / 2 + 0x7f;
+    ACOS[idx.clamp(0, 0xfe) as usize]
+}
+
+/// A room of the set as the dungeon sees it.
+struct DungeonRoom {
+    path: String,
+    tag: String,
+    weight: u32,
+    mask: u8,
+    units: (u32, u32),
+    exits: Vec<Exit>,
+}
+
+/// A room candidate (`RoomSet` entry): a room turned by `o`.
+#[derive(Debug, Clone)]
+struct Candidate {
+    room: usize,
+    o: u8,
+    size: (u32, u32),
+    exits: Vec<Exit>,
+    weight: u32,
+}
+
+/// A room placed on the grid.
+#[derive(Debug, Clone)]
+pub struct PlacedRoom {
+    pub path: String,
+    pub node: Option<usize>,
+    pub origin: (i32, i32),
+    pub size: (u32, u32),
+    pub orientation: u8,
+    pub exits: Vec<Exit>,
+    /// The extra door type the node's edge pick chose (`0x1420966f0`).
+    pub extra_door: Option<String>,
+}
+
+/// The unit grid (`0x141ff05f0`'s 0x70-byte object).
+pub struct Grid {
+    pub w: u32,
+    pub h: u32,
+    /// Per cell: 0/1 free, n ≥ 2 room n − 2.
+    pub cells: Vec<u32>,
+    pub rooms: Vec<PlacedRoom>,
+}
+
+impl Grid {
+    fn state(&self, (x, y): (i32, i32)) -> Option<u32> {
+        (x >= 0 && y >= 0 && (x as u32) < self.w && (y as u32) < self.h).then(|| self.cells[(y as u32 * self.w + x as u32) as usize])
+    }
+
+    /// `0x1420a6d30`.
+    fn free(&self, origin: (i32, i32), (w, h): (u32, u32)) -> bool {
+        (0..h as i32).all(|dy| (0..w as i32).all(|dx| self.state((origin.0 + dx, origin.1 + dy)).is_some_and(|s| s < 2)))
+    }
+
+    /// `0x1420a73d0`.
+    fn stamp(&mut self, room: PlacedRoom) -> Result<(), GenError> {
+        let id = self.rooms.len() as u32 + 2;
+        for dy in 0..room.size.1 as i32 {
+            for dx in 0..room.size.0 as i32 {
+                let (x, y) = (room.origin.0 + dx, room.origin.1 + dy);
+                match self.state((x, y)) {
+                    Some(s) if s < 2 => self.cells[(y as u32 * self.w + x as u32) as usize] = id,
+                    _ => return Err(unsupported(format!("dungeon room overlap at ({x},{y})"))),
+                }
+            }
+        }
+        self.rooms.push(room);
+        Ok(())
+    }
+}
+
+/// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`).
+pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, rng: &mut TerrainRng) -> Result<Grid, GenError> {
+    let mut types = TerrainTypes::default();
+    let rooms: Vec<DungeonRoom> = set
+        .rooms
+        .iter()
+        .map(|r| {
+            let arm = &r.room.arm;
+            let units = (arm.numbers1.first().copied().unwrap_or(1), arm.numbers1.get(1).copied().unwrap_or(1));
+            let exits = arm
+                .thingies
+                .iter()
+                .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: false })
+                .collect();
+            DungeonRoom { path: r.path.clone(), tag: r.tag.clone(), weight: r.weight, mask: r.orientations, units, exits }
+        })
+        .collect();
+    for r in &rooms {
+        if r.exits.len() as u32 != 2 * (r.units.0 + r.units.1) {
+            return Err(unsupported(format!("room {}: {} exits for {}x{} units", r.path, r.exits.len(), r.units.0, r.units.1)));
+        }
+    }
+    let fields: Vec<EdgeFields> = graph.edges.iter().map(|e| EdgeFields::parse(&e.extra)).collect::<Result<_, _>>()?;
+    for e in &graph.edges {
+        let t = types.edge(files, &e.edge_type)?;
+        if t.height_change != 0 || t.virtual_edge {
+            return Err(unsupported(format!("dungeon edge type {} (chirality not ported)", e.edge_type)));
+        }
+    }
+    // A node's side slots: its edges by edge index (`0x141d1c580`).
+    let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
+        .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
+        .collect();
+    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new() };
+    let unit = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
+    let height = |n: usize| graph.nodes[n].values.get(1).copied().unwrap_or(0);
+    let priority = |n: usize| graph.nodes[n].values.get(2).copied().unwrap_or(0) as i8;
+
+    // `0x1420aa500`: typed nodes, then typeless ones, each stable-sorted by priority.
+    let mut typed: Vec<usize> = (0..graph.nodes.len()).filter(|&n| !graph.nodes[n].room_type.is_empty()).collect();
+    let mut typeless: Vec<usize> = (0..graph.nodes.len()).filter(|&n| graph.nodes[n].room_type.is_empty()).collect();
+    typed.sort_by_key(|&n| std::cmp::Reverse(priority(n)));
+    typeless.sort_by_key(|&n| std::cmp::Reverse(priority(n)));
+    let _ = &typeless;
+
+    for &n in &typed {
+        let node = &graph.nodes[n];
+        let no = node_orientation(&node.orientation);
+        let empty = Exit { door: None, height: 0, chiral: false };
+        let exit_for = |e: usize| {
+            let edge = &graph.edges[e];
+            let h = height(edge.from as usize).max(height(edge.to as usize)) - height(n);
+            Exit { door: Some(edge.edge_type.to_ascii_lowercase()), height: h, chiral: false }
+        };
+        // Required exits (`0x1420ad6b0`, `0x141f96730`).
+        let required: Vec<Exit> = slots[n].iter().map(|&e| exit_for(e)).collect();
+        // The type's rooms in every allowed orientation (`RoomSet` entries).
+        let mut all: Vec<Candidate> = Vec::new();
+        for (ri, r) in rooms.iter().enumerate() {
+            if !r.tag.eq_ignore_ascii_case(&node.room_type) {
+                continue;
+            }
+            for o in 0..8u8 {
+                if r.mask >> o & 1 == 0 {
+                    continue;
+                }
+                let n_ring = r.exits.len() as u32;
+                let mut exits = vec![empty.clone(); n_ring as usize];
+                for i in 0..n_ring {
+                    exits[turn_index(r.units.0, r.units.1, i, o) as usize] = r.exits[i as usize].clone();
+                }
+                let size = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
+                all.push(Candidate { room: ri, o, size, exits, weight: r.weight });
+            }
+        }
+        let cands: Vec<Candidate> = if no == 9 {
+            // `(best)`: each edge takes the free side closest to its direction, then
+            // `GetExactRooms` (`0x141fc0350`), else the looser `0x141fc0460`.
+            match best_sides(graph, &slots[n], n) {
+                Some(sides) => {
+                    let sides: [Exit; 4] = sides.map(|s| s.map_or(empty.clone(), exit_for));
+                    let exact: Vec<Candidate> = all.iter().filter(|c| exact_sides(c, &sides, None)).cloned().collect();
+                    if exact.is_empty() {
+                        let mut loose = Vec::new();
+                        for c in &all {
+                            if exact_sides(c, &sides, Some(&mut |door: &str| types.edge(files, door).map(|t| t.can_end).unwrap_or(false))) {
+                                loose.push(c.clone());
+                            }
+                        }
+                        loose
+                    } else {
+                        exact
+                    }
+                }
+                None => Vec::new(),
+            }
+        } else {
+            // `GetPossibleRooms` (`0x141f9b8f0`): doors containing the required ones.
+            all.into_iter().filter(|c| contains(&c.exits, &required)).collect()
+        };
+        if cands.is_empty() {
+            return Err(unsupported(format!("dungeon node {n} ({}): no room (GetFeatureRooms not ported)", node.room_type)));
+        }
+        // `0x1420d1110`: orientation and fit; candidates whose doors disagree with a neighbour
+        // are dropped when others remain.
+        let pos = unit(n);
+        if std::env::var("POE_DBG").is_ok() {
+            eprintln!("DBG node {n} {} o{no} pos {pos:?} req {:?} best {:?}", node.room_type, required, if no == 9 { best_sides(graph, &slots[n], n) } else { None });
+            for c in &cands {
+                let origin = origin_for(&grid, graph.region, pos, c.size);
+                eprintln!("DBG   cand {} o{} size {:?} w{} origin {origin:?} fits {:?} exits {:?}", rooms[c.room].path.rsplit('/').next().unwrap(), c.o, c.size, c.weight, fits(&grid, c, origin, required.len() as u32), c.exits.iter().map(|e| e.door.is_some() as u8).collect::<Vec<_>>());
+            }
+        }
+        let mut kept: Vec<(Candidate, (i32, i32), bool)> = Vec::new();
+        for c in cands {
+            if !(no >= 8 || c.o == no) {
+                continue;
+            }
+            let origin = origin_for(&grid, graph.region, pos, c.size);
+            if let Some(mismatch) = fits(&grid, &c, origin, required.len() as u32) {
+                kept.push((c, origin, mismatch));
+            }
+        }
+        if kept.iter().any(|k| !k.2) {
+            kept.retain(|k| !k.2);
+        }
+        if kept.is_empty() {
+            return Err(unsupported(format!("dungeon node {n} ({}): no suitable room", node.room_type)));
+        }
+        let total: u32 = kept.iter().map(|k| k.0.weight).sum();
+        let mut k = pick(&kept, rng.below(total));
+        if repeats(&grid, &rooms[kept[k].0.room].path, kept[k].1, kept[k].0.size) {
+            k = pick(&kept, rng.below(total));
+        }
+        let (c, origin, _) = kept[k].clone();
+        // `0x1420966f0`: the extra door type from the node's edges.
+        let weighted: Vec<(usize, u32)> = slots[n].iter().map(|&e| (e, fields[e].extra_door)).filter(|w| w.1 != 0).collect();
+        let extra_door = if weighted.is_empty() {
+            None
+        } else {
+            let mut r = rng.below(weighted.iter().map(|w| w.1).sum());
+            let mut chosen = weighted[weighted.len() - 1].0;
+            for &(e, w) in &weighted {
+                if r < w {
+                    chosen = e;
+                    break;
+                }
+                r -= w;
+            }
+            let t = &fields[chosen].extra_door_type;
+            Some(if t.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { t.to_ascii_lowercase() })
+        };
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door })?;
+    }
+    if !typeless.is_empty() {
+        return Err(unsupported(format!("dungeon: typeless nodes (0x1420afdd0) not ported; {} rooms placed", grid.rooms.len())));
+    }
+    Ok(grid)
+}
+
+/// `0x1420ad6b0` for `(best)` nodes: per edge, the sides its direction leans to (x first, then
+/// y) with their angle to that side; sorted by angle, the smallest first takes its side if free
+/// (dropping the edge's other proposals). `None` unless every edge gets a side. Sides: 0 up,
+/// 1 right, 2 down, 3 left.
+fn best_sides(graph: &Graph, slots: &[usize], n: usize) -> Option<[Option<usize>; 4]> {
+    let node = (graph.nodes[n].x, graph.nodes[n].y);
+    let mut props: Vec<(usize, u32, u32)> = Vec::new();
+    for &e in slots {
+        let edge = &graph.edges[e];
+        let target = if edge.from as usize == n {
+            edge.points.first().copied().unwrap_or((graph.nodes[edge.to as usize].x, graph.nodes[edge.to as usize].y))
+        } else {
+            edge.points.last().copied().unwrap_or((graph.nodes[edge.from as usize].x, graph.nodes[edge.from as usize].y))
+        };
+        let d = (target.0 - node.0, target.1 - node.1);
+        if d.0 < 0 {
+            props.push((e, 3, angle(d, (-100, 0)) as u32));
+        } else if d.0 > 0 {
+            props.push((e, 1, angle(d, (100, 0)) as u32));
+        }
+        if d.1 < 0 {
+            props.push((e, 0, angle(d, (0, -100)) as u32));
+        } else if d.1 > 0 {
+            props.push((e, 2, angle(d, (0, 100)) as u32));
+        }
+    }
+    // `0x1420d5840`: stable, largest angle first.
+    props.sort_by_key(|p| std::cmp::Reverse(p.2));
+    let mut sides: [Option<usize>; 4] = [None; 4];
+    while let Some(&(e, side, _)) = props.last() {
+        if sides[side as usize].is_none() {
+            sides[side as usize] = Some(e);
+            props.retain(|p| p.0 != e);
+        } else {
+            props.pop();
+        }
+    }
+    (sides.iter().flatten().count() == slots.len()).then_some(sides)
+}
+
+/// `0x141fc0350` (`loose` = `None`) / `0x141fc0460`: every side of the candidate's door ring
+/// holds that side's required exit; the loose form also accepts a side with no required door
+/// whose doors may all be left closed (`.et` flag 0x10).
+fn exact_sides(c: &Candidate, sides: &[Exit; 4], mut loose: Option<&mut dyn FnMut(&str) -> bool>) -> bool {
+    let (w, h) = c.size;
+    let bounds = [0, w, w + h, 2 * w + h, c.exits.len() as u32];
+    (0..4).all(|k| {
+        let range = bounds[k] as usize..bounds[k + 1] as usize;
+        if c.exits[range.clone()].iter().any(|e| *e == sides[k]) {
+            return true;
+        }
+        match &mut loose {
+            None => false,
+            Some(optional) => sides[k].door.is_none() && c.exits[range].iter().all(|e| e.door.as_deref().is_none_or(|d| optional(d))),
+        }
+    })
+}
+
+/// Weighted pick over kept candidates.
+fn pick(kept: &[(Candidate, (i32, i32), bool)], mut r: u32) -> usize {
+    for (i, k) in kept.iter().enumerate() {
+        if r < k.0.weight {
+            return i;
+        }
+        r -= k.0.weight;
+    }
+    kept.len() - 1
+}
+
+/// `0x141f9b7a0`: every required door is among the candidate's (as a multiset).
+fn contains(exits: &[Exit], required: &[Exit]) -> bool {
+    let mut count: HashMap<&Exit, i32> = HashMap::new();
+    for e in exits {
+        *count.entry(e).or_default() += 1;
+    }
+    required.iter().all(|r| {
+        let c = count.entry(r).or_default();
+        *c -= 1;
+        *c >= 0
+    })
+}
+
+/// `0x1420aefc0`: the room's origin for a node at unit `pos` (the room's extent is taken off on
+/// axes the region mirrors), clamped into the grid.
+fn origin_for(grid: &Grid, region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
+    const TABLE: [[u8; 3]; 9] = [[0, 1, 1], [1, 0, 1], [0, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1]];
+    let [a, b, c] = TABLE[region.min(8) as usize];
+    // The graph's orientation swaps the sides for odd orientations.
+    let (rw, rh) = if region & 1 == 1 && region < 8 { (h as i32, w as i32) } else { (w as i32, h as i32) };
+    let v = [rw - 1, 0, rh - 1, 0];
+    let x = pos.0 - v[(b + a * 2) as usize];
+    let y = pos.1 - v[((if a == 0 { 2 } else { 0 }) + c) as usize];
+    let x = x.max(0).min(grid.w as i32 - w as i32);
+    let y = y.max(0).min(grid.h as i32 - h as i32);
+    (x, y)
+}
+
+/// `0x1420af280`: the room fits at `origin` (free cells; at least `need` doors lead into the
+/// grid). Returns whether a door faces a placed room whose door there differs.
+fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32) -> Option<bool> {
+    if !grid.free(origin, c.size) {
+        return None;
+    }
+    if c.size == (grid.w, grid.h) {
+        return Some(false);
+    }
+    let (mut any, mut inside, mut mismatch) = (false, 0, false);
+    for (u, e) in c.exits.iter().enumerate() {
+        let Some(door) = &e.door else { continue };
+        any = true;
+        let cell = ring_cell(origin, c.size, u as u32);
+        let Some(state) = grid.state(cell) else { continue };
+        inside += 1;
+        if state < 2 || mismatch {
+            continue;
+        }
+        let p = &grid.rooms[state as usize - 2];
+        let inner = ring_inner(origin, c.size, u as u32);
+        let n = p.exits.len() as u32;
+        if let Some(v) = (0..n).find(|&v| ring_cell(p.origin, p.size, v) == inner && ring_inner(p.origin, p.size, v) == cell) {
+            if p.exits[v as usize].door.as_ref() != Some(door) {
+                mismatch = true;
+            }
+        }
+    }
+    if any && inside < need {
+        return None;
+    }
+    Some(mismatch)
+}
+
+/// `0x1420b1550`: a room right next to the rectangle is the same `.arm`.
+fn repeats(grid: &Grid, path: &str, origin: (i32, i32), (w, h): (u32, u32)) -> bool {
+    let mut cells = Vec::new();
+    for dx in 0..w as i32 {
+        cells.push((origin.0 + dx, origin.1 - 1));
+        cells.push((origin.0 + dx, origin.1 + h as i32));
+    }
+    for dy in 0..h as i32 {
+        cells.push((origin.0 - 1, origin.1 + dy));
+        cells.push((origin.0 + w as i32, origin.1 + dy));
+    }
+    cells.iter().any(|&c| grid.state(c).is_some_and(|s| s >= 2 && grid.rooms[s as usize - 2].path.eq_ignore_ascii_case(path)))
+}
