@@ -604,7 +604,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
             virtual_end |= types.edge(files, &graph.edges[ei as usize].edge_type)?.virtual_edge;
         }
         let fixed = placed.iter().any(|p| p.node == i);
-        lg.nodes.push(LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end });
+        lg.nodes.push(LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end, orig: Some(i) });
     }
     for (gi, e) in graph.edges.iter().enumerate() {
         let ri = route_index[gi];
@@ -639,7 +639,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                 first = false;
             } else {
                 let nn = lg.nodes.len();
-                lg.nodes.push(LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false });
+                lg.nodes.push(LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None });
                 if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
                 lg.nodes[node].slots[k] = None;
             }
@@ -647,6 +647,10 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     }
     smoothing::smooth(&mut lg);
     probe(Stage::Graph("smooth", &lg));
+    // Virtual nodes no tile fitted (`0x1420c6cd0`).
+    for &n in &virtual_nodes {
+        node_tiles::virtual_junction(&mut lg, n, rng)?;
+    }
 
     // Virtual edges split into their two banks.
     let mut split_types: HashMap<String, SplitType> = HashMap::new();
@@ -662,15 +666,20 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let lookup = |t: &str| split_types.get(&t.to_ascii_lowercase()).cloned().unwrap_or_default();
     split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), rng);
     probe(Stage::Graph("split", &lg));
+    // Logical links of tile-less virtual nodes (`0x1420bcff0`).
+    let (link_tiles, _) = node_tiles::resolve_links(&mut lg)?;
 
     // Rounding, border dead ends and node tiles (`0x1420cade0`), slot compaction, rounding,
     // end points.
     smoothing::round_corners(&mut lg);
     let mut tile_nodes = Vec::new();
-    for n in 0..graph.nodes.len() {
-        if !graph.nodes[n].room_type.is_empty() {
+    for gi in 0..graph.nodes.len() {
+        // Sorted at the start of the tile stage (`0x1420c7400`): virtual nodes are not in the
+        // tile list.
+        if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) {
             continue;
         }
+        let Some(n) = lg.nodes.iter().position(|x| x.orig == Some(gi)) else { continue };
         let edges: Vec<usize> = lg.nodes[n].slots.iter().flatten().copied().collect();
         let mut near = false;
         if let [e] = edges[..] {
@@ -713,6 +722,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         lg.nodes[n].fixed = true;
         lg.edges[e].offsets[w] = off;
     }
+    tile_nodes.extend(link_tiles);
     node_tiles::place_node_tiles(&mut lg, graph, &tile_nodes, &master, &mut map, tiles, &mut types, files, rng)?;
     smoothing::compact_slots(&mut lg);
     smoothing::round_corners(&mut lg);
