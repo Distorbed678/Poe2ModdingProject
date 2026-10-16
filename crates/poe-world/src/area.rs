@@ -408,7 +408,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
         }
     }
-    let master = Master::load(files, &rel("TileSet").ok_or_else(|| data("no TileSet"))?, &rel("FillTiles").ok_or_else(|| data("no FillTiles"))?)?;
+    let mut master = Master::load(files, &rel("TileSet").ok_or_else(|| data("no TileSet"))?, &rel("FillTiles").ok_or_else(|| data("no FillTiles"))?)?;
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
         None => Default::default(),
@@ -425,7 +425,8 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
     }
     let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap };
-    pass.run(&grid, &rooms, &mut map, rng)?;
+    let cells = pass.run(&grid, &rooms, &mut map, rng)?;
+    let fill_rooms = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
         for p in &map.pieces {
@@ -434,7 +435,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
         std::fs::write(path, out).ok();
     }
-    Err(GenError::Unsupported(format!("dungeon fill not ported ({} tiles placed)", map.pieces.len())))
+    Err(GenError::Unsupported(format!("dungeon de-repetition not ported ({} tiles placed, {} fill rooms)", map.pieces.len(), fill_rooms.len())))
 }
 
 /// Everything after the topology choice, for one graph.

@@ -49,6 +49,9 @@ struct Fill<'a> {
     files: &'a dyn Files,
     rooms: HashMap<String, Room>,
     placed: Vec<PlacedFillRoom>,
+    /// The caller's height for the cell (`0x141f8f930`'s last argument; `i32::MIN` there means
+    /// the corners decide).
+    height: Option<i16>,
 }
 
 fn oriented(size: (u8, u8), o: u8) -> (i32, i32) {
@@ -160,8 +163,12 @@ impl Fill<'_> {
         }
     }
 
-    /// Height of a fill tile (`0x141f90950`): the middle of its set corner heights.
+    /// Height of a fill tile (`0x141f90950`): the caller's, else the middle of its set corner
+    /// heights.
     fn corner_height(&self, x: i32, y: i32, w: i32, h: i32) -> i16 {
+        if let Some(h) = self.height {
+            return h;
+        }
         let hs: Vec<i32> = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
             .iter()
             .filter_map(|&(px, py)| self.map.point_index(px, py))
@@ -349,13 +356,38 @@ fn pick_entry(list: &[Entry], mut r: u32) -> &Entry {
 /// `0x141f93060`: rows top to bottom, cells left to right; a cell's ground is its top-left
 /// corner's, and fill rooms with points of interest only go where that corner is walkable (no
 /// flag 8, and no ground or one with `.gt` flag 4).
+/// The dungeon fill (`0x14209cf50` per listed cell): each still-empty cell with its listed
+/// ground (else its corner's, when set) and reachability.
+pub fn fill_cells(
+    map: &mut TileMap,
+    master: &mut Master,
+    files: &dyn Files,
+    cells: &[crate::dungeon_tiles::GroundCell],
+    rng: &mut TerrainRng,
+) -> Result<Vec<PlacedFillRoom>, GenError> {
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None };
+    for c in cells {
+        let (x, y) = c.pos;
+        if !f.map.index(x, y).is_some_and(|i| f.map.cells[i].is_none()) {
+            continue;
+        }
+        let ground = c.ground.clone().or_else(|| {
+            let p = &f.map.lattice[f.map.point_index(x, y)?];
+            (p.flags & 1 != 0).then(|| p.ground.clone()).flatten()
+        });
+        f.height = Some(c.height as i16);
+        f.cell(x, y, ground, c.accessible, rng)?;
+    }
+    Ok(f.placed)
+}
+
 pub fn fill_pass(
     map: &mut TileMap,
     master: &mut Master,
     files: &dyn Files,
     rng: &mut TerrainRng,
 ) -> Result<Vec<PlacedFillRoom>, GenError> {
-    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new() };
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None };
     for y in 0..f.map.height as i32 {
         let mut x = 0;
         while x < f.map.width as i32 {
