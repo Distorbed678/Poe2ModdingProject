@@ -379,6 +379,7 @@ impl TilePass<'_> {
                 let c = pick(list, rng.below(total)).expect("non-empty list");
                 let def = &self.master.tiles.tiles[c.tile];
                 map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height as i16, Some(c.tile));
+                map.set_heights(pos.0, pos.1, &def.tdt, height as i16);
             }
         }
         Ok(())
@@ -475,6 +476,7 @@ impl TilePass<'_> {
             let c = pick(list, rng.below(total)).expect("non-empty list");
             let def = &self.master.tiles.tiles[c.tile];
             map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, e.height as i16, Some(c.tile));
+            map.set_heights(pos.0, pos.1, &def.tdt, e.height as i16);
             doors.after_border(pos, &e.key);
         }
         Ok(())
