@@ -376,6 +376,9 @@ impl TilePass<'_> {
                     return Err(unsupported(format!("dungeon: no tile for {} slot ({x},{y}) at {pos:?} feature {feature:?} key {key:?}", p.path)));
                 }
                 let total = list.iter().map(|c| c.weight).sum();
+                if std::env::var("POE_DBG_KEYS").is_ok() {
+                    eprintln!("DBG key {pos:?} total {total} {} slot ({x},{y}) o{o} {key:?}", p.path.rsplit('/').next().unwrap_or(""));
+                }
                 let c = pick(list, rng.below(total)).expect("non-empty list");
                 let def = &self.master.tiles.tiles[c.tile];
                 map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height as i16, Some(c.tile));
