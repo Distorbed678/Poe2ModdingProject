@@ -151,7 +151,13 @@ fn angle(a: (i32, i32), b: (i32, i32)) -> u16 {
 /// A room of the set as the dungeon sees it.
 struct DungeonRoom {
     path: String,
+    /// The room type (the `.arm` tag; empty for `special…` rooms, whose tag the parser clears).
     tag: String,
+    /// Kept out of the type buckets and size map (`0x141f99b20`): `special…` rooms and the
+    /// shrine, mission, stone circle, preunique and injector types.
+    generic: bool,
+    /// The `.arm` uniqueness flag (room data +6).
+    unique: bool,
     weight: u32,
     mask: u8,
     units: (u32, u32),
@@ -231,7 +237,11 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 .iter()
                 .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: false })
                 .collect();
-            DungeonRoom { path: r.path.clone(), tag: r.tag.clone(), weight: r.weight, mask: r.orientations, units, exits }
+            let tag = r.tag.to_ascii_lowercase();
+            let special = tag.starts_with("special");
+            let generic = !special && !matches!(tag.as_str(), "shrine" | "mission" | "stonecircle" | "preunique") && !tag.starts_with("telepad_injector") && !tag.starts_with("room_injector") && !tag.starts_with("tile_injector");
+            let unique = arm.bools.first().copied().unwrap_or(false);
+            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, weight: r.weight, mask: r.orientations, units, exits }
         })
         .collect();
     for r in &rooms {
@@ -262,7 +272,11 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     typeless.sort_by_key(|&n| std::cmp::Reverse(priority(n)));
     let _ = &typeless;
 
+    let void = |n: usize| graph.nodes[n].extra.first().is_some_and(|v| v.eq_ignore_ascii_case("Y"));
     for &n in &typed {
+        if void(n) {
+            continue;
+        }
         let node = &graph.nodes[n];
         let no = node_orientation(&node.orientation);
         let empty = Exit { door: None, height: 0, chiral: false };
@@ -276,7 +290,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         // The type's rooms in every allowed orientation (`RoomSet` entries).
         let mut all: Vec<Candidate> = Vec::new();
         for (ri, r) in rooms.iter().enumerate() {
-            if !r.tag.eq_ignore_ascii_case(&node.room_type) {
+            if !r.generic || !r.tag.eq_ignore_ascii_case(&node.room_type) {
                 continue;
             }
             for o in 0..8u8 {
@@ -352,27 +366,69 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             k = pick(&kept, rng.below(total));
         }
         let (c, origin, _) = kept[k].clone();
-        // `0x1420966f0`: the extra door type from the node's edges.
-        let weighted: Vec<(usize, u32)> = slots[n].iter().map(|&e| (e, fields[e].extra_door)).filter(|w| w.1 != 0).collect();
-        let extra_door = if weighted.is_empty() {
-            None
-        } else {
-            let mut r = rng.below(weighted.iter().map(|w| w.1).sum());
-            let mut chosen = weighted[weighted.len() - 1].0;
-            for &(e, w) in &weighted {
-                if r < w {
-                    chosen = e;
-                    break;
-                }
-                r -= w;
-            }
-            let t = &fields[chosen].extra_door_type;
-            Some(if t.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { t.to_ascii_lowercase() })
-        };
+        let extra_door = extra_door_pick(&slots[n], &fields, rng);
         grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door })?;
     }
-    if !typeless.is_empty() {
-        return Err(unsupported(format!("dungeon: typeless nodes (0x1420afdd0) not ported; {} rooms placed", grid.rooms.len())));
+    // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
+    // edge type until one fits; the room itself comes later.
+    let sizes = size_map_final(&rooms);
+    for &n in &typeless {
+        if void(n) {
+            continue;
+        }
+        let pos = unit(n);
+        let i = match grid.state(pos) {
+            Some(_) => (pos.1 as u32 * grid.w + pos.0 as u32) as usize,
+            None => return Err(unsupported(format!("dungeon node {n} out of bounds at {pos:?}"))),
+        };
+        if grid.cells[i] == 1 {
+            grid.cells[i] = 0;
+        }
+        if grid.cells[i] != 0 {
+            return Err(unsupported(format!("dungeon node {n} overlaps another room at {pos:?}")));
+        }
+        let door = slots[n].first().map(|&e| graph.edges[e].edge_type.to_ascii_lowercase()).unwrap_or_default();
+        let mut list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| s.0 == door).map(|s| s.1.clone()).unwrap_or_default();
+        if let Some(forced) = forced_size(&graph.nodes[n].tags) {
+            list.retain(|s| s.0 == forced);
+        }
+        if list.is_empty() {
+            return Err(unsupported(format!("dungeon node {n}: no room sizes for edge type {door}")));
+        }
+        let mut total: u32 = list.iter().map(|s| s.1).sum();
+        loop {
+            let mut r = rng.below(total);
+            let mut k = list.len() - 1;
+            for (j, s) in list.iter().enumerate() {
+                if r < s.1 {
+                    k = j;
+                    break;
+                }
+                r -= s.1;
+            }
+            let (w, h) = list[k].0;
+            let origin = size_origin(graph.region, pos, (w, h));
+            let inside = origin.0 >= 0 && origin.1 >= 0 && origin.0 as u32 + w <= grid.w && origin.1 as u32 + h <= grid.h;
+            let clear = inside && (0..h as i32).all(|dy| (0..w as i32).all(|dx| grid.state((origin.0 + dx, origin.1 + dy)) == Some(0)));
+            // `0x1420af6a0`: the rectangle must not hold another node.
+            let swallows = |m: usize| {
+                let p = unit(m);
+                m != n && p.0 >= origin.0 && p.0 < origin.0 + w as i32 && p.1 >= origin.1 && p.1 < origin.1 + h as i32
+            };
+            if clear && !(0..graph.nodes.len()).any(swallows) {
+                let extra_door = extra_door_pick(&slots[n], &fields, rng);
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door })?;
+                break;
+            }
+            let size = list[k].0;
+            if let Some(j) = list.iter().position(|s| s.0 == size) {
+                total -= list[j].1;
+                list.remove(j);
+            }
+            if list.is_empty() {
+                return Err(unsupported(format!("dungeon node {n}: no room size fits at {pos:?}")));
+            }
+        }
     }
     Ok(grid)
 }
@@ -433,6 +489,90 @@ fn exact_sides(c: &Candidate, sides: &[Exit; 4], mut loose: Option<&mut dyn FnMu
             Some(optional) => sides[k].door.is_none() && c.exits[range].iter().all(|e| e.door.as_deref().is_none_or(|d| optional(d))),
         }
     })
+}
+
+/// `0x1420966f0`: the extra door type, drawn from the node's edges weighted by their extra
+/// door %.
+fn extra_door_pick(slots: &[usize], fields: &[EdgeFields], rng: &mut TerrainRng) -> Option<String> {
+    let weighted: Vec<(usize, u32)> = slots.iter().map(|&e| (e, fields[e].extra_door)).filter(|w| w.1 != 0).collect();
+    if weighted.is_empty() {
+        return None;
+    }
+    let mut r = rng.below(weighted.iter().map(|w| w.1).sum());
+    let mut chosen = weighted[weighted.len() - 1].0;
+    for &(e, w) in &weighted {
+        if r < w {
+            chosen = e;
+            break;
+        }
+        r -= w;
+    }
+    let t = &fields[chosen].extra_door_type;
+    Some(if t.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { t.to_ascii_lowercase() })
+}
+
+/// `0x1420d0000`: a `size:W` or `size:WxH` node tag.
+fn forced_size(tags: &[String]) -> Option<(u32, u32)> {
+    let t = tags.iter().find_map(|t| t.strip_prefix("size:"))?;
+    match t.split_once('x') {
+        Some((a, b)) => Some((a.parse().ok()?, b.parse().ok()?)).filter(|s: &(u32, u32)| s.0 != 0 && s.1 != 0),
+        None => t.parse().ok().map(|v| (v, v)),
+    }
+}
+
+/// `0x1420afdd0`: the origin of a `w`×`h` size at a node's unit cell (the extent is taken off on
+/// axes the region mirrors; not clamped).
+fn size_origin(region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
+    const TABLE: [[u8; 3]; 9] = [[0, 1, 1], [1, 0, 1], [0, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1]];
+    let [a, b, c] = TABLE[region.min(8) as usize];
+    let (rw, rh) = if region & 1 == 1 && region < 8 { (h as i32, w as i32) } else { (w as i32, h as i32) };
+    let v = [rw - 1, rh - 1, 0];
+    let x = pos.0 - [v[0], 0, v[1], 0][(b + a * 2) as usize];
+    let y = pos.1 - [v[0], 0, v[1], 0][((if a == 0 { 2 } else { 0 }) + c) as usize];
+    (x, y)
+}
+
+/// The size lists per door type after `0x141f995a0`: sizes of generic rooms with their summed
+/// weights, keeping only sizes some non-unique generic room has.
+fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)> {
+    let mut all: Vec<(String, Vec<((u32, u32), u32)>)> = Vec::new();
+    let mut plain: Vec<(String, Vec<(u32, u32)>)> = Vec::new();
+    for r in rooms.iter().filter(|r| r.generic) {
+        let (w, h) = r.units;
+        let mut seen: Vec<&String> = Vec::new();
+        for door in r.exits.iter().filter_map(|e| e.door.as_ref()) {
+            if seen.contains(&door) {
+                continue;
+            }
+            seen.push(door);
+            let mut sizes = Vec::new();
+            if r.mask == 0 || r.mask & 0x55 != 0 {
+                sizes.push((w, h));
+            }
+            if w != h && (r.mask == 0 || r.mask & 0xaa != 0) {
+                sizes.push((h, w));
+            }
+            let k = all.iter().position(|e| &e.0 == door).unwrap_or_else(|| {
+                all.push((door.clone(), Vec::new()));
+                plain.push((door.clone(), Vec::new()));
+                all.len() - 1
+            });
+            for size in sizes {
+                match all[k].1.iter_mut().find(|e| e.0 == size) {
+                    Some(e) => e.1 += r.weight,
+                    None => all[k].1.push((size, r.weight)),
+                }
+                if !r.unique && !plain[k].1.contains(&size) {
+                    plain[k].1.push(size);
+                }
+            }
+        }
+    }
+    for (k, (_, sizes)) in all.iter_mut().enumerate() {
+        sizes.retain(|s| plain[k].1.contains(&s.0) && s.1 != 0);
+        sizes.sort_by_key(|s| s.0);
+    }
+    all
 }
 
 /// Weighted pick over kept candidates.
@@ -520,4 +660,55 @@ fn repeats(grid: &Grid, path: &str, origin: (i32, i32), (w, h): (u32, u32)) -> b
         cells.push((origin.0 + w as i32, origin.1 + dy));
     }
     cells.iter().any(|&c| grid.state(c).is_some_and(|s| s >= 2 && grid.rooms[s as usize - 2].path.eq_ignore_ascii_case(path)))
+}
+
+/// The room-size map per door type (`0x141f98bb0`, room set +0x28): every generic room adds its
+/// `.rs` weight to (w, h) under each door type it has (once per type), and to (h, w) when it is
+/// not square and its orientations include odd ones. Rooms tagged `shrine` or `mission` are kept
+/// apart and add nothing.
+pub fn size_map(set: &RoomSet) -> Vec<(String, Vec<((u32, u32), u32)>)> {
+    let mut out: Vec<(String, Vec<((u32, u32), u32)>)> = Vec::new();
+    for r in &set.rooms {
+        let tag = r.tag.to_ascii_lowercase();
+        if tag == "shrine" || tag == "mission" || tag == "stonecircle" {
+            continue;
+        }
+        let a = &r.room.arm;
+        let (w, h) = (a.numbers1.first().copied().unwrap_or(1), a.numbers1.get(1).copied().unwrap_or(1));
+        let mut seen: Vec<String> = Vec::new();
+        for t in &a.thingies {
+            let Some(door) = t.et_file.as_ref().map(|s| s.to_ascii_lowercase()) else { continue };
+            if seen.contains(&door) {
+                continue;
+            }
+            seen.push(door.clone());
+            let k = match out.iter().position(|e| e.0 == door) {
+                Some(k) => k,
+                None => {
+                    out.push((door.clone(), Vec::new()));
+                    out.len() - 1
+                }
+            };
+            let mut add = |size: (u32, u32)| match out[k].1.iter_mut().find(|e| e.0 == size) {
+                Some(e) => e.1 += r.weight,
+                None => out[k].1.push((size, r.weight)),
+            };
+            if r.orientations == 0 || r.orientations & 0x55 != 0 {
+                add((w, h));
+            }
+            if w != h && (r.orientations == 0 || r.orientations & 0xaa != 0) {
+                add((h, w));
+            }
+        }
+    }
+    out
+}
+
+/// [`size_map`] as text, with totals.
+pub fn size_report(set: &RoomSet) -> String {
+    size_map(set)
+        .iter()
+        .map(|(door, sizes)| format!("{door}: total {} {:?}", sizes.iter().map(|s| s.1).sum::<u32>(), sizes))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
