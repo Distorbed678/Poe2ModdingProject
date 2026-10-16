@@ -187,6 +187,12 @@ pub struct PlacedRoom {
     pub extra_door: Option<String>,
     /// Room height (+0x12): the node's, or the edge's on a corridor.
     pub height: i32,
+    /// Flags +0x15 bit 0: reachable (an accessible edge or tag).
+    pub accessible: bool,
+    /// Flags +0x15 bit 1: closed to extra doors (typed or tagged nodes, impenetrable edges).
+    pub blocked: bool,
+    /// +0x10: extra door chance (%).
+    pub extra_pct: u32,
 }
 
 impl PlacedRoom {
@@ -289,6 +295,20 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let _ = &typeless;
 
     let void = |n: usize| graph.nodes[n].extra.first().is_some_and(|v| v.eq_ignore_ascii_case("Y"));
+    // `0x142095d90`: an accessible edge, or an `accessible` / `default` / `entrance…` /
+    // `sideentrance…` tag.
+    let node_accessible = |n: usize| {
+        slots[n].iter().any(|&e| fields[e].accessible)
+            || graph.nodes[n].tags.iter().any(|t| {
+                let t = t.to_ascii_lowercase();
+                t == "accessible" || t == "default" || t.starts_with("entrance") || t.starts_with("sideentrance")
+            })
+    };
+    // `0x1420af7d0`: typed or tagged nodes, or nodes with an impenetrable edge.
+    let node_blocked = |n: usize| {
+        !graph.nodes[n].room_type.is_empty() || !graph.nodes[n].tags.is_empty() || slots[n].iter().any(|&e| fields[e].impenetrable.eq_ignore_ascii_case("I"))
+    };
+    let node_extra = |n: usize| slots[n].iter().map(|&e| fields[e].extra_door).max().unwrap_or(0);
     for &n in &typed {
         if void(n) {
             continue;
@@ -383,7 +403,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let (c, origin, _) = kept[k].clone();
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
-        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n) })?;
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n) })?;
     }
     // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
@@ -433,7 +453,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             if clear && !(0..graph.nodes.len()).any(swallows) {
                 let extra_door = extra_door_pick(&slots[n], &fields, rng);
-                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n) })?;
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n) })?;
                 break;
             }
             let size = list[k].0;
@@ -874,7 +894,73 @@ fn corridors(
         branch(graph, fields, key, &generic, grid, &mut records, &paths, rng)?;
         compact(grid, &mut records, &mut paths);
     }
+    extra_doors(grid, &generic, open_into_impenetrable(graph), rng)?;
     Ok(())
+}
+
+/// The `.dgr` header's `open_extra_doors_into_impenetrable_rooms` (version > 22).
+fn open_into_impenetrable(graph: &Graph) -> bool {
+    graph.extra_header.as_deref().is_some_and(|v| v != "0")
+}
+
+/// `0x1420a99e0`: extra doors. Per room with an extra door chance: its door positions (empty or
+/// of its extra door type) facing a room it is not yet joined to (open, and one of the two
+/// accessible) are shuffled (a discarded `below(n)` first); each one both sides could take
+/// opens with `below(100)` under the chance (a chance over 100 opens more than one).
+fn extra_doors(grid: &mut Grid, generic: &[(u32, u32, Vec<Exit>)], into_impenetrable: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let mut reached: Vec<usize> = Vec::new();
+    for r in 0..grid.rooms.len() {
+        if grid.rooms[r].extra_pct == 0 {
+            continue;
+        }
+        let door = grid.rooms[r].extra_door.clone().unwrap_or_else(|| "metadata/terrain/dungeon/rooms.et".into());
+        let mut list: Vec<(u32, usize)> = Vec::new();
+        for u in 0..grid.rooms[r].exits.len() as u32 {
+            let room = &grid.rooms[r];
+            let d = &room.exits[u as usize].door;
+            if !(d.is_none() || d.as_deref() == Some(door.as_str())) {
+                continue;
+            }
+            let Some(s) = grid.state(ring_cell(room.origin, room.size, u)) else { continue };
+            if s < 2 {
+                continue;
+            }
+            let n = s as usize - 2;
+            let nr = &grid.rooms[n];
+            if (into_impenetrable || !nr.blocked) && (room.accessible || nr.accessible) && !joined(room, nr) {
+                list.push((u, n));
+            }
+        }
+        rng.below(list.len() as u32);
+        let k = list.len();
+        for i in 0..k {
+            let j = rng.uniform((k - i) as u32) as usize;
+            list.swap(i, i + j);
+        }
+        let mut pct = grid.rooms[r].extra_pct;
+        for &(_, n) in &list {
+            let height = grid.rooms[r].height.max(grid.rooms[n].height);
+            if can_branch(grid, generic, r, n, height, &door) && can_branch(grid, generic, n, r, height, &door) && rng.below(100) < pct {
+                open_door(grid, r, n, &door, true, rng)?;
+                if (grid.rooms[r].accessible || grid.rooms[n].accessible) && !reached.contains(&n) {
+                    reached.push(n);
+                }
+                if pct < 101 {
+                    break;
+                }
+                pct -= 100;
+            }
+        }
+    }
+    for n in reached {
+        grid.rooms[n].accessible = true;
+    }
+    Ok(())
+}
+
+/// `0x141fa8320`: the rooms already share an open door.
+fn joined(a: &PlacedRoom, b: &PlacedRoom) -> bool {
+    (0..a.exits.len() as u32).any(|u| a.exits[u as usize].door.is_some() && facing(a, b, u).is_some_and(|v| b.exits[v as usize].door == a.exits[u as usize].door))
 }
 
 /// A corridor (`0x1420a3a20`'s 0x28-byte record under its type key): rooms from the edge's
@@ -969,11 +1055,15 @@ struct BranchCand {
     depth: i32,
     height: i32,
     impen: bool,
+    accessible: bool,
+    extra_pct: u32,
+    extra_door: String,
 }
 
 /// `0x1420a4910` / `0x1420a4a10`: neighbours of `parent` that can start a branch.
 #[allow(clippy::too_many_arguments)]
-fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit>)], parent: usize, depth: i32, chance: i32, height: i32, impen: bool, door: &str, out: &mut Vec<BranchCand>) {
+fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit>)], parent: usize, proto: &BranchCand, door: &str, out: &mut Vec<BranchCand>) {
+    let height = proto.height;
     for n in neighbours(grid, parent) {
         let rec = &records[n];
         let fits_height = if rec.heights.is_empty() { height == 0 } else { rec.heights.len() == 1 && rec.heights[0] == height };
@@ -981,7 +1071,7 @@ fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit
             continue;
         }
         if can_branch(grid, generic, parent, n, height, door) {
-            out.push(BranchCand { room: n, parent, chance, depth, height, impen });
+            out.push(BranchCand { room: n, parent, ..proto.clone() });
         }
     }
 }
@@ -1048,8 +1138,10 @@ fn branch(graph: &Graph, fields: &[EdgeFields], key: &str, generic: &[(u32, u32,
         let end = if branching(edge.from) { c.rooms.len() } else { c.rooms.len() - 1 };
         let impen = f.impenetrable.eq_ignore_ascii_case("I");
         let mut list = Vec::new();
+        let t = if f.extra_door_type.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { f.extra_door_type.to_ascii_lowercase() };
+        let proto = BranchCand { room: 0, parent: 0, chance: f.chance2, depth: f.depth_limit - 1, height: c.height, impen, accessible: f.accessible, extra_pct: f.extra_door, extra_door: t };
         for i in first..end.max(first) {
-            branch_starts(grid, records, generic, c.rooms[i], f.depth_limit - 1, f.chance2, c.height, impen, key, &mut list);
+            branch_starts(grid, records, generic, c.rooms[i], &proto, key, &mut list);
         }
         if f.chance1 < 100 {
             let k = chance_count(f.chance1, list.len(), rng);
@@ -1104,6 +1196,12 @@ fn grow_branch(grid: &mut Grid, records: &mut [Record], generic: &[(u32, u32, Ve
         return Ok(());
     }
     grid.rooms[c.room].height = c.height;
+    grid.rooms[c.room].accessible = c.accessible;
+    grid.rooms[c.room].blocked = c.impen;
+    grid.rooms[c.room].extra_pct = grid.rooms[c.room].extra_pct.max(c.extra_pct);
+    if grid.rooms[c.room].extra_door.as_deref().is_none_or(|d| d == "metadata/terrain/dungeon/rooms.et") {
+        grid.rooms[c.room].extra_door = Some(c.extra_door.clone());
+    }
     records[c.room].used = true;
     records[c.room].impen = c.impen;
     open_door(grid, c.room, c.parent, door, false, rng)?;
@@ -1124,7 +1222,8 @@ fn grow_branch(grid: &mut Grid, records: &mut [Record], generic: &[(u32, u32, Ve
         }
     }
     if c.depth != 0 {
-        branch_starts(grid, records, generic, c.room, c.depth - 1, c.chance, c.height, c.impen, door, next);
+        let proto = BranchCand { depth: c.depth - 1, ..c.clone() };
+        branch_starts(grid, records, generic, c.room, &proto, door, next);
     }
     Ok(())
 }
@@ -1166,13 +1265,20 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
         if grid.rooms[c].is_placeholder() {
             records[c].impval = f.impenetrability;
             records[c].impen = impenetrable;
+            grid.rooms[c].blocked = impenetrable;
             if c != start && c != goal {
                 grid.rooms[c].height = height;
+                grid.rooms[c].extra_pct = f.extra_door;
+                let t = if f.extra_door_type.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { f.extra_door_type.to_ascii_lowercase() };
+                grid.rooms[c].extra_door = Some(t);
             }
         }
         if let Some(p) = prev {
             let either = grid.rooms[c].is_placeholder() || grid.rooms[p].is_placeholder();
             open_door(grid, c, p, &door, either, rng)?;
+            if c != start && c != goal {
+                grid.rooms[c].accessible |= f.accessible;
+            }
             if prev2.is_some() {
                 mark_around(grid, records, p);
             }
@@ -1415,7 +1521,7 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], rng: &mut Terr
             }
             let size = chosen.unwrap_or(list[0].0);
             let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
-            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0 })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0 })?;
             x += size.0 as i32;
         }
     }
