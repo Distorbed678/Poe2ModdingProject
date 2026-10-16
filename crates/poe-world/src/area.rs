@@ -778,7 +778,31 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     for p in &mut map.lattice {
         p.flags &= !4;
     }
+    // Overlays before and after the fill (`0x141fa1a70`).
+    let mut overlays = match rel("Overlays") {
+        Some(toy) => {
+            let rects: Vec<crate::overlay::RoomRect> = placed
+                .iter()
+                .map(|p| {
+                    let feature = p.tile.is_none() && !set.rooms[p.room].room.arm.tag.is_empty();
+                    crate::overlay::RoomRect {
+                        rect: (p.pos.0, p.pos.1, p.pos.0 + p.size.0 as i32, p.pos.1 + p.size.1 as i32),
+                        feature,
+                        described: !graph.nodes[p.node].tags.is_empty(),
+                    }
+                })
+                .collect();
+            Some(crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects)?)
+        }
+        None => None,
+    };
+    if let Some(o) = &mut overlays {
+        o.run(1, &mut map, &mut master, &mut types, files, rng)?;
+    }
     let fill_rooms = fill_pass(&mut map, &mut master, files, rng)?;
+    if let Some(o) = &mut overlays {
+        o.run(2, &mut map, &mut master, &mut types, files, rng)?;
+    }
     let mut rooms: Vec<RoomPlacement> = placed
         .iter()
         .filter(|p| p.tile.is_none())

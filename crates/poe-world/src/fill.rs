@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use crate::{
     generate::{GenError, Files, Master, Room, TileMap, cell_key, load_room, uniform_ground},
+    region::compose,
     rng::TerrainRng,
     tdt::Tdt,
     tileset::{orient_cell, pick},
@@ -88,14 +89,38 @@ impl Fill<'_> {
 
     /// `0x141f90d60`: orientation for a fill tile, 8 when it does not fit.
     fn tile_orientation(&self, x: i32, y: i32, tdt: &Tdt, o: u8, rng: &mut TerrainRng) -> u8 {
-        if o != 8 {
-            return if self.tile_fits(x, y, tdt, o) { o } else { 8 };
+        choose_orientation(tdt, o, &|o| self.tile_fits(x, y, tdt, o), rng)
+    }
+
+    /// `0x141f8c500`: a tile turned by `o` (room frame) covers only free uniform cells of the
+    /// room grid from `(cx, cy)`: no feature or edges, one ground compatible with the tile's
+    /// (equal, or both missing or `.gt` flag 8) and the start cell's height.
+    fn grid_fits(&self, room: &Room, cx: usize, cy: usize, tdt: &Tdt, o: u8) -> bool {
+        use poe_data_tools::file_parsers::arm::types::Slot;
+        let (w, h) = oriented(tdt.size, o);
+        let grid = &room.arm.grid;
+        let (rw, rh) = (room.width(), room.height());
+        if cx + w as usize > rw || cy + h as usize > rh {
+            return false;
         }
-        if tdt.size.0 == tdt.size.1 {
-            return if self.tile_fits(x, y, tdt, 0) { rng.below(8) as u8 } else { 8 };
-        }
-        let mask = if self.tile_fits(x, y, tdt, 0) { 0x55 } else { 0 } | if self.tile_fits(x, y, tdt, 1) { 0xaa } else { 0 };
-        if mask == 0 { 8 } else { mask_pick(mask, rng.below(840)) }
+        let uniform = |slot: &Slot| -> Option<(Option<String>, u8)> {
+            match slot {
+                Slot::S => Some((None, 0)),
+                slot => cell_key(slot)
+                    .filter(|(k, f)| uniform_ground(k, f))
+                    .map(|(k, _)| (k.grounds[0].clone(), k.heights[0])),
+            }
+        };
+        let tile_ground = tdt.point_grounds.first().cloned().flatten();
+        let loose = |g: &Option<String>| g.as_ref().is_none_or(|g| self.map.gt_flags(g) & 8 != 0);
+        let Some((_, height)) = uniform(&grid[cy][cx]) else { return false };
+        (0..h as usize).all(|dy| {
+            (0..w as usize).all(|dx| {
+                uniform(&grid[cy + dy][cx + dx]).is_some_and(|(g, hh)| {
+                    hh == height && (g == tile_ground || (loose(&g) && loose(&tile_ground)))
+                })
+            })
+        })
     }
 
     /// `0x141f90f60`: orientation for a fill room, 8 when it does not fit.
@@ -206,6 +231,45 @@ impl Fill<'_> {
         let (w, h) = (room.width(), room.height());
         for cx in 0..w {
             for cy in 0..h {
+                // An `s` slot, or a key without feature and edges on one ground: a fill tile of
+                // that ground (no ground: `default`), as the fill pass picks it.
+                let uniform = match &room.arm.grid[cy][cx] {
+                    poe_data_tools::file_parsers::arm::types::Slot::S => Some(None),
+                    slot => cell_key(slot).filter(|(k, f)| f.is_empty() && k.edges.iter().all(Option::is_none) && k.grounds.iter().all(|g| *g == k.grounds[0])).map(|(k, _)| k.grounds[0].clone()),
+                };
+                if let Some(g) = uniform {
+                    let (ox, oy) = orient_cell(o, w as i32, h as i32, cx as i32, cy as i32);
+                    if self.map.index(x + ox, y + oy).is_none_or(|i| self.map.cells[i].is_some()) {
+                        continue;
+                    }
+                    // `0x141f8e400`: the tile turned by `to` in the room's frame, placed from the
+                    // smallest corner its cells reach, turned by `to` then the room.
+                    let at = |tdt: &Tdt, to: u8| {
+                        let (tw, th) = oriented(tdt.size, to);
+                        let (bx, by) = orient_cell(o, w as i32, h as i32, cx as i32 + tw - 1, cy as i32 + th - 1);
+                        (x + ox.min(bx), y + oy.min(by))
+                    };
+                    let (mut list, _) = self.groups(g.as_deref())?;
+                    let mut total: u32 = list.iter().map(|e| e.weight).sum();
+                    while !list.is_empty() {
+                        let e = pick_entry(&list, rng.below(total)).clone();
+                        let tdt = self.master.header(self.files, &e.path)?.clone();
+                        let fits = |to: u8| {
+                            let (mx, my) = at(&tdt, to);
+                            self.tile_fits(mx, my, &tdt, compose(to, o)) && self.grid_fits(&room, cx, cy, &tdt, to)
+                        };
+                        let to = choose_orientation(&tdt, e.o, &fits, rng);
+                        if to != 8 {
+                            let (mx, my) = at(&tdt, to);
+                            self.place_tile(mx, my, &e.path, compose(to, o))?;
+                            break;
+                        }
+                        let k = list.iter().position(|f| f.path == e.path && f.o == e.o).unwrap();
+                        total -= list[k].weight;
+                        list.remove(k);
+                    }
+                    continue;
+                }
                 let Some((key, feature)) = cell_key(&room.arm.grid[cy][cx]) else { continue };
                 let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
                 let key = key.oriented(o);
@@ -253,6 +317,20 @@ impl Fill<'_> {
         self.placed.push(PlacedFillRoom { room, origin: (x, y), orientation: o });
         Ok(())
     }
+}
+
+/// The orientation for a fill tile (entry orientation `o`, 8 = any) among those `fits`
+/// accepts: a square tile any of 8 when unturned fits, else the even or odd ones (`0x1421c3d00`
+/// on a draw of 840); 8 when none fits.
+fn choose_orientation(tdt: &Tdt, o: u8, fits: &dyn Fn(u8) -> bool, rng: &mut TerrainRng) -> u8 {
+    if o != 8 {
+        return if fits(o) { o } else { 8 };
+    }
+    if tdt.size.0 == tdt.size.1 {
+        return if fits(0) { rng.below(8) as u8 } else { 8 };
+    }
+    let mask = if fits(0) { 0x55 } else { 0 } | if fits(1) { 0xaa } else { 0 };
+    if mask == 0 { 8 } else { mask_pick(mask, rng.below(840)) }
 }
 
 /// `0x1415d5a30`/`0x141faccc0`: weighted pick (`r` in `0..total`).

@@ -205,6 +205,21 @@ impl TileMap {
         }
     }
 
+    /// Takes away the piece covering a cell (`0x141d0c480`).
+    pub fn remove_piece_at(&mut self, x: i32, y: i32) {
+        let Some(i) = self.index(x, y) else { return };
+        let Some(p) = self.piece_at[i] else {
+            self.cells[i] = None;
+            return;
+        };
+        for j in 0..self.cells.len() {
+            if self.piece_at[j] == Some(p) {
+                self.piece_at[j] = None;
+                self.cells[j] = None;
+            }
+        }
+    }
+
     /// Whether every cell of a `w`×`h` rectangle is inside the map and empty (`0x141d0d880`).
     pub fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
         (0..h).all(|dy| (0..w).all(|dx| self.index(x + dx, y + dy).is_some_and(|i| self.cells[i].is_none())))

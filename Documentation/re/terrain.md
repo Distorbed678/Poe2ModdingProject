@@ -403,11 +403,50 @@ node takes `NarrowRiver_Mud/StMS_01.tdt` (3×3, o5).
   them).
 - Tile-set index keys (`0x141d09900`) drop grounds whose `.gt` has flag 0x10 (the fifth bool,
   e.g. `wideriver_trim.gt`). `TileDef::key` holds that key.
-- Overlays (master `Overlays` `.toy`, master +0x200; `0x141fa1a70` → `0x141fa1ba0` →
-  `0x141fa1e60` candidate positions, `0x141fa23e0` placement): run after the lattice passes and
-  before the fill. There are weighted position draws (`below(total)`), a weighted overlay pick
-  (padded to 100 with "nothing"), and an orientation `below(0x348)`. Not ported yet: `G1_2`
-  seed 1001 matches the client up to the first overlay draw (4054 draws, all 87 edge tiles).
+- Overlays: see "Overlays (`.toy`)" below.
+
+**Region orientation** (`0x141ff89e0`, `crates/poe-world/src/region.rs`): a topology may be laid
+out turned or mirrored. Table `0x142f020c8` drives the point transform (`0x141d14b30`), the
+centring of even-sized placements and the alignment snap `0x141fe7400` (a remainder of exactly
+half rounds by orientation). `0x141d14990` turns the graph; mirrored orientations flip the
+chirality of edges whose type is not symmetric. Forced by the `map_force_orientation` stat (o+1).
+
+**Graph pruning** (`0x141fe9970`): node existence (`values[0]`: 0 removes, ≥100 keeps, else
+`below(100)`), edge rolls, `shuffle<N>` groups (random pair swaps of room type and tags),
+`unique<N>[#count]` (keeps `count` random nodes; lettered tags from session history are not
+ported). Removal `0x141feb9d0`: two same-type edges at equal heights merge (`0x141fec1c0`); a
+node with ≥2 edges only loses its room; otherwise `0x141fec520` retracts its edges with points
+to a new node at their nearest point and erases it.
+
+**Virtual junctions without tiles** (`0x1420c6cd0`): point drops, pair loop with `0x1420c6420`,
+ordering `0x1420c6860`, node split `0x1420c5ee0`, and logical links. The split updates the links
+(`0x1420baf40`). `0x1420bcff0` resolves them: pairs at identical positions, else
+`0x1420bc9a0` with segment distance `0x142196290`. Link nodes of degree >2 join the tile list.
+
+**Overlays (`.toy`)** (`crates/poe-world/src/overlay.rs`; master `Overlays`, +0x200): passes with
+a header `phase1 phase2 [phase3] [Random|FileOrder|SizeOrder] [±flags]` and entries
+`weight "arm" [±flags] [!excl] [limit=N] [required=N] [rotations]`. Flags: 0x01 TileOverlays,
+0x02 FeatureTiles, 0x04 FeatureRooms, 0x08 FeatureRoomOverlap, 0x10 DescriptionNodes, 0x20
+ExtraFeatures, 0x40 MatchAllTileKeys (default 0x18). Phase 1 runs before the fill
+(`0x141fa1a70(ctx,1,0)`), phase 2 after it (`(ctx,2,1)`).
+- Context `0x141fa0ac0` keeps an occupancy grid. Candidates `0x141fa1e60` step by 3 when the
+  key has a size-3 edge and sort by `x·0x10000+y`.
+- Fit `0x141fa1830`: occupancy, whole pieces (`0x141d0dc40`), then room-fits `0x141f9d200`
+  (wild 0, margin 1: corner grounds `0x141f9cfc0`, consistent height differences, side checks
+  `0x141f9cee0`/`0x141f9ca30`/`0x141f9c800`/`0x141f9c600`).
+- Placement `0x141fa23e0`: `below(total)` position, `below(sum)` entry (padded to 100 with
+  "nothing"), `below(840)` orientation. Overlay rooms go through the normal room pass.
+- Not ported: phase 2, height offset `0x141fa10b0` (0 for now), SizeOrder, exclusions
+  `0x141fa3470`, MatchAllTileKeys `0x141fa3780`.
+
+**Fill-room uniform cells** (`0x141f8c8c0` → `0x141f8e400`): `s` slots and `k` slots without a
+feature or edges on one ground take a fill tile of that ground. The orientation is chosen in the
+room's frame (as for fill tiles) and composed with the room's. The tile is placed from the
+smallest corner its cells reach (per-orientation offset table in `0x141f8e400`). It must fit the
+map (`0x141f9e5f0`: one cell of slack, then `0x141d0d940`) and the room grid (`0x141f8c500`): it
+stays inside the room and covers only uniform cells whose ground equals the tile's first corner
+ground (or both are missing or have `.gt` flag 8), at the start cell's height byte (+0x72).
+`G1_2` seed 1001 matches through the fill (5722 draws, 87 edge tiles).
 
 **Inheriting tiles** (`0x1429153f0`): a `.tdt` with an `inherits` path (for example
 `ZombieIntroFeature_Reorient_1.tdt`) has an override-flags byte after it and carries only what
