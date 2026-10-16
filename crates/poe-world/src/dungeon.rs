@@ -358,6 +358,50 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let _ = &typeless;
 
     let void = |n: usize| graph.nodes[n].extra.first().is_some_and(|v| v.eq_ignore_ascii_case("V"));
+    // `0x1420ad420` / `0x141fa8710`: each void edge blocks the cells of a line through its
+    // points (and its end nodes that are void).
+    for (e, edge) in graph.edges.iter().enumerate() {
+        if removed[e] || !fields[e].void {
+            continue;
+        }
+        let (a, b) = (edge.from as usize, edge.to as usize);
+        let mut pts: Vec<(i32, i32)> = Vec::new();
+        if void(a) {
+            pts.push(unit(a));
+        }
+        pts.extend(edge.points.iter().map(|p| (p.0 / 23, p.1 / 23)));
+        if void(b) {
+            pts.push(unit(b));
+        }
+        for k in 1..pts.len() {
+            let (p, c) = (pts[k - 1], pts[k]);
+            let (dx, dy) = ((c.0 - p.0).abs(), (c.1 - p.1).abs());
+            // Major axis: the longer delta (x on a tie).
+            let (ymajor, m0, m1, n0, n1) = if dx < dy { (true, p.1, c.1, p.0, c.0) } else { (false, p.0, c.0, p.1, c.1) };
+            let (dm, dn) = ((m1 - m0).abs(), (n1 - n0).abs());
+            let ns = (n1 - n0).signum();
+            let ms = if m0 < m1 { 1 } else { -1 };
+            let mut err = -(dm / 2);
+            let mut n = n0;
+            let mut m = m0;
+            loop {
+                let cell = if ymajor { (n, m) } else { (m, n) };
+                if grid.state(cell) == Some(0) {
+                    grid.cells[(cell.1 as u32 * grid.w + cell.0 as u32) as usize] = 1;
+                }
+                err += dn;
+                if err > 0 {
+                    n += ns;
+                    err -= dm;
+                }
+                if m == m1 {
+                    break;
+                }
+                m += ms;
+            }
+        }
+    }
+
     // `0x142095d90`: an accessible edge, or an `accessible` / `default` / `entrance…` /
     // `sideentrance…` tag.
     let node_accessible = |n: usize| {
@@ -510,6 +554,9 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             return Err(unsupported(format!("dungeon node {n}: no room sizes for edge type {door}")));
         }
         let mut total: u32 = list.iter().map(|s| s.1).sum();
+        if std::env::var("POE_DBG").is_ok() {
+            eprintln!("DBG typeless {n} pos {:?} door {door} total {total} edges {:?}", unit(n), slots[n]);
+        }
         loop {
             let mut r = rng.below(total);
             let mut k = list.len() - 1;
@@ -666,12 +713,20 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
     let mut plain: Vec<(String, Vec<(u32, u32)>)> = Vec::new();
     for r in rooms.iter().filter(|r| r.generic) {
         let (w, h) = r.units;
+        // `0x141f99b20`: each distinct door type other than the default; a room with only
+        // default doors counts under the default (room data +0x180).
+        const DEFAULT: &str = "metadata/terrain/dungeon/rooms.et";
         let mut seen: Vec<&String> = Vec::new();
         for door in r.exits.iter().filter_map(|e| e.door.as_ref()) {
-            if seen.contains(&door) {
-                continue;
+            if door != DEFAULT && !seen.contains(&door) {
+                seen.push(door);
             }
-            seen.push(door);
+        }
+        let default = DEFAULT.to_string();
+        if seen.is_empty() && r.exits.iter().any(|e| e.door.is_some()) {
+            seen.push(&default);
+        }
+        for door in seen {
             let mut sizes = Vec::new();
             if r.mask == 0 || r.mask & 0x55 != 0 {
                 sizes.push((w, h));
@@ -689,7 +744,10 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
                     Some(e) => e.1 += r.weight,
                     None => all[k].1.push((size, r.weight)),
                 }
-                if !r.unique && !plain[k].1.contains(&size) {
+                // `0x141f98bb0`: a default-type room counts as a plain size only with every
+                // position a default door at height 0.
+                let full = door != DEFAULT || r.exits.iter().all(|e| e.door.is_some() && e.height == 0);
+                if !r.unique && full && !plain[k].1.contains(&size) {
                     plain[k].1.push(size);
                 }
             }
@@ -1505,6 +1563,9 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
         prev2 = prev;
         prev = Some(c);
         cur = records[c].pred;
+    }
+    if std::env::var("POE_DBG_PATHS").is_ok() {
+        eprintln!("DBG path edge {e} {}->{} rooms {:?}", edge.from, edge.to, path.iter().map(|&r| grid.rooms[r].origin).collect::<Vec<_>>());
     }
     paths.push(Corridor { key, rooms: path, edge: e, height });
     for r in records.iter_mut() {

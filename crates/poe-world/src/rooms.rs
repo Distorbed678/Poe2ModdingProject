@@ -47,7 +47,8 @@ pub struct EdgeType {
     /// Fourth number (`+0x4d`): edge tiles take their exits from a coordinate hash
     /// (`0x1421969e0`) instead of the path's curve.
     pub hashed: bool,
-    /// `can_end` (flag 0x10): the edge may end at the map border or an edge-less side.
+    /// `can_end` (flag 0x10, fifth number): the edge may end at the map border or an
+    /// edge-less side.
     pub can_end: bool,
     pub virtual_edge: bool,
     /// A virtual edge's two split edge types (lower case) and their chirality flags (flag
@@ -74,7 +75,9 @@ impl EdgeType {
             .map(|l| l.split_whitespace().filter_map(|v| v.parse().ok()).collect())
             .unwrap_or_default();
         let rest: Vec<&str> = lines.clone().collect();
-        let can_end = rest.iter().any(|l| l.split_whitespace().any(|t| t == "can_end"));
+        // `0x1429195a0`: after height change, size and the centring flag come `random_wiggle`,
+        // `can_end` and `force_height_zero` as numbers.
+        let can_end = nums.get(4).is_some_and(|&v| v != 0) || rest.iter().any(|l| l.split_whitespace().any(|t| t == "can_end"));
         let virtual_edge = lines.next().is_some_and(|l| l == "virtual");
         let mut splits: [(String, bool); 2] = Default::default();
         if virtual_edge {
