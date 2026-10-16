@@ -3,13 +3,11 @@
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
 with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
-(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3 seeds 1001–1003 and
-G1_9 seed 1001 (`cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
-Not ported yet: several corridor types (`0x1420a50e0` ordering, G1_7), `GetFeatureRooms` nodes
-(G1_8, G1_12), chiral/height-change edge types (G1_11), named border tiles and the
-`0x14209f050` fallbacks (G1_6), door placement (`0x14209d180` / `0x14209dc90`; guarded),
-injector and blank special rooms, the `0x1420a8980` split for special rooms, and the request-driven
-extra rooms and shrines (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`).
+(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_7 and G1_9 (seeds 1001–1003 each; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
+Not ported yet: `GetFeatureRooms` nodes (G1_8, G1_12), height-change edge types (G1_11),
+named border tiles and the `0x14209f050` fallbacks (G1_6), door placement (`0x14209d180` /
+`0x14209dc90`; guarded), injector and blank special rooms, and the request-driven extra rooms
+and shrines (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`).
 
 ## Call chain
 
@@ -180,3 +178,45 @@ buffer and de-repetition as for `.tgr`.
    fill's tiles of that ground are levelled to their corners' middle, again while one moved by
    more than 1 (up to 15 rounds).
 7. Cell heights are stored in world units: storeys × `StoreyHeight` (`.tsi`).
+
+## Later findings
+
+- Region orientation table `0x142f020c8` (9 × 3 bytes): `[0,1,1] [1,0,1] [0,0,0] [1,1,0] [0,0,1]
+  [1,0,0] [0,1,0] [1,1,1] [0,1,1]` (rows 5 and 7 were swapped in the port before; one shared
+  table in `region.rs` now).
+- `.dgr` node random offsets (`0x141fea2e0` → `0x141fee830`, before the existence rolls): node
+  values 5..9 are x min, y min, x max, y max; x += min + `range(0, max − min)`, then y. The graph
+  turn (`0x141d14b30`) turns the offsets with the positions; a node with the lock flag (+0x41)
+  keeps its orientation.
+- Corridor types (`0x1420a50e0`): sorted by path, a discarded `below(n)` and a shuffle, then
+  stable-partitioned: types with one room size (`0x1420a55b0`), other types, the default type.
+- Chirality: a door type is chiral (`0x141d047b0`) when it changes height or has two grounds, or
+  is a virtual edge whose halves differ or are the same chiral type with equal flags. `.arm`
+  exits carry it (the third number up to version 29, the fourth after); mirrored turns flip it.
+  Typed nodes require (edge from == node) xor edge chirality (edge value 1). A door between `a`
+  and `b` (`0x141fa7fd0`) gives `a` `!chir` and `b` `chir`; shared positions (`0x141fa7bf0`)
+  require those, and a chiral door of another type on either side empties the list. Corridors
+  pass the edge's chirality (A* neighbour test `(cur, n, chir)`, expansion `(n, cur, !chir)`);
+  branches, extra doors and `0x1420a4090` pass 0. Placeholder matching (`0x141f9b430`) compares
+  chirality for chiral types.
+- Special-room split (`0x1420a8980`, used when no room matches exactly): at the corners of each
+  eligible room, per allowed orientation, a spot where the special room covers free cells and
+  whole non-special untagged rooms of one height (`0x1420a8bc0`) with agreeing doors along its
+  sides (`0x1420a8fc0`; a default-type special door may face a closed one, but not all of them).
+  Spots are kept sorted by x·65536 + y (`0x1420cef60`); `below(spots)`, `below(variants)`; the
+  covered rooms are removed (highest index first) and the special room is stamped at the height
+  of the last one removed.
+- Filler rooms (`0x1420b19f0`, before and after the special rooms; reserved cells are freed in
+  between): per room in order, each side (right, bottom, left, top) whose two turned corners
+  share a ground spreads it into the empty cells beyond (`0x1420b23a0`, height = room height +
+  that door's height), first for grounds with `.gt` flag 2, then the rest, each pass repeated
+  while it places anything. The ground's size list (room set +0x98) has per blank room (no tag,
+  one ground, no doors) its size and, if not square, the turned size, each with the room's
+  weight, in `.rs` order; `below(total)`, and a size that does not fit drops its first entry and
+  is redrawn (`0x1420b276a`). The spot covers the cell: corner at the cell, then shifted left, up,
+  up-left (`0x1420b2bb0`); the room is drawn among the ground's blank rooms of that size
+  (`0x1420b2a21`), its orientation with `below(840)` (`0x1420b2a38`).
+- Fill tiles may overhang the region by one cell (`0x141f9e5f0`: x, y ≥ −1, far side ≤ size + 1),
+  so 3×3 ground slots on the region's border fill from −1. The outer fill aligns a 3×3 tile one
+  cell outside when the region's corner and size are 1 mod 3. Fill rooms floor their slot heights
+  like pass A; de-repetition keeps the replaced tile's height.
