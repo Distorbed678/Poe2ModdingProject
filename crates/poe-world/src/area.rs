@@ -257,7 +257,7 @@ fn live_slots(g: &Graph, removed: &[bool], n: usize) -> [Option<usize>; 4] {
 /// height merge into one through it (`0x141fec1c0`: the first edge takes the second's far
 /// node, the node's position and the second edge's points); a room node with two or more
 /// edges only loses its room; anything else goes with its edges (`0x141fec520`).
-fn remove_node(g: &mut Graph, removed: &mut [bool], dropped: &mut [bool], n: usize) {
+fn remove_node(g: &mut Graph, removed: &mut [bool], dropped: &mut Vec<bool>, n: usize) {
     let slots: Vec<usize> = live_slots(g, removed, n).into_iter().flatten().collect();
     let height = |g: &Graph, i: usize| g.nodes[i].values.get(1).copied().unwrap_or(0);
     let other = |g: &Graph, e: usize| if g.edges[e].from as usize == n { g.edges[e].to as usize } else { g.edges[e].from as usize };
@@ -306,9 +306,29 @@ fn remove_node(g: &mut Graph, removed: &mut [bool], dropped: &mut [bool], n: usi
         g.nodes[n].orientation = "(any)".into();
         return;
     }
+    // `0x141fec520`: an edge with internal points ends at a new node on its nearest point
+    // instead of going.
     for e in slots {
-        removed[e] = true;
+        if g.edges[e].points.is_empty() {
+            removed[e] = true;
+            continue;
+        }
+        let from = g.edges[e].from as usize == n;
+        let p = if from { g.edges[e].points.remove(0) } else { g.edges[e].points.pop().unwrap() };
+        let nn = g.nodes.len();
+        g.nodes.push(crate::graph::Node {
+            x: p.0,
+            y: p.1,
+            edges: vec![e as u32],
+            room_type: String::new(),
+            orientation: "(any)".into(),
+            tags: Vec::new(),
+            values: vec![100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            extra: Vec::new(),
+        });
+        if from { g.edges[e].from = nn as u32 } else { g.edges[e].to = nn as u32 }
     }
+    dropped.resize(g.nodes.len(), false);
     dropped[n] = true;
 }
 
