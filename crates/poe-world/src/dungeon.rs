@@ -158,6 +158,12 @@ struct DungeonRoom {
     generic: bool,
     /// The `.arm` uniqueness flag (room data +6).
     unique: bool,
+    /// Room data +8: a `special` / `specialN` / `specialchance N` tag (`0x142931cf0`).
+    special: bool,
+    /// Room data +4: the special list (`specialN`; 0xff: the chance list).
+    list: u8,
+    /// Room data +5: `specialchance N` (default 100).
+    chance: u8,
     weight: u32,
     mask: u8,
     units: (u32, u32),
@@ -195,6 +201,8 @@ pub struct PlacedRoom {
     pub extra_pct: u32,
     /// +0x40: the door type a placeholder's room must take (its node's or corridor's edge type).
     pub door_type: Option<String>,
+    /// Kind 8 (+0x14): a special room placed over a generic one (`0x1420a7da0`).
+    pub special: bool,
 }
 
 impl PlacedRoom {
@@ -261,9 +269,13 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 .collect();
             let tag = r.tag.to_ascii_lowercase();
             let special = tag.starts_with("special");
+            let (list, chance) = match tag.strip_prefix("specialchance") {
+                Some(n) => (0xff, n.trim().parse().unwrap_or(100)),
+                None => (tag.strip_prefix("special").and_then(|n| n.trim().parse().ok()).unwrap_or(0xff), 100),
+            };
             let generic = !special && !matches!(tag.as_str(), "shrine" | "mission" | "stonecircle" | "preunique") && !tag.starts_with("telepad_injector") && !tag.starts_with("room_injector") && !tag.starts_with("tile_injector");
             let unique = arm.bools.first().copied().unwrap_or(false);
-            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, weight: r.weight, mask: r.orientations, units, exits }
+            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits }
         })
         .collect();
     for r in &rooms {
@@ -405,7 +417,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let (c, origin, _) = kept[k].clone();
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
-        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None })?;
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false })?;
     }
     // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
@@ -455,7 +467,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             if clear && !(0..graph.nodes.len()).any(swallows) {
                 let extra_door = extra_door_pick(&slots[n], &fields, rng);
-                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()) })?;
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()), special: false })?;
                 break;
             }
             let size = list[k].0;
@@ -469,6 +481,10 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
     corridors(files, graph, removed, &fields, &rooms, &sizes, &mut grid, &mut types, rng)?;
+    // `0x1420a9590` (open door counts) and `0x1420b19f0` (ground spreading) draw nothing; then
+    // the special rooms (`0x1420aa710`). The request-driven steps after it (`0x1420aab60` /
+    // `0x1420aacf0` extra rooms, `0x1420abf60` shrines) have nothing to place for a plain area.
+    special_rooms(files, &rooms, &mut grid, &mut types, rng)?;
     Ok(grid)
 }
 
@@ -1653,9 +1669,155 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Opt
             }
             let size = chosen.unwrap_or(list[0].0);
             let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
-            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone() })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone(), special: false })?;
             x += size.0 as i32;
         }
     }
     Ok(())
+}
+
+/// `0x1420aa710`: special rooms. The `.rs` order fills one list per `specialN` index, each
+/// shuffled (a discarded `below(n)`, then a forward Fisher-Yates) and tried until one room
+/// places; the last list (`special` / `specialchance N`) places every room whose chance roll
+/// passes (`below(100)` only for chances 1..99).
+fn special_rooms(files: &dyn Files, rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let mut lists: Vec<Vec<usize>> = Vec::new();
+    let mut last: Vec<usize> = Vec::new();
+    for (i, r) in rooms.iter().enumerate() {
+        if !r.special {
+            continue;
+        }
+        if r.list == 0xff {
+            last.push(i);
+        } else {
+            if lists.len() <= r.list as usize {
+                lists.resize(r.list as usize + 1, Vec::new());
+            }
+            lists[r.list as usize].push(i);
+        }
+    }
+    for (li, list) in lists.iter().enumerate() {
+        if list.is_empty() {
+            continue;
+        }
+        let mut l = list.clone();
+        rng.below(l.len() as u32);
+        for i in 0..l.len() {
+            let k = rng.uniform((l.len() - i) as u32) as usize;
+            l.swap(i, i + k);
+        }
+        let mut placed = false;
+        for &r in &l {
+            if place_special(files, rooms, &[r], grid, types, rng)?.is_some() {
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            return Err(unsupported(format!("dungeon: failed to place a special{li} room")));
+        }
+    }
+    for &r in &last {
+        let c = rooms[r].chance as u32;
+        if c == 0 || (c < 100 && rng.below(100) >= c) {
+            continue;
+        }
+        if place_special(files, rooms, &[r], grid, types, rng)?.is_none() {
+            return Err(unsupported(format!("dungeon: failed to place special room {}", rooms[r].path)));
+        }
+    }
+    Ok(())
+}
+
+/// `0x1420a7da0`: a special room replaces a placed room. Candidates are reachable rooms with an
+/// `.arm` that is neither special nor tagged, whose size and doors match the special room in
+/// some allowed orientation (`0x1420a8810`, `0x1420a7c40`: the first such orientation, weight 1);
+/// `below(count)` picks the room, `below(weight)` the orientation. The room keeps its doors and
+/// becomes kind 8 (+0x14).
+fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<Option<usize>, GenError> {
+    let mut exact: Vec<(usize, Vec<(usize, u8)>)> = Vec::new();
+    for &si in entries {
+        let s = &rooms[si];
+        if s.tag.to_ascii_lowercase().contains("injector") {
+            return Err(unsupported(format!("dungeon: injector special room {}", s.path)));
+        }
+        let blank = s.exits.iter().all(|e| e.door.is_none());
+        if blank {
+            return Err(unsupported(format!("dungeon: blank special room {} (ground match not ported)", s.path)));
+        }
+        let variants: Vec<Option<((u32, u32), Vec<Exit>)>> = (0..8u8)
+            .map(|o| {
+                (s.mask == 0 || s.mask >> o & 1 != 0).then(|| {
+                    let n = s.exits.len() as u32;
+                    let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
+                    for j in 0..n {
+                        exits[turn_index(s.units.0, s.units.1, j, o) as usize] = s.exits[j as usize].clone();
+                    }
+                    (if o & 1 == 1 { (s.units.1, s.units.0) } else { s.units }, exits)
+                })
+            })
+            .collect();
+        for i in 0..grid.rooms.len() {
+            let p = &grid.rooms[i];
+            if !p.accessible || p.is_placeholder() {
+                continue;
+            }
+            let Some(pr) = rooms.iter().find(|r| r.path == p.path) else { continue };
+            if pr.special || !pr.tag.is_empty() {
+                continue;
+            }
+            for (o, v) in variants.iter().enumerate() {
+                let Some((size, exits)) = v else { continue };
+                if *size == p.size && special_fits(files, &p.exits, exits, types)? {
+                    match exact.iter_mut().find(|e| e.0 == i) {
+                        Some(e) => e.1.push((si, o as u8)),
+                        None => exact.push((i, vec![(si, o as u8)])),
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    if exact.is_empty() {
+        return Err(unsupported("dungeon: special room without an exact spot (0x1420a8980 split not ported)"));
+    }
+    let k = rng.below(exact.len() as u32) as usize;
+    let v = rng.below(exact[k].1.len() as u32) as usize;
+    let (i, (si, o)) = (exact[k].0, exact[k].1[v]);
+    let p = &mut grid.rooms[i];
+    p.path = rooms[si].path.clone();
+    p.orientation = o;
+    p.special = true;
+    Ok(Some(i))
+}
+
+/// `0x1420a7c40`: the placed room's doors against a special room's (same size checked by the
+/// caller). Where the special door is optional (`.et` flag 0x10) the placed one may be closed;
+/// elsewhere they must be equal. With optional special doors, the placed room needs at least
+/// one optional door of its own.
+fn special_fits(files: &dyn Files, placed: &[Exit], special: &[Exit], types: &mut TerrainTypes) -> Result<bool, GenError> {
+    if placed.len() != special.len() {
+        return Ok(false);
+    }
+    let optional = |d: &Option<String>, types: &mut TerrainTypes| -> Result<bool, GenError> {
+        Ok(match d {
+            Some(d) => types.edge(files, d)?.can_end,
+            None => false,
+        })
+    };
+    let (mut any_optional, mut own) = (false, 0);
+    for (p, s) in placed.iter().zip(special) {
+        if optional(&s.door, types)? {
+            if p != s && p.door.is_some() {
+                return Ok(false);
+            }
+            any_optional = true;
+        } else if p != s {
+            return Ok(false);
+        }
+        if optional(&p.door, types)? {
+            own += 1;
+        }
+    }
+    Ok(!(any_optional && own == 0))
 }
