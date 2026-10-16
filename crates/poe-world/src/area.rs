@@ -393,6 +393,16 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
     edge_symmetric(types, files, &t.splits[0].0)
 }
 
+/// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then (not ported) its tile pass.
+fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+    let tsi_path = graph.master_file.clone();
+    let tsi = tsi_entries(&files.read(&tsi_path)?);
+    let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
+    let set = RoomSet::load(files, &format!("{dir}/{}", tsi.get("RoomSet").ok_or_else(|| data("no RoomSet"))?))?;
+    let grid = crate::dungeon::layout(files, graph, removed, &set, rng)?;
+    Err(GenError::Unsupported(format!("dungeon tile pass not ported ({} rooms placed)", grid.rooms.len())))
+}
+
 /// Everything after the topology choice, for one graph.
 pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
     generate_graph_probed(files, graph, rng, &mut |_| {})
@@ -401,6 +411,9 @@ pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &m
 fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
+    if graph.dungeon_defaults.is_some() {
+        return generate_dungeon(files, graph, &removed, rng);
+    }
     let mut nodes: Vec<JitterNode> = graph
         .nodes
         .iter()
