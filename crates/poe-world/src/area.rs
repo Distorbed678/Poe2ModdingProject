@@ -35,6 +35,9 @@ pub enum Stage<'a> {
     Rooms(&'a TileMap),
     /// The tile map after the edge tiles, with the number of pieces before them.
     Edges(&'a TileMap, usize),
+    /// The corner lattice before the client step it is named after (`borders`, `flood`,
+    /// `heights`, `92ce0`, `fill`), as the DLL's `lattice` snapshots are.
+    Lattice(&'a str, &'a TileMap),
 }
 
 /// A generated area.
@@ -500,7 +503,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                 let def = &master.tiles.tiles[t];
                 map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, Some(t));
             }
-            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, rng)?,
+            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, false, rng)?,
         }
     }
     probe(Stage::Rooms(&map));
@@ -771,10 +774,14 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     for p in &mut map.lattice {
         if p.flags & 1 != 0 { p.flags |= 4 } else { p.flags &= !4 }
     }
+    probe(Stage::Lattice("borders", &map));
     lattice::border_floods(&mut map, &master.tiles);
+    probe(Stage::Lattice("flood", &map));
     lattice::mark_unwalkable(&mut map, &master.tiles);
+    probe(Stage::Lattice("heights", &map));
     let default_ground = graph.ground_types.iter().find(|g| !g.is_empty()).cloned();
     lattice::settle(&mut map, default_ground.as_deref());
+    probe(Stage::Lattice("92ce0", &map));
     for p in &mut map.lattice {
         p.flags &= !4;
     }
@@ -799,6 +806,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     if let Some(o) = &mut overlays {
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
+    probe(Stage::Lattice("fill", &map));
     let fill_rooms = fill_pass(&mut map, &mut master, files, rng)?;
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
@@ -809,6 +817,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         .map(|p| RoomPlacement { room: &set.rooms[p.room].room, origin: p.pos, orientation: p.orientation })
         .collect();
     rooms.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
+    if let Some(o) = &overlays {
+        rooms.extend(o.placed.iter().map(|&(i, origin, orientation)| RoomPlacement { room: o.room(i), origin, orientation }));
+    }
     derepeat_pass(&mut map, &master, &rooms, rng);
 
     // Outer buffer.

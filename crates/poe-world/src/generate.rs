@@ -93,6 +93,15 @@ pub struct TileMap {
     pub ground_flags: HashMap<String, u8>,
     /// `.et` flags by edge path (lower case): 0x80 wildcard, 4 virtual.
     pub edge_flags: HashMap<String, u8>,
+    /// Cells and corners tiles wrote outside the map (a tile may overhang the region by one
+    /// cell): the client's region is a window into the full map, so `embed` keeps them.
+    spill: Vec<Spill>,
+}
+
+#[derive(Debug, Clone)]
+enum Spill {
+    Cell(i32, i32, usize, Cell),
+    Point(i32, i32, Option<String>, i8),
 }
 
 /// One tile corner (map +0x50 records: ground index, height, flags).
@@ -119,6 +128,7 @@ impl TileMap {
             lattice: vec![LatticePoint::default(); ((width + 1) * (height + 1)) as usize],
             ground_flags: HashMap::new(),
             edge_flags: HashMap::new(),
+            spill: Vec::new(),
         }
     }
 
@@ -148,6 +158,26 @@ impl TileMap {
                 let i = self.point_index(x, y).unwrap();
                 if let Some(j) = m.point_index(x + offset.0, y + offset.1) {
                     m.lattice[j] = self.lattice[i].clone();
+                }
+            }
+        }
+        for s in &self.spill {
+            match s {
+                Spill::Cell(x, y, piece, cell) => {
+                    if let Some(j) = m.index(x + offset.0, y + offset.1) {
+                        m.cells[j] = Some(cell.clone());
+                        m.piece_at[j] = Some(*piece);
+                    }
+                }
+                Spill::Point(x, y, g, h) => {
+                    if let Some(j) = m.point_index(x + offset.0, y + offset.1) {
+                        let p = &mut m.lattice[j];
+                        p.flags |= 3;
+                        if g.is_some() {
+                            p.ground = g.clone();
+                        }
+                        p.height = *h;
+                    }
                 }
             }
         }
@@ -260,15 +290,12 @@ impl TileMap {
         for ly in 0..h {
             for lx in 0..w {
                 let (dx, dy) = orient_cell(o, w, h, lx, ly);
+                let cell = Cell { path: path.to_string(), orientation: o, sub: (ly * w + lx) as u32, height, offset: (dx as u8, dy as u8) };
                 if let Some(i) = self.index(x + dx, y + dy) {
                     self.piece_at[i] = Some(piece);
-                    self.cells[i] = Some(Cell {
-                        path: path.to_string(),
-                        orientation: o,
-                        sub: (ly * w + lx) as u32,
-                        height,
-                        offset: (dx as u8, dy as u8),
-                    });
+                    self.cells[i] = Some(cell);
+                } else {
+                    self.spill.push(Spill::Cell(x + dx, y + dy, piece, cell));
                 }
             }
         }
@@ -279,7 +306,11 @@ impl TileMap {
                 let k = ((w + 1) * v + u) as usize;
                 let g = tdt.point_grounds.get(k).cloned().flatten().map(|g| g.to_ascii_lowercase());
                 let (dx, dy) = crate::tileset::orient_point(o, w, h, u, v);
-                let Some(i) = self.point_index(x + dx, y + dy) else { continue };
+                let Some(i) = self.point_index(x + dx, y + dy) else {
+                    let ph = (tdt.point_heights.get(k).copied().unwrap_or(0) as i16 + height) as i8;
+                    self.spill.push(Spill::Point(x + dx, y + dy, g, ph));
+                    continue;
+                };
                 let old = self.lattice[i].ground.clone();
                 let takes_height = |m: &Self, g: &Option<String>| g.as_ref().is_none_or(|g| m.gt_flags(g) & 1 != 0);
                 let set_height = takes_height(self, &g) || takes_height(self, &old);
@@ -560,18 +591,21 @@ pub fn room_pass(
     origin: (i32, i32),
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
-    room_pass_oriented(map, master, room, origin, 0, rng)
+    room_pass_oriented(map, master, room, origin, 0, false, rng)
 }
 
 /// Room pass (`0x141f8e6c0`): every cell of the room grid, x outer, y inner; a slot's key is
 /// seen with the room's orientation `o` and lands where its cells land when the room is
-/// turned (`origin` is the turned room's corner).
+/// turned (`origin` is the turned room's corner). With `mark` (its eighth argument; overlays set
+/// it, node rooms do not), uniform-ground slots also give their ground to the corners x in
+/// `0..w`, y in `0..=h` (`0x141d0e130`).
 pub fn room_pass_oriented(
     map: &mut TileMap,
     master: &Master,
     room: &Room,
     origin: (i32, i32),
     o: u8,
+    mark: bool,
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
     let (w, h) = (room.width(), room.height());
@@ -588,13 +622,18 @@ pub fn room_pass_oriented(
             let (bx, by) = orient_cell(o, w as i32, h as i32, x as i32 + sw - 1, y as i32 + sh - 1);
             let (mx, my) = (origin.0 + ax.min(bx), origin.1 + ay.min(by));
             if uniform_ground(&key, &feature) {
-                // Nothing is placed (the fill pass places a tile here). With its last argument
-                // set the client would also mark corners x in 0..w, y in 0..=h with the ground;
-                // node rooms pass it unset.
+                // Nothing is placed (the fill pass places a tile here).
                 for dy in 0..key.size.1 as i32 {
                     for dx in 0..key.size.0 as i32 {
                         if let Some(i) = map.index(mx + dx, my + dy) {
                             map.grounds[i] = key.grounds[0].clone();
+                        }
+                    }
+                }
+                if let (true, Some(g)) = (mark, &key.grounds[0]) {
+                    for dy in 0..=key.size.1 as i32 {
+                        for dx in 0..key.size.0 as i32 {
+                            map.set_ground(mx + dx, my + dy, g);
                         }
                     }
                 }
@@ -759,10 +798,11 @@ impl Derepeat<'_> {
         (pos.1..=pos.1 + h).any(|y| (pos.0..=pos.0 + w).any(|x| map.point_index(x, y).is_some_and(|i| self.overridden[i])))
     }
 
+    /// A placed piece's tile-set index key (`0x141d08a40` turned, `0x141d09900`: grounds with
+    /// `.gt` flag 0x10 dropped).
     fn key_of(&self, map: &TileMap, p: usize) -> Option<TileKey> {
         let piece = &map.pieces[p];
-        let tdt = &self.master.tiles.tiles[piece.tile?].tdt;
-        Some(TileKey::from_tdt(tdt).oriented(piece.orientation))
+        Some(self.master.tiles.tiles[piece.tile?].key.oriented(piece.orientation))
     }
 
     /// `0x141fde880` (its corner ground fix-ups are not ported).
