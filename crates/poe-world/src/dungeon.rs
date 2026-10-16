@@ -203,6 +203,8 @@ pub struct Grid {
     /// Per cell: 0/1 free, n ≥ 2 room n − 2.
     pub cells: Vec<u32>,
     pub rooms: Vec<PlacedRoom>,
+    /// Grid +0x34: the tiles rooms share at their borders (master +0x14b).
+    pub overlap: u32,
 }
 
 impl Grid {
@@ -272,7 +274,9 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
         .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
         .collect();
-    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new() };
+    // Master +0x14b; the rooms' `.arm` dimensions carry the same overlap.
+    let overlap = set.rooms.first().and_then(|r| r.room.arm.dimensions.uint1).unwrap_or(1);
+    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap };
     let unit = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
     let height = |n: usize| graph.nodes[n].values.get(1).copied().unwrap_or(0);
     let priority = |n: usize| graph.nodes[n].values.get(2).copied().unwrap_or(0) as i8;
@@ -818,21 +822,309 @@ fn corridors(
     for room in 0..grid.rooms.len().min(records.len()) {
         records[room].used = true;
     }
+    let mut paths: Vec<Corridor> = Vec::new();
+    let mark_used = |grid: &Grid, records: &mut [Record]| {
+        // `0x1420a6030`: rooms with an `.arm` count as used; so do placeholders of tagged nodes
+        // (also impenetrable).
+        for (i, r) in grid.rooms.iter().enumerate() {
+            if !r.is_placeholder() {
+                records[i].used = true;
+            } else if r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()) {
+                records[i].used = true;
+                records[i].impen = true;
+            }
+        }
+    };
     for b in &batches {
         let t = graph.edges[b[0]].edge_type.to_ascii_lowercase();
         let list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| s.0 == t).map(|s| s.1.clone()).unwrap_or_default();
         fill_placeholders(grid, &list, rng)?;
         grow(&mut records, grid, rng);
-        // `0x1420a6030`: rooms with an `.arm` count as used.
-        for (i, r) in grid.rooms.iter().enumerate() {
-            if !r.is_placeholder() {
-                records[i].used = true;
+        mark_used(grid, &mut records);
+        for &e in b {
+            connect(graph, e, &fields[e], grid, &mut records, &mut paths, rng)?;
+        }
+        compact(grid, &mut records, &mut paths);
+    }
+    // `0x1420a50e0`: per corridor type (a discarded `below(n)` and a shuffle over the types),
+    // types with a branching edge get placeholders, records and branches (`0x1420a5680`).
+    let mut keys: Vec<String> = Vec::new();
+    for c in &paths {
+        if !keys.contains(&c.key) {
+            keys.push(c.key.clone());
+        }
+    }
+    if keys.len() > 1 {
+        return Err(unsupported("dungeon: several corridor types (0x1420a50e0 ordering not ported)"));
+    }
+    rng.below(keys.len() as u32);
+    for i in 0..keys.len() {
+        let k = rng.uniform((keys.len() - i) as u32) as usize;
+        keys.swap(i, i + k);
+    }
+    let generic: Vec<(u32, u32, Vec<Exit>)> = generic_shapes(rooms);
+    for key in &keys {
+        if !paths.iter().any(|c| &c.key == key && fields[c.edge].chance1 != 0) {
+            continue;
+        }
+        let list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| &s.0 == key).map(|s| s.1.clone()).unwrap_or_default();
+        fill_placeholders(grid, &list, rng)?;
+        grow(&mut records, grid, rng);
+        mark_used(grid, &mut records);
+        branch(graph, fields, key, &generic, grid, &mut records, &paths, rng)?;
+        compact(grid, &mut records, &mut paths);
+    }
+    Ok(())
+}
+
+/// A corridor (`0x1420a3a20`'s 0x28-byte record under its type key): rooms from the edge's
+/// to-node room back to its from-node room.
+#[derive(Debug, Clone)]
+struct Corridor {
+    key: String,
+    rooms: Vec<usize>,
+    edge: usize,
+    height: i32,
+}
+
+/// Untyped generic rooms in every allowed orientation: size and turned doors.
+fn generic_shapes(rooms: &[DungeonRoom]) -> Vec<(u32, u32, Vec<Exit>)> {
+    let mut out = Vec::new();
+    for r in rooms.iter().filter(|r| r.generic && r.tag.is_empty()) {
+        for o in 0..8u8 {
+            if r.mask >> o & 1 == 0 {
+                continue;
+            }
+            let n = r.exits.len() as u32;
+            let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
+            for i in 0..n {
+                exits[turn_index(r.units.0, r.units.1, i, o) as usize] = r.exits[i as usize].clone();
+            }
+            let (w, h) = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
+            out.push((w, h, exits));
+        }
+    }
+    out
+}
+
+/// `0x1420a2e90`: a corridor height on the room at `cell` (unused placeholders only).
+fn mark_height(grid: &Grid, records: &mut [Record], cell: (i32, i32), height: i32) {
+    let Some(s) = grid.state(cell) else { return };
+    if s < 2 {
+        return;
+    }
+    let i = s as usize - 2;
+    if records[i].used || !grid.rooms[i].is_placeholder() {
+        return;
+    }
+    if !records[i].heights.contains(&height) {
+        records[i].heights.push(height);
+        records[i].heights.sort();
+    }
+}
+
+/// `0x1420a2fb0` (doors without chirality): with an overlap, the corridor's height goes to the
+/// rooms outside `room`'s door-less positions.
+fn mark_around(grid: &Grid, records: &mut [Record], room: usize) {
+    if grid.overlap == 0 {
+        return;
+    }
+    let r = grid.rooms[room].clone();
+    let (x, y, w, h) = (r.origin.0, r.origin.1, r.size.0 as i32, r.size.1 as i32);
+    let n = r.exits.len() as i32;
+    let mut mark = |idx: i32, cell: (i32, i32)| {
+        let e = &r.exits[idx as usize];
+        if e.door.is_none() {
+            mark_height(grid, records, cell, e.height + r.height);
+        }
+    };
+    if y != 0 {
+        for u in 0..w {
+            mark(u, (x + u, y - 1));
+        }
+    }
+    if ((y + h) as u32) < grid.h {
+        for u in 0..w {
+            mark(h - 1 + 2 * w - u, (x + u, y + h));
+        }
+    }
+    if x != 0 {
+        for u in 0..h {
+            mark(n - u - 1, (x - 1, y + u));
+        }
+    }
+    if ((x + w) as u32) < grid.w {
+        for u in 0..h {
+            mark(u + w, (x + w, y + u));
+        }
+    }
+}
+
+/// A branch start (`0x1420a4a10`, 0x18 bytes).
+#[derive(Debug, Clone)]
+struct BranchCand {
+    room: usize,
+    parent: usize,
+    chance: i32,
+    depth: i32,
+    height: i32,
+    impen: bool,
+}
+
+/// `0x1420a4910` / `0x1420a4a10`: neighbours of `parent` that can start a branch.
+#[allow(clippy::too_many_arguments)]
+fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit>)], parent: usize, depth: i32, chance: i32, height: i32, impen: bool, door: &str, out: &mut Vec<BranchCand>) {
+    for n in neighbours(grid, parent) {
+        let rec = &records[n];
+        let fits_height = if rec.heights.is_empty() { height == 0 } else { rec.heights.len() == 1 && rec.heights[0] == height };
+        if !fits_height || rec.used || rec.impen {
+            continue;
+        }
+        if can_branch(grid, generic, parent, n, height, door) {
+            out.push(BranchCand { room: n, parent, chance, depth, height, impen });
+        }
+    }
+}
+
+/// `0x1420a4090`: a door from `a` towards `b`: an existing one at the height, or a free position
+/// of a placeholder that some untyped room could still take with that door added.
+fn can_branch(grid: &Grid, generic: &[(u32, u32, Vec<Exit>)], a: usize, b: usize, height: i32, door: &str) -> bool {
+    let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
+    for u in shared_doors(ra, rb, door) {
+        let e = &ra.exits[u as usize];
+        if e.door.is_none() && ra.is_placeholder() {
+            let mut exits = ra.exits.clone();
+            exits[u as usize] = Exit { door: Some(door.to_string()), height: height - ra.height, chiral: false };
+            let ok = generic.iter().any(|(w, h, g)| {
+                (*w, *h) == ra.size && exits.iter().zip(g).all(|(x, y)| x.door.is_none() || x == y)
+            });
+            if ok {
+                return true;
             }
         }
-        for &e in b {
-            connect(graph, e, &fields[e], grid, &mut records, rng)?;
+        if e.door.as_deref() == Some(door) && e.height + ra.height == height {
+            return true;
         }
-        compact(grid, &mut records);
+    }
+    false
+}
+
+/// `⌊chance·n/100⌋`, plus one with `below(100)` under the remainder; at most `n`.
+fn chance_count(chance: i32, n: usize, rng: &mut TerrainRng) -> usize {
+    let c = (chance.clamp(0, 100) as u64) * n as u64;
+    let k = c / 100 + u64::from((rng.below(100) as u64) < c % 100);
+    (k as usize).min(n)
+}
+
+/// `0x1420a5680`: branches off the corridors of one type.
+#[allow(clippy::too_many_arguments)]
+fn branch(graph: &Graph, fields: &[EdgeFields], key: &str, generic: &[(u32, u32, Vec<Exit>)], grid: &mut Grid, records: &mut [Record], paths: &[Corridor], rng: &mut TerrainRng) -> Result<(), GenError> {
+    let branching = |n: u32| graph.nodes[n as usize].extra.get(1).is_some_and(|v| v != "0");
+    for c in paths.iter().filter(|c| c.key == key) {
+        let edge = &graph.edges[c.edge];
+        // The corridor's end rooms at branching nodes mark their neighbours.
+        if branching(edge.to) {
+            for n in neighbours(grid, c.rooms[0]) {
+                let o = grid.rooms[n].origin;
+                mark_height(grid, records, o, c.height);
+            }
+        }
+        if branching(edge.from) {
+            for n in neighbours(grid, *c.rooms.last().unwrap()) {
+                let o = grid.rooms[n].origin;
+                mark_height(grid, records, o, c.height);
+            }
+        }
+    }
+    // `0x1420a4c90`: branch starts along each corridor with a branching chance.
+    let mut starts: Vec<BranchCand> = Vec::new();
+    for c in paths.iter().filter(|c| c.key == key) {
+        let f = &fields[c.edge];
+        if f.chance1 == 0 {
+            continue;
+        }
+        let edge = &graph.edges[c.edge];
+        let first = usize::from(!branching(edge.to));
+        let end = if branching(edge.from) { c.rooms.len() } else { c.rooms.len() - 1 };
+        let impen = f.impenetrable.eq_ignore_ascii_case("I");
+        let mut list = Vec::new();
+        for i in first..end.max(first) {
+            branch_starts(grid, records, generic, c.rooms[i], f.depth_limit - 1, f.chance2, c.height, impen, key, &mut list);
+        }
+        if f.chance1 < 100 {
+            let k = chance_count(f.chance1, list.len(), rng);
+            rng.below(list.len() as u32);
+            let n = list.len();
+            for i in 0..n {
+                let j = rng.uniform((n - i) as u32) as usize;
+                list.swap(i, i + j);
+            }
+            list.truncate(k);
+        }
+        starts.extend(list);
+    }
+    let mut next: Vec<BranchCand> = Vec::new();
+    for c in &starts {
+        grow_branch(grid, records, generic, c, key, &mut next, rng)?;
+    }
+    while !next.is_empty() {
+        rng.below(next.len() as u32);
+        let n = next.len();
+        for i in 0..n {
+            let j = rng.uniform((n - i) as u32) as usize;
+            next.swap(i, i + j);
+        }
+        let mut groups: Vec<(i32, Vec<BranchCand>)> = Vec::new();
+        for c in next.drain(..) {
+            match groups.iter_mut().find(|g| g.0 == c.chance) {
+                Some(g) => g.1.push(c),
+                None => groups.push((c.chance, vec![c])),
+            }
+        }
+        groups.sort_by_key(|g| g.0);
+        for (chance, group) in groups {
+            let k = chance_count(chance, group.len(), rng);
+            for c in group.iter().take(k) {
+                grow_branch(grid, records, generic, c, key, &mut next, rng)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `0x1420a5ba0`: a branch room off its parent (a door; heights on its surroundings; deeper
+/// starts while depth remains).
+fn grow_branch(grid: &mut Grid, records: &mut [Record], generic: &[(u32, u32, Vec<Exit>)], c: &BranchCand, door: &str, next: &mut Vec<BranchCand>, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let rec = &records[c.room];
+    if rec.used {
+        return Ok(());
+    }
+    let fits_height = if rec.heights.is_empty() { c.height == 0 } else { rec.heights.len() == 1 && rec.heights[0] == c.height };
+    if !fits_height {
+        return Ok(());
+    }
+    grid.rooms[c.room].height = c.height;
+    records[c.room].used = true;
+    records[c.room].impen = c.impen;
+    open_door(grid, c.room, c.parent, door, false, rng)?;
+    if grid.overlap != 0 {
+        let r = grid.rooms[c.room].clone();
+        for n in neighbours(grid, c.room) {
+            let o = grid.rooms[n].origin;
+            mark_height(grid, records, o, c.height);
+        }
+        let (x, y, w, h) = (r.origin.0, r.origin.1, r.size.0 as i32, r.size.1 as i32);
+        let corners = [((x - 1, y - 1), (x, y - 1), (x - 1, y)), ((x + w, y - 1), (x + w - 1, y - 1), (x + w, y)), ((x + w, y + h), (x + w - 1, y + h), (x + w, y + h - 1)), ((x - 1, y + h), (x, y + h), (x - 1, y + h - 1))];
+        for (cell, a, b) in corners {
+            if let Some(s) = grid.state(cell) {
+                if grid.state(a) != Some(s) && grid.state(b) != Some(s) {
+                    mark_height(grid, records, cell, c.height);
+                }
+            }
+        }
+    }
+    if c.depth != 0 {
+        branch_starts(grid, records, generic, c.room, c.depth - 1, c.chance, c.height, c.impen, door, next);
     }
     Ok(())
 }
@@ -844,7 +1136,7 @@ fn centre(r: &PlacedRoom) -> (i32, i32) {
 
 /// `0x1420a3a20`: an edge between the rooms under its nodes: A* over rooms (`0x1420a4330`),
 /// then doors along the path (`0x141fa8140`).
-fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &mut [Record], rng: &mut TerrainRng) -> Result<(), GenError> {
+fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &mut [Record], paths: &mut Vec<Corridor>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let edge = &graph.edges[e];
     let cell = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
     let (a, b) = (grid.state(cell(edge.from as usize)), grid.state(cell(edge.to as usize)));
@@ -861,8 +1153,11 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
     if !search(grid, records, start, goal, height, f.fuzzy, &door, impenetrable) {
         return Err(unsupported(format!("dungeon edge {e}: failed to connect")));
     }
-    let (mut cur, mut prev) = (Some(goal), None::<usize>);
+    let (mut cur, mut prev, mut prev2) = (Some(goal), None::<usize>, None::<usize>);
+    let key = if f.branching_type.is_empty() { door.clone() } else { f.branching_type.to_ascii_lowercase() };
+    let mut path = Vec::new();
     while let Some(c) = cur {
+        path.push(c);
         if !records[c].heights.contains(&height) {
             records[c].heights.push(height);
             records[c].heights.sort();
@@ -878,10 +1173,15 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
         if let Some(p) = prev {
             let either = grid.rooms[c].is_placeholder() || grid.rooms[p].is_placeholder();
             open_door(grid, c, p, &door, either, rng)?;
+            if prev2.is_some() {
+                mark_around(grid, records, p);
+            }
         }
+        prev2 = prev;
         prev = Some(c);
         cur = records[c].pred;
     }
+    paths.push(Corridor { key, rooms: path, edge: e, height });
     for r in records.iter_mut() {
         r.pred = None;
     }
@@ -1035,15 +1335,17 @@ fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, either: bool, rng:
 
 /// `0x1420a6610`: unused placeholders leave (each swapped with the last room), then the grid is
 /// stamped again (`0x1420a6bb0`).
-fn compact(grid: &mut Grid, records: &mut Vec<Record>) {
+fn compact(grid: &mut Grid, records: &mut Vec<Record>, paths: &mut [Corridor]) {
     if grid.rooms.is_empty() {
         return;
     }
+    let mut perm: Vec<usize> = (0..grid.rooms.len()).collect();
     let (mut i, mut last) = (0usize, grid.rooms.len() - 1);
     while i < last {
         if !records[i].used {
             grid.rooms.swap(i, last);
             records.swap(i, last);
+            perm.swap(i, last);
             last -= 1;
         } else {
             i += 1;
@@ -1054,6 +1356,15 @@ fn compact(grid: &mut Grid, records: &mut Vec<Record>) {
     }
     grid.rooms.truncate(i);
     records.truncate(i);
+    let mut new_index = vec![usize::MAX; perm.len()];
+    for (new, &old) in perm.iter().enumerate() {
+        new_index[old] = new;
+    }
+    for c in paths.iter_mut() {
+        for r in c.rooms.iter_mut() {
+            *r = new_index[*r];
+        }
+    }
     for c in grid.cells.iter_mut() {
         if *c != 1 {
             *c = 0;
