@@ -443,6 +443,14 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     }
     let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap };
     let cells = pass.run(&grid, &rooms, &mut map, rng)?;
+    if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
+        let mut out = String::new();
+        for p in &map.pieces {
+            let h = map.get(p.x as u32, p.y as u32).map_or(0, |c| c.height);
+            out += &format!("{} {} o{} h{}\t{}\n", p.x, p.y, p.orientation, h, p.path);
+        }
+        std::fs::write(path, out).ok();
+    }
     let fill_rooms = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
     // De-repetition over the rooms and fill rooms, then the outer buffer.
     let mut placements: Vec<RoomPlacement> = grid
@@ -454,14 +462,6 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     derepeat_pass(&mut map, &master, &placements, rng);
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let edge_types = master.edge_type_table(files)?;
-    if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
-        let mut out = String::new();
-        for p in &map.pieces {
-            let h = map.get(p.x as u32, p.y as u32).map_or(0, |c| c.height);
-            out += &format!("{} {} o{} h{}\t{}\n", p.x, p.y, p.orientation, h, p.path);
-        }
-        std::fs::write(path, out).ok();
-    }
     let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), true, &mut master, files, &edge_types, rng)?;
     // Tile records keep heights in world units (`StoreyHeight` per storey).
     let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);

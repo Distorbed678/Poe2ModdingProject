@@ -251,6 +251,11 @@ impl TileMap {
     }
 
     /// Whether every cell of a `w`×`h` rectangle is inside the map and empty (`0x141d0d880`).
+    /// A cell outside the region that a tile already took (it overhangs into the outer buffer).
+    pub(crate) fn spilled(&self, x: i32, y: i32) -> bool {
+        self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
+    }
+
     pub fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
         (0..h).all(|dy| (0..w).all(|dx| self.index(x + dx, y + dy).is_some_and(|i| self.cells[i].is_none())))
     }
@@ -862,7 +867,9 @@ impl Derepeat<'_> {
     /// `0x141fde880` (its corner ground fix-ups are not ported).
     fn replace(&self, map: &mut TileMap, pos: (i32, i32), tile: usize, o: u8) {
         let def = &self.master.tiles.tiles[tile];
-        map.place(pos.0, pos.1, &def.path, &def.tdt, o, 0, Some(tile));
+        // The new tile keeps the old one's height.
+        let height = map.index(pos.0, pos.1).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height);
+        map.place(pos.0, pos.1, &def.path, &def.tdt, o, height, Some(tile));
     }
 
     /// `0x141fdfa60`: re-pick the tile at `pos` (it mirrors the neighbour at `npos` across
