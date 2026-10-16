@@ -174,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
     for p in &placed {
-        room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, &mut rng)?;
+        room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, false, &mut rng)?;
     }
     println!("room passes: {} pieces", map.pieces.len());
 

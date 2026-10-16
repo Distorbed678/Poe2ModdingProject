@@ -448,6 +448,29 @@ stays inside the room and covers only uniform cells whose ground equals the tile
 ground (or both are missing or have `.gt` flag 8), at the start cell's height byte (+0x72).
 `G1_2` seed 1001 matches through the fill (5722 draws, 87 edge tiles).
 
+**Region overhang**: the client's region is a window into the full map (`0x141d0bad0` checks
+the full map's bounds), so a tile placed with the one cell of slack writes cells and corners into
+the margin. `TileMap` keeps those writes and `embed` applies them.
+
+**Room pass ground marking** (`0x141f8e6c0`, eighth argument): when set (overlays, `0x141fa23e0`
+passes `1, 1, 9, 0`), uniform-ground slots also give their ground to the corners x in `0..w`, y
+in `0..=h` (`0x141d0e130`, which sets flag 1). Node rooms (`0x1420c9970`) pass it unset. The room
+pass also registers each room (`0x141faab40`), so overlay rooms count as rooms for
+de-repetition.
+
+**Fill rooms on unwalkable corners** (`0x141f91110`): only rooms whose room data +0x188 list is
+empty. Entries are 0x30 bytes, which fits the points of interest (x, y, rotation, tag); it is
+not the doodad list.
+
+**De-repetition keys**: tiles are looked up by their tile-set index key (`0x141d08a40` turned,
+`0x141d09900` drops `.gt` flag 0x10 grounds).
+
+**Result (2026-10-16)**: tile hashes equal the client's for Clearfell (seeds 1, 2), `G1_1`
+(1000-1002), `G1_2` (1001-1003, forced topology 15) and `G1_4` (1001, 1002; topology 10,
+orientation 2). `G1_4` 1003 needs overlay placement after the fill. `G1_5` fails routing one
+edge. The other act 1 areas use `.dgr` layouts (not ported). `area_vectors` tries every forced
+topology and orientation when the natural choice (world-map pins) does not match.
+
 **Inheriting tiles** (`0x1429153f0`): a `.tdt` with an `inherits` path (for example
 `ZombieIntroFeature_Reorient_1.tdt`) has an override-flags byte after it and carries only what
 the flags name:
@@ -580,7 +603,11 @@ gives a 69×78 map with the region at (0, 3)). Set corners get flag 2; each marg
 the ground and height of the nearest set corner along its column (up/down) and row
 (left/right), and margin corners get flag 8. Then the strips: below the region (columns left
 to right; the strip shrinks under taken cells), above it (strict `x < x1`), right of it (rows
-top to bottom; left not ported). At each step the region's border cell decides: an edge
+top to bottom), left of it (rows top to bottom, stacked from x=0 to the border; edges on sides
+1/3, exits `[3s, 3s−e−1, 3s, e]`), right of it, in that order (`0x141fd8360` handles sides 0, 2,
+3, 1). `OuterBufferSize` (`0x1429285e0`) is top, right, bottom, left: a missing right or bottom
+copies the top and a missing left copies the right, so act 1's single values (`6`, `7`, `10`)
+mean all four sides. At each step the region's border cell decides: an edge
 crossing that cell side (`0x141fd5cd0`; virtual edges give the split type whose exit
 crosses) makes an edge-tile key (that edge on the two sides across the strip, exits
 `e`/`3s−e−1` from the border tile's exit `0x141d083d0` minus the cell offset, corner grounds

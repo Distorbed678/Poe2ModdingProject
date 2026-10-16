@@ -19,6 +19,70 @@ fn compare_edges(map: &TileMap, before: usize, lines: &[Vec<String>]) {
     }
 }
 
+/// Compares the final map with the client's `layout.tsv` (tile, sub-tile, height,
+/// orientation, offset per cell).
+fn compare_layout(map: &TileMap, dir: &str) {
+    let Ok(text) = std::fs::read_to_string(Path::new(dir).join("layout.tsv")) else { return };
+    let (mut same, mut diff) = (0, 0);
+    for l in text.lines().filter(|l| !l.starts_with('#')) {
+        let f: Vec<&str> = l.split('\t').collect();
+        if f.len() < 7 {
+            continue;
+        }
+        let (x, y): (u32, u32) = (f[0].parse().unwrap_or(0), f[1].parse().unwrap_or(0));
+        let theirs = format!("{} s{} h{} o{} {}", f[2].to_ascii_lowercase(), f[3], f[4], f[5], f[6]);
+        let ours = map.get(x, y).map(|c| format!("{} s{} h{} o{} {},{}", c.path.to_ascii_lowercase(), c.sub, c.height, c.orientation, c.offset.0, c.offset.1)).unwrap_or_else(|| " s0 h0 o0 0,0".into());
+        if ours == theirs {
+            same += 1;
+        } else {
+            diff += 1;
+            if diff <= 8 {
+                println!("  cell {x},{y}: ours {ours}\n           client {theirs}");
+            }
+        }
+    }
+    println!("layout: {same} cells same, {diff} different");
+}
+
+/// Compares the corner lattice with the client's `lattice <step>` snapshot (ground, height,
+/// flags per corner, region coordinates).
+fn compare_lattice(step: &str, map: &TileMap, lines: &[Vec<String>]) {
+    let mut grounds: Vec<String> = Vec::new();
+    let mut rows: Vec<Vec<(usize, i8, u8)>> = Vec::new();
+    for f in lines.iter().filter(|f| f.len() > 4 && f[1] == "lattice" && f[2] == step) {
+        if f[3].starts_with("view") {
+            grounds = f[4].split(',').map(|g| g.to_ascii_lowercase()).collect();
+            rows.clear();
+        } else {
+            rows.push(f[4].split(' ').map(|c| {
+                let v: Vec<i32> = c.split('.').map(|x| x.parse().unwrap_or(0)).collect();
+                (v[0] as usize, v[1] as i8, v[2] as u8)
+            }).collect());
+        }
+    }
+    if rows.is_empty() {
+        return;
+    }
+    let (mut same, mut diff) = (0, 0);
+    for (y, row) in rows.iter().enumerate() {
+        for (x, &(g, h, fl)) in row.iter().enumerate() {
+            let Some(i) = map.point_index(x as i32, y as i32) else { continue };
+            let p = &map.lattice[i];
+            let og = p.ground.as_deref().map(|g| g.rsplit('/').next().unwrap().to_string()).unwrap_or("-".into());
+            let tg = grounds.get(g).cloned().unwrap_or_default();
+            if og == tg && p.height == h && p.flags == fl {
+                same += 1;
+            } else {
+                diff += 1;
+                if diff <= 6 {
+                    println!("  lattice {step} ({x},{y}): ours {og} {} {:#x}, client {tg} {h} {fl:#x}", p.height, p.flags);
+                }
+            }
+        }
+    }
+    println!("lattice before {step}: {same} same, {diff} different");
+}
+
 /// Compares the room-pass pieces with the trace's first `place` lines.
 fn compare_rooms(map: &TileMap, lines: &[Vec<String>]) {
     let places: Vec<(i32, i32, u8, String)> = lines
@@ -157,9 +221,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Stage::Graph(name, lg) => compare_graph(name, lg, &lines),
         Stage::Rooms(map) => compare_rooms(map, &lines),
         Stage::Edges(map, before) => compare_edges(map, before, &lines),
+        Stage::Lattice(step, map) => compare_lattice(step, map, &lines),
     };
     match poe_world::area::generate_probed(&gd, &area, &mut rng, forced, &mut probe) {
-        Ok(g) => println!("{} {}x{}: tile hash {}", g.graph, g.map.width, g.map.height, g.map.tile_hash()),
+        Ok(g) => {
+            compare_layout(&g.map, &dir);
+            println!("{} {}x{}: tile hash {}", g.graph, g.map.width, g.map.height, g.map.tile_hash());
+        }
         Err(e) => println!("error: {e}"),
     }
     let log = rng.log.take().unwrap_or_default();

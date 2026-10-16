@@ -162,6 +162,9 @@ pub struct Overlays {
     height: i32,
     /// Overlays placed per room (for `limit=`).
     counts: HashMap<usize, u32>,
+    /// Rooms placed so far (room index, origin, orientation): rooms like any other for the
+    /// de-repetition pass.
+    pub placed: Vec<(usize, (i32, i32), u8)>,
 }
 
 /// A placed room as the overlay grid sees it: rectangle (tiles, end exclusive), whether its
@@ -174,6 +177,11 @@ pub struct RoomRect {
 
 impl Overlays {
     /// Loads the master's `.toy` and builds the groups and occupancy grid.
+    /// A placed overlay room's data.
+    pub fn room(&self, i: usize) -> &Room {
+        &self.rooms[i].1
+    }
+
     pub fn new(files: &dyn Files, toy: &str, map: &TileMap, master: &mut Master, rooms_placed: &[RoomRect]) -> Result<Self, GenError> {
         let passes = parse_toy(&crate::text::decode_utf16(&files.read(toy)?))?;
         let mut rooms: Vec<(String, Room)> = Vec::new();
@@ -221,7 +229,7 @@ impl Overlays {
             built.push((pass, groups));
         }
         let (width, height) = (map.width as i32, map.height as i32);
-        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, counts: HashMap::new() };
+        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, counts: HashMap::new(), placed: Vec::new() };
         if s.passes.iter().any(|p| p.0.phases & 3 != 0) {
             for r in rooms_placed {
                 if r.described {
@@ -260,9 +268,6 @@ impl Overlays {
     /// `0x141fa1a70`: the passes of phase `phase` (1 or 2).
     #[allow(clippy::too_many_arguments)]
     pub fn run(&mut self, phase: u8, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
-        if phase == 2 && self.passes.iter().any(|p| p.0.phases & 2 != 0 && !p.1.is_empty()) {
-            return Err(GenError::Unsupported("overlays after the fill (phase 2) are not ported".into()));
-        }
         for pi in 0..self.passes.len() {
             if self.passes[pi].0.phases & phase == 0 {
                 continue;
@@ -273,11 +278,13 @@ impl Overlays {
                 for (gi, g) in groups.iter().enumerate() {
                     self.collect(g, gi, map, master, types, files, &mut cands)?;
                 }
+                after_fill(phase, &cands)?;
                 self.place(&groups, cands, map, master, types, files, rng)?;
             } else {
                 for (gi, g) in groups.iter().enumerate() {
                     let mut cands = Candidates::default();
                     self.collect(g, gi, map, master, types, files, &mut cands)?;
+                    after_fill(phase, &cands)?;
                     self.place(&groups, cands, map, master, types, files, rng)?;
                 }
             }
@@ -436,9 +443,10 @@ impl Overlays {
                     }
                 }
             }
-            room_pass_oriented(map, master, &self.rooms[room.room].1, pos, o, rng)?;
+            room_pass_oriented(map, master, &self.rooms[room.room].1, pos, o, true, rng)?;
             self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
             *self.counts.entry(room.room).or_default() += 1;
+            self.placed.push((room.room, pos, o));
         }
         Ok(())
     }
@@ -740,4 +748,14 @@ fn room_height(room: &Room, map: &TileMap, pos: (i32, i32), o: u8) -> Result<Opt
     // Rooms in act 1 overlays have flat corners; a full port needs the slots' corner heights.
     let _ = (room, map, pos, o);
     Ok(Some(0))
+}
+
+/// Phase 2 placement (`0x141fa23e0` with `param_3` set) takes the pieces under the overlay out
+/// and fills what the room leaves free again (`0x141f8f930`, `0x141f9e2e0`); not ported. With no
+/// candidates it draws nothing, as in phase 1.
+fn after_fill(phase: u8, cands: &Candidates) -> Result<(), GenError> {
+    if phase == 2 && !cands.0.is_empty() {
+        return Err(GenError::Unsupported("overlay placement after the fill (phase 2) is not ported".into()));
+    }
+    Ok(())
 }

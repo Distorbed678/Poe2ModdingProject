@@ -190,8 +190,10 @@ impl Fill<'_> {
         let with_rooms = !rooms.is_empty();
         if with_rooms {
             for r in rooms {
-                let has_doodads = !self.room(&r.path)?.arm.doodads.is_empty();
-                if walkable || !has_doodads {
+                // `0x141f91110`: on an unwalkable corner only rooms whose room data +0x188 list
+                // (0x30-byte entries: the points of interest, by size) is empty.
+                let has_pois = self.room(&r.path)?.arm.points_of_interest.iter().any(|g| !g.is_empty());
+                if walkable || !has_pois {
                     list.push(r);
                 }
             }
@@ -345,8 +347,8 @@ fn pick_entry(list: &[Entry], mut r: u32) -> &Entry {
 }
 
 /// `0x141f93060`: rows top to bottom, cells left to right; a cell's ground is its top-left
-/// corner's, and fill rooms with doodads only go where that corner is walkable (no flag 8, and
-/// no ground or one with `.gt` flag 4).
+/// corner's, and fill rooms with points of interest only go where that corner is walkable (no
+/// flag 8, and no ground or one with `.gt` flag 4).
 pub fn fill_pass(
     map: &mut TileMap,
     master: &mut Master,

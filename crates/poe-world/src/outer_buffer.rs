@@ -23,14 +23,18 @@ pub struct Margins {
 }
 
 impl Margins {
-    /// `OuterBufferSize` from a `.tsi` (top, right, bottom, left).
+    /// `OuterBufferSize` from a `.tsi` (top, right, bottom, left; `0x1429285e0`: a missing
+    /// right or bottom copies the top, a missing left copies the right).
     pub fn parse(tsi_text: &str) -> Margins {
         let line = tsi_text.lines().map(str::trim).find(|l| l.starts_with("OuterBufferSize"));
         let v: Vec<u32> = line
             .map(|l| l.split_whitespace().skip(1).filter_map(|t| t.parse().ok()).collect())
             .unwrap_or_default();
-        let g = |i: usize| v.get(i).copied().unwrap_or(0);
-        Margins { top: g(0), right: g(1), bottom: g(2), left: g(3) }
+        let top = v.first().copied().unwrap_or(0);
+        let right = v.get(1).copied().unwrap_or(top);
+        let bottom = v.get(2).copied().unwrap_or(top);
+        let left = v.get(3).copied().unwrap_or(right);
+        Margins { top, right, bottom, left }
     }
 }
 
@@ -363,6 +367,60 @@ impl Pass<'_> {
         Ok(())
     }
 
+    /// Left of the region (side 3), rows top to bottom; the mirror of `right_strip`.
+    fn left_strip(&mut self, (x0, _, _, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
+        let mut y = 0;
+        while y < self.h {
+            let h0 = self.height(x0, y);
+            let mut x = x0;
+            while x != 0 && self.occupied(x - 1, y) {
+                x -= 1;
+            }
+            if x == 0 {
+                y += 1;
+                continue;
+            }
+            let off = self.map.index(x, y).and_then(|i| self.map.cells[i].as_ref()).map_or(0, |c| c.offset.1 as i32);
+            if let Some((et, off)) = self.border_edge(x, y, 3, off).filter(|(e, _)| !self.edges[e].wildcard) {
+                let s = self.edges[&et].size as i32;
+                let e = (self.exit(x, y, 3) - off * 3) as u8;
+                let full = (s * 3) as u8;
+                let (ga, gb) = (self.ground(x, y), self.ground(x, y + s));
+                let (ha, hb) = (self.height(x, y), self.height(x, y + s));
+                let (mut key, m) = self.edge_key(&et, [1, 3], [full, full.wrapping_sub(e).wrapping_sub(1), full, e], [ga.clone(), ga, gb.clone(), gb], [ha, ha, hb, hb]);
+                let list = self.edge_candidates(&et, &mut key)?;
+                if list.is_empty() {
+                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer left at ({x},{y})")));
+                }
+                let total = list.iter().map(|c| c.weight).sum();
+                let c = pick(&list, rng.below(total)).unwrap();
+                let mut xx = 0;
+                while xx < x {
+                    self.place_candidate(xx, y, c, m);
+                    xx += s;
+                }
+                y += s;
+            } else {
+                let (g1, g2) = (self.ground(x, y), self.ground(x, y + 1));
+                let Some((path, tdt, o)) = self.fill_tile(&g1, &g2)? else {
+                    y += 1;
+                    continue;
+                };
+                if tdt.size.1 as i32 + y <= self.h {
+                    let mut xx = 0;
+                    while xx < x {
+                        if self.fits(xx, y, tdt.size, o) {
+                            self.map.place(xx, y, &path, &tdt, o, h0 as i16, None);
+                        }
+                        xx += tdt.size.0 as i32;
+                    }
+                }
+                y += tdt.size.1 as i32;
+            }
+        }
+        Ok(())
+    }
+
     fn right_strip(&mut self, (_, _, x1, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
         let mut y = 0;
         while y < self.h {
@@ -428,9 +486,6 @@ pub fn outer_buffer(
 ) -> Result<TileMap, GenError> {
     let (w, h) = (region.width + margins.left + margins.right, region.height + margins.top + margins.bottom);
     let mut map = region.embed((margins.left as i32, margins.top as i32), w, h);
-    if margins.left != 0 {
-        return Err(GenError::Unsupported("outer buffer on the left".into()));
-    }
     for p in &mut map.lattice {
         if p.flags & 1 != 0 {
             p.flags |= 2;
@@ -446,6 +501,7 @@ pub fn outer_buffer(
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
     pass.above_strip(rect, rng)?;
+    pass.left_strip(rect, rng)?;
     pass.right_strip(rect, rng)?;
     Ok(map)
 }
