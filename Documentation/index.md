@@ -19,6 +19,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 | [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the DLL bypass |
 | [re/findings-2026-10-13.md](re/findings-2026-10-13.md) | Offline analysis: live-log comparison, client packet classes, rendering/spawn notes |
 | [re/terrain.md](re/terrain.md) | Terrain generator: phases, RNG (mt19937), tile/doodad hashes, tile records, area export, generator trace, seed sweep |
+| [re/dungeon.md](re/dungeon.md) | `.dgr` dungeon layouts (most act 1 areas): call chain, grid, room pick (port in progress) |
 | [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Reverse-engineering findings (Ghidra addresses) for 0.5.5e |
 | [research/poe1-prior-art.md](research/poe1-prior-art.md) | What public PoE1 research says about the protocol |
 | [research/tools.md](research/tools.md) | Survey of datamining and RE tools |
