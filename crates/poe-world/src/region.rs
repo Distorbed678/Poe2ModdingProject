@@ -7,15 +7,15 @@ use crate::graph::Graph;
 use crate::tileset::ORIENTATION_NAMES;
 
 /// `0x142f020c8`: per orientation (0..8; 8 = none) the bytes `(a, b, c)`.
-const TABLE: [[u8; 3]; 9] = [
+pub const TABLE: [[u8; 3]; 9] = [
     [0, 1, 1],
     [1, 0, 1],
     [0, 0, 0],
     [1, 1, 0],
     [0, 0, 1],
-    [1, 1, 1],
-    [0, 1, 0],
     [1, 0, 0],
+    [0, 1, 0],
+    [1, 1, 1],
     [0, 1, 1],
 ];
 

@@ -578,7 +578,7 @@ fn forced_size(tags: &[String]) -> Option<(u32, u32)> {
 /// `0x1420afdd0`: the origin of a `w`×`h` size at a node's unit cell (the extent is taken off on
 /// axes the region mirrors; not clamped).
 fn size_origin(region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
-    const TABLE: [[u8; 3]; 9] = [[0, 1, 1], [1, 0, 1], [0, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1]];
+    const TABLE: [[u8; 3]; 9] = crate::region::TABLE;
     let [a, b, c] = TABLE[region.min(8) as usize];
     let (rw, rh) = if region & 1 == 1 && region < 8 { (h as i32, w as i32) } else { (w as i32, h as i32) };
     let v = [rw - 1, rh - 1, 0];
@@ -657,7 +657,7 @@ fn contains(exits: &[Exit], required: &[Exit]) -> bool {
 /// `0x1420aefc0`: the room's origin for a node at unit `pos` (the room's extent is taken off on
 /// axes the region mirrors), clamped into the grid.
 fn origin_for(grid: &Grid, region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
-    const TABLE: [[u8; 3]; 9] = [[0, 1, 1], [1, 0, 1], [0, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1]];
+    const TABLE: [[u8; 3]; 9] = crate::region::TABLE;
     let [a, b, c] = TABLE[region.min(8) as usize];
     // The graph's orientation swaps the sides for odd orientations.
     let (rw, rh) = if region & 1 == 1 && region < 8 { (h as i32, w as i32) } else { (w as i32, h as i32) };
@@ -1641,6 +1641,12 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Opt
         return Ok(());
     }
     let total: u32 = list.iter().map(|s| s.1).sum();
+    if std::env::var("POE_DBG_GRID").is_ok() {
+        eprintln!("DBG fill {:?} list {:?}", door_type, list);
+        for y in 0..grid.h {
+            eprintln!("DBG grid {}", (0..grid.w).map(|x| match grid.cells[(y * grid.w + x) as usize] { 0 => ".".to_string(), 1 => "#".to_string(), v => format!("{}", (v - 2) % 36).chars().last().unwrap().to_string() }).collect::<String>());
+        }
+    }
     let fits = |grid: &Grid, (x, y): (i32, i32), (w, h): (u32, u32)| {
         x >= 0 && y >= 0 && x as u32 + w <= grid.w && y as u32 + h <= grid.h && (0..h as i32).all(|dy| (0..w as i32).all(|dx| grid.state((x + dx, y + dy)) == Some(0)))
     };
