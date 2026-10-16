@@ -185,6 +185,15 @@ pub struct PlacedRoom {
     pub exits: Vec<Exit>,
     /// The extra door type the node's edge pick chose (`0x1420966f0`).
     pub extra_door: Option<String>,
+    /// Room height (+0x12): the node's, or the edge's on a corridor.
+    pub height: i32,
+}
+
+impl PlacedRoom {
+    /// A placeholder (no `.arm` yet; room +0 null).
+    pub fn is_placeholder(&self) -> bool {
+        self.path.is_empty()
+    }
 }
 
 /// The unit grid (`0x141ff05f0`'s 0x70-byte object).
@@ -206,8 +215,11 @@ impl Grid {
         (0..h as i32).all(|dy| (0..w as i32).all(|dx| self.state((origin.0 + dx, origin.1 + dy)).is_some_and(|s| s < 2)))
     }
 
-    /// `0x1420a73d0`.
-    fn stamp(&mut self, room: PlacedRoom) -> Result<(), GenError> {
+    /// `0x1420a73d0` (`0x1420a6fb0` gives a placeholder an empty door ring).
+    fn stamp(&mut self, mut room: PlacedRoom) -> Result<(), GenError> {
+        if room.exits.is_empty() {
+            room.exits = vec![Exit { door: None, height: 0, chiral: false }; (2 * (room.size.0 + room.size.1)) as usize];
+        }
         let id = self.rooms.len() as u32 + 2;
         for dy in 0..room.size.1 as i32 {
             for dx in 0..room.size.0 as i32 {
@@ -367,7 +379,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let (c, origin, _) = kept[k].clone();
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
-        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door })?;
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n) })?;
     }
     // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
@@ -417,7 +429,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             if clear && !(0..graph.nodes.len()).any(swallows) {
                 let extra_door = extra_door_pick(&slots[n], &fields, rng);
-                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door })?;
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n) })?;
                 break;
             }
             let size = list[k].0;
@@ -717,7 +729,21 @@ pub fn size_report(set: &RoomSet) -> String {
 /// Per placed room (`0x1420a5e50` records, 0x30 bytes): a random cost and search state.
 #[derive(Debug, Clone, Default)]
 struct Record {
+    /// +0: on an impenetrable corridor.
+    impen: bool,
+    /// +1: on a corridor (or a node's room).
+    used: bool,
+    /// +4: the search predecessor.
+    pred: Option<usize>,
+    /// +8: the corridor's impenetrability.
+    impval: i32,
+    /// +0xc: `below(128)`.
     cost: u32,
+    /// +0x10 / +0x14: A* g and h.
+    g: i32,
+    h: i32,
+    /// +0x18: corridor heights through the room.
+    heights: Vec<i32>,
 }
 
 /// The corridor stage of `0x1420ac3e0` (step 4): edge batches, the shuffle (`0x141fa8b60`), then
@@ -740,7 +766,7 @@ fn corridors(
     let mut records: Vec<Record> = Vec::new();
     let grow = |records: &mut Vec<Record>, grid: &Grid, rng: &mut TerrainRng| {
         while records.len() < grid.rooms.len() {
-            records.push(Record { cost: rng.below(128) });
+            records.push(Record { cost: rng.below(128), ..Default::default() });
         }
     };
     grow(&mut records, grid, rng);
@@ -789,14 +815,258 @@ fn corridors(
         }
         b.sort_by_key(|&e| priority(e));
     }
-    if let Some(b) = batches.first() {
+    for room in 0..grid.rooms.len().min(records.len()) {
+        records[room].used = true;
+    }
+    for b in &batches {
         let t = graph.edges[b[0]].edge_type.to_ascii_lowercase();
         let list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| s.0 == t).map(|s| s.1.clone()).unwrap_or_default();
         fill_placeholders(grid, &list, rng)?;
         grow(&mut records, grid, rng);
-        return Err(unsupported(format!("dungeon: edge connection (0x1420a3a20) not ported ({} rooms, {} records, batch {:?})", grid.rooms.len(), records.len(), b)));
+        // `0x1420a6030`: rooms with an `.arm` count as used.
+        for (i, r) in grid.rooms.iter().enumerate() {
+            if !r.is_placeholder() {
+                records[i].used = true;
+            }
+        }
+        for &e in b {
+            connect(graph, e, &fields[e], grid, &mut records, rng)?;
+        }
+        compact(grid, &mut records);
     }
     Ok(())
+}
+
+/// A room's centre in half units.
+fn centre(r: &PlacedRoom) -> (i32, i32) {
+    (2 * r.origin.0 + r.size.0 as i32, 2 * r.origin.1 + r.size.1 as i32)
+}
+
+/// `0x1420a3a20`: an edge between the rooms under its nodes: A* over rooms (`0x1420a4330`),
+/// then doors along the path (`0x141fa8140`).
+fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &mut [Record], rng: &mut TerrainRng) -> Result<(), GenError> {
+    let edge = &graph.edges[e];
+    let cell = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
+    let (a, b) = (grid.state(cell(edge.from as usize)), grid.state(cell(edge.to as usize)));
+    let (Some(a), Some(b)) = (a, b) else {
+        return Err(unsupported(format!("dungeon edge {e}: an end outside the grid (0x1420a3770 not ported)")));
+    };
+    if a < 2 || b < 2 {
+        return Err(unsupported(format!("dungeon edge {e}: connects from a void room")));
+    }
+    let (start, goal) = (a as usize - 2, b as usize - 2);
+    let door = edge.edge_type.to_ascii_lowercase();
+    let height = grid.rooms[start].height.max(grid.rooms[goal].height);
+    let impenetrable = f.impenetrable.eq_ignore_ascii_case("I");
+    if !search(grid, records, start, goal, height, f.fuzzy, &door, impenetrable) {
+        return Err(unsupported(format!("dungeon edge {e}: failed to connect")));
+    }
+    let (mut cur, mut prev) = (Some(goal), None::<usize>);
+    while let Some(c) = cur {
+        if !records[c].heights.contains(&height) {
+            records[c].heights.push(height);
+            records[c].heights.sort();
+        }
+        records[c].used = true;
+        if grid.rooms[c].is_placeholder() {
+            records[c].impval = f.impenetrability;
+            records[c].impen = impenetrable;
+            if c != start && c != goal {
+                grid.rooms[c].height = height;
+            }
+        }
+        if let Some(p) = prev {
+            let either = grid.rooms[c].is_placeholder() || grid.rooms[p].is_placeholder();
+            open_door(grid, c, p, &door, either, rng)?;
+        }
+        prev = Some(c);
+        cur = records[c].pred;
+    }
+    for r in records.iter_mut() {
+        r.pred = None;
+    }
+    Ok(())
+}
+
+/// `0x1420a4330`: A* from `start` to `goal`; open set by g + h, then room index.
+#[allow(clippy::too_many_arguments)]
+fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height: i32, fuzzy: i32, door: &str, impenetrable: bool) -> bool {
+    records[start].g = 0;
+    records[start].pred = None;
+    records[goal].h = 0;
+    let mut open: Vec<usize> = vec![start];
+    let mut closed: Vec<bool> = vec![false; grid.rooms.len()];
+    let key = |records: &[Record], i: usize| (records[i].g.wrapping_add(records[i].h), i);
+    loop {
+        let Some(k) = (0..open.len()).min_by_key(|&k| key(records, open[k])) else { return false };
+        let cur = open.remove(k);
+        if cur == goal {
+            return true;
+        }
+        closed[cur] = true;
+        for n in neighbours(grid, cur) {
+            if !connectable(grid, cur, n, height, door) {
+                continue;
+            }
+            let ok = n == goal || ((!records[n].used || (!records[n].impen && !impenetrable)) && !closed[n] && records[cur].pred != Some(n));
+            if !ok || !connectable(grid, n, cur, height, door) {
+                continue;
+            }
+            let (c0, c1) = (centre(&grid.rooms[cur]), centre(&grid.rooms[n]));
+            let d = isqrt(((c0.0 - c1.0).pow(2) + (c0.1 - c1.1).pow(2)) as u32);
+            let g = (d >> 1) as i32 + records[cur].g;
+            if let Some(j) = open.iter().position(|&o| o == n) {
+                if records[n].g <= g {
+                    continue;
+                }
+                open.remove(j);
+            } else {
+                let cg = centre(&grid.rooms[goal]);
+                let dg = isqrt(((c1.0 - cg.0).pow(2) + (c1.1 - cg.1).pow(2)) as u32);
+                records[n].h = ((dg >> 1) as i32).wrapping_mul(100 - fuzzy) + (((records[n].impval << 7) as u32) / 100) as i32 + fuzzy.wrapping_mul(records[n].cost as i32);
+            }
+            records[n].g = g;
+            open.push(n);
+            records[n].pred = Some(cur);
+        }
+    }
+}
+
+/// `0x1420a7ab0`: rooms along the four strips around `room` (above, below, left, right), each
+/// once per strip.
+fn neighbours(grid: &Grid, room: usize) -> Vec<usize> {
+    let r = &grid.rooms[room];
+    let (x, y, w, h) = (r.origin.0, r.origin.1, r.size.0 as i32, r.size.1 as i32);
+    let mut out = Vec::new();
+    let mut strip = |horizontal: bool, fixed: i32, from: i32, len: i32| {
+        let mut u = 0;
+        while u < len {
+            let cell = if horizontal { (from + u, fixed) } else { (fixed, from + u) };
+            match grid.state(cell) {
+                Some(s) if s >= 2 => {
+                    out.push(s as usize - 2);
+                    let o = &grid.rooms[s as usize - 2];
+                    u = if horizontal { o.origin.0 + o.size.0 as i32 - from } else { o.origin.1 + o.size.1 as i32 - from };
+                }
+                _ => u += 1,
+            }
+        }
+    };
+    if y != 0 {
+        strip(true, y - 1, x, w);
+    }
+    if ((y + h) as u32) < grid.h {
+        strip(true, y + h, x, w);
+    }
+    if x != 0 {
+        strip(false, x - 1, y, h);
+    }
+    if ((x + w) as u32) < grid.w {
+        strip(false, x + w, y, h);
+    }
+    out
+}
+
+/// Ring position of `b` facing ring position `u` of `a` (`0x141fa79e0`).
+fn facing(a: &PlacedRoom, b: &PlacedRoom, u: u32) -> Option<u32> {
+    let outside = ring_cell(a.origin, a.size, u);
+    let inner = ring_inner(a.origin, a.size, u);
+    (0..b.exits.len() as u32).find(|&v| ring_cell(b.origin, b.size, v) == inner && ring_inner(b.origin, b.size, v) == outside)
+}
+
+/// `0x141fa7d40`: `a`'s ring positions on the border shared with `b` where both sides take a
+/// door of `door` (a placeholder's empty position, or that door already).
+fn shared_doors(a: &PlacedRoom, b: &PlacedRoom, door: &str) -> Vec<u32> {
+    let (ax, ay, aw, ah) = (a.origin.0, a.origin.1, a.size.0 as i32, a.size.1 as i32);
+    let (bx, by, bw, bh) = (b.origin.0, b.origin.1, b.size.0 as i32, b.size.1 as i32);
+    let positions: Vec<u32> = if by + bh == ay {
+        (ax.max(bx)..(ax + aw).min(bx + bw)).map(|x| (x - ax) as u32).collect()
+    } else if ay + ah == by {
+        (ax.max(bx)..(ax + aw).min(bx + bw)).map(|x| (2 * aw + ah - 1 - (x - ax)) as u32).collect()
+    } else if bx + bw == ax {
+        (ay.max(by)..(ay + ah).min(by + bh)).map(|y| (2 * (aw + ah) - 1 - (y - ay)) as u32).collect()
+    } else {
+        (ay.max(by)..(ay + ah).min(by + bh)).map(|y| (aw + (y - ay)) as u32).collect()
+    };
+    let ok = |r: &PlacedRoom, i: u32| {
+        let e = &r.exits[i as usize];
+        (r.is_placeholder() && e.door.is_none()) || e.door.as_deref() == Some(door)
+    };
+    positions.into_iter().filter(|&u| ok(a, u) && facing(a, b, u).is_some_and(|v| ok(b, v))).collect()
+}
+
+/// `0x1420a4260`: `a` can open towards `b` at the corridor height.
+fn connectable(grid: &Grid, a: usize, b: usize, height: i32, door: &str) -> bool {
+    let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
+    shared_doors(ra, rb, door).into_iter().any(|u| {
+        let e = &ra.exits[u as usize];
+        (e.door.is_none() && ra.is_placeholder()) || (e.door.as_deref() == Some(door) && e.height + ra.height == height)
+    })
+}
+
+/// `0x141fa8140` / `0x141fa7fd0`: a door between neighbouring rooms `a` and `b` at a shuffled
+/// shared position (a discarded `below(n)`, then the shuffle).
+fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, either: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let mut list = shared_doors(&grid.rooms[a], &grid.rooms[b], door);
+    if list.is_empty() {
+        return Err(unsupported("dungeon: could not open doors"));
+    }
+    rng.below(list.len() as u32);
+    let n = list.len();
+    for i in 0..n {
+        let k = rng.uniform((n - i) as u32) as usize;
+        list.swap(i, i + k);
+    }
+    let u = list[0];
+    let v = facing(&grid.rooms[a], &grid.rooms[b], u).expect("shared position");
+    grid.rooms[a].exits[u as usize].door = Some(door.to_string());
+    grid.rooms[b].exits[v as usize].door = Some(door.to_string());
+    if either {
+        let (ha, hb) = (grid.rooms[a].height, grid.rooms[b].height);
+        if grid.rooms[a].is_placeholder() {
+            grid.rooms[a].exits[u as usize].height = (hb - ha).max(0);
+        }
+        if grid.rooms[b].is_placeholder() {
+            grid.rooms[b].exits[v as usize].height = (ha - hb).max(0);
+        }
+    }
+    Ok(())
+}
+
+/// `0x1420a6610`: unused placeholders leave (each swapped with the last room), then the grid is
+/// stamped again (`0x1420a6bb0`).
+fn compact(grid: &mut Grid, records: &mut Vec<Record>) {
+    if grid.rooms.is_empty() {
+        return;
+    }
+    let (mut i, mut last) = (0usize, grid.rooms.len() - 1);
+    while i < last {
+        if !records[i].used {
+            grid.rooms.swap(i, last);
+            records.swap(i, last);
+            last -= 1;
+        } else {
+            i += 1;
+        }
+    }
+    if records[i].used {
+        i += 1;
+    }
+    grid.rooms.truncate(i);
+    records.truncate(i);
+    for c in grid.cells.iter_mut() {
+        if *c != 1 {
+            *c = 0;
+        }
+    }
+    for (k, r) in grid.rooms.iter().enumerate() {
+        for dy in 0..r.size.1 as i32 {
+            for dx in 0..r.size.0 as i32 {
+                let (x, y) = (r.origin.0 + dx, r.origin.1 + dy);
+                grid.cells[(y as u32 * grid.w + x as u32) as usize] = k as u32 + 2;
+            }
+        }
+    }
 }
 
 /// `0x1420a6140`: every free unit cell (row by row) gets a placeholder of a size drawn from the
@@ -834,7 +1104,7 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], rng: &mut Terr
             }
             let size = chosen.unwrap_or(list[0].0);
             let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
-            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0 })?;
             x += size.0 as i32;
         }
     }
