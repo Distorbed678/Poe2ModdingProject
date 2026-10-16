@@ -427,6 +427,16 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap };
     let cells = pass.run(&grid, &rooms, &mut map, rng)?;
     let fill_rooms = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
+    // De-repetition over the rooms and fill rooms, then the outer buffer.
+    let mut placements: Vec<RoomPlacement> = grid
+        .rooms
+        .iter()
+        .filter_map(|r| Some(RoomPlacement { room: rooms.get(&r.path)?, origin: (r.origin.0 * step as i32, r.origin.1 * step as i32), orientation: r.orientation }))
+        .collect();
+    placements.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
+    derepeat_pass(&mut map, &master, &placements, rng);
+    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
+    let edge_types = master.edge_type_table(files)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
         for p in &map.pieces {
@@ -435,7 +445,13 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
         std::fs::write(path, out).ok();
     }
-    Err(GenError::Unsupported(format!("dungeon de-repetition not ported ({} tiles placed, {} fill rooms)", map.pieces.len(), fill_rooms.len())))
+    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), true, &mut master, files, &edge_types, rng)?;
+    // Tile records keep heights in world units (`StoreyHeight` per storey).
+    let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);
+    for c in map.cells.iter_mut().flatten() {
+        c.height *= storey;
+    }
+    Ok(map)
 }
 
 /// Everything after the topology choice, for one graph.
@@ -872,5 +888,5 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
 
     // Outer buffer.
     let edge_types = master.edge_type_table(files)?;
-    outer_buffer(&map, margins, &mut master, files, &edge_types, rng)
+    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
 }

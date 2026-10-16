@@ -476,9 +476,12 @@ impl Pass<'_> {
 }
 
 /// `0x141fd8360`: the region map placed inside its outer buffer and the margins tiled.
+/// `outer_ground` is the master's `OuterGroundType`; `repair` levels its fill tiles (dungeons).
 pub fn outer_buffer(
     region: &TileMap,
     margins: Margins,
+    outer_ground: Option<&str>,
+    repair: bool,
     master: &mut Master,
     files: &dyn Files,
     edges: &HashMap<String, EdgeType>,
@@ -497,6 +500,9 @@ pub fn outer_buffer(
         (margins.left + region.width) as i32,
         (margins.top + region.height) as i32,
     );
+    if let Some(g) = outer_ground {
+        fill_black(&mut map, rect, g, repair, master, files)?;
+    }
     let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32 };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
@@ -504,4 +510,110 @@ pub fn outer_buffer(
     pass.left_strip(rect, rng)?;
     pass.right_strip(rect, rng)?;
     Ok(map)
+}
+
+/// `0x141fd5ff0`: region cells still empty (dungeon grid cells without a room) take the outer
+/// ground's first fill tile (`0x141fd6990`; orientation "any" counts as 0). With `repair` and an
+/// outer ground whose heights do not follow the tiles (no `.gt` flag 1), each new tile takes the
+/// middle of its cell's set corner heights (cells without any wait for their neighbours), and
+/// then those tiles and the fill's tiles of that ground are levelled to the middle of their
+/// corners, again while some tile moved by more than one storey (up to 15 rounds).
+fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
+    let Some((path, o)) = master.first_fill_tile(files, Some(ground))? else {
+        return Err(GenError::Unsupported("no fill tile found for outer fill ground type".into()));
+    };
+    let o = if o == 8 { 0 } else { o };
+    let tdt = master.header(files, &path)?.clone();
+    let (tw, th) = TileMap::oriented_size(tdt.size, o);
+    let ground = ground.to_ascii_lowercase();
+    if !repair || map.gt_flags(&ground) & 1 != 0 {
+        for y in rect.1..rect.3 {
+            for x in rect.0..rect.2 {
+                if x + tw <= rect.2 && y + th <= rect.3 && map.free(x, y, tw, th) {
+                    map.place(x, y, &path, &tdt, o, 0, None);
+                }
+            }
+        }
+        return Ok(());
+    }
+    if (tw, th) != (1, 1) {
+        return Err(GenError::Unsupported(format!("outer fill tile {path} is not 1x1 (height repair)")));
+    }
+    // `0x141fd6990`: the tile's corners take its height first.
+    let place = |map: &mut TileMap, x: i32, y: i32, h: i32| {
+        if !map.free(x, y, tw, th) {
+            return;
+        }
+        for py in y..=y + th {
+            for px in x..=x + tw {
+                if let Some(k) = map.point_index(px, py) {
+                    map.lattice[k].height = h as i8;
+                    map.lattice[k].flags |= 2;
+                }
+            }
+        }
+        map.place(x, y, &path, &tdt, o, h as i16, None);
+    };
+    let mut fixed: Vec<(i32, i32)> = Vec::new();
+    let mut waiting: Vec<(i32, i32)> = Vec::new();
+    let mut ready: Vec<(i32, i32, i32)> = Vec::new();
+    // `0x141fd7060`.
+    let scan = |map: &TileMap, c: (i32, i32), waiting: &mut Vec<(i32, i32)>, ready: &mut Vec<(i32, i32, i32)>| match crate::generate::middle(&map.tile_corner_heights(c.0, c.1)) {
+        None => waiting.push(c),
+        Some(h) => ready.push((c.0, c.1, h)),
+    };
+    for y in rect.1..rect.3 {
+        for x in rect.0..rect.2 {
+            let Some(i) = map.index(x, y) else { continue };
+            match &map.cells[i] {
+                None => scan(map, (x, y), &mut waiting, &mut ready),
+                Some(c) if c.path.eq_ignore_ascii_case(&path) => fixed.push((x, y)),
+                Some(_) => {}
+            }
+        }
+    }
+    while !waiting.is_empty() {
+        for (x, y, h) in ready.drain(..) {
+            place(map, x, y, h);
+            fixed.push((x, y));
+        }
+        let before = waiting.len();
+        for c in std::mem::take(&mut waiting) {
+            scan(map, c, &mut waiting, &mut ready);
+        }
+        if waiting.len() == before {
+            return Err(GenError::Unsupported("could not fix heights in dungeon".into()));
+        }
+    }
+    for (x, y, h) in ready.drain(..) {
+        place(map, x, y, h);
+        fixed.push((x, y));
+    }
+    // `0x141fd71c0` rounds.
+    for _ in 0..15 {
+        let mut small = true;
+        let mut changes: Vec<((i32, i32), i32)> = Vec::new();
+        for &(x, y) in &fixed {
+            let h = crate::generate::middle(&map.tile_corner_heights(x, y)).unwrap_or(0);
+            let cur = map.index(x, y).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height as i32);
+            if h != cur {
+                changes.push(((x, y), h));
+                if (h - cur).abs() > 1 {
+                    small = false;
+                }
+            }
+        }
+        if changes.is_empty() {
+            break;
+        }
+        for ((x, y), h) in changes {
+            if map.index(x, y).and_then(|i| map.cells[i].as_ref()).is_some_and(|c| c.offset == (0, 0)) {
+                map.set_heights(x, y, &tdt, h as i16);
+            }
+        }
+        if small {
+            break;
+        }
+    }
+    Ok(())
 }

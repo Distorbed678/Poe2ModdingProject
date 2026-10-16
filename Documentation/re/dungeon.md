@@ -2,8 +2,14 @@
 
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
-with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port:
-not started (this file records the reverse engineering as it goes).
+with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
+(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3 seeds 1001–1003 and
+G1_9 seed 1001 (`cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
+Not ported yet: several corridor types (`0x1420a50e0` ordering, G1_7), `GetFeatureRooms` nodes
+(G1_8, G1_12), chiral/height-change edge types (G1_11), named border tiles and the
+`0x14209f050` fallbacks (G1_6), door placement (`0x14209d180` / `0x14209dc90`; guarded),
+injector and blank special rooms, the `0x1420a8980` split for special rooms, and the request-driven
+extra rooms and shrines (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`).
 
 ## Call chain
 
@@ -114,3 +120,63 @@ starts at draw 11 (`0x1420aebc9`). Later call sites: `0x1420aff12` (`below(2964)
 `0x1420a62b0`, `0x1420a5f8a`, `0x141fa81a3`, `0x1420b125c`/`0x1420b134c`, `0x1420a4e94`/
 `0x1420a4ec7`, `0x1420a9b9f`, then the tile pass (`0x142098d18`, `0x14209f8b8`), fill, outer
 buffer and de-repetition as for `.tgr`.
+
+## After the rooms (`0x1420ac3e0` step 4 onwards)
+
+- Corridors (`0x1420a5e50`, `0x1420a2c70`): one record per placed room with a `below(128)` cost;
+  edges batched by priority and container (edge types with one room size / other / default),
+  shuffled (a discarded `below(n)` then a forward Fisher-Yates); placeholders fill free cells;
+  each edge is joined by A* over rooms (`0x1420a4330`: g += isqrt(centre distance in half units)/2,
+  h = (dist/2)(100 − fuzzy) + (impenetrability << 7)/100 + fuzzy·cost, open set by (g+h, id)).
+  Unused placeholders are compacted away (swap with the last room, ids remapped).
+- Branching (`0x1420a50e0` / `0x1420a5680`): per corridor key, candidates next to corridor rooms;
+  count ⌊c·n/100⌋ + (below(100) < remainder); depth rounds grouped by chance2.
+- Extra doors (`0x1420a99e0`): per room with an extra door %, shuffled candidate positions,
+  `below(100) < pct`, pct −= 100.
+- Placeholder rooms (`0x1420b0fe0`): size-bucket entries of non-unique generic rooms × allowed
+  orientations, matched strict / optional extras / any; weight (empty²·10+1)·w; orientation
+  `region::pick(mask, below(840))`; one re-pick when a neighbour uses the same room.
+- `0x1420a9590` (open door counts) and `0x1420b19f0` (ground spreading) draw nothing.
+- Special rooms (`0x1420aa710`): `.arm` tags `special` / `specialN` / `specialchance N` (room data
+  +8 flag, +4 list index, 0xff = chance list, +5 chance, default 100). The room set keeps one list
+  per index (`.rs` order) and appends the chance list last. Indexed lists: a discarded `below(n)`
+  and a shuffle, then the first entry that places. Chance list: every room with chance ≥ 100, or
+  1..99 with `below(100) < chance`. Placement (`0x1420a7da0`): reachable placed rooms with an
+  `.arm` that is neither special nor tagged, whose doors match the special room in its first
+  matching allowed orientation (`0x1420a7c40`: equal doors, or closed where the special door is
+  optional; with optional special doors the room needs one of its own); `below(count)` picks the
+  room, `below(weight)` the variant. The room keeps its doors and becomes kind 8.
+
+## Tile pass (`0x14209c4c0`)
+
+1. Pass A (`0x1420983d0`), per placed room in order: the `.arm` grid row by row (y outer).
+   Slot anchor +0x73 (`origin`: SW 0, SE 1, NE 2, NW 3) moves a multi-cell slot's listed cell to
+   its corner; position and key are turned by the room's orientation; the lowest corner height
+   moves into the tile height (slot +0x72). Ground-only slots (no feature, edges or heights,
+   one ground; `s` slots and `f` without a fill name too) only mark their corners' height and are
+   listed for the fill (`0x142097cb0`). Odd-sized slots centred on the room's border line
+   (`0x142099b90`) go to the border map. Others: tile-set lookup, `below(total)`, place, then
+   `0x141d0b390` (cells and corners take the height).
+2. Border map (`0x142097f80`, sorted by x·65536 + y): the first room's key is stored with the
+   sides it covers (4 top, 0x10 right, 2 bottom, 8 left; bit 0 reachable); the second is merged
+   (`0x1420972f0`): corners it covers fully take its ground (none for `.gt` flag 0x10) and height,
+   sides only it covers take its edge, shared sides are combined by the `.ecf`
+   (`0x1420a28c0`: edge pair + corner height difference → edge; no rule: a lone edge stays, two
+   give none; exits kept when equal, else the middle). Heights are rebased to their minimum.
+3. Pass B (`0x14209fbc0`), x-major: ground-only keys are marked; sides seen by one room drop their
+   flag-0x10 grounds; then tile-set lookup, `below(total)`, place (`0x14209f050`).
+4. Doors (only with `door` tiles): open exits mark their unit's middle cells on the border line
+   (`0x142096ad0`); straight passages across a marked shared exit become door groups
+   (`0x142097060`); `0x14209d180` would place a door tile there (not ported: the port fails when
+   a door tile could fit).
+5. Room ground overrides (`0x141f9e780`), then the fill: the listed ground-only cells, stable
+   sorted by (x, y), each filled with its ground and its slot height (`0x14209cf50` →
+   `0x141f8f930`; `0x141f90950` uses a passed height unless it is `i32::MIN`, which the `.tgr`
+   fill passes).
+6. De-repetition and outer buffer as for `.tgr`. The outer buffer first fills the region's
+   empty cells (grid cells without a room) with the `OuterGroundType`'s first fill tile
+   (`0x141fd5ff0`). For grounds without `.gt` flag 1 it repairs heights: new tiles take the middle
+   of their set corner heights (cells without any wait for neighbours), then those tiles and the
+   fill's tiles of that ground are levelled to their corners' middle, again while one moved by
+   more than 1 (up to 15 rounds).
+7. Cell heights are stored in world units: storeys × `StoreyHeight` (`.tsi`).

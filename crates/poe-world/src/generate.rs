@@ -328,6 +328,60 @@ impl TileMap {
     }
 }
 
+impl TileMap {
+    /// `0x141d0b390`: the tile covering `(x, y)` (`tdt` is its header) gets height `h` on all
+    /// its cells and `h` plus the tile's own corner heights on all its corner points (flags
+    /// unchanged).
+    pub(crate) fn set_heights(&mut self, x: i32, y: i32, tdt: &Tdt, h: i16) {
+        let Some(i) = self.index(x, y) else { return };
+        let Some(pi) = self.piece_at[i] else { return };
+        let (px, py, o) = (self.pieces[pi].x, self.pieces[pi].y, self.pieces[pi].orientation);
+        let (tw, th) = (tdt.size.0 as i32, tdt.size.1 as i32);
+        for ly in 0..th {
+            for lx in 0..tw {
+                let (dx, dy) = orient_cell(o, tw, th, lx, ly);
+                if let Some(c) = self.index(px + dx, py + dy).and_then(|k| self.cells[k].as_mut()) {
+                    c.height = h;
+                }
+            }
+        }
+        for v in 0..=th {
+            for u in 0..=tw {
+                let (dx, dy) = crate::tileset::orient_point(o, tw, th, u, v);
+                if let Some(k) = self.point_index(px + dx, py + dy) {
+                    let d = tdt.point_heights.get(((tw + 1) * v + u) as usize).copied().unwrap_or(0) as i16;
+                    self.lattice[k].height = (h + d) as i8;
+                }
+            }
+        }
+    }
+
+    /// `0x141fd6d70`: the set (flag 2) heights at the four corners of the tile covering
+    /// `(x, y)` (a 1×1 square when the cell is empty).
+    pub(crate) fn tile_corner_heights(&self, x: i32, y: i32) -> Vec<i32> {
+        let (x0, y0, w, h) = match self.index(x, y).and_then(|i| self.piece_at[i]) {
+            Some(pi) => {
+                let p = &self.pieces[pi];
+                let (w, h) = Self::oriented_size(p.size, p.orientation);
+                (p.x, p.y, w, h)
+            }
+            None => (x, y, 1, 1),
+        };
+        [(x0, y0), (x0 + w, y0), (x0, y0 + h), (x0 + w, y0 + h)]
+            .iter()
+            .filter_map(|&(px, py)| self.point_index(px, py))
+            .filter(|&k| self.lattice[k].flags & 2 != 0)
+            .map(|k| self.lattice[k].height as i32)
+            .collect()
+    }
+}
+
+/// The middle of a set of heights (`max - (max - min) / 2`).
+pub(crate) fn middle(hs: &[i32]) -> Option<i32> {
+    let (lo, hi) = (*hs.iter().min()?, *hs.iter().max()?);
+    Some(hi - (hi - lo) / 2)
+}
+
 /// One `.gft` fill group: `(weight, path, orientation mask)`.
 type FillGroup = Vec<(u32, String, u8)>;
 

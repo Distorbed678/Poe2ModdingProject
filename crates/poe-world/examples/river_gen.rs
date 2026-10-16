@@ -657,7 +657,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tsi_text = poe_world::text_utf16(&Files::read(files, &tsi_path)?);
     let margins = poe_world::outer_buffer::Margins::parse(&tsi_text);
     let edge_types = master.edge_type_table(files)?;
-    match poe_world::outer_buffer::outer_buffer(&map, margins, &mut master, files, &edge_types, &mut rng) {
+    match poe_world::outer_buffer::outer_buffer(&map, margins, None, false, &mut master, files, &edge_types, &mut rng) {
         Ok(full) => {
             let export = poe_world::export::AreaExport::load(Path::new(&export_dir))?;
             println!("map {}x{}: tile hash ours {} client {}", full.width, full.height, full.tile_hash(), export.meta("tile_hash").unwrap_or("?"));
