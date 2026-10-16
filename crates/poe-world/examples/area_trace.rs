@@ -231,6 +231,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("error: {e}"),
     }
     let log = rng.log.take().unwrap_or_default();
+    if std::env::var("POE_DUMP_DRAWS").is_ok() {
+        let mut runs: Vec<(u32, usize)> = Vec::new();
+        for d in &log {
+            match runs.last_mut() {
+                Some(r) if r.0 == d.0 => r.1 += 1,
+                _ => runs.push((d.0, 1)),
+            }
+        }
+        eprintln!("DBG ours {}", runs.iter().map(|r| format!("{}x{}", r.1, r.0)).collect::<Vec<_>>().join(" "));
+    }
     match log.iter().zip(&trace).position(|(o, t)| o.0 != t.2 || o.1 != t.3) {
         Some(i) => {
             let (line, site, n, r) = &trace[i];
