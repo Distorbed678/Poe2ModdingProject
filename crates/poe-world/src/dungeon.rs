@@ -221,9 +221,30 @@ pub struct Grid {
     pub rooms: Vec<PlacedRoom>,
     /// Grid +0x34: the tiles rooms share at their borders (master +0x14b).
     pub overlap: u32,
+    /// Door types whose two sides differ (`0x141d047b0`): their doors carry a chirality.
+    pub chiral: std::collections::HashSet<String>,
 }
 
 impl Grid {
+    fn is_chiral(&self, door: &str) -> bool {
+        self.chiral.contains(door)
+    }
+
+    /// A room's door ring turned by `o` (`0x141f964f0`): mirrored orientations flip the
+    /// chirality of chiral doors.
+    fn turned(&self, w: u32, h: u32, exits: &[Exit], o: u8) -> Vec<Exit> {
+        let n = exits.len() as u32;
+        let mut out = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
+        for i in 0..n {
+            let mut e = exits[i as usize].clone();
+            if o >= 4 && e.door.as_deref().is_some_and(|d| self.is_chiral(d)) {
+                e.chiral = !e.chiral;
+            }
+            out[turn_index(w, h, i, o) as usize] = e;
+        }
+        out
+    }
+
     fn state(&self, (x, y): (i32, i32)) -> Option<u32> {
         (x >= 0 && y >= 0 && (x as u32) < self.w && (y as u32) < self.h).then(|| self.cells[(y as u32 * self.w + x as u32) as usize])
     }
@@ -256,7 +277,7 @@ impl Grid {
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`).
 pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
-    let rooms: Vec<DungeonRoom> = set
+    let mut rooms: Vec<DungeonRoom> = set
         .rooms
         .iter()
         .map(|r| {
@@ -265,7 +286,8 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             let exits = arm
                 .thingies
                 .iter()
-                .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: false })
+                // Version > 29 puts a height override flag before the chirality.
+                .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: if arm.version > 29 { t.bool2 } else { t.bool1 }.unwrap_or(false) })
                 .collect();
             let tag = r.tag.to_ascii_lowercase();
             let special = tag.starts_with("special");
@@ -296,7 +318,22 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         .collect();
     // Master +0x14b; the rooms' `.arm` dimensions carry the same overlap.
     let overlap = set.rooms.first().and_then(|r| r.room.arm.dimensions.uint1).unwrap_or(1);
-    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap };
+    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap, chiral: Default::default() };
+    // Door types with a chirality: those of the rooms' doors and the graph's edges.
+    let mut door_types: Vec<String> = rooms.iter().flat_map(|r| r.exits.iter().filter_map(|e| e.door.clone())).collect();
+    door_types.extend(graph.edges.iter().map(|e| e.edge_type.to_ascii_lowercase()));
+    door_types.sort();
+    door_types.dedup();
+    for t in door_types {
+        if !t.is_empty() && chiral_type(&mut types, files, &t)? {
+            grid.chiral.insert(t);
+        }
+    }
+    for r in &mut rooms {
+        for e in &mut r.exits {
+            e.chiral &= e.door.as_deref().is_some_and(|d| grid.chiral.contains(d));
+        }
+    }
     let unit = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
     let height = |n: usize| graph.nodes[n].values.get(1).copied().unwrap_or(0);
     let priority = |n: usize| graph.nodes[n].values.get(2).copied().unwrap_or(0) as i8;
@@ -333,7 +370,9 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         let exit_for = |e: usize| {
             let edge = &graph.edges[e];
             let h = height(edge.from as usize).max(height(edge.to as usize)) - height(n);
-            Exit { door: Some(edge.edge_type.to_ascii_lowercase()), height: h, chiral: false }
+            let door = edge.edge_type.to_ascii_lowercase();
+            let chiral = grid.is_chiral(&door) && ((edge.from as usize == n) ^ (edge.values.get(1).copied().unwrap_or(0) != 0));
+            Exit { door: Some(door), height: h, chiral }
         };
         // Required exits (`0x1420ad6b0`, `0x141f96730`).
         let required: Vec<Exit> = slots[n].iter().map(|&e| exit_for(e)).collect();
@@ -347,11 +386,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 if r.mask >> o & 1 == 0 {
                     continue;
                 }
-                let n_ring = r.exits.len() as u32;
-                let mut exits = vec![empty.clone(); n_ring as usize];
-                for i in 0..n_ring {
-                    exits[turn_index(r.units.0, r.units.1, i, o) as usize] = r.exits[i as usize].clone();
-                }
+                let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
                 let size = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
                 all.push(Candidate { room: ri, o, size, exits, weight: r.weight });
             }
@@ -881,23 +916,27 @@ fn corridors(
         }
         compact(grid, &mut records, &mut paths);
     }
-    // `0x1420a50e0`: per corridor type (a discarded `below(n)` and a shuffle over the types),
-    // types with a branching edge get placeholders, records and branches (`0x1420a5680`).
+    // `0x1420a50e0`: the corridor types sorted by path (`0x1420db6f0`), a discarded `below(n)`
+    // and a shuffle, then stable-partitioned into types with exactly one room size
+    // (`0x1420a55b0`), other types, and the default type last; types with a branching edge get
+    // placeholders, records and branches (`0x1420a5680`).
     let mut keys: Vec<String> = Vec::new();
     for c in &paths {
         if !keys.contains(&c.key) {
             keys.push(c.key.clone());
         }
     }
-    if keys.len() > 1 {
-        return Err(unsupported("dungeon: several corridor types (0x1420a50e0 ordering not ported)"));
-    }
+    keys.sort();
     rng.below(keys.len() as u32);
     for i in 0..keys.len() {
         let k = rng.uniform((keys.len() - i) as u32) as usize;
         keys.swap(i, i + k);
     }
-    let generic: Vec<(u32, u32, Vec<Exit>)> = generic_shapes(rooms);
+    let is_default = |k: &str| k.is_empty() || k == "metadata/terrain/dungeon/rooms.et";
+    let single = |k: &str| sizes.iter().find(|s| s.0 == k).is_some_and(|s| s.1.len() == 1);
+    let rank = |k: &str| if is_default(k) { 2 } else if single(k) { 0 } else { 1 };
+    keys.sort_by_key(|k| rank(k));
+    let generic: Vec<(u32, u32, Vec<Exit>)> = generic_shapes(grid, rooms);
     for key in &keys {
         if !paths.iter().any(|c| &c.key == key && fields[c.edge].chance1 != 0) {
             continue;
@@ -929,11 +968,7 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
             if r.mask >> o & 1 == 0 {
                 continue;
             }
-            let n = r.exits.len() as u32;
-            let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
-            for i in 0..n {
-                exits[turn_index(r.units.0, r.units.1, i, o) as usize] = r.exits[i as usize].clone();
-            }
+            let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
             let size = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
             entries.push((ri, o, size, exits, r.weight));
         }
@@ -946,20 +981,26 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
         let Some(door_type) = p.door_type.clone() else { continue };
         let optional = |types: &mut TerrainTypes, d: &str| types.edge(files, d).map(|t| t.can_end).unwrap_or(false);
         let strict = !(p.extra_pct == 0 && optional(types, &door_type));
-        let mut list = match_rooms(files, &entries, p, if strict { 2 } else { 1 }, types);
+        let mut list = match_rooms(files, &entries, p, if strict { 2 } else { 1 }, &grid.chiral, types);
         if list.is_empty() && !strict {
-            list = match_rooms(files, &entries, p, 0, types);
+            list = match_rooms(files, &entries, p, 0, &grid.chiral, types);
         }
         if list.is_empty() && strict {
-            list = match_rooms(files, &entries, p, 1, types);
+            list = match_rooms(files, &entries, p, 1, &grid.chiral, types);
             if list.is_empty() {
-                list = match_rooms(files, &entries, p, 0, types);
+                list = match_rooms(files, &entries, p, 0, &grid.chiral, types);
             }
         }
         if list.is_empty() {
             return Err(unsupported(format!("dungeon: no room fits placeholder {i} at {:?}", p.origin)));
         }
         let total: u32 = list.iter().map(|l| l.2).sum();
+        if std::env::var("POE_DBG_ASSIGN").is_ok() {
+            eprintln!("DBG assign {i} at {:?} size {:?} strict {strict} doors {:?} total {total}", p.origin, p.size, p.exits.iter().map(|e| e.door.as_deref().map_or("-", |d| d.rsplit('/').next().unwrap())).collect::<Vec<_>>());
+            for l in &list {
+                eprintln!("DBG   {} mask {:#x} w {}", rooms[l.0].path.rsplit('/').next().unwrap(), l.1, l.2);
+            }
+        }
         let draw = |rng: &mut TerrainRng| {
             let mut r = rng.below(total);
             let mut k = list.len() - 1;
@@ -979,11 +1020,7 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
             (k, o) = draw(rng);
         }
         let r = &rooms[list[k].0];
-        let n = r.exits.len() as u32;
-        let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
-        for j in 0..n {
-            exits[turn_index(r.units.0, r.units.1, j, o) as usize] = r.exits[j as usize].clone();
-        }
+        let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
         let p = &mut grid.rooms[i];
         p.path = r.path.clone();
         p.orientation = o;
@@ -996,7 +1033,7 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
 /// height); `mode` 2 allows no other doors, 1 only optional ones (`.et` flag 0x10), 0 any.
 /// Orientations of one room merge (mask); its weight is (empty matches² × 10 + 1) × the `.rs`
 /// weight of its first matching orientation.
-fn match_rooms(files: &dyn Files, entries: &[(usize, u8, (u32, u32), Vec<Exit>, u32)], p: &PlacedRoom, mode: u8, types: &mut TerrainTypes) -> Vec<(usize, u8, u32)> {
+fn match_rooms(files: &dyn Files, entries: &[(usize, u8, (u32, u32), Vec<Exit>, u32)], p: &PlacedRoom, mode: u8, chiral: &std::collections::HashSet<String>, types: &mut TerrainTypes) -> Vec<(usize, u8, u32)> {
     let mut out: Vec<(usize, u8, u32)> = Vec::new();
     for (room, o, size, exits, weight) in entries {
         if *size != p.size || exits.len() != p.exits.len() {
@@ -1007,7 +1044,7 @@ fn match_rooms(files: &dyn Files, entries: &[(usize, u8, (u32, u32), Vec<Exit>, 
         for (want, have) in p.exits.iter().zip(exits) {
             match (&want.door, &have.door) {
                 (Some(w), Some(h)) => {
-                    if w != h || want.height != have.height {
+                    if w != h || want.height != have.height || (chiral.contains(w.as_str()) && want.chiral != have.chiral) {
                         ok = false;
                         break;
                     }
@@ -1085,7 +1122,7 @@ fn extra_doors(grid: &mut Grid, generic: &[(u32, u32, Vec<Exit>)], into_impenetr
         for &(_, n) in &list {
             let height = grid.rooms[r].height.max(grid.rooms[n].height);
             if can_branch(grid, generic, r, n, height, &door) && can_branch(grid, generic, n, r, height, &door) && rng.below(100) < pct {
-                open_door(grid, r, n, &door, true, rng)?;
+                open_door(grid, r, n, &door, false, true, rng)?;
                 if (grid.rooms[r].accessible || grid.rooms[n].accessible) && !reached.contains(&n) {
                     reached.push(n);
                 }
@@ -1118,18 +1155,14 @@ struct Corridor {
 }
 
 /// Untyped generic rooms in every allowed orientation: size and turned doors.
-fn generic_shapes(rooms: &[DungeonRoom]) -> Vec<(u32, u32, Vec<Exit>)> {
+fn generic_shapes(grid: &Grid, rooms: &[DungeonRoom]) -> Vec<(u32, u32, Vec<Exit>)> {
     let mut out = Vec::new();
     for r in rooms.iter().filter(|r| r.generic && r.tag.is_empty()) {
         for o in 0..8u8 {
             if r.mask >> o & 1 == 0 {
                 continue;
             }
-            let n = r.exits.len() as u32;
-            let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
-            for i in 0..n {
-                exits[turn_index(r.units.0, r.units.1, i, o) as usize] = r.exits[i as usize].clone();
-            }
+            let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
             let (w, h) = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
             out.push((w, h, exits));
         }
@@ -1224,7 +1257,7 @@ fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit
 /// of a placeholder that some untyped room could still take with that door added.
 fn can_branch(grid: &Grid, generic: &[(u32, u32, Vec<Exit>)], a: usize, b: usize, height: i32, door: &str) -> bool {
     let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
-    for u in shared_doors(ra, rb, door) {
+    for u in shared_doors(grid, ra, rb, door, false) {
         let e = &ra.exits[u as usize];
         if e.door.is_none() && ra.is_placeholder() {
             let mut exits = ra.exits.clone();
@@ -1349,7 +1382,7 @@ fn grow_branch(grid: &mut Grid, records: &mut [Record], generic: &[(u32, u32, Ve
     }
     records[c.room].used = true;
     records[c.room].impen = c.impen;
-    open_door(grid, c.room, c.parent, door, false, rng)?;
+    open_door(grid, c.room, c.parent, door, false, false, rng)?;
     if grid.overlap != 0 {
         let r = grid.rooms[c.room].clone();
         for n in neighbours(grid, c.room) {
@@ -1394,7 +1427,8 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
     let door = edge.edge_type.to_ascii_lowercase();
     let height = grid.rooms[start].height.max(grid.rooms[goal].height);
     let impenetrable = f.impenetrable.eq_ignore_ascii_case("I");
-    if !search(grid, records, start, goal, height, f.fuzzy, &door, impenetrable) {
+    let chir = edge.values.get(1).copied().unwrap_or(0) != 0;
+    if !search(grid, records, start, goal, height, f.fuzzy, &door, chir, impenetrable) {
         return Err(unsupported(format!("dungeon edge {e}: failed to connect")));
     }
     let (mut cur, mut prev, mut prev2) = (Some(goal), None::<usize>, None::<usize>);
@@ -1423,7 +1457,7 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
         }
         if let Some(p) = prev {
             let either = grid.rooms[c].is_placeholder() || grid.rooms[p].is_placeholder();
-            open_door(grid, c, p, &door, either, rng)?;
+            open_door(grid, c, p, &door, chir, either, rng)?;
             if c != start && c != goal {
                 grid.rooms[c].accessible |= f.accessible;
             }
@@ -1444,7 +1478,7 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
 
 /// `0x1420a4330`: A* from `start` to `goal`; open set by g + h, then room index.
 #[allow(clippy::too_many_arguments)]
-fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height: i32, fuzzy: i32, door: &str, impenetrable: bool) -> bool {
+fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height: i32, fuzzy: i32, door: &str, chir: bool, impenetrable: bool) -> bool {
     records[start].g = 0;
     records[start].pred = None;
     records[goal].h = 0;
@@ -1459,11 +1493,11 @@ fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height
         }
         closed[cur] = true;
         for n in neighbours(grid, cur) {
-            if !connectable(grid, cur, n, height, door) {
+            if !connectable(grid, cur, n, height, door, chir) {
                 continue;
             }
             let ok = n == goal || ((!records[n].used || (!records[n].impen && !impenetrable)) && !closed[n] && records[cur].pred != Some(n));
-            if !ok || !connectable(grid, n, cur, height, door) {
+            if !ok || !connectable(grid, n, cur, height, door, !chir) {
                 continue;
             }
             let (c0, c1) = (centre(&grid.rooms[cur]), centre(&grid.rooms[n]));
@@ -1529,8 +1563,10 @@ fn facing(a: &PlacedRoom, b: &PlacedRoom, u: u32) -> Option<u32> {
 }
 
 /// `0x141fa7d40`: `a`'s ring positions on the border shared with `b` where both sides take a
-/// door of `door` (a placeholder's empty position, or that door already).
-fn shared_doors(a: &PlacedRoom, b: &PlacedRoom, door: &str) -> Vec<u32> {
+/// door of `door` (`0x141fa7bf0`: a placeholder's empty position, or that door already; for a
+/// chiral door type with `a` holding `!chir` and `b` holding `chir`). A chiral door of another
+/// type on either side of a checked position empties the list.
+fn shared_doors(grid: &Grid, a: &PlacedRoom, b: &PlacedRoom, door: &str, chir: bool) -> Vec<u32> {
     let (ax, ay, aw, ah) = (a.origin.0, a.origin.1, a.size.0 as i32, a.size.1 as i32);
     let (bx, by, bw, bh) = (b.origin.0, b.origin.1, b.size.0 as i32, b.size.1 as i32);
     let positions: Vec<u32> = if by + bh == ay {
@@ -1542,26 +1578,47 @@ fn shared_doors(a: &PlacedRoom, b: &PlacedRoom, door: &str) -> Vec<u32> {
     } else {
         (ay.max(by)..(ay + ah).min(by + bh)).map(|y| (aw + (y - ay)) as u32).collect()
     };
-    let ok = |r: &PlacedRoom, i: u32| {
+    let conflict = std::cell::Cell::new(false);
+    let ok = |r: &PlacedRoom, i: u32, want: bool| {
         let e = &r.exits[i as usize];
-        (r.is_placeholder() && e.door.is_none()) || e.door.as_deref() == Some(door)
+        match e.door.as_deref() {
+            Some(d) if d != door => {
+                if grid.is_chiral(d) {
+                    conflict.set(true);
+                }
+                false
+            }
+            None if r.is_placeholder() => true,
+            None => false,
+            Some(_) => !grid.is_chiral(door) || e.chiral == want,
+        }
     };
-    positions.into_iter().filter(|&u| ok(a, u) && facing(a, b, u).is_some_and(|v| ok(b, v))).collect()
+    let mut out = Vec::new();
+    for u in positions {
+        if ok(a, u, !chir) && facing(a, b, u).is_some_and(|v| ok(b, v, chir)) {
+            out.push(u);
+        }
+        if conflict.get() {
+            return Vec::new();
+        }
+    }
+    out
 }
 
 /// `0x1420a4260`: `a` can open towards `b` at the corridor height.
-fn connectable(grid: &Grid, a: usize, b: usize, height: i32, door: &str) -> bool {
+fn connectable(grid: &Grid, a: usize, b: usize, height: i32, door: &str, chir: bool) -> bool {
     let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
-    shared_doors(ra, rb, door).into_iter().any(|u| {
+    shared_doors(grid, ra, rb, door, chir).into_iter().any(|u| {
         let e = &ra.exits[u as usize];
         (e.door.is_none() && ra.is_placeholder()) || (e.door.as_deref() == Some(door) && e.height + ra.height == height)
     })
 }
 
 /// `0x141fa8140` / `0x141fa7fd0`: a door between neighbouring rooms `a` and `b` at a shuffled
-/// shared position (a discarded `below(n)`, then the shuffle).
-fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, either: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
-    let mut list = shared_doors(&grid.rooms[a], &grid.rooms[b], door);
+/// shared position (a discarded `below(n)`, then the shuffle); for a chiral type `a` takes
+/// chirality `!chir` and `b` takes `chir` (`0x141f96730`).
+fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, chir: bool, either: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let mut list = shared_doors(grid, &grid.rooms[a], &grid.rooms[b], door, chir);
     if list.is_empty() {
         return Err(unsupported("dungeon: could not open doors"));
     }
@@ -1573,8 +1630,11 @@ fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, either: bool, rng:
     }
     let u = list[0];
     let v = facing(&grid.rooms[a], &grid.rooms[b], u).expect("shared position");
+    let c = grid.is_chiral(door);
     grid.rooms[a].exits[u as usize].door = Some(door.to_string());
+    grid.rooms[a].exits[u as usize].chiral = c && !chir;
     grid.rooms[b].exits[v as usize].door = Some(door.to_string());
+    grid.rooms[b].exits[v as usize].chiral = c && chir;
     if either {
         let (ha, hb) = (grid.rooms[a].height, grid.rooms[b].height);
         if grid.rooms[a].is_placeholder() {
@@ -1742,6 +1802,8 @@ fn special_rooms(files: &dyn Files, rooms: &[DungeonRoom], grid: &mut Grid, type
 /// becomes kind 8 (+0x14).
 fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<Option<usize>, GenError> {
     let mut exact: Vec<(usize, Vec<(usize, u8)>)> = Vec::new();
+    // `0x1420a8980`: spots where the special room would cover whole rooms (by position).
+    let mut split: Vec<((i32, i32), Vec<(usize, u8, (u32, u32))>)> = Vec::new();
     for &si in entries {
         let s = &rooms[si];
         if s.tag.to_ascii_lowercase().contains("injector") {
@@ -1754,11 +1816,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
         let variants: Vec<Option<((u32, u32), Vec<Exit>)>> = (0..8u8)
             .map(|o| {
                 (s.mask == 0 || s.mask >> o & 1 != 0).then(|| {
-                    let n = s.exits.len() as u32;
-                    let mut exits = vec![Exit { door: None, height: 0, chiral: false }; n as usize];
-                    for j in 0..n {
-                        exits[turn_index(s.units.0, s.units.1, j, o) as usize] = s.exits[j as usize].clone();
-                    }
+                    let exits = grid.turned(s.units.0, s.units.1, &s.exits, o);
                     (if o & 1 == 1 { (s.units.1, s.units.0) } else { s.units }, exits)
                 })
             })
@@ -1782,10 +1840,74 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
                     break;
                 }
             }
+            if !exact.is_empty() {
+                continue;
+            }
+            // No exact spot yet: the special room at the room's corners.
+            let p = &grid.rooms[i];
+            for (o, v) in variants.iter().enumerate() {
+                let Some((size, exits)) = v else { continue };
+                let (sw, sh) = (size.0 as i32, size.1 as i32);
+                let (px, py, pw, ph) = (p.origin.0, p.origin.1, p.size.0 as i32, p.size.1 as i32);
+                let mut corners = vec![(px, py)];
+                if sw >= 2 {
+                    corners.push((px + pw - sw, py));
+                    if sh >= 2 {
+                        corners.push((px, py + ph - sh));
+                        corners.push((px + pw - sw, py + ph - sh));
+                    }
+                } else if sh >= 2 {
+                    corners.push((px, py + ph - sh));
+                }
+                for pos in corners {
+                    if split_fits(grid, rooms, *size, exits, pos) {
+                        match split.iter_mut().find(|e| e.0 == pos) {
+                            Some(e) => e.1.push((si, o as u8, *size)),
+                            None => split.push((pos, vec![(si, o as u8, *size)])),
+                        }
+                    }
+                }
+            }
         }
     }
     if exact.is_empty() {
-        return Err(unsupported("dungeon: special room without an exact spot (0x1420a8980 split not ported)"));
+        if split.is_empty() {
+            return Ok(None);
+        }
+        // `0x1420a8448` / `0x1420a8461`: the spot, then the variant; the rooms under it leave
+        // (highest index first) and the special room takes their place at the height of the
+        // last one removed.
+        let k = rng.below(split.len() as u32) as usize;
+        let v = rng.below(split[k].1.len() as u32) as usize;
+        let (pos, (si, o, size)) = (split[k].0, split[k].1[v]);
+        let mut ids: Vec<u32> = Vec::new();
+        for dy in 0..size.1 as i32 {
+            for dx in 0..size.0 as i32 {
+                let st = grid.state((pos.0 + dx, pos.1 + dy)).unwrap_or(0);
+                if st >= 2 && !ids.contains(&st) {
+                    ids.push(st);
+                }
+            }
+        }
+        ids.sort();
+        let mut height = 0;
+        for &id in ids.iter().rev() {
+            height = grid.rooms[id as usize - 2].height;
+            grid.rooms.remove(id as usize - 2);
+        }
+        for c in grid.cells.iter_mut() {
+            if *c != 1 {
+                *c = 0;
+            }
+        }
+        let placed = std::mem::take(&mut grid.rooms);
+        for r in placed {
+            grid.stamp(r)?;
+        }
+        let r = &rooms[si];
+        let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
+        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: pos, size, orientation: o, exits, extra_door: None, height, accessible: true, blocked: false, extra_pct: 0, door_type: None, special: true })?;
+        return Ok(Some(grid.rooms.len() - 1));
     }
     let k = rng.below(exact.len() as u32) as usize;
     let v = rng.below(exact[k].1.len() as u32) as usize;
@@ -1826,4 +1948,116 @@ fn special_fits(files: &dyn Files, placed: &[Exit], special: &[Exit], types: &mu
         }
     }
     Ok(!(any_optional && own == 0))
+}
+
+/// `0x141d047b0`: an edge type whose sides differ (a height change or two grounds; a virtual
+/// edge unless both halves are the same chiral type with equal flags).
+fn chiral_type(types: &mut TerrainTypes, files: &dyn Files, t: &str) -> Result<bool, GenError> {
+    let e = types.edge(files, t)?.clone();
+    if e.height_change != 0 || e.grounds[0] != e.grounds[1] {
+        return Ok(true);
+    }
+    if !e.virtual_edge {
+        return Ok(false);
+    }
+    if e.splits[0].0 == e.splits[1].0 {
+        if !chiral_type(types, files, &e.splits[0].0)? || e.splits[0].1 != e.splits[1].1 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// `0x1420a8bc0`: the special room at `pos` lies on the grid over free cells and whole
+/// non-special, untagged rooms of one height, and its doors agree with theirs along its sides
+/// (`0x1420a8fc0`; a default-type special door may face a closed one, but not all of them).
+fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exit], pos: (i32, i32)) -> bool {
+    let (x0, y0) = pos;
+    let (x1, y1) = (x0 + size.0 as i32, y0 + size.1 as i32);
+    if x0 < 0 || y0 < 0 || x1 > grid.w as i32 || y1 > grid.h as i32 {
+        return false;
+    }
+    const DEFAULT: &str = "metadata/terrain/dungeon/rooms.et";
+    let defaults = exits.iter().filter(|e| e.door.as_deref() == Some(DEFAULT)).count();
+    let (sw, sh, n) = (size.0 as i32, size.1 as i32, exits.len() as i32);
+    let mut skipped = 0usize;
+    let mut height: Option<i32> = None;
+    let empty = [Exit { door: None, height: 0, chiral: false }, Exit { door: None, height: 0, chiral: false }, Exit { door: None, height: 0, chiral: false }, Exit { door: None, height: 0, chiral: false }];
+    // `0x1420a8fc0` for a record at `(px, py)`.
+    let mut check = |(px, py): (i32, i32), (pw, ph): (i32, i32), pe: &[Exit]| -> bool {
+        let np = pe.len() as i32;
+        let mut cmp = |s: &Exit, p: &Exit| -> bool {
+            if s == p {
+                return true;
+            }
+            skipped += 1;
+            s.door.as_deref() == Some(DEFAULT) && p.door.is_none()
+        };
+        if px == x0 {
+            for k in 0..ph {
+                if !cmp(&exits[(n - (k + (py - y0)) - 1) as usize], &pe[(np - k - 1) as usize]) {
+                    return false;
+                }
+            }
+        }
+        if px + pw == x1 {
+            for k in 0..ph {
+                if !cmp(&exits[(sw + (py - y0) + k) as usize], &pe[(pw + k) as usize]) {
+                    return false;
+                }
+            }
+        }
+        if py == y0 {
+            for k in 0..pw {
+                if !cmp(&exits[((px - x0) + k) as usize], &pe[k as usize]) {
+                    return false;
+                }
+            }
+        }
+        if py + ph == y1 {
+            for k in 0..pw {
+                if !cmp(&exits[(n - sh - (px - x0 + k) - 1) as usize], &pe[(np - ph - k - 1) as usize]) {
+                    return false;
+                }
+            }
+        }
+        true
+    };
+    for y in y0..y1 {
+        for x in x0..x1 {
+            match grid.state((x, y)) {
+                Some(0) => {
+                    if !check((x, y), (1, 1), &empty) {
+                        return false;
+                    }
+                }
+                Some(st) if st >= 2 => {
+                    let p = &grid.rooms[st as usize - 2];
+                    let (pw, ph) = (p.size.0 as i32, p.size.1 as i32);
+                    if p.origin.0 < x0 || p.origin.1 < y0 || p.origin.0 + pw > x1 || p.origin.1 + ph > y1 {
+                        return false;
+                    }
+                    if p.origin != (x, y) {
+                        continue;
+                    }
+                    if !p.is_placeholder() {
+                        if let Some(r) = rooms.iter().find(|r| r.path == p.path) {
+                            if r.special || !r.tag.is_empty() {
+                                return false;
+                            }
+                        }
+                    }
+                    if height.is_some_and(|h| h != p.height) {
+                        return false;
+                    }
+                    height = Some(p.height);
+                    if !check((x, y), (pw, ph), &p.exits) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+    defaults == 0 || skipped != defaults
 }
