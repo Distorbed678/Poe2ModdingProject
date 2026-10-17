@@ -84,23 +84,60 @@ pub struct AreaInfo {
     pub unk_24: u32,
     /// Client +0x70: `u16` count + big-endian `u32`s (PoE1 sent a preload list here).
     pub list_70: Vec<u32>,
+    /// Flags0 bit 7 (reader `0x14211d1c0` → `0x1423baa70`): two stat records (+0x130, +0x150)
+    /// and a list of more (+0x170); a record is a varuint count, then `u16` stat key (Stats
+    /// row + 1) and varint value per stat. The terrain generator reads `map_force_topology`
+    /// (2962) and `map_force_orientation` (2963) from the area's stats. Official G1_1: record
+    /// 1 = ritual tower augment, `area_culture_hash`, ritual groups enabled; record 2 = the
+    /// first and last of those; no further records.
+    pub stats: Option<AreaStats>,
+}
+
+/// AreaInfo's stat records (see [`AreaInfo::stats`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AreaStats {
+    pub first: Vec<(u16, i32)>,
+    pub second: Vec<(u16, i32)>,
+    pub more: Vec<Vec<(u16, i32)>>,
+}
+
+fn write_stat_record(w: &mut Writer, stats: &[(u16, i32)]) {
+    w.varuint(stats.len() as u32);
+    for &(k, v) in stats {
+        w.u16(k).varint(v);
+    }
+}
+
+fn read_stat_record(r: &mut Reader<'_>) -> Result<Vec<(u16, i32)>, DecodeError> {
+    let n = r.varuint()? as usize;
+    let mut out = Vec::with_capacity(n.min(256));
+    for _ in 0..n {
+        out.push((r.u16()?, r.varint()?));
+    }
+    Ok(out)
 }
 
 impl Message for AreaInfo {
     const NAME: &'static str = "AreaInfo";
     const DIRECTION: Direction = Direction::Server;
     fn encode(&self, w: &mut Writer) {
-        assert_eq!(
-            self.flags, [0; 3],
-            "optional AreaInfo blocks are not implemented"
+        assert!(
+            self.flags[0] & !0x80 & 0x08 == 0 && self.flags[1] == 0,
+            "optional AreaInfo blocks other than the stat records are not implemented"
         );
+        let mut flags = self.flags;
+        if self.stats.is_some() {
+            flags[0] |= 0x80;
+        } else {
+            flags[0] &= !0x80;
+        }
         w.u8(self.unk_10)
             .u32(self.instance_id)
             .u16(self.area_hash)
             .wstring(&self.league)
             .u32(self.seed)
             .bytes(&self.bytes_a)
-            .bytes(&self.flags)
+            .bytes(&flags)
             .bytes(&self.bytes_b)
             .u32(self.unk_24);
         w.u16(self.list_70.len() as u16);
@@ -110,6 +147,14 @@ impl Message for AreaInfo {
         // Vectors, all empty: u16-count u8s (+0x88), u8-count u8s (+0x58), u16-count u16s
         // (+0xe8), u8-count raw 8-byte items (+0x100), u16-count u16s (+0x118).
         w.u16(0).u8(0).u16(0).u8(0).u16(0);
+        if let Some(st) = &self.stats {
+            write_stat_record(w, &st.first);
+            write_stat_record(w, &st.second);
+            w.u8(st.more.len() as u8);
+            for rec in &st.more {
+                write_stat_record(w, rec);
+            }
+        }
     }
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let m = Self {
@@ -123,14 +168,19 @@ impl Message for AreaInfo {
             bytes_b: r.array()?,
             unk_24: r.u32()?,
             list_70: Vec::new(),
+            stats: None,
         };
-        if m.flags != [0; 3] {
+        // Blocks without a decoder here: flags1 bits 2 (`0x14212a8f0`) and 3 (`0x14212aa00`).
+        if m.flags[1] & 0x0c != 0 {
             return Err(DecodeError::Invalid {
                 offset: r.position(),
                 what: "AreaInfo optional blocks",
             });
         }
         let mut m = m;
+        if m.flags[0] & 8 != 0 {
+            r.u16()?;
+        }
         let n = r.u16()? as usize;
         for _ in 0..n {
             m.list_70.push(r.u32()?);
@@ -145,6 +195,23 @@ impl Message for AreaInfo {
         r.bytes(n * 8)?;
         let n = r.u16()? as usize;
         r.bytes(n * 2)?;
+        // flags1 bits 0 and 1: u8-count byte lists (+0xa0, +0xb8).
+        for bit in [1u8, 2] {
+            if m.flags[1] & bit != 0 {
+                let n = r.u8()? as usize;
+                r.bytes(n)?;
+            }
+        }
+        if m.flags[0] & 0x80 != 0 {
+            let first = read_stat_record(r)?;
+            let second = read_stat_record(r)?;
+            let n = r.u8()? as usize;
+            let mut more = Vec::new();
+            for _ in 0..n {
+                more.push(read_stat_record(r)?);
+            }
+            m.stats = Some(AreaStats { first, second, more });
+        }
         Ok(m)
     }
 }
