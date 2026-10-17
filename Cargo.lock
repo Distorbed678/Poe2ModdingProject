@@ -3154,6 +3154,7 @@ dependencies = [
  "clap",
  "poe-config",
  "poe-data",
+ "poe-world",
 ]
 
 [[package]]

@@ -58,6 +58,9 @@ enum Cmd {
     },
     /// Undo deploy-client (restores the original gateway list, removes installed files).
     RevertClient,
+    /// Only rewrite the DLL's name tables in `GameFiles/poe-hook-data/` (stats, action types,
+    /// areas); leaves the gateway and installed DLLs as they are.
+    DllData,
     /// Launch the client through Proton with a dedicated prefix (Steam must be running).
     RunClient {
         /// Proton installation to use (folder name under steamapps/common).
@@ -78,6 +81,7 @@ fn main() -> Result<()> {
         }
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
+        Cmd::DllData => export_dll_data(&config),
         Cmd::RunClient { proton } => run_client(&root, &config, &proton),
     }
 }
@@ -213,8 +217,38 @@ fn export_dll_data(config: &Config) -> Result<()> {
         }
     }
     std::fs::write(dir.join("action_types.tsv"), out)?;
+    // Area picker of the Instances tab: every WorldAreas row with its topologies (graph file
+    // and allowed orientations: bit per orientation, 0xff = all).
+    let areas = data.table("WorldAreas")?;
+    let mut out = String::from("# id\tname\tact\tlevel\tkind\ttopologies (graph:orientation mask, ...)\n");
+    let mut n_areas = 0;
+    for row in areas.rows() {
+        let id = row.str("Id")?;
+        if id.is_empty() {
+            continue;
+        }
+        let kind = if row.bool("IsTown")? {
+            "town"
+        } else if row.bool("IsHideout")? {
+            "hideout"
+        } else if id.starts_with("Map") {
+            "map"
+        } else {
+            "area"
+        };
+        let topologies = poe_world::area::topology_entries(&data, &id, 1)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(graph, mask)| format!("{}:{mask:#04x}", graph.rsplit('/').next().unwrap_or(&graph)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let name = row.str("Name")?.replace(['\t', '\n'], " ");
+        out.push_str(&format!("{id}\t{name}\t{}\t{}\t{kind}\t{topologies}\n", row.int("Act")?, row.int("AreaLevel")?));
+        n_areas += 1;
+    }
+    std::fs::write(dir.join("areas.tsv"), out)?;
     println!(
-        "dll data -> {} ({} stats, {} action types)",
+        "dll data -> {} ({} stats, {} action types, {n_areas} areas)",
         dir.display(),
         stats.len(),
         actions.len()
