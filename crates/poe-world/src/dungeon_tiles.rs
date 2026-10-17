@@ -418,7 +418,7 @@ impl TilePass<'_> {
                 let e = &mut borders[i].1;
                 let mut merged = e.merged;
                 let mut out = merge(map, self.ecf, &key, &e.key, height, e.height, flags, e.seen, &mut merged)?;
-                let m = *out.heights.iter().min().unwrap() as i8;
+                let m = out.heights.iter().map(|&v| v as i8).min().unwrap_or(0);
                 for v in &mut out.heights {
                     *v = (*v as i8 - m) as u8;
                 }
