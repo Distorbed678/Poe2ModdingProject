@@ -46,6 +46,8 @@ Unknown01ac = 0x01ac
 
 [server]
 EnableEncryption = 0x0011
+# A chat line (players, the server): sender (channel prefix + name), text, item links.
+ChatMessage = 0x0018
 PingReply = 0x001d
 ChatJoined = 0x014d
 AreaInfo = 0x001e
