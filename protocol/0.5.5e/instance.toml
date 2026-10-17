@@ -23,8 +23,9 @@ ExitRequest = 0x0173
 LeaveGame = 0x001b
 # Statistics sent when leaving an instance: u8, u16 length, bytes.
 ExitReport = 0x0355
+# A typed chat line: u8, wstring text, u8.
+ChatSend = 0x0016
 # Not decoded yet (sizes from single-message batches, 2026-10-14).
-Unknown0016 = 0x0016
 Unknown00fe = 0x00fe
 Unknown0200 = 0x0200
 # Pause/resume request (escape menu in a solo game): u8, u8 paused.

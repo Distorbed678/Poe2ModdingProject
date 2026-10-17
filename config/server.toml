@@ -14,6 +14,9 @@ protocol_dir = "protocol/0.5.5e"
 bind = "0.0.0.0:20481"
 # Host written into gateway_list.txt by `cargo xtask deploy-client`.
 public_host = "127.0.0.1"
+# Official servers send 0x0017 0x0014 after InstanceDetails, which makes the client close its
+# login connection. Our in-game transfers go through that connection, so keep this off.
+close_after_handoff = false
 
 [instance]
 bind = "0.0.0.0:6112"

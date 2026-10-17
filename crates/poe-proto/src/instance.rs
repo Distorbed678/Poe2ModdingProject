@@ -701,6 +701,27 @@ impl Message for FrameReport {
     }
 }
 
+/// C→S `0x0016` ChatSend: a line typed in the chat box, as typed (channel prefixes such as
+/// `#`, `$`, `@name` included; the client handles its own `/` commands): `u8` (1), wstring
+/// text, `u8` (0).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChatSend {
+    pub unk_0: u8,
+    pub text: String,
+    pub unk_1: u8,
+}
+
+impl Message for ChatSend {
+    const NAME: &'static str = "ChatSend";
+    const DIRECTION: Direction = Direction::Client;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_0).wstring(&self.text).u8(self.unk_1);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        Ok(Self { unk_0: r.u8()?, text: r.wstring()?, unk_1: r.u8()? })
+    }
+}
+
 /// C→S request to join a chat channel, sent for global and trade chat after entering an
 /// area: `u8, u16 channel (0xffff = any), u8 kind (0 global, 1 trade), u8, u8`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

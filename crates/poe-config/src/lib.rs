@@ -229,6 +229,10 @@ pub struct GameConfig {
 pub struct LoginConfig {
     pub bind: SocketAddr,
     pub public_host: String,
+    /// Send `0x0017 0x0014` after InstanceDetails as official servers do: the client then closes
+    /// its login connection, so in-game transfers (which go through it) stop working.
+    #[serde(default)]
+    pub close_after_handoff: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

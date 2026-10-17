@@ -325,7 +325,6 @@ impl InstanceServer {
         mut closed: Option<tokio::sync::watch::Receiver<bool>>,
         registration: live::Registration,
     ) -> anyhow::Result<()> {
-        let ticket = ctx.ticket;
         let client_port = ctx.port;
         let live::Registration { mut kicked, chat: mut chat_in } = registration;
         // Simulation frames: each tick marker closes a frame of `tick_ms` (InitialState).
@@ -371,7 +370,7 @@ impl InstanceServer {
                     while rest.len() >= 2 {
                         let opcode = u16::from_be_bytes([rest[0], rest[1]]);
                         let mut r = poe_net::Reader::new(&rest[2..]);
-                        match self.handle_client_message(conn, hnc, player, ticket.account_id, client_port, opcode, &mut r).await? {
+                        match self.handle_client_message(conn, hnc, player, ctx, opcode, &mut r).await? {
                             Handled::Continue => rest = &rest[2 + r.position()..],
                             Handled::Unknown => {
                                 info!(len = rest.len(), "received\n{}", hexdump(rest));
@@ -403,6 +402,7 @@ impl InstanceServer {
                         );
                     }
                     let mut replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
+                    let mut leave = false;
                     let mut extra = Vec::new();
                     if self.config.instance.debug_link {
                         // Overlay commands: the same registry as chat commands.
@@ -414,6 +414,7 @@ impl InstanceServer {
                             let out = self.run_command(ctx, player, &command);
                             replies.extend(out.replies);
                             extra.extend(out.raw);
+                            leave |= out.leave;
                             let status = if out.ok { "ok" } else { "error" };
                             self.reports.send_debug(
                                 client_port,
@@ -436,6 +437,10 @@ impl InstanceServer {
                     }
                     out.extend_from_slice(&tick);
                     conn.send(&out).await?;
+                    if leave {
+                        info!("handing the client to another instance: ending this session");
+                        return Ok(());
+                    }
                     let took = frame.elapsed();
                     if took.as_millis() as u64 > self.config.instance.tick_ms / 2 {
                         warn!(?took, "slow simulation frame");
@@ -783,11 +788,12 @@ impl InstanceServer {
         conn: &mut Connection,
         hnc: &mut poe_net::Salsa20Stream,
         player: &mut player::Player,
-        account_id: u32,
-        port: u16,
+        ctx: &exec::SessionCtx<'_>,
         opcode: u16,
         r: &mut poe_net::Reader<'_>,
     ) -> anyhow::Result<Handled> {
+        let account_id = ctx.ticket.account_id;
+        let port = ctx.port;
         let table = &self.protocol.instance;
         let Some(name) = table.name(poe_proto::Direction::Client, opcode) else {
             return Ok(Handled::Unknown);
@@ -906,7 +912,38 @@ impl InstanceServer {
                 };
                 conn.send(&table.encode(&reply)?).await?;
             }
-            // Chat: every request joins channel 1 of the requested kind (no chat server yet).
+            // A typed chat line: a server command, or a line for its channel.
+            poe_proto::instance::ChatSend::NAME => {
+                let req = poe_proto::instance::ChatSend::decode(r)?;
+                let name = &ctx.ticket.character.name;
+                match chat::route(&req.text, &self.config.commands.prefix) {
+                    chat::Route::Command(line) => {
+                        let out = self.run_command(ctx, player, &line);
+                        for reply in &out.replies {
+                            conn.send(&self.encode_reply(port, reply)?).await?;
+                        }
+                        if !out.raw.is_empty() {
+                            conn.send(&out.raw).await?;
+                        }
+                        let leave = out.leave;
+                        let text = if out.ok { out.text } else { format!("Error: {}", out.text) };
+                        let line = live::ChatOut { sender: exec::SERVER_NAME.into(), text };
+                        conn.send(&table.encode(&chat_line(&line))?).await?;
+                        if leave {
+                            info!("handing the client to another instance: ending this session");
+                            return Ok(Handled::Exit);
+                        }
+                    }
+                    route => {
+                        info!(from = %name, text = %req.text, "chat");
+                        if let Some(err) = chat::deliver(&self.live, name, ctx.instance, route) {
+                            let line = live::ChatOut { sender: exec::SERVER_NAME.into(), text: err };
+                            conn.send(&table.encode(&chat_line(&line))?).await?;
+                        }
+                    }
+                }
+            }
+            // Chat channels: the requested number (or `[chat] default_channel` for "any").
             ChatJoinRequest::NAME => {
                 let req = ChatJoinRequest::decode(r)?;
                 let channel = if req.channel == 0xffff {
