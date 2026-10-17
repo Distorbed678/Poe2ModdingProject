@@ -34,7 +34,8 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
 - The backend's `framebuffer_srgb` option is set for the game's `B8G8R8A8_SRGB` swapchain, so colors are right.
 - Release builds abort on panic; the core installs a panic hook that logs the message and backtrace first.
 - `scale` multiplies the font size (DejaVu Sans Mono 16 px, embedded; license in `poe-hook-core/assets/`). Window layout persists in `logs/poe-hook/imgui.ini`.
-- Tabs:
+- Layout (2026-10-17): one window with a sidebar of groups and pages (HOME: Status, Log, Game log; SERVER: Instances, Commands, Sync state, Desync; NETWORK: Packets, Protocol, Coverage, Notes, Timing; GAME: Player, Stats, Actions, Entities, Watches, Minimap; RE TOOLS: Scanner, Hooks; SETTINGS: Features), a page search box, and the last page remembered (`logs/poe-hook/overlay_page.txt`). The SERVER group is hidden while the read-only latch is on. **Ctrl+P** opens a command palette: type to jump to a page, or type a server command line (`transfer G1_6 random natural natural`) and press Enter to run it; a command that needs arguments opens its form on the Commands page.
+- Pages:
   - **Status**: mode, latch, session folder, connections, Vulkan; Reload core / Snapshot / Hide buttons.
   - **Log**: the shared log ring (level and text filters, copy).
   - **Packets**: captured messages (filters, decoded view, hex, copy).
@@ -47,7 +48,7 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
   - **Entities**: entities created in the area (initial-state reader), type path from the object-type lookup just before, live grid position (Positioned found by its reader `0x141dd8820`). After a reload the player is adopted from its frame tick (type unknown).
   - **Server** (our server only): the instance server's simulation state for this session (debug link, refreshed every second tick: apply frame, synced, server/predicted position and velocity, last report, WASD, held click, last turn, turn modes, facing, roll, current action, pause) and dev commands: teleport (cell, or "Here"), `turn_cell`, `turn_timing`, `face_cursor`.
   - **Commands** and **Instances** (our server only): the server's command registry as forms, and its instances with join/close and a new-instance form (area picker over every area, seed, topology, orientation). See [server-admin.md](server-admin.md).
-  - Our-server-only tabs (Server, Desync, Commands, Instances) are hidden while the read-only latch is on.
+  - Our-server-only pages (the SERVER group) are hidden while the read-only latch is on.
   - **Desync** (our server only): the server's predicted position and the last report against the client's own position (ImPlot), with a count of samples over 1.5 cells and the worst; desyncs over 6 cells are logged. The prediction is one frame ahead, so ~1.2 cells while walking is normal.
   - **Minimap**: the client's four cell grids around the player (terrain object found by vtable in the game world; tiles `+0x18`/`+0x20`, 23 cells per tile, 4 bits per cell at `+0xd0`, `+0xe8`, `+0x100`, `+0x118`), shaded by value, with the player and its facing, and the server's position (blue ring, our server). "Export area" writes `terrain_layout_*.tsv` / `terrain_grid_*.bin` on demand (also on official servers, where the automatic export is off).
   - **Stats**: the player's stats by name (`poe-hook-data/stats.tsv`), all stat sets, values that changed in the last 3 s highlighted. Stats component (found by name) `+0x1c8` = set 0 (the entity's own stats), other sets in the 16-byte list `+0x1e8..+0x1f0` (container `+0xd8` = set id); a container is a sorted `(i32 key, i32 value)` array at `+0xf8..+0x100` (setter `0x1426ac920`, StatsUpdate handler `0x142181f20`).
