@@ -289,7 +289,7 @@ impl TilePass<'_> {
         }
         self.borders(borders, map, &mut cells, &mut doors, rng)?;
         if doors.on {
-            self.check_doors(&doors, map)?;
+            self.check_doors(&doors, map, rng)?;
         }
         // `0x141f9e780`: the rooms' ground overrides.
         let step = (self.unit - self.overlap) as i32;
@@ -496,22 +496,92 @@ impl TilePass<'_> {
         Some((def.key.oriented(piece.orientation), def.tdt.feature.as_deref().is_some_and(|f| f.eq_ignore_ascii_case("door"))))
     }
 
-    /// `0x14209d180` / `0x14209dc90` are not ported: fail when a door tile could go on a door
-    /// spot (`0x141d09700`: a `door` tile with the spot tile's edges, grounds and heights).
-    fn check_doors(&self, doors: &Doors, map: &TileMap) -> Result<(), GenError> {
-        let fits = |k: &TileKey| {
-            self.door_tiles().any(|t| (0..8u8).filter(|o| t.orientations >> o & 1 != 0).any(|o| {
-                let d = t.key.oriented(o);
-                d.edges == k.edges && d.grounds == k.grounds && d.heights == k.heights
-            }))
-        };
+    /// The door sizes for a spot's edges (`0x141d09700`; the `+0x68` sets `0x141d09ab0`
+    /// builds): every `door` tile orientation with those edges, its oriented size, sorted.
+    fn door_sizes(&self, edges: &[Option<String>; 4]) -> Vec<(u8, u8)> {
+        let mut out: Vec<(u8, u8)> = Vec::new();
+        let doors = self.master.tiles.tiles.iter().filter(|t| t.tdt.feature.as_deref().is_some_and(|f| f.eq_ignore_ascii_case("door")));
+        for t in doors {
+            for o in (0..8u8).filter(|o| t.orientations >> o & 1 != 0) {
+                if &t.key.oriented(o).edges == edges {
+                    let s = if o & 1 == 0 { t.key.size } else { (t.key.size.1, t.key.size.0) };
+                    if let Err(i) = out.binary_search(&s) {
+                        out.insert(i, s);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// `0x14209d180`: a door tile on every door group without one, and `0x14209dc90` (not
+    /// ported) for the 3×3 spots.
+    fn check_doors(&self, doors: &Doors, map: &mut TileMap, rng: &mut TerrainRng) -> Result<(), GenError> {
         for g in &doors.groups {
             if g.iter().any(|&p| self.key_at(map, p).is_some_and(|k| k.1)) {
                 continue;
             }
-            if g.iter().filter_map(|&p| self.key_at(map, p)).any(|k| fits(&k.0)) {
-                return Err(unsupported(format!("dungeon: door group at {:?} (0x14209d180 not ported)", g[0])));
+            // Vertical when the first two cells share x, or every cell is on a left and right
+            // border; the anchor is the first cell with the lowest coordinate along the group.
+            let vertical = (g.len() >= 2 && g[0].0 == g[1].0) || g.iter().all(|p| doors.markers.get(p).is_some_and(|&m| m & 0x18 == 0x18));
+            let along = |p: (i32, i32)| if vertical { p.1 } else { p.0 };
+            let mut anchor = 0;
+            for i in 0..g.len() {
+                if along(g[i]) < along(g[anchor]) {
+                    anchor = i;
+                }
             }
+            let (w, h) = if vertical { (1, g.len() as u32) } else { (g.len() as u32, 1) };
+            let Some((key, _)) = self.key_at(map, g[anchor]) else { continue };
+            let sizes = self.door_sizes(&key.edges);
+            if sizes.is_empty() {
+                continue;
+            }
+            let mut fit: Vec<(u8, u8)> = sizes.into_iter().filter(|s| s.0 as u32 <= w && s.1 as u32 <= h).collect();
+            if fit.is_empty() {
+                return Err(unsupported(format!("dungeon: no door fits {w}x{h} at {:?}", g[anchor])));
+            }
+            rng.below(fit.len() as u32);
+            let n = fit.len();
+            for i in 0..n {
+                let k = rng.uniform((n - i) as u32) as usize;
+                fit.swap(i, i + k);
+            }
+            let mut found = None;
+            for s in fit {
+                let mut k = key.clone();
+                k.size = s;
+                let v = [s.0 * 3, s.1 * 3, s.0 * 3, s.1 * 3];
+                for i in 0..4 {
+                    if k.exits[i] == 3 {
+                        k.exits[i] = v[i];
+                    }
+                }
+                k.virtual_exits = v;
+                let list = self.master.tiles.candidates("door", &k);
+                if !list.is_empty() {
+                    found = Some((s, list));
+                    break;
+                }
+            }
+            let Some((s, list)) = found else {
+                return Err(unsupported(format!("dungeon: no matching door tile at {:?}", g[anchor])));
+            };
+            let span = if vertical { s.1 } else { s.0 } as u32;
+            let (unit, overlap) = (self.unit, self.overlap);
+            let centre = (span == 1 && unit & 1 != 0)
+                .then(|| g.iter().position(|&p| along(p).rem_euclid((unit - overlap) as i32) == (unit >> 1) as i32))
+                .flatten();
+            let off = match centre {
+                Some(i) => i as i32,
+                None => rng.below(g.len() as u32 - span + 1) as i32,
+            };
+            let pos = if vertical { (g[anchor].0, g[anchor].1 + off) } else { (g[anchor].0 + off, g[anchor].1) };
+            let total = list.iter().map(|c| c.weight).sum();
+            let c = pick(list, rng.below(total)).expect("non-empty list");
+            let def = &self.master.tiles.tiles[c.tile];
+            let height = map.index(pos.0, pos.1).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height);
+            map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
         }
         for &p in &doors.large {
             if self.key_at(map, p).is_some_and(|k| !k.1 && self.master.tiles.candidates("door", &k.0).iter().next().is_some()) {
