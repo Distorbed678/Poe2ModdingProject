@@ -7,8 +7,10 @@ dungeons) and [re/terrain.md](re/terrain.md) (`.tgr` graphs).
 ## Goal
 
 All act 1 areas generate server-side exactly as the client does (same tile hash for the same
-area and seed), so the server can later do collision, pathing and spawns. After that: area
-transfer through a dev command and a DLL overlay panel. Collision itself comes later.
+area and seed), so the server can later do collision, pathing and spawns. Area transfer (dev
+command and overlay) is done ([server-admin.md](server-admin.md)); collision comes later.
+Server-side generation is off by default (`[terrain] generate`); `!terrain` runs it for the
+current instance.
 
 The client builds its own terrain from the area and seed the server sends, so it loads any area
 regardless of our generator. The server's copy is what has to match.
@@ -29,7 +31,8 @@ regardless of our generator. The server's copy is what has to match.
 
 G1_6 and G1_8 match only with forced topologies (e.g. G1_8 `1:3` / `11:3` / `4:1`, G1_6 `2:7` /
 `2:7` / `1:6`). The client picks its topology from world-map pins, which aren't ported. The
-server should force it by sending `map_force_topology` / `map_force_orientation`.
+server can force it (`map_force_topology` / `map_force_orientation`, done for instances
+created with a topology/orientation); the natural choice is still not reproduced.
 
 ## Where I stopped: G1_12 seed 1001
 
@@ -58,9 +61,9 @@ Command: `cargo run --release -p poe-world --example area_trace -- G1_12 1001 da
 6. Doodads (the doodad hash), not ported anywhere yet.
 7. Generator features no tested area uses yet: `0x14209dc90` (3×3 door spots), FileGroups
    subgraphs, nested subgraphs, request-driven extra rooms and shrines.
-8. Server: send the forced topology and orientation in AreaInfo.
-9. Area transfer: dev command plus DLL overlay panel.
-10. Later: collision and walkability.
+8. Done 2026-10-17: forced topology/orientation in AreaInfo, area transfer (command and
+   Instances page).
+9. Later: collision and walkability.
 
 ## Tools
 

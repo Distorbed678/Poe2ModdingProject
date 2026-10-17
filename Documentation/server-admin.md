@@ -8,7 +8,7 @@ places:
 
 - **Chat**: `!name args` (prefix `[commands] prefix`; `/` stays with the client's own
   commands). Replies come back as chat lines from `<Server>`.
-- **Overlay**: the DLL's Commands tab builds a form per command from the registry, which the
+- **Overlay**: the DLL's Commands page builds a form per command from the registry, which the
   server sends over the debug link (`cmds` datagrams; the overlay asks with `registry`).
   Results arrive as `ack` lines. Commands added to the registry show up in the overlay by
   themselves.
@@ -82,9 +82,9 @@ their prefix: `#` global and `$` trade to everyone on the same channel number (f
 client's join requests, `/global N`), none = local (same instance), `@name text` whispers.
 Party (`%`) and guild (`&`) answer "not supported yet". Muted players get "You are muted."
 
-## Overlay tabs (our server only)
+## Overlay pages (our server only, SERVER group)
 
-Hidden while the read-only latch is on (official servers), like the Server and Desync tabs.
+Hidden while the read-only latch is on (official servers), like the Sync state and Desync pages.
 
 - **Commands**: every registry command as a form, grouped; results below.
 - **Instances**: the server's instances (id, area, seed, layout, players, time until an empty

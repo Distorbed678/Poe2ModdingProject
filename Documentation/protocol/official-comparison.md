@@ -20,7 +20,7 @@ optional blocks and `AddInventory` items.
 | Cursor facing | client `0x0062` AimTarget (mode 2 = cell), server echoes `0x01dc` SetAimTarget one frame later | DLL cursor report + SetOrientation lock | official. The client only sends cells in WASD input mode and while the Player component is in combat stance, which official servers set with a `0x02f9` ComponentDelta on the first Move; ours does it on the first movement or skill. In click-to-move mode the client sends no AimTarget, so the DLL path stays for it |
 | `0x0062` size | 4, 8 or 12 bytes by mode | fixed 4 in `client_body_sizes` (would misread the batch) | decoded by mode |
 | Login `0x003c` | four zero u32 before the key-exchange reply | not sent | sent |
-| Login `0x0017` | u16 `0x0014` right after `InstanceDetails` | not sent | sent |
+| Login `0x0017` | u16 `0x0014` right after `InstanceDetails` | not sent | sent 2026-10-15, removed 2026-10-17: it makes the client `shutdown()` its login connection, which our transfers need (`[login] close_after_handoff`) |
 | `AddObject` header (player) | (0xffffffff, 0, 0) | (0, 0xff, 0) | official; verified with and without the first-visit intro (the old (0, 0, 0) crash does not come back) |
 | AreaInfo league (+0x38) | the character's league | empty | the character's league |
 | InitialState | flags 7, four stash tabs "1".."4", character flags `68 40 00`, player entry `0x40`/`7` | flags 0, no tabs, `00 40 00`, `0`/`0` | official (`[accounts] stash_tabs`) |

@@ -130,8 +130,8 @@ pub struct PlayerConfig {
     pub start_area: Option<String>,
 }
 
-/// Chat channels. There is no chat server yet: join requests are answered so the client does
-/// not report a timeout.
+/// Chat channels: join requests get the requested channel number (this one for "any"); the
+/// instance server routes chat lines by channel (`instance-server::chat`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatConfig {
     /// Channel number given when the client asks for any channel.
@@ -276,8 +276,8 @@ pub struct InstanceConfig {
     #[serde(default = "default_cursor_to_grid")]
     pub cursor_to_grid: [f32; 6],
     /// Debug link for the client DLL's overlay (dev): send each session's simulation state to
-    /// the DLL (UDP, where its position reports come from) and accept its dev commands
-    /// (teleport, movement switches). Loopback only.
+    /// the DLL (UDP, where its position reports come from), the command registry and instance
+    /// list, and accept server commands from its overlay (`commands.rs`). Loopback only.
     #[serde(default = "default_true")]
     pub debug_link: bool,
     /// Terrain seed sweep (research, M5): a file of `<WorldAreas.Id> <seed> [count]` lines.

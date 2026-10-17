@@ -151,3 +151,16 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x140150cb0` | get Render component by name | entity `+8` → type, `+0x28` → component lookup: sorted `{char* name, i32 index}` (16 bytes) from `+0x28` to `+0x30`; the index selects `entity+0x10[index]` |
 | `0x142181f20` | Stats component message handler | `0x1d3` StatsUpdate: set 0 → container at component `+0x1c8`, other sets in the list `+0x1e8..+0x1f0` (container `+0xd8` = set id); `0x1d4` removes a set |
 | `0x1426ac920` | stat container set `(container, key, value)` | sorted `(i32 key, i32 value)` array at `+0xf8..+0x100` |
+
+## Login hand-off, chat, AreaInfo stats, terrain passes (2026-10-16/17)
+| Address | Function | Notes |
+|---|---|---|
+| `0x1420e8130` | `ClientLoginSession_ProcessPacket` (named in Ghidra) | login message switch (opcode − 2); case `0x14` InstanceDetails (+0x84 byte kept), case `0x17` → `0x1420e7140` |
+| `0x1420e7140` / `0x1420e71d0` | login disconnect with reason | `0x1420e71d0` calls `shutdown()` on the login socket: login `0x0017 <u16>` makes the client close its login connection |
+| `0x142150ad0` / `0x142150a60` | S→C `0x18` ChatMessage read / write | `u8`, then the chat struct (`0x1421a73d0` read, `0x1421a71d0` write): 3 wstrings (`0x141cfb1b0`), flags, class, item links |
+| `0x14211d1c0` | AreaInfo reader | optional blocks by flags0/flags1 bits; flags0 bit 7: stat records `0x1423baa70` (varuint count, `u16` key, varint value via `0x141cfbfe0`) |
+| `0x1420a1f70` | dungeon exit wiggle (after the fill) | sorted position set at tile pass +0xb0, filled by pass A (`0x142098b18`) and the fill listener `0x14209a2c0`; hashed exits `0x1421969e0` |
+| `0x14209f050` | dungeon border tile placement | fallbacks: middle exits `0x14209fa10`, height flattening `0x14209fb00`, neighbour repair `0x14209ec70` |
+| `0x14209d180` | dungeon door groups | door sizes per edge set `0x141d09700` (sets built by `0x141d09ab0`) |
+| `0x141ff7a10` / `0x141ff05f0` | per-graph outer fill + buffer / subgraph generation | subgraphs run the whole pipeline in a window (`0x141f9e130`) of the main map |
+| `0x141fd5ff0` / `0x141fd71c0` | outer fill with height repair / one levelling round | see [dungeon.md](dungeon.md) |

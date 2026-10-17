@@ -10,7 +10,7 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 - Documentation goes in `Documentation/` (start at `Documentation/index.md`). Update it in the same commit as the code it describes. RE findings and addresses go in `Documentation/re/`.
 - Commit and push (`origin main`, private repo `Distorbed678/Poe2ModdingProject`) after each working step.
 - Avoid hardcoding:
-  - Opcodes go in `protocol/<version>/opcodes.toml`.
+  - Opcodes go in `protocol/<version>/{login,instance,hnc}.toml`.
   - Ports, leagues and start areas go in `config/server.toml`.
   - Classes, areas and items come from game data (`poe-data`).
   - Subsystems sit behind traits so implementations can be swapped.
@@ -30,9 +30,10 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
   - `poe-proto`: packet definitions, with opcodes from `protocol/`.
   - `poe-data`: game data from Bundles2 plus dat-schema.
   - `poe-store`: persistence (SQLite).
-  - `poe-world`: areas and terrain.
-  - `poe-game`: simulation (ECS).
-  - `poe-mod-api`: mod hooks.
+  - `poe-cluster`: tickets, login sessions (logout, transfers), instance directory.
+  - `poe-world`: terrain generation (port of the client's generator).
+  - `poe-game`: simulation (movement, stats).
+  - Planned: `poe-mod-api` (mod hooks).
 - `servers/`: `login-server`, `instance-server`, and `poe-server` (a dev launcher that runs both).
 - `client/`: the client DLLs, built for `x86_64-pc-windows-msvc` with cargo-xwin; **excluded from the workspace** (own Cargo workspace). `poe-hook` = `version.dll` loader (permanent hooks), `poe-hook-core` = hot-reloadable debug core and overlay, `poe-hook-shared` = config and ABI.
 - `tools/xtask`: dev automation (`cargo xtask <cmd>`).
@@ -44,6 +45,9 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 - `cargo xtask build-dll` builds the client DLLs; `cargo xtask deploy-core` installs only the core, which a running client hot-reloads.
 - `cargo xtask deploy-client` / `cargo xtask revert-client` install and remove the gateway entry, DLL and config in `GameFiles/`.
 - `cargo xtask run-client` launches `GameFiles/PathOfExileSteam.exe` through Proton with its own prefix (`Tools/proton-prefix`). Steam must be running.
+- `cargo xtask dll-data` rewrites only the DLL's name tables in `GameFiles/poe-hook-data/` (stats, action types, areas).
+- Unattended in-game tests (Steam running): start the server writing to `data/server-run.log`, then `tools/test-run.sh <name> [seconds]` logs in and enters the game; `tools/re/send_dev.py auto <command>` runs a server command; `echo 0x2d > GameFiles/poe-hook.keys` presses Insert; `tools/shot.sh <name>` screenshots. See Documentation/setup.md.
+- Server commands and admins: Documentation/server-admin.md (`[admin] accounts`, chat prefix `!`).
 - `Tools/poe_data_tools/poe_data_tools -p 2 --steam GameFiles list '<glob>'` lists and extracts game files.
 
 ## Reference data from live play
