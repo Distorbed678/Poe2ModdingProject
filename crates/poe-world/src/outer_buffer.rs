@@ -512,6 +512,42 @@ pub fn outer_buffer(
     Ok(map)
 }
 
+/// `0x141fd5ff0` + `0x141fd8360` for a subgraph: `map` is its reserved window (the region at
+/// `rect` inside its margins); corners set in the region count as height-set, then the outer
+/// fill and the margin strips.
+#[allow(clippy::too_many_arguments)]
+pub fn outer_buffer_window(
+    map: &mut TileMap,
+    rect: (i32, i32, i32, i32),
+    outer_ground: Option<&str>,
+    repair: bool,
+    master: &mut Master,
+    files: &dyn Files,
+    edges: &HashMap<String, EdgeType>,
+    rng: &mut TerrainRng,
+) -> Result<(), GenError> {
+    for y in rect.1..=rect.3 {
+        for x in rect.0..=rect.2 {
+            if let Some(k) = map.point_index(x, y) {
+                if map.lattice[k].flags & 1 != 0 {
+                    map.lattice[k].flags |= 2;
+                }
+            }
+        }
+    }
+    if let Some(g) = outer_ground {
+        fill_black(map, rect, g, repair, master, files)?;
+    }
+    let (w, h) = (map.width as i32, map.height as i32);
+    let mut pass = Pass { map, master, files, edges, w, h };
+    pass.extend_lattice(rect);
+    pass.below_strip(rect, rng)?;
+    pass.above_strip(rect, rng)?;
+    pass.left_strip(rect, rng)?;
+    pass.right_strip(rect, rng)?;
+    Ok(())
+}
+
 /// `0x141fd5ff0` on one graph's rectangle of an already embedded map (a subgraph's window):
 /// set corners there count as height-set, then the outer ground's fill.
 pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
@@ -612,6 +648,9 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
             scan(map, c, &mut waiting, &mut ready);
         }
         if waiting.len() == before && ready.is_empty() {
+            if std::env::var("POE_DBG").is_ok() {
+                eprintln!("DBG stuck rect {:?} waiting {:?}", rect, waiting.iter().map(|c| (c.0 + x0, c.1 + y0)).collect::<Vec<_>>());
+            }
             return Err(GenError::Unsupported("could not fix heights in dungeon".into()));
         }
     }

@@ -422,7 +422,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut built = build_dungeon(files, graph, removed, rng, None)?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
-    let mut done: Vec<(Built, (i32, i32))> = Vec::new();
+    let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
     for (file, origin) in std::mem::take(&mut built.subgraphs) {
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
         if sub.dungeon_defaults.is_none() {
@@ -432,20 +432,33 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         turn(files, &mut sub, graph.region)?;
         random_offsets(&mut sub, rng);
         let (sub, removed) = prune(&sub, rng)?;
-        let inner = build_dungeon(files, &sub, &removed, rng, Some((&built.map, origin)))?;
+        // The region sits inside the subgraph master's `OuterBufferSize` margins.
+        let m = Margins::parse(&crate::text::decode_utf16(&files.read(&sub.master_file)?));
+        let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
+        let inner = build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?;
         if !inner.subgraphs.is_empty() {
             return Err(GenError::Unsupported(format!("subgraph {file}: nested subgraphs (not ported)")));
         }
-        built.map.paste(&inner.map, origin);
-        done.push((inner, origin));
+        built.map.paste(&inner.map, at);
+        done.push((inner, origin, m));
     }
-    // `0x141ff7a10`: the outer fill per graph, the last subgraph first (a subgraph's own outer
-    // buffer is empty: `OuterBufferSize 0`), then the main graph's below.
-    for (mut inner, origin) in done.into_iter().rev() {
-        if let Some(g) = inner.tsi.get("OuterGroundType").cloned() {
-            let rect = (origin.0, origin.1, origin.0 + inner.map.width as i32, origin.1 + inner.map.height as i32);
-            crate::outer_buffer::outer_fill(&mut built.map, rect, &g, true, &mut inner.master, files)?;
+    // `0x141ff7a10`: the outer fill and outer buffer per graph, the last subgraph first, then the
+    // main graph's below.
+    for (mut inner, origin, m) in done.into_iter().rev() {
+        let g = inner.tsi.get("OuterGroundType").cloned();
+        let (w, h) = (inner.map.width, inner.map.height);
+        if m.top + m.right + m.bottom + m.left == 0 {
+            if let Some(g) = g {
+                let rect = (origin.0, origin.1, origin.0 + w as i32, origin.1 + h as i32);
+                crate::outer_buffer::outer_fill(&mut built.map, rect, &g, true, &mut inner.master, files)?;
+            }
+            continue;
         }
+        let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
+        let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
+        let edges = inner.master.edge_type_table(files)?;
+        crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng)?;
+        built.map.paste(&window, origin);
     }
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
@@ -502,8 +515,10 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
             rooms.insert(r.path.clone(), crate::generate::load_room(files, &r.path)?);
         }
     }
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap };
-    let cells = pass.run(&grid, &rooms, &mut map, rng)?;
+    let edge_types = master.edge_type_table(files)?;
+    let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors") };
+    let (cells, moved) = pass.run(&grid, &rooms, &mut map, rng)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
         for p in &map.pieces {
@@ -512,7 +527,9 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         std::fs::write(path, out).ok();
     }
-    let fill_rooms = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
+    let (fill_rooms, wiggle) = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
+    let wiggle = [moved, wiggle].concat();
+    crate::dungeon_tiles::wiggle(&mut master, files, &mut map, wiggle, rng)?;
     // De-repetition over the rooms and fill rooms, then the outer buffer.
     let mut placements: Vec<RoomPlacement> = grid
         .rooms

@@ -184,6 +184,25 @@ impl TileMap {
         m
     }
 
+    /// A `width × height` copy of this map from `origin` on (cells, pieces moved, corners).
+    pub fn window(&self, origin: (i32, i32), width: u32, height: u32) -> TileMap {
+        let mut m = TileMap::new(width, height);
+        m.ground_flags = self.ground_flags.clone();
+        m.edge_flags = self.edge_flags.clone();
+        m.pieces = self.pieces.iter().map(|p| Piece { x: p.x - origin.0, y: p.y - origin.1, ..p.clone() }).collect();
+        for y in 0..height as i32 {
+            for x in 0..width as i32 {
+                if let (Some(i), Some(j)) = (self.index(x + origin.0, y + origin.1), m.index(x, y)) {
+                    m.cells[j] = self.cells[i].clone();
+                    m.grounds[j] = self.grounds[i].clone();
+                    m.piece_at[j] = self.piece_at[i];
+                }
+            }
+        }
+        m.copy_lattice(self, origin);
+        m
+    }
+
     /// The corners of `outer` from `origin` on (a subgraph's window, `0x141f9e130`).
     pub fn copy_lattice(&mut self, outer: &TileMap, origin: (i32, i32)) {
         for y in 0..=self.height as i32 {
@@ -312,6 +331,17 @@ impl TileMap {
 
     /// Whether every cell of a `w`×`h` rectangle is inside the map and empty (`0x141d0d880`).
     /// A cell outside the region that a tile already took (it overhangs into the outer buffer).
+    /// The cell at `(x, y)`, also outside the map where a tile overhangs it (last write wins).
+    pub(crate) fn cell_or_spill(&self, x: i32, y: i32) -> Option<&Cell> {
+        match self.index(x, y) {
+            Some(i) => self.cells[i].as_ref(),
+            None => self.spill.iter().rev().find_map(|s| match s {
+                Spill::Cell(sx, sy, _, c) if *sx == x && *sy == y => Some(c),
+                _ => None,
+            }),
+        }
+    }
+
     pub(crate) fn spilled(&self, x: i32, y: i32) -> bool {
         self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
     }

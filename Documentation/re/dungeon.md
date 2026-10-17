@@ -3,9 +3,9 @@
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
 with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
-(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_7 and G1_9 (seeds 1001–1003 each) and G1_8 1001/1002 (forced topologies 1:3, 11:3; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
-Not ported yet: height-change edge types (G1_11), named border tiles and the `0x14209f050`
-fallbacks (G1_6), 3×3 door spots (`0x14209dc90`; guarded), subgraph file groups and nested
+(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_6, G1_7, G1_8 and G1_9 (seeds 1001–1003 each; G1_6 and G1_8 with forced topologies, e.g. G1_8 1:3 / 11:3 / 4:1, G1_6 2:7 / 2:7 / 1:6; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
+Not ported yet: height-change edge types (G1_11), the height fallback of `0x14209f050`, 3×3
+door spots (`0x14209dc90`; guarded), subgraph file groups and nested
 subgraphs, injector and blank special rooms, and the request-driven extra rooms
 and shrines (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`).
 
@@ -161,8 +161,18 @@ buffer and de-repetition as for `.tgr`.
    sides only it covers take its edge, shared sides are combined by the `.ecf`
    (`0x1420a28c0`: edge pair + corner height difference → edge; no rule: a lone edge stays, two
    give none; exits kept when equal, else the middle). Heights are rebased to their minimum.
-3. Pass B (`0x14209fbc0`), x-major: ground-only keys are marked; sides seen by one room drop their
-   flag-0x10 grounds; then tile-set lookup, `below(total)`, place (`0x14209f050`).
+3. Pass B (`0x14209fbc0`), x-major: ground-only keys without names are marked. A partial overlap
+   with placed tiles is an error; over a placed tile its key is merged in for the sides no room
+   gave (0x1c↔0x1a, 0x16↔0x0e, else 0x1e), heights rebased; otherwise sides seen by one room drop
+   their flag-0x10 grounds. Named slots draw a name by its tiles' total weight (1 without tiles)
+   until one places (a 1×1 `door` becomes a door group cell). Then a uniform key is marked, else
+   `0x14209f050` with no name (seen |= 0x20, door bookkeeping). `0x14209f050`: lookup; without
+   tiles, sides with a non-virtual, non-centred edge whose exit is off the middle (size·3/2)
+   and that face another border entry (any side with `.tsi` `AllowInteriorOverlapFixes`) take
+   the middle exit one by one until tiles exist (`0x14209fa10`); after placing, `0x14209ec70`
+   gives the cell across each moved side the middle exit too: a border entry still to come in its
+   key, a placed tile with the same edge and side length by drawing it again. The height
+   fallback (`0x141d05560` / `0x14209fb00`) is not ported.
 4. Doors (only with `door` tiles): open exits mark their unit's middle cells on the border line
    (`0x142096ad0`); straight passages across a marked shared exit become door groups
    (`0x142097060`). `0x14209d180` (gated by master +0x38), per group without a `door` tile: the
@@ -175,10 +185,21 @@ buffer and de-repetition as for `.tgr`.
    a 1-wide door with an odd unit the cell whose coordinate mod (unit − overlap) is unit / 2, else
    `below(len − span + 1)`; `below(total)`, placed at the cell's height over the old tile.
    `0x14209dc90` (3×3 spots) is not ported.
+   `DisableDoors` (`.tsi`, master +0x167) skips the door placement.
 5. Room ground overrides (`0x141f9e780`), then the fill: the listed ground-only cells, stable
    sorted by (x, y), each filled with its ground and its slot height (`0x14209cf50` →
    `0x141f8f930`; `0x141f90950` uses a passed height unless it is `i32::MIN`, which the `.tgr`
    fill passes).
+   Exit wiggle (`0x1420a1f70`, after the fill): pass A records square unnamed slots whose edges
+   all have the slot's size and one has `.et` random wiggle (fourth number) ≥ 2, or ≥ 1 on the
+   room's border line (`0x142098b18`); the fill's listener (`0x14209a2c0`) records fill tiles
+   the same way (wiggle ≥ 1). The set is ordered by x·65536 + y; a discarded `below(n)` and a
+   shuffle; per position whose corner cell still holds such a tile, a discarded `below(4)` and a
+   shuffled side order; each side with a wiggle edge takes the hashed exit (`0x1421969e0`) when
+   it differs, if tiles exist for the key (grounds with `.gt` flag 0x10 left out) and for the
+   tile across (its opposite exit `size·3 − exit − 1`), else it is put back. Then the tile and
+   each accepted neighbour are drawn again (`below(total)`) and placed. Positions may lie one
+   cell outside the region (overhanging tiles).
 6. De-repetition and outer buffer as for `.tgr`. The outer buffer first fills the region's
    empty cells (grid cells without a room) with the `OuterGroundType`'s first fill tile
    (`0x141fd5ff0`). For grounds without `.gt` flag 1 it repairs heights: new tiles take the middle
@@ -239,9 +260,43 @@ buffer and de-repetition as for `.tgr`.
   `OuterGroundType`) and the outer buffer (`0x141fd8360`; empty for `OuterBufferSize 0`). A graph without edges has no corridor
   stage (no `below(128)` records, no type shuffle). G1_8's secret chamber
   (`_secretchamber.dgr`, `master_secretchamber.tsi`) is one typed node.
+- `.ecf` rules without a height number (`canopy.ecf`) apply to any corner height difference:
+  `0x1420a28c0` looks up (pair, difference, exact) first, then (pair, any).
+- Subgraph outer buffers: a subgraph's region sits inside its master's `OuterBufferSize`
+  margins in the reserved block (G1_12: 10 units × 6 + 1 = 61 tiles + 13 per side = 87 = 3 main
+  units of 29); `0x141ff7a10` runs the outer fill and the margin strips per subgraph on that
+  block (`outer_buffer_window`).
 - Typeless nodes (`0x1420afdd0` → `0x1420afa40`): the size list is the one of the first edge
   (node slots in order) whose type is not the default, else the default type's.
 - Fill tiles may overhang the region by one cell (`0x141f9e5f0`: x, y ≥ −1, far side ≤ size + 1),
   so 3×3 ground slots on the region's border fill from −1. The outer fill aligns a 3×3 tile one
   cell outside when the region's corner and size are 1 mod 3. Fill rooms floor their slot heights
   like pass A; de-repetition keeps the replaced tile's height.
+
+## Where the port stands (2026-10-16)
+
+Vectors (`area_vectors -- data/sweep-vectors.tsv all`): town 2/2, G1_1/2/3/6/7/8/9 3/3, G1_4 2/3,
+G1_5 0/3, G1_11 0/3, G1_12 0/1, G1_13–15 no traces. Topologies for G1_6/G1_8 are found by the
+forced search (the natural choice needs the world-map pins, not ported).
+
+In progress, G1_12 1001 (forced `2:7`, `CanopyE_S.dgr`, two `graph` nodes: `_CanopyE_S.dgr` with
+`canopy_master.tsi`, `Trees_Subscene.dgr` with `subscene_master.tsi`): all 2385 terrain draws
+match, but our map is 169×85 and the client's 174×87. G1_12's `master.tsi` has `RoomOverlap 0`
+(unit 29); the grid overlap (`Grid::overlap`, master +0x14b) seems to default to 1, so check
+where `dungeon::layout` reads it. Then compare the layout. The subgraph margin and window code
+(above) is new and only checked by "no regression" so far.
+
+Still to do, by area:
+- G1_4 1003: overlay placement after the fill (phase 2, `overlay.rs`).
+- G1_5: edge routing "could not tilise edge 14".
+- G1_11: height-change (cliff) edge types: chirality for `woodscliff_height.et` (virtual /
+  height-change door types, `0x141d047b0`).
+- G1_13–15: record client traces first.
+- Not ported anywhere: doodads (doodad hash), `0x14209dc90` (3×3 door spots), FileGroups
+  subgraphs, nested subgraphs, the request-driven extra rooms and shrines.
+- Then the server: send `map_force_topology` / `map_force_orientation`, area transfer (dev
+  command + DLL overlay panel), collision later.
+
+Debug switches: `POE_DBG` (rooms, stuck height repair), `POE_DBG_WIGGLE` (exit wiggle keys and
+placements), `POE_DBG_KEYS`, `POE_DBG_SLOTS`, `POE_DBG_GRID`, `POE_DBG_PATHS`, `POE_DUMP_DRAWS`,
+`POE_LAYOUT_DIFFS=n` (area_trace), `wiggle_check` example (client tiles the wiggle could move).

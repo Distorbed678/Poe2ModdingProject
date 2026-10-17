@@ -47,6 +47,9 @@ pub struct EdgeType {
     /// Fourth number (`+0x4d`): edge tiles take their exits from a coordinate hash
     /// (`0x1421969e0`) instead of the path's curve.
     pub hashed: bool,
+    /// The fourth number itself (`+0x4d`): pass A records a slot for the exit wiggle when it
+    /// is at least 2 (1 on a room's border line).
+    pub wiggle: u8,
     /// `can_end` (flag 0x10, fifth number): the edge may end at the map border or an
     /// edge-less side.
     pub can_end: bool,
@@ -98,6 +101,7 @@ impl EdgeType {
             size: nums.get(1).copied().unwrap_or(1) as u8,
             centred: nums.get(2).is_some_and(|&v| v != 0),
             hashed: nums.get(3).is_some_and(|&v| v != 0),
+            wiggle: nums.get(3).copied().unwrap_or(0) as u8,
             can_end,
             virtual_edge,
         }
