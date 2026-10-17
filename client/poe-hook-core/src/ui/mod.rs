@@ -69,6 +69,9 @@ pub struct App {
     server: server_tab::ServerView,
     commands: commands_tab::CommandsView,
     instances: instances_tab::InstancesView,
+    page: Page,
+    page_search: String,
+    palette_query: String,
 }
 
 impl App {
@@ -89,6 +92,9 @@ impl App {
             server: server_tab::ServerView::new(),
             commands: commands_tab::CommandsView::new(),
             instances: instances_tab::InstancesView::new(),
+            page: load_page(),
+            page_search: String::new(),
+            palette_query: String::new(),
         }
     }
 
@@ -108,77 +114,219 @@ impl App {
             .size([1500.0, 780.0], Condition::FirstUseEver)
             .position([40.0, 80.0], Condition::FirstUseEver)
             .build(|| {
-                if let Some(_bar) = ui.tab_bar("tabs") {
-                    if let Some(_t) = ui.tab_item("Status") {
-                        status_tab::draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Log") {
-                        self.log.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Packets") {
-                        self.packets.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Protocol") {
-                        self.protocol.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Notes") {
-                        notes_tab::draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Coverage") {
-                        self.coverage.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Timing") {
-                        self.timing.draw(ui, plots);
-                    }
-                    if let Some(_t) = ui.tab_item("Game log") {
-                        self.gamelog.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Player") {
-                        inspect_tab::draw_player(ui);
-                    }
-                    // Our server only: hidden while connected to an official server.
-                    if custom_server() {
-                        if let Some(_t) = ui.tab_item("Server") {
-                            self.server.draw_server(ui);
-                        }
-                        if let Some(_t) = ui.tab_item("Desync") {
-                            self.server.draw_desync(ui, plots);
-                        }
-                        if let Some(_t) = ui.tab_item("Commands") {
-                            self.commands.draw(ui);
-                        }
-                        if let Some(_t) = ui.tab_item("Instances") {
-                            self.instances.draw(ui);
-                        }
-                    }
-                    if let Some(_t) = ui.tab_item("Minimap") {
-                        self.minimap.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Stats") {
-                        self.stats.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Actions") {
-                        game_tab::draw_actions(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Entities") {
-                        self.entities.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Watches") {
-                        self.watches.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Scanner") {
-                        self.scanner.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Hooks") {
-                        self.hooks.draw(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Features") {
-                        features_tab::draw(ui);
-                    }
-                }
+                self.palette(ui);
+                let avail = ui.content_region_avail();
+                ui.child_window("nav").size([190.0, avail[1]]).border(true).build(ui, || {
+                    self.nav(ui);
+                });
+                ui.same_line();
+                ui.child_window("page").size([0.0, avail[1]]).build(ui, || {
+                    self.draw_page(ui, plots);
+                });
             });
         let _ = toggle;
     }
+
+    /// The sidebar: groups and their pages (our-server-only ones hidden while read-only),
+    /// filtered by the search box.
+    fn nav(&mut self, ui: &Ui) {
+        ui.set_next_item_width(-1.0);
+        ui.input_text("##page_search", &mut self.page_search).hint("search pages").build();
+        ui.text_disabled("Ctrl+P: palette");
+        let f = self.page_search.to_lowercase();
+        for (group, custom, pages) in GROUPS {
+            if *custom && !custom_server() {
+                continue;
+            }
+            let shown: Vec<&(Page, &str)> = pages.iter().filter(|(_, n)| f.is_empty() || n.to_lowercase().contains(&f)).collect();
+            if shown.is_empty() {
+                continue;
+            }
+            ui.spacing();
+            ui.text_colored([0.6, 0.75, 1.0, 1.0], group);
+            for (page, name) in shown {
+                if ui.selectable_config(format!("  {name}")).selected(self.page == *page).build() {
+                    self.go(*page);
+                }
+            }
+        }
+    }
+
+    fn go(&mut self, page: Page) {
+        self.page = page;
+        save_page(page);
+    }
+
+    fn draw_page(&mut self, ui: &Ui, plots: &dear_implot::PlotContext) {
+        // A page of our server only, while connected to an official one: back home.
+        if page_is_custom(self.page) && !custom_server() {
+            self.page = Page::Status;
+        }
+        match self.page {
+            Page::Status => status_tab::draw(ui),
+            Page::Log => self.log.draw(ui),
+            Page::GameLog => self.gamelog.draw(ui),
+            Page::Instances => self.instances.draw(ui),
+            Page::Commands => self.commands.draw(ui),
+            Page::Server => self.server.draw_server(ui),
+            Page::Desync => self.server.draw_desync(ui, plots),
+            Page::Packets => self.packets.draw(ui),
+            Page::Protocol => self.protocol.draw(ui),
+            Page::Coverage => self.coverage.draw(ui),
+            Page::Notes => notes_tab::draw(ui),
+            Page::Timing => self.timing.draw(ui, plots),
+            Page::Player => inspect_tab::draw_player(ui),
+            Page::Stats => self.stats.draw(ui),
+            Page::Actions => game_tab::draw_actions(ui),
+            Page::Entities => self.entities.draw(ui),
+            Page::Watches => self.watches.draw(ui),
+            Page::Minimap => self.minimap.draw(ui),
+            Page::Scanner => self.scanner.draw(ui),
+            Page::Hooks => self.hooks.draw(ui),
+            Page::Features => features_tab::draw(ui),
+        }
+    }
+
+    /// Ctrl+P: jump to a page, or run a server command line (`transfer G1_6 ...`).
+    fn palette(&mut self, ui: &Ui) {
+        if ui.io().key_ctrl() && ui.is_key_pressed(imgui::Key::P) {
+            self.palette_query.clear();
+            ui.open_popup("##palette");
+        }
+        let Some(_p) = ui.begin_popup("##palette") else { return };
+        if ui.is_window_appearing() {
+            let [w, _] = ui.io().display_size();
+            ui.set_window_pos([w * 0.5 - 300.0, 120.0]);
+            ui.set_window_size([600.0, 420.0]);
+            ui.set_keyboard_focus_here();
+        }
+        ui.set_next_item_width(-1.0);
+        let enter = ui
+            .input_text("##palette_query", &mut self.palette_query)
+            .hint("page name, or a server command line")
+            .enter_returns_true(true)
+            .build();
+        let q = self.palette_query.trim().to_lowercase();
+        let first_word = q.split_whitespace().next().unwrap_or("").to_string();
+        let mut chosen: Option<PaletteItem> = None;
+        let mut first: Option<PaletteItem> = None;
+        for (_, custom, pages) in GROUPS {
+            if *custom && !custom_server() {
+                continue;
+            }
+            for (page, name) in pages.iter() {
+                if !q.is_empty() && !name.to_lowercase().contains(&q) {
+                    continue;
+                }
+                first.get_or_insert(PaletteItem::Page(*page));
+                if ui.selectable(format!("Page: {name}")) {
+                    chosen = Some(PaletteItem::Page(*page));
+                }
+            }
+        }
+        if custom_server() {
+            let (cmds, me) = crate::devlink::registry();
+            let admin = me.is_some_and(|m| m.admin);
+            for c in cmds.iter().filter(|c| admin || !c.admin) {
+                if !q.is_empty() && !c.name.starts_with(&first_word) && !c.name.contains(&q) {
+                    continue;
+                }
+                let line = if q.starts_with(&c.name) { self.palette_query.trim().to_string() } else { c.name.clone() };
+                first.get_or_insert(PaletteItem::Command(line.clone(), c.args.iter().any(|a| !a.optional)));
+                let usage: Vec<String> = c.args.iter().map(|a| if a.optional { format!("[{}]", a.name) } else { format!("<{}>", a.name) }).collect();
+                if ui.selectable(format!("Run: {} {}  - {}##cmd{}", c.name, usage.join(" "), c.help, c.name)) {
+                    chosen = Some(PaletteItem::Command(line, false));
+                }
+            }
+        }
+        if enter {
+            chosen = first;
+        }
+        if ui.is_key_pressed(imgui::Key::Escape) {
+            ui.close_current_popup();
+            return;
+        }
+        match chosen {
+            Some(PaletteItem::Page(p)) => {
+                self.go(p);
+                ui.close_current_popup();
+            }
+            // A bare command that needs arguments: open its form instead of running it.
+            Some(PaletteItem::Command(line, needs_args)) if needs_args && !line.contains(' ') => {
+                self.go(Page::Commands);
+                ui.close_current_popup();
+            }
+            Some(PaletteItem::Command(line, _)) => {
+                crate::devlink::command(&line);
+                ui.close_current_popup();
+            }
+            None => {}
+        }
+    }
+}
+
+enum PaletteItem {
+    Page(Page),
+    /// The command line to run, and whether it still needs arguments.
+    Command(String, bool),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Page {
+    Status,
+    Log,
+    GameLog,
+    Instances,
+    Commands,
+    Server,
+    Desync,
+    Packets,
+    Protocol,
+    Coverage,
+    Notes,
+    Timing,
+    Player,
+    Stats,
+    Actions,
+    Entities,
+    Watches,
+    Minimap,
+    Scanner,
+    Hooks,
+    Features,
+}
+
+/// Sidebar groups: name, our server only, pages.
+const GROUPS: &[(&str, bool, &[(Page, &str)])] = &[
+    ("HOME", false, &[(Page::Status, "Status"), (Page::Log, "Log"), (Page::GameLog, "Game log")]),
+    ("SERVER", true, &[(Page::Instances, "Instances"), (Page::Commands, "Commands"), (Page::Server, "Sync state"), (Page::Desync, "Desync")]),
+    ("NETWORK", false, &[(Page::Packets, "Packets"), (Page::Protocol, "Protocol"), (Page::Coverage, "Coverage"), (Page::Notes, "Notes"), (Page::Timing, "Timing")]),
+    ("GAME", false, &[(Page::Player, "Player"), (Page::Stats, "Stats"), (Page::Actions, "Actions"), (Page::Entities, "Entities"), (Page::Watches, "Watches"), (Page::Minimap, "Minimap")]),
+    ("RE TOOLS", false, &[(Page::Scanner, "Scanner"), (Page::Hooks, "Hooks")]),
+    ("SETTINGS", false, &[(Page::Features, "Features")]),
+];
+
+fn page_is_custom(page: Page) -> bool {
+    GROUPS.iter().any(|(_, custom, pages)| *custom && pages.iter().any(|(p, _)| *p == page))
+}
+
+fn page_path() -> std::path::PathBuf {
+    poe_hook_shared::exe_dir().join("logs").join("poe-hook").join("overlay_page.txt")
+}
+
+fn save_page(page: Page) {
+    let _ = std::fs::write(page_path(), format!("{page:?}"));
+}
+
+/// The page selected last time (kept across sessions).
+fn load_page() -> Page {
+    let name = std::fs::read_to_string(page_path()).unwrap_or_default();
+    GROUPS
+        .iter()
+        .flat_map(|(_, _, pages)| pages.iter())
+        .map(|(p, _)| *p)
+        .find(|p| format!("{p:?}") == name.trim())
+        .unwrap_or(Page::Status)
 }
 
 /// Table options for the overlay's tables: columns fit their contents, resizable, striped.
