@@ -28,7 +28,12 @@ pub struct PacketsView {
     follow: bool,
     selected: Option<u64>,
     shown: Vec<usize>,
-    shown_key: (String, bool, bool, [bool; 3], bool),
+    shown_key: (String, bool, bool, [bool; 3], bool, u64, bool),
+    /// Show opcodes hidden in `hidden_opcodes.tsv` anyway.
+    show_hidden: bool,
+    /// The opcode list (every opcode seen, with its visibility).
+    show_opcodes: bool,
+    opcode_filter: String,
     shown_upto: usize,
     detail: Option<(u64, String)>,
     /// Note editors for the selected message's opcode and for the message itself.
@@ -37,6 +42,64 @@ pub struct PacketsView {
 }
 
 impl PacketsView {
+    /// Every opcode seen this session (by channel and direction) with a visibility checkbox
+    /// and its message count.
+    fn draw_opcodes(&mut self, ui: &Ui) {
+        let mut seen: std::collections::BTreeMap<crate::hidden::Key, (usize, Option<&'static str>, Channel, Dir)> = Default::default();
+        for m in &self.msgs {
+            let e = seen.entry(crate::hidden::key(m.channel, m.dir, m.opcode)).or_insert((0, m.name(), m.channel, m.dir));
+            e.0 += 1;
+        }
+        ui.set_next_item_width(160.0);
+        ui.input_text("##opcode_filter", &mut self.opcode_filter).hint("filter opcodes").build();
+        ui.same_line();
+        let f = self.opcode_filter.to_lowercase();
+        let matches = |k: &crate::hidden::Key, name: Option<&str>| {
+            f.is_empty() || format!("{:#06x}", k.2).contains(&f) || name.is_some_and(|n| n.to_lowercase().contains(&f))
+        };
+        if ui.button("Hide all named") {
+            for (k, (_, name, ..)) in &seen {
+                if name.is_some() && matches(k, *name) {
+                    crate::hidden::set_hidden(*k, true);
+                }
+            }
+        }
+        ui.same_line();
+        if ui.button("Hide all listed") {
+            for (k, (_, name, ..)) in &seen {
+                if matches(k, *name) {
+                    crate::hidden::set_hidden(*k, true);
+                }
+            }
+        }
+        ui.same_line();
+        if ui.button("Show all") {
+            crate::hidden::clear();
+        }
+        ui.child_window("opcode_list").size([0.0, 160.0]).border(true).build(ui, || {
+            for (k, (count, name, channel, dir)) in &seen {
+                if !matches(k, *name) {
+                    continue;
+                }
+                let mut visible = !crate::hidden::is_hidden(*k);
+                let label = format!(
+                    "{:8} {:3} {:#06x} {:28} {:6}##op{}_{}_{}",
+                    channel.name(),
+                    dir.name(),
+                    k.2,
+                    name.unwrap_or("?"),
+                    count,
+                    k.0,
+                    k.1,
+                    k.2
+                );
+                if ui.checkbox(label, &mut visible) {
+                    crate::hidden::set_hidden(*k, !visible);
+                }
+            }
+        });
+    }
+
     pub fn new() -> Self {
         Self {
             msgs: Vec::new(),
@@ -50,7 +113,10 @@ impl PacketsView {
             follow: true,
             selected: None,
             shown: Vec::new(),
-            shown_key: (String::new(), true, true, [true; 3], true),
+            shown_key: (String::new(), true, true, [true; 3], true, 0, false),
+            show_hidden: false,
+            show_opcodes: false,
+            opcode_filter: String::new(),
             shown_upto: 0,
             detail: None,
             opcode_note: String::new(),
@@ -89,6 +155,9 @@ impl PacketsView {
         if !dir_ok || !chan_ok || (self.hide_noise && noisy(m)) {
             return false;
         }
+        if !self.show_hidden && crate::hidden::is_hidden(crate::hidden::key(m.channel, m.dir, m.opcode)) {
+            return false;
+        }
         if self.filter.is_empty() {
             return true;
         }
@@ -104,6 +173,8 @@ impl PacketsView {
             self.show_out,
             self.channels,
             self.hide_noise,
+            crate::hidden::version(),
+            self.show_hidden,
         );
         if key != self.shown_key {
             self.shown_key = key;
@@ -137,6 +208,13 @@ impl PacketsView {
         ui.checkbox("pause", &mut self.paused);
         ui.same_line();
         ui.checkbox("follow", &mut self.follow);
+        ui.same_line();
+        ui.checkbox(format!("show hidden ({})", crate::hidden::count()), &mut self.show_hidden);
+        ui.same_line();
+        ui.checkbox("opcodes", &mut self.show_opcodes);
+        if self.show_opcodes {
+            self.draw_opcodes(ui);
+        }
         self.refresh();
         ui.text_disabled(format!(
             "{} of {} messages (in memory; all are in packets.jsonl / packets.txt){}",
@@ -257,6 +335,17 @@ impl PacketsView {
         ui.same_line();
         if ui.button("Copy") {
             crate::ui::set_clipboard(&text);
+        }
+        ui.same_line();
+        let k = crate::hidden::key(m.channel, m.dir, m.opcode);
+        let hidden = crate::hidden::is_hidden(k);
+        if ui.button(if hidden { "Show this opcode" } else { "Hide this opcode" }) {
+            crate::hidden::set_hidden(k, !hidden);
+            crate::ui::notice(format!(
+                "{:#06x} {name} {}",
+                m.opcode,
+                if hidden { "shown again" } else { "hidden (\"show hidden\" or the opcode list brings it back)" }
+            ));
         }
         ui.child_window("packet_detail")
             .border(true)

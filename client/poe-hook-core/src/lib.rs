@@ -17,6 +17,7 @@ mod entities;
 mod exit_trace;
 mod gamedata;
 mod gamelog;
+mod hidden;
 mod hooks;
 mod host;
 mod inspect;
