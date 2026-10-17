@@ -16,6 +16,9 @@ use std::{
 use rand::RngCore;
 use tokio::sync::watch;
 
+pub mod instances;
+pub use instances::{InstanceDirectory, InstanceInfo, InstanceSpec, MemoryInstances};
+
 /// The character being handed off (what the instance server needs to spawn it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketCharacter {
@@ -41,6 +44,9 @@ pub struct Ticket {
     pub character: TicketCharacter,
     /// `WorldAreas.Id` to load.
     pub area: String,
+    /// The instance to join ([`InstanceDirectory`]); `None`: the instance server picks or
+    /// creates one for `area`.
+    pub instance: Option<u32>,
     /// 64 bytes of stream key material for the instance connection.
     pub keys: [u8; 64],
 }
@@ -60,7 +66,11 @@ pub trait TicketRegistry: Send + Sync {
     /// Takes a resume ticket out of the registry; `true` if it was valid.
     fn redeem_resume(&self, ticket: ResumeTicket) -> bool;
     /// Issues a ticket with a fresh id and keys.
-    fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket;
+    fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket {
+        self.issue_for(account_id, character, area, None)
+    }
+    /// Issues a ticket for a given instance.
+    fn issue_for(&self, account_id: u32, character: TicketCharacter, area: &str, instance: Option<u32>) -> Ticket;
     /// Takes a ticket out of the registry (single use).
     fn redeem(&self, id: u32) -> Option<Ticket>;
     /// All unredeemed tickets (used to match a connection when the client does not send
@@ -120,7 +130,7 @@ impl TicketRegistry for MemoryTickets {
         }
     }
 
-    fn issue(&self, account_id: u32, character: TicketCharacter, area: &str) -> Ticket {
+    fn issue_for(&self, account_id: u32, character: TicketCharacter, area: &str, instance: Option<u32>) -> Ticket {
         let mut rng = rand::rng();
         let mut keys = [0u8; 64];
         rng.fill_bytes(&mut keys);
@@ -137,6 +147,7 @@ impl TicketRegistry for MemoryTickets {
             account_id,
             character,
             area: area.to_owned(),
+            instance,
             keys,
         };
         map.insert(id, (Instant::now(), ticket.clone()));
@@ -198,12 +209,19 @@ pub trait LoginSessions: Send + Sync {
     fn subscribe(&self, account_id: u32) -> watch::Receiver<u64>;
     /// Ends the account's login connections.
     fn logout(&self, account_id: u32);
+    /// Called by a login connection once its account is known: transfers for the account
+    /// (in-game instance changes) arrive here. The latest connection of an account gets them.
+    fn subscribe_transfers(&self, account_id: u32) -> tokio::sync::mpsc::UnboundedReceiver<Ticket>;
+    /// Sends the account's client to another instance: its login connection sends
+    /// `InstanceDetails` for `ticket`. `false` if the account has no login connection.
+    fn transfer(&self, account_id: u32, ticket: Ticket) -> bool;
 }
 
 /// In-process [`LoginSessions`].
 #[derive(Default)]
 pub struct MemorySessions {
     accounts: Mutex<HashMap<u32, watch::Sender<u64>>>,
+    transfers: Mutex<HashMap<u32, tokio::sync::mpsc::UnboundedSender<Ticket>>>,
 }
 
 impl LoginSessions for MemorySessions {
@@ -220,6 +238,20 @@ impl LoginSessions for MemorySessions {
         if let Some(tx) = self.accounts.lock().unwrap().get(&account_id) {
             tx.send_modify(|n| *n += 1);
         }
+    }
+
+    fn subscribe_transfers(&self, account_id: u32) -> tokio::sync::mpsc::UnboundedReceiver<Ticket> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.transfers.lock().unwrap().insert(account_id, tx);
+        rx
+    }
+
+    fn transfer(&self, account_id: u32, ticket: Ticket) -> bool {
+        self.transfers
+            .lock()
+            .unwrap()
+            .get(&account_id)
+            .is_some_and(|tx| tx.send(ticket).is_ok())
     }
 }
 
