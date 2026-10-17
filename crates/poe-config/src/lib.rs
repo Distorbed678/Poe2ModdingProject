@@ -54,6 +54,26 @@ pub struct Config {
     pub admin: AdminConfig,
     #[serde(default)]
     pub commands: CommandsConfig,
+    #[serde(default)]
+    pub instances: InstancesConfig,
+}
+
+/// Instances of areas.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InstancesConfig {
+    /// Close instances that have been empty this long (towns and hideouts stay); 0 = never.
+    #[serde(default = "default_idle_minutes")]
+    pub idle_minutes: u64,
+}
+
+impl Default for InstancesConfig {
+    fn default() -> Self {
+        Self { idle_minutes: default_idle_minutes() }
+    }
+}
+
+fn default_idle_minutes() -> u64 {
+    15
 }
 
 /// Server-side terrain generation (`poe-world`). The client always builds the terrain itself
