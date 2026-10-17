@@ -33,6 +33,7 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
    | +0x100 | u8 count + 8-byte[] |
    | +0x118 | u16 count + u16[] |
    | +0xe8 note | official G1_1: 29 sorted u16 keys (table unknown) |
+   | (correction) | the reader `0x14211d1c0` branches on flags0 (+0x2d) bit 3 (`u16` +0x1e, before `list_70`), flags1 bits 0 and 1 (u8-count byte lists +0xa0, +0xb8), bit 2 (`0x14212a8f0`), flags0 bit 7 (two stat records `0x1423baa70` at +0x130/+0x150, then `u8` count + that many records at +0x170; record = varuint count, then `u16` stat key and varint value per stat) and flags1 bit 3 (`0x14212aa00`), in that order. Official G1_1 (flags `94 02 03`): flags1 bit 1 list `[0x11, 0x4f]`, record 1 = {20079 `map_ritual_tower_augment_quantity_+%`, 24795 `area_culture_hash`, 27211 `map_ritual_area_groups_enabled` = 1}, record 2 = {20079, 27211}, no further records. Every official AreaInfo decodes. |
    | optional | flags1 (+0x2e) bit 1: u8 count + u8[] (+0xa0); bit 2: u8 count + u8[] (+0xb8); bit 4: `0x14212a8f0` (+0xd0); flags0 (+0x2d) bit 7: two `0x1423baa70` records + u8 count of them (+0x130/+0x150/+0x170); flags1 bit 8: `0x14212aa00` (+0x188). Reader `0x14211d1c0` |
 
    Official G1_1 values we do not send yet: +0x2a 1, +0x2c 10, +0x2b 0, +0x30 29, flags `94 02 03`, +0x28 0, +0x29 0, +0x34 56, +0x24 `0x200f76af`, list_58 `[5]`, flags1 bit 2 list `[0x11, 0x4f]` and the flags0 bit 7 records.

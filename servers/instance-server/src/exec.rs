@@ -182,7 +182,7 @@ impl InstanceServer {
                 Outcome::ok(player.face_cursor.is_some().to_string())
             }
             "terrain" => {
-                self.generate_terrain(&ctx.ticket.area, ctx.seed, ctx.tile_hash);
+                self.generate_terrain(&ctx.ticket.area, ctx.seed, ctx.tile_hash, ctx.instance);
                 Outcome::ok("generating on the server: the result is in the server log")
             }
             "area_info" => {

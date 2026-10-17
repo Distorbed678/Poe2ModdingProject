@@ -61,9 +61,10 @@ the target instance and asks the account's login connection (`LoginSessions::tra
 keeps its login connection open while in game, which is where official hand-offs arrive.) A
 second AreaInfo on one connection would crash the client, so transfers always reconnect.
 
-Not done yet: forcing topology and orientation in the client. The instance stores them, but
-AreaInfo's stat block (`map_force_topology` 0xb92, `map_force_orientation` 0xb93; flags0
-bit 7 records) is not sent yet, so the client still picks its own layout.
+Forced layouts: an instance with a topology or orientation sends them in AreaInfo's first
+stat record (flags0 bit 7; `map_force_topology` = 1-based topology, `map_force_orientation` =
+orientation + 1), and the server-side terrain check uses the same choice. Not verified in game
+yet (which of the two records the generator reads is a guess: the first).
 
 ## Overlay tabs (our server only)
 
