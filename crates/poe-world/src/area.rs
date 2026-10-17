@@ -422,6 +422,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut built = build_dungeon(files, graph, removed, rng, None)?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
+    let mut done: Vec<(Built, (i32, i32))> = Vec::new();
     for (file, origin) in std::mem::take(&mut built.subgraphs) {
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
         if sub.dungeon_defaults.is_none() {
@@ -436,6 +437,15 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             return Err(GenError::Unsupported(format!("subgraph {file}: nested subgraphs (not ported)")));
         }
         built.map.paste(&inner.map, origin);
+        done.push((inner, origin));
+    }
+    // `0x141ff7a10`: the outer fill per graph, the last subgraph first (a subgraph's own outer
+    // buffer is empty: `OuterBufferSize 0`), then the main graph's below.
+    for (mut inner, origin) in done.into_iter().rev() {
+        if let Some(g) = inner.tsi.get("OuterGroundType").cloned() {
+            let rect = (origin.0, origin.1, origin.0 + inner.map.width as i32, origin.1 + inner.map.height as i32);
+            crate::outer_buffer::outer_fill(&mut built.map, rect, &g, true, &mut inner.master, files)?;
+        }
     }
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));

@@ -3,7 +3,7 @@
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
 with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
-(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_7 and G1_9 (seeds 1001–1003 each) and G1_8 1001 (forced topology 1:3; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
+(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_7 and G1_9 (seeds 1001–1003 each) and G1_8 1001/1002 (forced topologies 1:3, 11:3; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
 Not ported yet: height-change edge types (G1_11), named border tiles and the `0x14209f050`
 fallbacks (G1_6), 3×3 door spots (`0x14209dc90`; guarded), subgraph file groups and nested
 subgraphs, injector and blank special rooms, and the request-driven extra rooms
@@ -234,9 +234,13 @@ buffer and de-repetition as for `.tgr`.
   its rectangle in the main grid; after the main graph's fill and de-repetition, each subgraph
   `.dgr` (turned with the main region) runs the whole pipeline (offsets, existence rolls,
   layout, tile pass, fill, de-repetition) in a window of the main map at that rectangle
-  (`0x141f9e130`); the outer buffer runs once afterwards. A graph without edges has no corridor
+  (`0x141f9e130`). Then `0x141ff7a10` runs, per graph from the last subgraph to the main one,
+  the outer fill with height repair (`0x141fd5ff0`, on that graph's rectangle with its master's
+  `OuterGroundType`) and the outer buffer (`0x141fd8360`; empty for `OuterBufferSize 0`). A graph without edges has no corridor
   stage (no `below(128)` records, no type shuffle). G1_8's secret chamber
   (`_secretchamber.dgr`, `master_secretchamber.tsi`) is one typed node.
+- Typeless nodes (`0x1420afdd0` → `0x1420afa40`): the size list is the one of the first edge
+  (node slots in order) whose type is not the default, else the default type's.
 - Fill tiles may overhang the region by one cell (`0x141f9e5f0`: x, y ≥ −1, far side ≤ size + 1),
   so 3×3 ground slots on the region's border fill from −1. The outer fill aligns a 3×3 tile one
   cell outside when the region's corner and size are 1 mod 3. Fill rooms floor their slot heights

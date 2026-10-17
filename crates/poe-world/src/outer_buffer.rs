@@ -512,6 +512,21 @@ pub fn outer_buffer(
     Ok(map)
 }
 
+/// `0x141fd5ff0` on one graph's rectangle of an already embedded map (a subgraph's window):
+/// set corners there count as height-set, then the outer ground's fill.
+pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
+    for y in rect.1..=rect.3 {
+        for x in rect.0..=rect.2 {
+            if let Some(k) = map.point_index(x, y) {
+                if map.lattice[k].flags & 1 != 0 {
+                    map.lattice[k].flags |= 2;
+                }
+            }
+        }
+    }
+    fill_black(map, rect, ground, repair, master, files)
+}
+
 /// `0x141fd5ff0`: region cells still empty (dungeon grid cells without a room) take the outer
 /// ground's first fill tile (`0x141fd6990`; orientation "any" counts as 0). A 3×3 tile on a
 /// region whose corner and size are 1 mod 3 is aligned one cell outside the region (and may
