@@ -934,6 +934,10 @@ fn corridors(
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
     let _ = rooms;
+    // A graph without edges (a one-room subgraph) has no corridor stage: no records, no draws.
+    if graph.edges.is_empty() {
+        return Ok(());
+    }
     // `0x1420a5e50`: one record per placed room with a `below(128)` cost.
     let mut records: Vec<Record> = Vec::new();
     let grow = |records: &mut Vec<Record>, grid: &Grid, rng: &mut TerrainRng| {

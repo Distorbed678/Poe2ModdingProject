@@ -3,10 +3,10 @@
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
 with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
-(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_7 and G1_9 (seeds 1001–1003 each; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
-Not ported yet: `GetFeatureRooms` nodes (G1_8, G1_12), height-change edge types (G1_11),
-named border tiles and the `0x14209f050` fallbacks (G1_6), door placement (`0x14209d180` /
-`0x14209dc90`; guarded), injector and blank special rooms, and the request-driven extra rooms
+(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_7 and G1_9 (seeds 1001–1003 each) and G1_8 1001 (forced topology 1:3; `cargo run --release -p poe-world --example area_vectors -- data/sweep-vectors.tsv`).
+Not ported yet: height-change edge types (G1_11), named border tiles and the `0x14209f050`
+fallbacks (G1_6), 3×3 door spots (`0x14209dc90`; guarded), subgraph file groups and nested
+subgraphs, injector and blank special rooms, and the request-driven extra rooms
 and shrines (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`).
 
 ## Call chain
@@ -165,8 +165,16 @@ buffer and de-repetition as for `.tgr`.
    flag-0x10 grounds; then tile-set lookup, `below(total)`, place (`0x14209f050`).
 4. Doors (only with `door` tiles): open exits mark their unit's middle cells on the border line
    (`0x142096ad0`); straight passages across a marked shared exit become door groups
-   (`0x142097060`); `0x14209d180` would place a door tile there (not ported: the port fails when
-   a door tile could fit).
+   (`0x142097060`). `0x14209d180` (gated by master +0x38), per group without a `door` tile: the
+   group runs vertically when its first two cells share x or every cell has both side markers
+   (0x18), else horizontally; the anchor is the first cell with the lowest coordinate along it.
+   Door sizes for the anchor tile's edges (`0x141d09700`: per feature, keyed by the 4 edges, a
+   sorted set of oriented sizes, `0x141d09ab0`) that fit the group (len × 1 or 1 × len); a
+   discarded `below(n)` and a shuffle; the first size whose key (size set, exits of 3 replaced by
+   size·3, virtual exits [w·3, h·3, w·3, h·3]) has `door` tiles wins. Offset along the group: for
+   a 1-wide door with an odd unit the cell whose coordinate mod (unit − overlap) is unit / 2, else
+   `below(len − span + 1)`; `below(total)`, placed at the cell's height over the old tile.
+   `0x14209dc90` (3×3 spots) is not ported.
 5. Room ground overrides (`0x141f9e780`), then the fill: the listed ground-only cells, stable
    sorted by (x, y), each filled with its ground and its slot height (`0x14209cf50` →
    `0x141f8f930`; `0x141f90950` uses a passed height unless it is `i32::MIN`, which the `.tgr`
@@ -216,6 +224,19 @@ buffer and de-repetition as for `.tgr`.
   is redrawn (`0x1420b276a`). The spot covers the cell: corner at the cell, then shifted left, up,
   up-left (`0x1420b2bb0`); the room is drawn among the ground's blank rooms of that size
   (`0x1420b2a21`), its orientation with `below(840)` (`0x1420b2a38`).
+- `.dgr` void token is `V` (nodes and edges); void edges block their cells (Bresenham,
+  `0x1420ad420` / `0x141fa8710`). `.et` numbers: height change, size, centred, random wiggle,
+  `can_end` (fifth), force height zero. The size map (`0x141f99b20`) counts a room per distinct
+  non-default door type; rooms with only default doors count under the default type, whose plain
+  sizes need a full ring at height 0 (`0x141f98bb0`). Border keys rebase their heights by the
+  signed minimum.
+- Subgraphs (`0x141ff7e00` → `0x141ff05f0` per subgraph): a `graph` node (`0x1420adfd0`) reserves
+  its rectangle in the main grid; after the main graph's fill and de-repetition, each subgraph
+  `.dgr` (turned with the main region) runs the whole pipeline (offsets, existence rolls,
+  layout, tile pass, fill, de-repetition) in a window of the main map at that rectangle
+  (`0x141f9e130`); the outer buffer runs once afterwards. A graph without edges has no corridor
+  stage (no `below(128)` records, no type shuffle). G1_8's secret chamber
+  (`_secretchamber.dgr`, `master_secretchamber.tsi`) is one typed node.
 - Fill tiles may overhang the region by one cell (`0x141f9e5f0`: x, y ≥ −1, far side ≤ size + 1),
   so 3×3 ground slots on the region's border fill from −1. The outer fill aligns a 3×3 tile one
   cell outside when the region's corner and size are 1 mod 3. Fill rooms floor their slot heights
