@@ -53,6 +53,10 @@ sweep_results = "data/sweep-results.tsv"
 # off until the generator covers every area (Documentation/terrain-status.md).
 generate = false
 
+[instances]
+# Empty instances close after this many minutes (towns and hideouts stay open); 0 = never.
+idle_minutes = 15
+
 [admin]
 # Accounts allowed to use admin commands (chat `!` commands and the overlay's server tools).
 accounts = ["Exile1"]

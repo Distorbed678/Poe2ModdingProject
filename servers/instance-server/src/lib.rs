@@ -14,6 +14,9 @@ use poe_config::Config;
 use poe_game::stats::StatRegistry;
 use poe_store::Store;
 
+pub mod commands;
+mod exec;
+pub mod live;
 mod player;
 pub mod seeds;
 mod spawn;
@@ -55,6 +58,8 @@ pub struct InstanceServer {
     pub sessions: Arc<dyn poe_cluster::LoginSessions>,
     /// Instances of areas: which one a session is in, its seed and layout choice.
     pub instances: Arc<dyn poe_cluster::InstanceDirectory>,
+    /// Sessions in game (who, kick, chat delivery, mutes).
+    pub live: Arc<live::Live>,
 }
 
 impl InstanceServer {
@@ -77,6 +82,20 @@ impl InstanceServer {
             tokio::spawn(async move {
                 if let Err(e) = reports.listen(addr).await {
                     warn!("client position reports: {e:#}");
+                }
+            });
+        }
+        // Idle instances close after `[instances] idle_minutes` (towns and hideouts stay).
+        let idle = self.config.instances.idle_minutes;
+        if idle > 0 {
+            let instances = self.instances.clone();
+            tokio::spawn(async move {
+                let mut every = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    every.tick().await;
+                    for id in instances.expire(Duration::from_secs(idle * 60)) {
+                        info!(instance = id, "closed idle instance");
+                    }
                 }
             });
         }
@@ -248,10 +267,29 @@ impl InstanceServer {
         if let Some(id) = instance {
             self.instances.join(id, &name);
         }
+        let account = self
+            .store
+            .account_by_id(ticket.account_id)
+            .ok()
+            .flatten()
+            .map(|a| a.name)
+            .unwrap_or_else(|| format!("account {}", ticket.account_id));
+        let ctx = exec::SessionCtx {
+            ticket: &ticket,
+            admin: self.is_admin(&account),
+            account: account.clone(),
+            instance,
+            seed,
+            tile_hash: hashes.hash_a,
+            port: client_port,
+        };
+        let registration = self.live.register(ticket.account_id, &account, &name, instance, &ticket.area, client_port);
+        self.send_registry(&ctx);
         let closed = instance.and_then(|id| self.instances.closed(id));
         let result = self
-            .run_session(&mut conn, &mut hnc, &ticket, &mut player, client_port, closed)
+            .run_session(&mut conn, &mut hnc, &ctx, &mut player, closed, registration)
             .await;
+        self.live.unregister(&name, client_port);
         if let Some(id) = instance {
             self.instances.leave(id, &name);
         }
@@ -281,11 +319,14 @@ impl InstanceServer {
         &self,
         conn: &mut Connection,
         hnc: &mut poe_net::Salsa20Stream,
-        ticket: &Ticket,
+        ctx: &exec::SessionCtx<'_>,
         player: &mut player::Player,
-        client_port: u16,
         mut closed: Option<tokio::sync::watch::Receiver<bool>>,
+        registration: live::Registration,
     ) -> anyhow::Result<()> {
+        let ticket = ctx.ticket;
+        let client_port = ctx.port;
+        let live::Registration { mut kicked, chat: mut chat_in } = registration;
         // Simulation frames: each tick marker closes a frame of `tick_ms` (InitialState).
         let tick = self.protocol.instance.encode(&SimulationTick)?;
         let mut ticker =
@@ -302,6 +343,13 @@ impl InstanceServer {
                 () = instance_closed(&mut closed) => {
                     info!("instance closed: disconnecting the player");
                     return Ok(());
+                }
+                () = was_kicked(&mut kicked) => {
+                    info!("kicked: disconnecting the player");
+                    return Ok(());
+                }
+                Some(line) = chat_in.recv() => {
+                    conn.send(&self.protocol.instance.encode(&chat_line(&line))?).await?;
                 }
                 n = conn.read_more() => {
                     if n? == 0 {
@@ -356,29 +404,23 @@ impl InstanceServer {
                     let mut replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
                     let mut extra = Vec::new();
                     if self.config.instance.debug_link {
+                        // Overlay commands: the same registry as chat commands.
                         for command in self.reports.take_commands(client_port) {
-                            // `area <WorldAreas.Id> <seed>`: a new AreaInfo on this connection
-                            // (terrain research: the client generates that layout).
-                            if let Some(args) = command.strip_prefix("area ") {
-                                let result = match self.area_info_command(args, ticket) {
-                                    Ok(bytes) => {
-                                        extra.extend(bytes);
-                                        "ok".to_string()
-                                    }
-                                    Err(e) => e.to_string(),
-                                };
-                                info!(%command, %result, "dev command");
-                                self.reports.send_debug(
-                                    client_port,
-                                    &format!("ack\t{command}\t{result}\n"),
-                                );
+                            if command == "registry" {
+                                self.send_registry(ctx);
                                 continue;
                             }
-                            let (result, reply) = self.dev_command(player, &command);
-                            info!(%command, %result, "dev command");
-                            replies.extend(reply);
-                            self.reports
-                                .send_debug(client_port, &format!("ack\t{command}\t{result}\n"));
+                            let out = self.run_command(ctx, player, &command);
+                            replies.extend(out.replies);
+                            extra.extend(out.raw);
+                            let status = if out.ok { "ok" } else { "error" };
+                            self.reports.send_debug(
+                                client_port,
+                                &format!("ack\t{command}\t{status}: {}\n", out.text.replace(['\t', '\n'], " ")),
+                            );
+                        }
+                        if ticks.is_multiple_of(30) {
+                            self.send_instances(ctx);
                         }
                         if ticks.is_multiple_of(2) {
                             self.reports.send_debug(
@@ -402,40 +444,9 @@ impl InstanceServer {
         }
     }
 
-    /// A dev command from the client DLL's overlay (debug link): returns a short result and
-    /// the message for the client, if any.
-    fn dev_command(
-        &self,
-        player: &mut player::Player,
-        command: &str,
-    ) -> (String, Vec<player::Reply>) {
-        let words: Vec<&str> = command.split_whitespace().collect();
-        let on = |w: Option<&&str>| matches!(w, Some(&"on" | &"true" | &"1"));
-        match words.as_slice() {
-            ["teleport", x, y] => match (x.parse(), y.parse()) {
-                (Ok(x), Ok(y)) => ("ok".into(), player.teleport((x, y))),
-                _ => ("bad cell".into(), Vec::new()),
-            },
-            ["turn_cell", mode] => {
-                player.turn_cell = player::TurnCell::parse(mode);
-                (format!("{:?}", player.turn_cell), Vec::new())
-            }
-            ["turn_timing", ..] => {
-                player.turn_timing = on(words.get(1));
-                (player.turn_timing.to_string(), Vec::new())
-            }
-            ["face_cursor", ..] => {
-                player.face_cursor =
-                    on(words.get(1)).then_some(self.config.instance.cursor_to_grid);
-                (player.face_cursor.is_some().to_string(), Vec::new())
-            }
-            _ => ("unknown command".into(), Vec::new()),
-        }
-    }
-
-    /// Server-side terrain (`[terrain] generate`): generates the layout in the background and
-    /// logs whether its tile hash matches the client's.
-    fn generate_terrain(&self, area: &str, seed: u32, client_hash: u32) {
+    /// Server-side terrain (`[terrain] generate`, `terrain` command): generates the layout in
+    /// the background and logs whether its tile hash matches the client's.
+    pub(crate) fn generate_terrain(&self, area: &str, seed: u32, client_hash: u32) {
         let data = self.data.clone();
         let area = area.to_string();
         tokio::task::spawn_blocking(move || {
@@ -568,6 +579,69 @@ impl InstanceServer {
         info!(area = %area.id, seed = msg.seed, instance = msg.instance_id, "sending area");
         conn.send(&self.protocol.instance.encode(&msg)?).await?;
         Ok((instance_id, seed))
+    }
+}
+
+/// A ChatMessage for a chat line (layout as in official captures).
+fn chat_line(line: &live::ChatOut) -> poe_proto::instance::ChatMessage {
+    poe_proto::instance::ChatMessage { unk_10: 1, sender: line.sender.clone(), text: line.text.clone(), unk_a2: 5, ..Default::default() }
+}
+
+impl InstanceServer {
+    /// The command registry for the overlay (debug link): `cmds` datagrams of `cmd` lines
+    /// (`commands::wire`), then whether this account is an admin.
+    fn send_registry(&self, ctx: &exec::SessionCtx<'_>) {
+        if !self.config.instance.debug_link {
+            return;
+        }
+        let mut chunk = String::from("cmds\tbegin\n");
+        for spec in commands::COMMANDS {
+            let line = commands::wire(spec);
+            if chunk.len() + line.len() > 3000 {
+                self.reports.send_debug(ctx.port, &chunk);
+                chunk = String::from("cmds\tmore\n");
+            }
+            chunk.push_str(&line.replace('\n', " "));
+            chunk.push('\n');
+        }
+        chunk.push_str(&format!("you\t{}\t{}\t{}\n", ctx.account, ctx.admin as u8, self.config.commands.prefix));
+        self.reports.send_debug(ctx.port, &chunk);
+    }
+
+    /// The instance list for the overlay's Instances tab: `instances` datagrams of `inst`
+    /// lines (`id, area, seed, topology, orientation, persistent, empty seconds, current,
+    /// players`).
+    fn send_instances(&self, ctx: &exec::SessionCtx<'_>) {
+        let list = self.instances.list();
+        let mut chunk = String::from("instances\tbegin\n");
+        for i in &list {
+            let line = format!(
+                "inst\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                i.id,
+                i.spec.area,
+                i.spec.seed.map_or(String::new(), |s| s.to_string()),
+                i.spec.topology.map_or(String::new(), |t| t.to_string()),
+                i.spec.orientation.map_or(String::new(), |o| o.to_string()),
+                i.persistent as u8,
+                i.empty_since.map_or(String::new(), |t| t.elapsed().as_secs().to_string()),
+                (Some(i.id) == ctx.instance) as u8,
+                i.players.join(",")
+            );
+            if chunk.len() + line.len() > 3000 {
+                self.reports.send_debug(ctx.port, &chunk);
+                chunk = String::from("instances\tmore\n");
+            }
+            chunk.push_str(&line);
+        }
+        chunk.push_str(&format!("idle\t{}\n", self.config.instances.idle_minutes));
+        self.reports.send_debug(ctx.port, &chunk);
+    }
+}
+
+/// Resolves when the session is kicked.
+async fn was_kicked(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    if rx.wait_for(|k| *k).await.is_err() {
+        std::future::pending::<()>().await;
     }
 }
 

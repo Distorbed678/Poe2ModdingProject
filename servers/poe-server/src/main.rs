@@ -46,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
         reports: Default::default(),
         sessions,
         instances,
+        live: Default::default(),
     });
 
     tokio::try_join!(login.run(), instance.run())?;
