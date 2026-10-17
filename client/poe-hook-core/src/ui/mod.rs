@@ -39,6 +39,12 @@ pub fn has_notices() -> bool {
     !n.is_empty()
 }
 
+/// Whether features that talk to our server are shown: never while the read-only latch is on
+/// (an official server), so nothing in the overlay can send to it.
+pub fn custom_server() -> bool {
+    !crate::host::read_only()
+}
+
 /// Plain-text summary of the client state (snapshots).
 pub fn state_text() -> String {
     status_tab::state_text()
@@ -123,11 +129,14 @@ impl App {
                     if let Some(_t) = ui.tab_item("Player") {
                         inspect_tab::draw_player(ui);
                     }
-                    if let Some(_t) = ui.tab_item("Server") {
-                        self.server.draw_server(ui);
-                    }
-                    if let Some(_t) = ui.tab_item("Desync") {
-                        self.server.draw_desync(ui, plots);
+                    // Our server only: hidden while connected to an official server.
+                    if custom_server() {
+                        if let Some(_t) = ui.tab_item("Server") {
+                            self.server.draw_server(ui);
+                        }
+                        if let Some(_t) = ui.tab_item("Desync") {
+                            self.server.draw_desync(ui, plots);
+                        }
                     }
                     if let Some(_t) = ui.tab_item("Minimap") {
                         self.minimap.draw(ui);
