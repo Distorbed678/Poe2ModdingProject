@@ -7,12 +7,19 @@
 | M2 | Instance server transfer, first zone loads with the player | done (2026-10-13) |
 | M3 | Movement: WASD, click-to-move and dodge roll; save area and position on exit | done (2026-10-14) |
 | M3.5 | Fixes before the terrain milestone: movement lag, full dodge roll, sprint, second-character creation | done (2026-10-14), sprint partial |
-| M4 | Debug suite: in-game imgui overlay (Vulkan) in the client DLL, packet capture and export for our and official servers (read-only), protocol coverage, inspectors, hot reload | built 2026-10-14; official session not tried yet |
-| M5 | Server-side terrain generation (reimplement the client generator) for collision | – |
-| M6 | Zone/instance transfer | – |
+| M4 | Debug suite: in-game imgui overlay (Vulkan) in the client DLL, packet capture and export for our and official servers (read-only), protocol coverage, inspectors, hot reload | done (2026-10-14); official sessions captured 2026-10-14/15; overlay reorganised into a sidebar 2026-10-17 |
+| M5 | Server-side terrain generation (reimplement the client generator) for collision | in progress: 25 of 33 test vectors match (towns, G1_1-3 and G1_6-9 fully) ([terrain-status.md](terrain-status.md)); off by default (`[terrain] generate`) |
+| M6 | Zone/instance transfer | dev transfers done (2026-10-17): instance directory, transfers, forced layouts, Instances page ([server-admin.md](server-admin.md)); waypoints and area transitions open |
 | M7 | Inventory and items | – |
 | M8 | Monsters and skills | – |
-| M9+ | To be decided (parties, chat, multiplayer, mod runtimes) | – |
+| M9+ | To be decided (parties, multiplayer, mod runtimes) | chat channels and server commands done early (2026-10-17) |
+
+## Status 2026-10-17
+- **Server tools:** one command registry for chat (`!` prefix) and the overlay, admins from `[admin] accounts`, audit log, `who`/`kick`/`mute`/`announce` ([server-admin.md](server-admin.md)).
+- **Instances and transfers (M6, dev side):** `poe_cluster::InstanceDirectory` (area, seed, forced topology/orientation, players, idle expiry). A transfer ends the instance session; the client returns to character selection on its open login connection and the login server sends the pending InstanceDetails. Forced layouts go in AreaInfo's stat records and were verified against the client's tile hash. Still open: waypoints/area transitions, and transfers without the character-select step (needs an official capture of a zone change).
+- **Chat:** C→S `0x16` ChatSend and S→C `0x18` ChatMessage decoded; global/trade by channel number, local, whispers, mutes.
+- **Terrain (M5):** see [terrain-status.md](terrain-status.md); the server can generate per instance and compare hashes (`[terrain] generate`, `!terrain`).
+- **Overlay:** sidebar navigation, Ctrl+P palette, opcode hiding in the Packets page, our-server pages hidden on official servers ([client-dll.md](client-dll.md)).
 
 ## M4 scope: Debug suite (agreed 2026-10-14)
 Renamed from terrain generation, which moves to M5 (later milestones shift by one). Goal: fewer workarounds, everything the DLL knows visible in game and in files.
@@ -26,7 +33,7 @@ Renamed from terrain generation, which moves to M5 (later milestones shift by on
 
 ### M4 status (2026-10-14)
 - Done: loader/core split with hot reload, read-only latch and official deploy, dear-imgui-rs overlay (Status, Log, Packets, Coverage, Timing, Game log, Player, Entities, Watches, Features), packet capture with redaction and files, snapshots, `tools/re/packets_diff.py`. Details in [client-dll.md](client-dll.md).
-- Not tried yet: an official session (the user plays it).
+- Official sessions: captured 2026-10-14 and 2026-10-15 (read-only); compared in [protocol/official-comparison.md](protocol/official-comparison.md).
 - Found with the minimap (2026-10-14), for M5: the player walked onto a cell where grid 0 (`terrain+0xd0`) is 0 while grids 1-3 are 5; grid 1 shows one connected open area around the player. The server's spawn code treats grid 0 non-zero as walkable; grid 1 is the likelier walkability grid. Check before building collision.
 - M5 tooling (2026-10-15, [re/terrain.md](re/terrain.md)): area export with hash self-check (tile and doodad hashes recomputed from the export match the client on every area tried), generator trace (every RNG draw and phase), walkability probe, generator-object dump, and a seed sweep (server `[instance] sweep` + `tools/re/sweep_drive.py`).
 - Found by the capture, left for later (server unchanged on request): the instance opening is two messages, `0x000f` Hello (u32) and `0x000e` (12 bytes, u32 ticket, u32, u8); the server reads them as one.

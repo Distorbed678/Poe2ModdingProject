@@ -14,13 +14,15 @@ Run `Tools/fetch-tools.sh` to download every external tool into `Tools/` (listed
 ```sh
 cargo build                 # server workspace
 cargo test                  # unit tests; poe-data tests read GameFiles if present
-cargo xtask build-dll       # client/poe-hook -> poe_hook.dll (x86_64-pc-windows-msvc)
+cargo xtask build-dll       # client/ -> version.dll (loader) + poe_hook_core.dll (x86_64-pc-windows-msvc)
 ```
 
 ## Run
 ```sh
 cargo run -p poe-server     # login (20481) + instance (6112) servers, config/server.toml
-cargo xtask deploy-client   # builds the DLL and installs it into GameFiles/
+cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: read-only, official servers)
+cargo xtask deploy-core     # rebuilds and installs only the debug core; a running client reloads it
+cargo xtask dll-data        # rewrites only GameFiles/poe-hook-data/ (stats, action types, areas)
 cargo xtask run-client      # launches the client through Proton (Steam must be running)
 cargo xtask revert-client   # restores GameFiles/ to the original state
 ```
@@ -28,7 +30,8 @@ cargo xtask revert-client   # restores GameFiles/ to the original state
 `deploy-client` does the following:
 - Backs up `GameFiles/gateway_list.txt` to `gateway_list.txt.orig` (only once).
 - Writes a single UTF-16LE gateway entry, built from `[gateway]`/`[login]` in `config/server.toml`.
-- Copies the DLL to `GameFiles/version.dll`.
+- Copies the loader to `GameFiles/version.dll` and the debug core next to it.
+- Writes the DLL's name tables to `GameFiles/poe-hook-data/` (`stats.tsv`, `action_types.tsv`, `areas.tsv` for the area picker).
 - Copies `client/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
 - Sets `position_sync_port` in that file's `[features]` to `[instance] public_port`, so position reports go to the instance server.
 - Writes `steam_appid.txt`.
@@ -55,11 +58,18 @@ To play:
 
 Notes:
 - The DLL config `GameFiles/poe-hook.toml` presses Enter 20 s after start (`auto_keys`, used by unattended tests). It just logs in; set `auto_keys = []` to turn it off.
-- Keep `dump_object_types = true`: the spawn position and the server's movement collision currently rely on the layout and walkability grid the DLL exports.
+- Keep `dump_object_types = true`: the spawn position relies on the tile layout the DLL exports (the server has no collision of its own yet).
+- Admin commands (`!help`, the overlay's Commands and Instances pages) need your account name in `[admin] accounts` in `config/server.toml` (accounts are named `Exile<id>`).
 - Movement: WASD works in the default input mode. For click-to-move, pick the mouse input method in the game's options (in the config file: `user_input_mode=mouse_and_keyboard`). Space is the dodge roll in both modes.
 - After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
 
 ## Logs
 - Client: `GameFiles/logs/Client.txt`.
-- DLL: `GameFiles/poe-hook.log`.
-- Server: stdout, filtered by `RUST_LOG` or `[logging] filter`.
+- DLL: `GameFiles/poe-hook.log`, plus a per-process session folder `GameFiles/logs/poe-hook/<date_time>_<pid>/` (logs, `packets.jsonl`, snapshots).
+- Server: stdout, filtered by `RUST_LOG` or `[logging] filter`. Admin commands are also appended to `[commands] audit_log`.
+
+## Unattended client tests
+With Steam running and the server writing to `data/server-run.log` (`target/debug/poe-server > data/server-run.log 2>&1`):
+- `tools/test-run.sh <name> [seconds]` launches the client, logs in and enters the game by itself (`auto_keys`).
+- `tools/re/send_dev.py auto <command>` sends a server command over the debug link (like the overlay).
+- `echo 0x2d > GameFiles/poe-hook.keys` presses a key in the client (0x2d = Insert, the overlay); `tools/shot.sh <name>` takes a screenshot.

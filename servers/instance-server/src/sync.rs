@@ -197,7 +197,7 @@ impl ClientReports {
 
     /// Receives reports on the instance address (UDP, same port as the TCP listener). Only
     /// loopback senders are accepted. `PDC1` datagrams (`u16 client port`, then a text
-    /// command) are dev commands from the client DLL's overlay.
+    /// command) are server commands from the client DLL's overlay (`commands.rs`).
     pub async fn listen(&self, addr: SocketAddr) -> anyhow::Result<()> {
         let socket = Arc::new(UdpSocket::bind(addr).await?);
         let _ = self.socket.set(socket.clone());

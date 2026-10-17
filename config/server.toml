@@ -42,7 +42,8 @@ turn_timing = true
 # Turn the player toward the cursor, except while walking by click-to-move or rolling (the
 # client reports the cursor with its position; mapped to grid cells by cursor_to_grid).
 face_cursor = true
-# Debug link for the client DLL overlay (state view, dev commands); loopback only.
+# Debug link for the client DLL overlay (state view, command registry, instance list, server
+# commands from the overlay); loopback only.
 debug_link = true
 # Terrain seed sweep (research): `<WorldAreas.Id> <seed> [count]` per line; empty = off
 # (env POE_SWEEP overrides). Each session generates the next listed layout and ends
@@ -147,7 +148,7 @@ intro_areas = ["G1_1"]
 tile = "Intro_Tree"
 point = [9, 33]
 
-# Chat: no chat server yet; global/trade join requests are answered with this channel.
+# Chat: the channel given to "join any" requests (global/trade); lines are routed by channel.
 [chat]
 default_channel = 1
 
