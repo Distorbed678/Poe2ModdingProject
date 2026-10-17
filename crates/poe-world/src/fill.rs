@@ -52,6 +52,8 @@ struct Fill<'a> {
     /// The caller's height for the cell (`0x141f8f930`'s last argument; `i32::MIN` there means
     /// the corners decide).
     height: Option<i16>,
+    /// Dungeon fill: positions of placed tiles the exit wiggle may move (`0x14209a2c0`).
+    wiggle: Option<(Vec<(i32, i32)>, crate::dungeon_tiles::Wiggles)>,
 }
 
 fn oriented(size: (u8, u8), o: u8) -> (i32, i32) {
@@ -65,6 +67,15 @@ fn mask_pick(mask: u8, r: u32) -> u8 {
 }
 
 impl Fill<'_> {
+    fn note(&mut self, x: i32, y: i32, tdt: &Tdt) -> Result<(), GenError> {
+        if let Some((list, w)) = &mut self.wiggle {
+            if w.movable(self.files, tdt)? {
+                list.push((x, y));
+            }
+        }
+        Ok(())
+    }
+
     fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
         (0..h).all(|dy| {
             (0..w).all(|dx| match self.map.index(x + dx, y + dy) {
@@ -187,6 +198,7 @@ impl Fill<'_> {
         let (w, h) = oriented(tdt.size, o);
         let height = self.corner_height(x, y, w, h);
         self.map.place(x, y, path, &tdt, o, height, None);
+        self.note(x, y, &tdt)?;
         Ok(w - 1)
     }
 
@@ -314,6 +326,7 @@ impl Fill<'_> {
                 let c = chosen.ok_or_else(|| GenError::Unsupported(format!("no tile fits at ({mx},{my}) for fill room {path}")))?;
                 let def = self.master.tiles.tiles[c.tile].clone();
                 self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16, Some(c.tile));
+                self.note(mx, my, &def.tdt)?;
             }
         }
         self.map.room_overrides(&room, (x, y), o);
@@ -370,8 +383,8 @@ pub fn fill_cells(
     files: &dyn Files,
     cells: &[crate::dungeon_tiles::GroundCell],
     rng: &mut TerrainRng,
-) -> Result<Vec<PlacedFillRoom>, GenError> {
-    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None };
+) -> Result<(Vec<PlacedFillRoom>, Vec<(i32, i32)>), GenError> {
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: Some((Vec::new(), Default::default())) };
     for c in cells {
         let (x, y) = c.pos;
         if !f.free(x, y, 1, 1) {
@@ -384,7 +397,8 @@ pub fn fill_cells(
         f.height = Some(c.height as i16);
         f.cell(x, y, ground, c.accessible, rng)?;
     }
-    Ok(f.placed)
+    let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
+    Ok((f.placed, wiggle))
 }
 
 pub fn fill_pass(
@@ -393,7 +407,7 @@ pub fn fill_pass(
     files: &dyn Files,
     rng: &mut TerrainRng,
 ) -> Result<Vec<PlacedFillRoom>, GenError> {
-    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None };
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: None };
     for y in 0..f.map.height as i32 {
         let mut x = 0;
         while x < f.map.width as i32 {

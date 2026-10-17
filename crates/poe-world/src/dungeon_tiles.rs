@@ -8,7 +8,7 @@ use crate::{
     dungeon::Grid,
     generate::{GenError, Master, Room, TileMap, cell_key},
     rng::TerrainRng,
-    tileset::{TileKey, orient_cell, pick},
+    tileset::{Candidate, TileKey, orient_cell, pick},
 };
 
 fn unsupported(s: impl Into<String>) -> GenError {
@@ -19,7 +19,8 @@ fn unsupported(s: impl Into<String>) -> GenError {
 /// shared border, with the corner height difference along it, give one edge type.
 #[derive(Default)]
 pub struct Ecf {
-    rules: Vec<(Option<String>, Option<String>, Option<String>, i32)>,
+    /// Edge pair, result, and the height difference (`None`: a rule without a number).
+    rules: Vec<(Option<String>, Option<String>, Option<String>, Option<i32>)>,
 }
 
 impl Ecf {
@@ -31,16 +32,17 @@ impl Ecf {
                 continue;
             }
             let p = |s: &str| (!s.is_empty()).then(|| s.to_ascii_lowercase().replace('\\', "/"));
-            let dh = parts[6].trim().parse().unwrap_or(0);
+            let dh = parts[6].trim().parse().ok();
             rules.push((p(parts[1]), p(parts[3]), p(parts[5]), dh));
         }
         Self { rules }
     }
 
-    /// `0x1420a28c0`: the rule for the pair (either order) and height difference; without one,
-    /// a lone edge stays and two different edges give none.
+    /// `0x1420a28c0`: the rule for the pair (either order) and height difference, then one
+    /// without a height difference; without one, a lone edge stays and two edges give none.
     fn combine(&self, a: &Option<String>, b: &Option<String>, dh: i32) -> Option<String> {
-        if let Some(r) = self.rules.iter().find(|r| r.3 == dh && ((&r.0 == a && &r.1 == b) || (&r.0 == b && &r.1 == a))) {
+        let pair = |r: &&(Option<String>, Option<String>, Option<String>, Option<i32>)| (&r.0 == a && &r.1 == b) || (&r.0 == b && &r.1 == a);
+        if let Some(r) = self.rules.iter().filter(pair).find(|r| r.3 == Some(dh)).or_else(|| self.rules.iter().filter(pair).find(|r| r.3.is_none())) {
             return r.2.clone();
         }
         match (a, b) {
@@ -267,12 +269,20 @@ pub struct TilePass<'a> {
     /// Tiles per room unit (master +0x149) and the shared border (+0x14b).
     pub unit: u32,
     pub overlap: u32,
+    /// Edge types by path (lower case), for the exit wiggle's records.
+    pub edge_types: &'a HashMap<String, crate::rooms::EdgeType>,
+    /// `.tsi` `AllowInteriorOverlapFixes` (master +0x162): border exits may move to the middle
+    /// on any side, not only towards another border entry.
+    pub overlap_fixes: bool,
+    /// `.tsi` `DisableDoors` (master +0x167): no door placement.
+    pub doors_disabled: bool,
 }
 
 impl TilePass<'_> {
     /// Passes A and B; returns the ground-only cells in fill order (`0x1420d5060`: stable, by
     /// x then y).
-    pub fn run(&self, grid: &Grid, rooms: &HashMap<String, Room>, map: &mut TileMap, rng: &mut TerrainRng) -> Result<Vec<GroundCell>, GenError> {
+    pub fn run(&self, grid: &Grid, rooms: &HashMap<String, Room>, map: &mut TileMap, rng: &mut TerrainRng) -> Result<(Vec<GroundCell>, Vec<(i32, i32)>), GenError> {
+        let mut moved = Vec::new();
         // `0x142099c80`: door bookkeeping only with `door` tiles.
         let mut doors = Doors { on: self.door_tiles().next().is_some(), ..Default::default() };
         let mut cells: Vec<GroundCell> = Vec::new();
@@ -285,10 +295,10 @@ impl TilePass<'_> {
             if doors.on && self.overlap != 0 {
                 doors.mark(p, self.unit as i32, self.overlap as i32);
             }
-            self.room(p, room, map, &mut borders, &mut cells, rng)?;
+            self.room(p, room, map, &mut borders, &mut cells, &mut moved, rng)?;
         }
         self.borders(borders, map, &mut cells, &mut doors, rng)?;
-        if doors.on {
+        if doors.on && !self.doors_disabled {
             self.check_doors(&doors, map, rng)?;
         }
         // `0x141f9e780`: the rooms' ground overrides.
@@ -299,11 +309,12 @@ impl TilePass<'_> {
             }
         }
         cells.sort_by_key(|c| c.pos);
-        Ok(cells)
+        Ok((cells, moved))
     }
 
     /// `0x1420983d0`: a room's slots row by row.
-    fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, rng: &mut TerrainRng) -> Result<(), GenError> {
+    #[allow(clippy::too_many_arguments)]
+    fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, moved: &mut Vec<(i32, i32)>, rng: &mut TerrainRng) -> Result<(), GenError> {
         let o = p.orientation;
         let step = (self.unit - self.overlap) as i32;
         let base = (p.origin.0 * step, p.origin.1 * step);
@@ -354,7 +365,26 @@ impl TilePass<'_> {
                     mark_ground(map, cells, pos, &key, height, p.accessible);
                     continue;
                 }
-                if self.on_border(&feature, &key, (xflag, yflag), (lx, ly), (tw, th)) {
+                let border = self.on_border(&feature, &key, (xflag, yflag), (lx, ly), (tw, th));
+                // `0x142098b18`: square unnamed slots whose edges all have its size, with an edge
+                // of wiggle 2 or more (1 on the border line), are recorded for the exit wiggle.
+                if feature.is_empty() && key.size.0 == key.size.1 {
+                    let need = if border { 1 } else { 2 };
+                    let mut ok = false;
+                    let mut fits = true;
+                    for e in key.edges.iter().flatten() {
+                        let Some(et) = self.edge_types.get(e) else { continue };
+                        if et.size != key.size.0 {
+                            fits = false;
+                            break;
+                        }
+                        ok |= et.wiggle >= need;
+                    }
+                    if fits && ok {
+                        moved.push(pos);
+                    }
+                }
+                if border {
                     let mut flags = p.accessible as u8;
                     if xflag != 2 {
                         flags |= 0x10;
@@ -443,44 +473,293 @@ impl TilePass<'_> {
     }
 
     /// `0x14209fbc0`: the shared-border slots in position order.
-    fn borders(&self, borders: Vec<((i32, i32), Border)>, map: &mut TileMap, cells: &mut Vec<GroundCell>, doors: &mut Doors, rng: &mut TerrainRng) -> Result<(), GenError> {
-        for (pos, mut e) in borders {
+    fn borders(&self, mut borders: Vec<((i32, i32), Border)>, map: &mut TileMap, cells: &mut Vec<GroundCell>, doors: &mut Doors, rng: &mut TerrainRng) -> Result<(), GenError> {
+        for idx in 0..borders.len() {
+            let (pos, mut e) = borders[idx].clone();
+            let r = self.border(&mut borders, pos, &mut e, map, cells, doors, rng);
+            borders[idx].1 = e;
+            r?;
+        }
+        Ok(())
+    }
+
+    /// One entry of `0x14209fbc0`.
+    #[allow(clippy::too_many_arguments)]
+    fn border(&self, borders: &mut [((i32, i32), Border)], pos: (i32, i32), e: &mut Border, map: &mut TileMap, cells: &mut Vec<GroundCell>, doors: &mut Doors, rng: &mut TerrainRng) -> Result<(), GenError> {
+        {
             if e.names.is_empty() && uniform(map, &e.key) {
                 mark_ground(map, cells, pos, &e.key, e.height, e.seen & 1 != 0);
-                continue;
+                return Ok(());
             }
             let (w, h) = (e.key.size.0 as i32, e.key.size.1 as i32);
             let taken = (0..h).flat_map(|dy| (0..w).map(move |dx| (dx, dy))).filter(|&(dx, dy)| map.index(pos.0 + dx, pos.1 + dy).is_some_and(|i| map.piece_at[i].is_some())).count() as i32;
-            if taken != 0 {
-                return Err(unsupported(format!("dungeon: border tile at {pos:?} over a placed tile (not ported)")));
+            if taken != 0 && taken != w * h {
+                return Err(unsupported(format!("dungeon: overlap tile at {pos:?} partially over placed tiles")));
             }
-            if e.merged & 0x1e != 0x1e {
-                // Sides only one room gave: their `.gt` flag 0x10 grounds are dropped.
-                let only = !e.merged & e.seen & 0x1e;
-                let mut a = e.key.clone();
-                a.edges = Default::default();
-                let mut merged = e.merged;
-                e.key = merge(map, self.ecf, &a, &e.key, e.height, e.height, only, e.seen, &mut merged)?;
-                e.merged = merged;
+            let placed = map.index(pos.0, pos.1).and_then(|i| map.cells[i].as_ref().map(|c| (map.piece_at[i], c.height)));
+            match placed {
+                None => {
+                    if e.merged & 0x1e != 0x1e {
+                        // Sides only one room gave: their `.gt` flag 0x10 grounds are dropped.
+                        let only = !e.merged & e.seen & 0x1e;
+                        let mut a = e.key.clone();
+                        a.edges = Default::default();
+                        let mut merged = e.merged;
+                        e.key = merge(map, self.ecf, &a, &e.key, e.height, e.height, only, e.seen, &mut merged)?;
+                        e.merged = merged;
+                    }
+                }
+                Some((piece, height)) => {
+                    // A tile is already there: its key counts for the sides no room gave.
+                    let tile = piece.and_then(|p| Some((map.pieces[p].tile?, map.pieces[p].orientation)));
+                    let Some((t, o)) = tile else {
+                        return Err(unsupported(format!("dungeon: overlap tile at {pos:?} over a fill tile")));
+                    };
+                    let k = self.master.tiles.tiles[t].key.oriented(o);
+                    let other = match e.seen & 0x1e {
+                        0x1c => 0x1a,
+                        0x1a => 0x1c,
+                        0x16 => 0x0e,
+                        0x0e => 0x16,
+                        _ => 0x1e,
+                    };
+                    let mut merged = e.merged;
+                    let mut out = merge(map, self.ecf, &e.key, &k, e.height, height as i32, e.seen, other, &mut merged)?;
+                    let m = out.heights.iter().map(|&v| v as i8).min().unwrap_or(0);
+                    for v in &mut out.heights {
+                        *v = (*v as i8 - m) as u8;
+                    }
+                    e.key = out;
+                    e.height += m as i32;
+                    e.merged = merged;
+                    e.seen |= other;
+                }
             }
+            // Named slots: a name drawn by its tiles' total weight (1 without tiles) until one
+            // places.
             if !e.names.is_empty() {
-                return Err(unsupported(format!("dungeon: named border tile at {pos:?} (not ported)")));
+                let mut names: Vec<(String, u32)> = e
+                    .names
+                    .iter()
+                    .map(|n| {
+                        let list = self.master.tiles.candidates(n, &e.key);
+                        (n.clone(), if list.is_empty() { 1 } else { list.iter().map(|c| c.weight).sum() })
+                    })
+                    .filter(|n| n.1 != 0)
+                    .collect();
+                let mut total: u32 = names.iter().map(|n| n.1).sum();
+                let mut done = false;
+                while !names.is_empty() {
+                    let mut r = rng.below(total);
+                    let mut k = names.len() - 1;
+                    for (j, n) in names.iter().enumerate() {
+                        if r < n.1 {
+                            k = j;
+                            break;
+                        }
+                        r -= n.1;
+                    }
+                    if self.place_border(&e.key, &names[k].0, pos, e.height, map, rng, Some(&mut *borders))? {
+                        if e.key.size == (1, 1) && names[k].0.eq_ignore_ascii_case("door") {
+                            doors.add(pos, (1, 1));
+                        }
+                        done = true;
+                        break;
+                    }
+                    let name = names[k].0.clone();
+                    if let Some(j) = names.iter().position(|n| n.0 == name) {
+                        total -= names[j].1;
+                        names.remove(j);
+                    }
+                }
+                if done {
+                    return Ok(());
+                }
             }
             if uniform(map, &e.key) {
                 mark_ground(map, cells, pos, &e.key, e.height, e.seen & 1 != 0);
-                continue;
+                return Ok(());
             }
-            // `0x14209f050`.
-            let list = self.master.tiles.candidates("", &e.key);
-            if list.is_empty() {
+            if !self.place_border(&e.key, "", pos, e.height, map, rng, Some(&mut *borders))? {
                 return Err(unsupported(format!("dungeon: no border tile at {pos:?} for {:?}", e.key)));
             }
-            let total = list.iter().map(|c| c.weight).sum();
-            let c = pick(list, rng.below(total)).expect("non-empty list");
-            let def = &self.master.tiles.tiles[c.tile];
-            map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, e.height as i16, Some(c.tile));
-            map.set_heights(pos.0, pos.1, &def.tdt, e.height as i16);
+            e.seen |= 0x20;
             doors.after_border(pos, &e.key);
+        }
+        Ok(())
+    }
+
+    /// `0x14209f050`: the tile-set tiles of `feature` with `key`, `below(total)`, placed at
+    /// `height`. Without tiles (and with `borders`, i.e. not for a neighbour's repair), sides
+    /// whose exit is off the middle and that face another border entry move it to the middle
+    /// one by one until tiles exist (`0x14209fa10`); the neighbours across moved sides then
+    /// follow (`0x14209ec70`). The height fallback is not ported.
+    #[allow(clippy::too_many_arguments)]
+    fn place_border(&self, key: &TileKey, feature: &str, pos: (i32, i32), height: i32, map: &mut TileMap, rng: &mut TerrainRng, borders: Option<&mut [((i32, i32), Border)]>) -> Result<bool, GenError> {
+        let lookup = |k: &TileKey| self.master.tiles.candidates(feature, k).to_vec();
+        // Sides whose exit may move to the middle (only for the slot itself, not a repair).
+        let mut sides = Vec::new();
+        if let Some(b) = borders.as_deref() {
+            for i in 0..4 {
+                let Some(edge) = &key.edges[i] else { continue };
+                let Some(et) = self.edge_types.get(edge) else { continue };
+                if et.virtual_edge || et.centred || key.exits[i] == Self::mid(key, i) {
+                    continue;
+                }
+                let n = self.across(key, pos, i);
+                if n != pos && (self.overlap_fixes || b.binary_search_by_key(&(n.0 * 0x10000 + n.1), |e| e.0.0 * 0x10000 + e.0.1).is_ok()) {
+                    sides.push(i);
+                }
+            }
+        }
+        // `0x14209fa10`: the sides take the middle exit one by one until tiles exist.
+        let middle = |k: &mut TileKey, changed: &mut Vec<usize>| -> Vec<Candidate> {
+            for &i in &sides {
+                k.exits[i] = Self::mid(k, i);
+                changed.push(i);
+                let l = lookup(k);
+                if !l.is_empty() {
+                    return l;
+                }
+            }
+            Vec::new()
+        };
+        let takes_height = |g: &Option<String>| g.as_ref().is_none_or(|g| map.gt_flags(g) & 1 != 0);
+        // `0x14209fb00`: one corner whose ground takes no height drops it.
+        let flatten_one = |k: &mut TileKey| -> Vec<Candidate> {
+            for i in 0..4 {
+                if takes_height(&k.grounds[i]) {
+                    continue;
+                }
+                let old = k.heights[i];
+                k.heights[i] = 0;
+                let l = lookup(k);
+                if !l.is_empty() {
+                    return l;
+                }
+                k.heights[i] = old;
+            }
+            Vec::new()
+        };
+        let mut height = height;
+        let mut k = key.clone();
+        let mut changed: Vec<usize> = Vec::new();
+        let mut list = lookup(&k);
+        if list.is_empty() && !sides.is_empty() {
+            list = middle(&mut k, &mut changed);
+        }
+        if list.is_empty() && key.heights.iter().any(|&h| h != 0) {
+            k = key.clone();
+            changed.clear();
+            list = flatten_one(&mut k);
+            if list.is_empty() && !sides.is_empty() {
+                list = middle(&mut k, &mut changed);
+                if list.is_empty() {
+                    list = flatten_one(&mut k);
+                }
+                if list.is_empty() {
+                    k = key.clone();
+                    changed.clear();
+                }
+            }
+            if list.is_empty() {
+                // Corners whose ground takes no height drop it; the others' heights.
+                let mut hs: Vec<i8> = Vec::new();
+                for i in 0..4 {
+                    if takes_height(&k.grounds[i]) {
+                        hs.push(k.heights[i] as i8);
+                    } else {
+                        k.heights[i] = 0;
+                    }
+                }
+                list = lookup(&k);
+                if list.is_empty() && !sides.is_empty() {
+                    list = middle(&mut k, &mut changed);
+                }
+                if list.is_empty() {
+                    hs.sort();
+                    hs.dedup();
+                    list = lookup(&k);
+                    // One height left: the tile is flat at that height.
+                    if list.is_empty() && hs.len() == 1 {
+                        k.heights = [0; 4];
+                        height += hs[0] as i32;
+                        list = lookup(&k);
+                    }
+                }
+            }
+        }
+        if list.is_empty() {
+            return Ok(false);
+        }
+        let total = list.iter().map(|c| c.weight).sum();
+        let c = pick(&list, rng.below(total)).expect("non-empty list");
+        let def = &self.master.tiles.tiles[c.tile];
+        map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height as i16, Some(c.tile));
+        map.set_heights(pos.0, pos.1, &def.tdt, height as i16);
+        if let Some(b) = borders {
+            self.fix_across(&k, pos, &changed, b, map, rng)?;
+        }
+        Ok(true)
+    }
+
+    /// The middle exit of side `i` (`size · 3 / 2`).
+    fn mid(k: &TileKey, i: usize) -> u8 {
+        (if i & 1 == 0 { k.size.0 } else { k.size.1 } as u32 * 3 / 2) as u8
+    }
+
+    /// `0x14209eb70`: the cell across side `i` of a tile at `pos`.
+    fn across(&self, k: &TileKey, pos: (i32, i32), i: usize) -> (i32, i32) {
+        let esize = |i: usize| k.edges[i].as_ref().and_then(|e| self.edge_types.get(e)).map_or(0, |et| et.size as i32);
+        match i {
+            0 => (pos.0, pos.1 - esize(0)),
+            1 => (pos.0 + k.size.0 as i32, pos.1),
+            2 => (pos.0, pos.1 + k.size.1 as i32),
+            _ => (pos.0 - esize(3), pos.1),
+        }
+    }
+
+    /// `0x14209ec70`: across each moved side, a placed tile with the same edge and side length
+    /// moves its exit to the middle too and is drawn again; a border entry still to come takes
+    /// the middle exit in its key.
+    fn fix_across(&self, k: &TileKey, pos: (i32, i32), changed: &[usize], borders: &mut [((i32, i32), Border)], map: &mut TileMap, rng: &mut TerrainRng) -> Result<(), GenError> {
+        for &u in changed {
+            let Some(edge) = k.edges[u].clone() else { continue };
+            let n = self.across(k, pos, u);
+            if n.0 < 0 || n.1 < 0 || n.0 as u32 >= map.width || n.1 as u32 >= map.height {
+                continue;
+            }
+            let o = (u + 2) & 3;
+            let len = if u & 1 == 0 { k.size.0 } else { k.size.1 };
+            let side_len = |k: &TileKey| if o & 1 == 0 { k.size.0 } else { k.size.1 };
+            let entry = borders.binary_search_by_key(&(n.0 * 0x10000 + n.1), |e| e.0.0 * 0x10000 + e.0.1).ok();
+            match entry {
+                Some(j) if borders[j].1.seen & 0x20 == 0 => {
+                    let e = &mut borders[j].1;
+                    if e.key.edges[o].as_deref() == Some(edge.as_str()) && side_len(&e.key) == len {
+                        e.key.exits[o] = Self::mid(&e.key, o);
+                    }
+                }
+                _ => {
+                    let Some(i) = map.index(n.0, n.1) else { continue };
+                    let Some(cell) = map.cells[i].clone() else { continue };
+                    let Some(t) = map.piece_at[i].and_then(|p| map.pieces[p].tile) else { continue };
+                    let def = &self.master.tiles.tiles[t];
+                    let mut nk = def.key.oriented(cell.orientation);
+                    if side_len(&nk) != len || nk.edges[o].as_deref() != Some(edge.as_str()) {
+                        continue;
+                    }
+                    let mid = Self::mid(&nk, o);
+                    if nk.exits[o] == mid {
+                        continue;
+                    }
+                    nk.exits[o] = mid;
+                    let feature = def.tdt.feature.clone().unwrap_or_default();
+                    if !self.place_border(&nk, &feature, n, cell.height as i32, map, rng, None)? {
+                        return Err(unsupported(format!("dungeon: could not find matching adjacent tile at {n:?}")));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -591,3 +870,163 @@ impl TilePass<'_> {
         Ok(())
     }
 }
+
+/// Edge types of the exit wiggle, loaded on demand.
+#[derive(Default)]
+pub struct Wiggles {
+    edges: HashMap<String, crate::rooms::EdgeType>,
+}
+
+impl Wiggles {
+    fn edge(&mut self, files: &dyn crate::generate::Files, path: &str) -> Result<&crate::rooms::EdgeType, GenError> {
+        let key = path.to_ascii_lowercase();
+        if !self.edges.contains_key(&key) {
+            let et = crate::rooms::EdgeType::parse(&crate::text::decode_utf16(&files.read(&key)?));
+            self.edges.insert(key.clone(), et);
+        }
+        Ok(&self.edges[&key])
+    }
+
+    /// `0x14209a2c0` / `0x1420969e0`: a square tile whose edges all have the tile's size and
+    /// one of them takes hashed exits.
+    pub fn movable(&mut self, files: &dyn crate::generate::Files, tdt: &crate::tdt::Tdt) -> Result<bool, GenError> {
+        if tdt.size.0 != tdt.size.1 || tdt.feature.as_deref().is_some_and(|f| !f.is_empty()) {
+            return Ok(false);
+        }
+        let mut hashed = false;
+        for e in tdt.edges.iter().flatten().filter(|e| !e.is_empty()) {
+            let et = self.edge(files, e)?;
+            if et.size != tdt.size.0 {
+                return Ok(false);
+            }
+            hashed |= et.hashed;
+        }
+        Ok(hashed)
+    }
+}
+
+/// `0x1421969e0`: the hashed exit of side `side` (0 top, 1 right, 2 bottom, 3 left) at `(x, y)`
+/// for an edge of size `size`.
+pub fn hashed_exit(x: i32, y: i32, side: u32, size: u32) -> u8 {
+    let (x, y) = (x as u32, y as u32);
+    let k = match side {
+        1 => {
+            let v = y.wrapping_mul(0x7bb).wrapping_add(0x31e9).wrapping_add(x.wrapping_add(size).wrapping_mul(0x337)) % 0xd;
+            ((v / 3 * 3).wrapping_sub(v).wrapping_add(2) & 0xff) * (size & 0xff)
+        }
+        2 => {
+            let v = y.wrapping_add(size).wrapping_mul(0x7bb).wrapping_add(x.wrapping_mul(0x337)) % 0xd;
+            ((v / 3 * 3).wrapping_sub(v).wrapping_add(2) & 0xff) * (size & 0xff)
+        }
+        _ => (y.wrapping_mul(0x7bb).wrapping_add(side.wrapping_mul(0x10a3)).wrapping_add(x.wrapping_mul(0x337)) % 0xd % 3) * (size & 0xff),
+    };
+    (k as u8).wrapping_add((size >> 1) as u8)
+}
+
+/// `0x1420a1f70` (after the fill): the recorded tiles, shuffled, each try their sides in a
+/// shuffled order; a side with a hashed edge whose hashed exit differs from the tile's takes
+/// it when tiles exist for both this key and the neighbour across (its opposite exit mirrored);
+/// then both are drawn again and placed.
+pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut TileMap, mut list: Vec<(i32, i32)>, rng: &mut TerrainRng) -> Result<(), GenError> {
+    if list.is_empty() {
+        return Ok(());
+    }
+    let mut w = Wiggles::default();
+    // `0x141fff9b0`: a set ordered by x·65536 + y.
+    list.sort_by_key(|p| p.0.wrapping_mul(0x10000).wrapping_add(p.1));
+    list.dedup();
+    rng.below(list.len() as u32);
+    let n = list.len();
+    for i in 0..n {
+        let k = rng.uniform((n - i) as u32) as usize;
+        list.swap(i, i + k);
+    }
+    const DIRS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+    // The tile at a cell, when it is a movable tile's corner cell: its path, height and key.
+    let at = |map: &TileMap, master: &mut Master, w: &mut Wiggles, p: (i32, i32)| -> Result<Option<(i16, TileKey)>, GenError> {
+        let Some(c) = map.cell_or_spill(p.0, p.1).cloned() else { return Ok(None) };
+        if c.offset != (0, 0) {
+            return Ok(None);
+        }
+        let tdt = master.header(files, &c.path)?.clone();
+        if !w.movable(files, &tdt)? {
+            return Ok(None);
+        }
+        // The indexed key (`0x141d09900`): grounds with `.gt` flag 0x10 left out.
+        let mut k = TileKey::from_tdt(&tdt);
+        for g in &mut k.grounds {
+            if g.as_ref().is_some_and(|g| map.gt_flags(g) & 0x10 != 0) {
+                *g = None;
+            }
+        }
+        Ok(Some((c.height, k.oriented(c.orientation))))
+    };
+    for p in list {
+        let Some((height, mut key)) = at(map, master, &mut w, p)? else {
+            if std::env::var("POE_DBG_WIGGLE").is_ok() {
+                let c = map.index(p.0, p.1).and_then(|i| map.cells[i].clone());
+                eprintln!("DBG wskip {p:?} {:?}", c.map(|c| (c.path, c.offset)));
+            }
+            continue;
+        };
+        let mut sides = [0u32, 1, 2, 3];
+        rng.below(4);
+        for i in 0..4 {
+            let k = rng.uniform(4 - i as u32) as usize;
+            sides.swap(i, i + k);
+        }
+        // Every side whose move both tiles allow keeps it; the tile takes the last list.
+        let mut own: Option<Vec<Candidate>> = None;
+        let mut across: [Option<((i32, i32), i16, Vec<Candidate>)>; 4] = Default::default();
+        for s in sides {
+            let Some(e) = key.edges[s as usize].clone() else { continue };
+            let et = w.edge(files, &e)?;
+            if !et.hashed {
+                continue;
+            }
+            let size = et.size as u32;
+            let new = hashed_exit(p.0, p.1, s, size);
+            if new == key.exits[s as usize] {
+                continue;
+            }
+            let d = DIRS[s as usize];
+            let q = (p.0 + size as i32 * d.0, p.1 + size as i32 * d.1);
+            if q.0 < 0 || q.1 < 0 || q.0 as u32 >= map.width || q.1 as u32 >= map.height {
+                continue;
+            }
+            let Some((qh, mut qkey)) = at(map, master, &mut w, q)? else { continue };
+            let old = key.exits[s as usize];
+            key.exits[s as usize] = new;
+            let list = master.tiles.candidates("", &key).to_vec();
+            if !list.is_empty() {
+                let o = ((s + 2) & 3) as usize;
+                qkey.exits[o] = (size as u8 * 3).wrapping_sub(new).wrapping_sub(1);
+                let qlist = master.tiles.candidates("", &qkey).to_vec();
+                if std::env::var("POE_DBG_WIGGLE").is_ok() {
+                    eprintln!("DBG wiggle {p:?} side {s} own {} {key:?}\nDBG   across {q:?} {} {qkey:?}", list.len(), qlist.len());
+                }
+                let ok = !qlist.is_empty();
+                across[s as usize] = Some((q, qh, qlist));
+                if ok {
+                    own = Some(list);
+                    continue;
+                }
+            }
+            key.exits[s as usize] = old;
+        }
+        let Some(list) = own else { continue };
+        let mut places = vec![(list, p, height)];
+        places.extend(across.into_iter().flatten().filter(|a| !a.2.is_empty()).map(|(q, qh, l)| (l, q, qh)));
+        for (list, pos, h) in places {
+            let total = list.iter().map(|c| c.weight).sum();
+            let c = pick(&list, rng.below(total)).expect("non-empty list");
+            let def = &master.tiles.tiles[c.tile];
+            if std::env::var("POE_DBG_WIGGLE").is_ok() {
+                eprintln!("DBG wplace {} {} o{} h{}\t{}", pos.0, pos.1, c.orientation, h, def.path);
+            }
+            map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, h, Some(c.tile));
+        }
+    }
+    Ok(())
+}
+
