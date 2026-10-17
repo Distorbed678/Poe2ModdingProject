@@ -1177,6 +1177,7 @@ dependencies = [
  "poe-net",
  "poe-proto",
  "poe-store",
+ "poe-world",
  "rand 0.9.5",
  "tokio",
  "tracing",

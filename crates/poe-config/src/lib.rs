@@ -48,6 +48,55 @@ pub struct Config {
     pub chat: ChatConfig,
     #[serde(default)]
     pub player: PlayerConfig,
+    #[serde(default)]
+    pub terrain: TerrainConfig,
+    #[serde(default)]
+    pub admin: AdminConfig,
+    #[serde(default)]
+    pub commands: CommandsConfig,
+}
+
+/// Server-side terrain generation (`poe-world`). The client always builds the terrain itself
+/// from the area and seed; the server's copy is for collision, pathing and spawns later.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TerrainConfig {
+    /// Generate each new instance's terrain on the server and compare its tile hash with the
+    /// client's. Off by default until the generator covers every area.
+    #[serde(default)]
+    pub generate: bool,
+}
+
+/// Server administrators: the accounts allowed to use admin commands.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AdminConfig {
+    /// Account names (as shown in game, e.g. `Exile1`).
+    #[serde(default)]
+    pub accounts: Vec<String>,
+}
+
+/// Chat commands (`!help` lists them).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommandsConfig {
+    /// Prefix of server commands typed in chat. Kept apart from `/`, which the client uses
+    /// for its own commands.
+    #[serde(default = "default_command_prefix")]
+    pub prefix: String,
+    /// Append every admin command (account, command, result) to this file; empty = off.
+    #[serde(default)]
+    pub audit_log: PathBuf,
+}
+
+impl Default for CommandsConfig {
+    fn default() -> Self {
+        Self {
+            prefix: default_command_prefix(),
+            audit_log: PathBuf::new(),
+        }
+    }
+}
+
+fn default_command_prefix() -> String {
+    "!".into()
 }
 
 /// Player characters.

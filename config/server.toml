@@ -47,6 +47,22 @@ debug_link = true
 sweep = ""
 sweep_results = "data/sweep-results.tsv"
 
+[terrain]
+# Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
+# with the one the client reports. The client always generates the terrain itself; leave this
+# off until the generator covers every area (Documentation/terrain-status.md).
+generate = false
+
+[admin]
+# Accounts allowed to use admin commands (chat `!` commands and the overlay's server tools).
+accounts = ["Exile1"]
+
+[commands]
+# Prefix for server commands typed in chat (`/` stays with the client's own commands).
+prefix = "!"
+# Every admin command is appended here (time, account, command, result). Empty = off.
+audit_log = "data/admin-audit.log"
+
 [database]
 path = "data/server.sqlite"
 
