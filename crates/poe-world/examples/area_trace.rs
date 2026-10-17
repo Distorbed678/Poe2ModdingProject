@@ -36,7 +36,7 @@ fn compare_layout(map: &TileMap, dir: &str) {
             same += 1;
         } else {
             diff += 1;
-            if diff <= 8 {
+            if diff <= std::env::var("POE_LAYOUT_DIFFS").ok().and_then(|v| v.parse().ok()).unwrap_or(8) {
                 println!("  cell {x},{y}: ours {ours}\n           client {theirs}");
             }
         }
@@ -141,7 +141,7 @@ fn compare_graph(stage: &str, lg: &LayoutGraph, lines: &[Vec<String>]) {
             same += 1;
         } else {
             diff += 1;
-            if diff <= 8 {
+            if diff <= std::env::var("POE_LAYOUT_DIFFS").ok().and_then(|v| v.parse().ok()).unwrap_or(8) {
                 println!("  {stage} {} {idx}: ours {ours}\n    client {theirs}", l[2]);
             }
         }

@@ -184,6 +184,66 @@ impl TileMap {
         m
     }
 
+    /// The corners of `outer` from `origin` on (a subgraph's window, `0x141f9e130`).
+    pub fn copy_lattice(&mut self, outer: &TileMap, origin: (i32, i32)) {
+        for y in 0..=self.height as i32 {
+            for x in 0..=self.width as i32 {
+                if let (Some(i), Some(j)) = (self.point_index(x, y), outer.point_index(x + origin.0, y + origin.1)) {
+                    self.lattice[i] = outer.lattice[j].clone();
+                }
+            }
+        }
+    }
+
+    /// Writes a subgraph's window back at `origin`: its cells, pieces (no longer tile-set
+    /// tiles of this map's set) and corners.
+    pub fn paste(&mut self, sub: &TileMap, origin: (i32, i32)) {
+        let base = self.pieces.len();
+        self.pieces.extend(sub.pieces.iter().map(|p| Piece { x: p.x + origin.0, y: p.y + origin.1, tile: None, ..p.clone() }));
+        for y in 0..sub.height as i32 {
+            for x in 0..sub.width as i32 {
+                let i = sub.index(x, y).unwrap();
+                if sub.cells[i].is_none() {
+                    continue;
+                }
+                if let Some(j) = self.index(x + origin.0, y + origin.1) {
+                    self.cells[j] = sub.cells[i].clone();
+                    self.grounds[j] = sub.grounds[i].clone();
+                    self.piece_at[j] = sub.piece_at[i].map(|p| p + base);
+                }
+            }
+        }
+        for y in 0..=sub.height as i32 {
+            for x in 0..=sub.width as i32 {
+                if let (Some(i), Some(j)) = (sub.point_index(x, y), self.point_index(x + origin.0, y + origin.1)) {
+                    self.lattice[j] = sub.lattice[i].clone();
+                }
+            }
+        }
+        for s in &sub.spill {
+            match s {
+                Spill::Cell(x, y, piece, cell) => match self.index(x + origin.0, y + origin.1) {
+                    Some(j) => {
+                        self.cells[j] = Some(cell.clone());
+                        self.piece_at[j] = Some(piece + base);
+                    }
+                    None => self.spill.push(Spill::Cell(x + origin.0, y + origin.1, piece + base, cell.clone())),
+                },
+                Spill::Point(x, y, g, h) => match self.point_index(x + origin.0, y + origin.1) {
+                    Some(j) => {
+                        let p = &mut self.lattice[j];
+                        p.flags |= 3;
+                        if g.is_some() {
+                            p.ground = g.clone();
+                        }
+                        p.height = *h;
+                    }
+                    None => self.spill.push(Spill::Point(x + origin.0, y + origin.1, g.clone(), *h)),
+                },
+            }
+        }
+    }
+
     /// Lattice index of corner `(x, y)` (0..=width, 0..=height).
     pub fn point_index(&self, x: i32, y: i32) -> Option<usize> {
         (x >= 0 && y >= 0 && x as u32 <= self.width && y as u32 <= self.height)

@@ -144,6 +144,13 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
     // the topology's list (`0x141ff90f0`: `region::pick(mask, lcg_index(sub, 0x348))`).
     let orientation = forced.orientation.filter(|&o| o < 8).unwrap_or(if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() as u8 });
     let mut graph = Graph::parse_bytes(&crate::generate::Files::read(files, &dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
+    turn(files, &mut graph, orientation)?;
+    let map = generate_graph_probed(files, &graph, rng, probe)?;
+    Ok(Generated { graph: dgr, map, draws: rng.draws })
+}
+
+/// Turns a graph into region orientation `o` (edge types decide their mirroring).
+fn turn(files: &dyn crate::generate::Files, graph: &mut Graph, o: u8) -> Result<(), GenError> {
     let mut types = TerrainTypes::default();
     let mut symmetric = std::collections::HashMap::new();
     for e in &graph.edges {
@@ -153,9 +160,8 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
             symmetric.insert(key, v);
         }
     }
-    crate::region::turn_graph(&mut graph, orientation, &|t| symmetric.get(&t.to_ascii_lowercase()).copied().unwrap_or(false));
-    let map = generate_graph_probed(files, &graph, rng, probe)?;
-    Ok(Generated { graph: dgr, map, draws: rng.draws })
+    crate::region::turn_graph(graph, o, &|t| symmetric.get(&t.to_ascii_lowercase()).copied().unwrap_or(false));
+    Ok(())
 }
 
 /// `0x141fe9970`: existence rolls (nodes, node +0x44 = value 0: 0 removes, ≥100 keeps, else
@@ -413,6 +419,48 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
 fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+    let mut built = build_dungeon(files, graph, removed, rng, None)?;
+    // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
+    // graph's fill and de-repetition, straight into its reserved rectangle of the map.
+    for (file, origin) in std::mem::take(&mut built.subgraphs) {
+        let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
+        if sub.dungeon_defaults.is_none() {
+            return Err(GenError::Unsupported(format!("subgraph {file}: not a dungeon graph (not ported)")));
+        }
+        // Turned like the main graph (`0x141ff05f0` sets the parent's region).
+        turn(files, &mut sub, graph.region)?;
+        random_offsets(&mut sub, rng);
+        let (sub, removed) = prune(&sub, rng)?;
+        let inner = build_dungeon(files, &sub, &removed, rng, Some((&built.map, origin)))?;
+        if !inner.subgraphs.is_empty() {
+            return Err(GenError::Unsupported(format!("subgraph {file}: nested subgraphs (not ported)")));
+        }
+        built.map.paste(&inner.map, origin);
+    }
+    let Built { map, mut master, tsi_bytes, tsi, .. } = built;
+    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
+    let edge_types = master.edge_type_table(files)?;
+    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), true, &mut master, files, &edge_types, rng)?;
+    // Tile records keep heights in world units (`StoreyHeight` per storey).
+    let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);
+    for c in map.cells.iter_mut().flatten() {
+        c.height *= storey;
+    }
+    Ok(map)
+}
+
+struct Built {
+    map: TileMap,
+    master: Master,
+    tsi_bytes: Vec<u8>,
+    tsi: std::collections::HashMap<String, String>,
+    /// Reserved subgraph rectangles: graph file and tile origin.
+    subgraphs: Vec<(String, (i32, i32))>,
+}
+
+/// One dungeon graph up to its de-repetition: layout, tile pass, fill. `window` is the map and
+/// origin a subgraph is generated into (its corners start as the map's).
+fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, window: Option<(&TileMap, (i32, i32))>) -> Result<Built, GenError> {
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
     let tsi = tsi_entries(&tsi_bytes);
@@ -435,6 +483,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut map = TileMap::new(grid.w * step + grid.overlap, grid.h * step + grid.overlap);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
+    if let Some((outer, origin)) = window {
+        map.copy_lattice(outer, origin);
+    }
     let mut rooms = std::collections::HashMap::new();
     for r in &grid.rooms {
         if !r.path.is_empty() && !rooms.contains_key(&r.path) {
@@ -460,15 +511,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         .collect();
     placements.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
     derepeat_pass(&mut map, &master, &placements, rng);
-    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
-    let edge_types = master.edge_type_table(files)?;
-    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), true, &mut master, files, &edge_types, rng)?;
-    // Tile records keep heights in world units (`StoreyHeight` per storey).
-    let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);
-    for c in map.cells.iter_mut().flatten() {
-        c.height *= storey;
-    }
-    Ok(map)
+    let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
+    drop(placements);
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs })
 }
 
 /// Everything after the topology choice, for one graph.
