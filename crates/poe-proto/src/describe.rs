@@ -77,6 +77,7 @@ pub fn describe(name: &str, direction: Direction, body: &[u8]) -> Option<Describ
         instance::PingReply,
         instance::FrameReport,
         instance::ChatJoinRequest,
+        instance::ChatSend,
         instance::ChatJoined,
         instance::ChatMessage,
         instance::ExitSession,

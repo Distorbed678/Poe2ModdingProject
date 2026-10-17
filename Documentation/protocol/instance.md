@@ -120,7 +120,7 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 - **C→S `0x014c` ChatJoinRequest**: `u8, u16 channel (0xffff = any), u8 kind (0 global, 1 trade), u8, u8`. Sent for global and trade chat after entering an area.
 - **S→C `0x014d` ChatJoined** (constructor `0x14215cb50`, reader `0x14215cc30`, handler `0x142124bca`): `u8, u16 channel, u8 trade, u8`. Stores the channel in the session (trade +0x2738, global +0x2740) and ends the pending join.
 - **S→C `0x0018` ChatMessage** (class `0x14350abb8`, reader `0x142150ad0` → `0x1421a73d0`, writer `0x1421a71d0`): `u8` (1), then the chat line: wstring sender (channel prefix + character name: `#` global, `$` trade; none for local), wstring text (an item link shows as `_`), wstring (empty in captures), 2 raw flag bytes (+0xa3, +0xa4; +0xa4 bit 3 adds `u16` length + bytes), `u8` +0xa1 (0..8: probably the sender's class), `u8` +0xa2 (always 5), `u64` +0x98, `u8` +0xa0, `u8` item count then per item `u32` + the item (`0x1421ecbc0`). All 55 official ones decode (`check_capture`).
-- **C→S `0x0016`**: the client's chat line (layout from the next official capture).
+- **C→S `0x0016` ChatSend**: `u8` (1), wstring text (as typed, prefixes included), `u8` (0). From our own session (`!where`, `!help`).
 - Without it the chat box shows "Timeout while joining {global|trade} chat" (ClientStrings `ChatTimeoutMessage`, formatted by `0x1401b6940`). There is no chat server yet; the server answers every join with `[chat] default_channel`.
 
 ## Splitting client messages

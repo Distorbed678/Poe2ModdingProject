@@ -7,8 +7,7 @@ group, whether it needs an admin, typed arguments and help. The same commands wo
 places:
 
 - **Chat**: `!name args` (prefix `[commands] prefix`; `/` stays with the client's own
-  commands). Replies come back as chat lines from `<Server>`. Needs the client's chat message
-  (`0x0016`) decoded; see [protocol/instance.md](protocol/instance.md).
+  commands). Replies come back as chat lines from `<Server>`.
 - **Overlay**: the DLL's Commands tab builds a form per command from the registry, which the
   server sends over the debug link (`cmds` datagrams; the overlay asks with `registry`).
   Results arrive as `ack` lines. Commands added to the registry show up in the overlay by
@@ -55,16 +54,33 @@ seed, forced topology and orientation, the players in it and since when it is em
 
 ## Transfers
 
-A transfer is a real hand-off, as on official servers: the instance server issues a ticket for
-the target instance and asks the account's login connection (`LoginSessions::transfer`) to send
-`InstanceDetails`; the client then connects to that instance and loads its area. (The client
-keeps its login connection open while in game, which is where official hand-offs arrive.) A
-second AreaInfo on one connection would crash the client, so transfers always reconnect.
+Verified 2026-10-17 (`G1_1` to `G1_2` with a forced topology 3, orientation 0; the client's
+tile hash 1655364279 equals the server's forced generation):
 
-Forced layouts: an instance with a topology or orientation sends them in AreaInfo's first
-stat record (flags0 bit 7; `map_force_topology` = 1-based topology, `map_force_orientation` =
-orientation + 1), and the server-side terrain check uses the same choice. Not verified in game
-yet (which of the two records the generator reads is a guess: the first).
+1. The instance server issues a ticket for the target instance and hands it to the account's
+   login connection (`LoginSessions::transfer`), which keeps it as pending.
+2. It ends the client's instance session. The client goes back to character selection on its
+   still-open login connection and asks for the character list.
+3. The login server answers with the list and the pending `InstanceDetails`; the client
+   connects to the new instance and loads its area.
+
+What does not work: `InstanceDetails` while the client is in an instance (received, ignored),
+and a second AreaInfo on one connection (crash). The login connection must stay open: login
+`0x0017` (official servers send `0x0017 0x0014` after every InstanceDetails) makes the client
+`shutdown()` it, so we leave it out (`[login] close_after_handoff = false`). How official
+servers reconnect for later transfers is still to be captured.
+
+Forced layouts: an instance with a topology or orientation sends them in AreaInfo's first stat
+record (flags0 bit 7; `map_force_topology` = 1-based topology, `map_force_orientation` =
+orientation + 1). Verified: the client generates that layout.
+
+## Chat
+
+C→S `0x0016` ChatSend (`u8`, wstring text, `u8`) carries the line as typed. Lines starting with
+the command prefix run as commands (replies as `<Server>` chat lines); others are routed by
+their prefix: `#` global and `$` trade to everyone on the same channel number (from the
+client's join requests, `/global N`), none = local (same instance), `@name text` whispers.
+Party (`%`) and guild (`&`) answer "not supported yet". Muted players get "You are muted."
 
 ## Overlay tabs (our server only)
 

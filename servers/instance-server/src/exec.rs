@@ -32,6 +32,8 @@ pub struct Outcome {
     pub replies: Vec<player::Reply>,
     /// Raw messages for this session's client.
     pub raw: Vec<u8>,
+    /// End this session after the reply (the client is being handed to another instance).
+    pub leave: bool,
 }
 
 impl Outcome {
@@ -146,7 +148,7 @@ impl InstanceServer {
             "transfer" => {
                 let id = self.new_instance(p)?;
                 self.move_to(ctx, id)?;
-                Outcome::ok(format!("moving to new instance #{id}"))
+                Outcome { leave: true, ..Outcome::ok(format!("moving to new instance #{id}")) }
             }
             "join" => {
                 let id = p.int("instance").unwrap_or(0) as u32;
@@ -157,7 +159,7 @@ impl InstanceServer {
                     return Ok(Outcome::err("you are already in it"));
                 }
                 self.move_to(ctx, id)?;
-                Outcome::ok(format!("moving to instance #{id}"))
+                Outcome { leave: true, ..Outcome::ok(format!("moving to instance #{id}")) }
             }
             "close" => {
                 let id = p.int("instance").unwrap_or(0) as u32;

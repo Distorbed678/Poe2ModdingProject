@@ -94,6 +94,8 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
     let mut logout: Option<tokio::sync::watch::Receiver<u64>> = None;
     // In-game instance changes for the account (see `LoginSessions::transfer`).
     let mut transfers: Option<tokio::sync::mpsc::UnboundedReceiver<poe_cluster::Ticket>> = None;
+    // A transfer waiting for the client to leave its instance.
+    let mut pending: Option<poe_cluster::Ticket> = None;
     loop {
         let decoded = tokio::select! {
             d = conn.decode(|r| decode_client(&server.protocol, r)) => d,
@@ -102,8 +104,11 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 return Ok(());
             }
             Some(ticket) = next_transfer(&mut transfers) => {
-                info!(area = %ticket.area, instance = ?ticket.instance, ticket = format_args!("{:#010x}", ticket.id), "instance transfer");
-                send_instance_details(&server, &mut conn, &ticket).await?;
+                // The client ignores InstanceDetails while it is in an instance: the instance
+                // server ends that session, the client comes back to character selection on
+                // this connection, and its character list request gets the details.
+                info!(area = %ticket.area, instance = ?ticket.instance, ticket = format_args!("{:#010x}", ticket.id), "instance transfer pending");
+                pending = Some(ticket);
                 continue;
             }
         };
@@ -142,6 +147,10 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 send_character_list(&server, &mut conn, req.account_id).await?;
                 conn.send(&server.protocol.login.encode(&league_list(&server))?)
                     .await?;
+                if let Some(ticket) = pending.take() {
+                    info!(area = %ticket.area, instance = ?ticket.instance, "instance transfer: sending the client on");
+                    send_instance_details(&server, &mut conn, &ticket).await?;
+                }
             }
             ClientMessage::ResumeSession(req) => {
                 let ticket = poe_cluster::ResumeTicket {
@@ -523,13 +532,17 @@ async fn send_instance_details(server: &LoginServer, conn: &mut Connection, tick
         unk_84: 0,
     };
     let mut out = server.protocol.login.encode(&details)?;
-    // Official servers follow InstanceDetails with 0x0017 0x0014.
-    out.extend(
-        server
-            .protocol
-            .login
-            .encode(&poe_proto::login::Unknown0017 { value: 0x0014 })?,
-    );
+    // Official servers follow InstanceDetails with 0x0017 0x0014, which makes the client shut
+    // its login connection down (handler `0x1420e7140` -> `0x1420e71d0`: `shutdown()`). We keep
+    // the connection: in-game transfers arrive on it (`[login] close_after_handoff`).
+    if server.config.login.close_after_handoff {
+        out.extend(
+            server
+                .protocol
+                .login
+                .encode(&poe_proto::login::Unknown0017 { value: 0x0014 })?,
+        );
+    }
     conn.send(&out).await?;
     Ok(())
 }
