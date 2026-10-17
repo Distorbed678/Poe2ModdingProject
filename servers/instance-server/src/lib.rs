@@ -14,6 +14,7 @@ use poe_config::Config;
 use poe_game::stats::StatRegistry;
 use poe_store::Store;
 
+pub mod chat;
 pub mod commands;
 mod exec;
 pub mod live;
@@ -914,6 +915,9 @@ impl InstanceServer {
                     req.channel
                 };
                 info!(kind = req.kind, channel, "chat join");
+                if let Some(name) = self.live.name_on_port(port) {
+                    self.live.set_channel(&name, req.kind != 0, channel);
+                }
                 let reply = ChatJoined {
                     unk_10: req.unk_0,
                     channel,
