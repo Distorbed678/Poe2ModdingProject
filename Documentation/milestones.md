@@ -12,7 +12,7 @@
 | M6 | Zone/instance transfer | dev transfers done (2026-10-17): instance directory, transfers, forced layouts, Instances page ([server-admin.md](server-admin.md)); waypoints and area transitions open |
 | M7 | Inventory and items | – |
 | M8 | Monsters and skills | – |
-| M9+ | To be decided (parties, multiplayer, mod runtimes) | chat channels and server commands done early (2026-10-17) |
+| M9+ | To be decided (parties, multiplayer, mod runtimes) | chat channels and server commands done early (2026-10-17); multiplayer gap analysis in [multiplayer.md](multiplayer.md) |
 
 ## Status 2026-10-17
 - **Server tools:** one command registry for chat (`!` prefix) and the overlay, admins from `[admin] accounts`, audit log, `who`/`kick`/`mute`/`announce` ([server-admin.md](server-admin.md)).

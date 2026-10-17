@@ -9,6 +9,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 | [milestones.md](milestones.md) | Roadmap and current status |
 | [server-admin.md](server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers |
 | [terrain-status.md](terrain-status.md) | Terrain port: results per area, where work stopped, next steps |
+| [multiplayer.md](multiplayer.md) | Multiplayer readiness: what blocks remote players, same-machine dependencies, shared world plan |
 | [modding.md](modding.md) | Server and client modding hooks (planned and existing) |
 | [datamining.md](datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, useful tables |
 | [protocol/official-comparison.md](protocol/official-comparison.md) | Official servers vs ours: what differs, what was fixed, what is open |
