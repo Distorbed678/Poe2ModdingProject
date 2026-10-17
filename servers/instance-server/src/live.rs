@@ -24,6 +24,9 @@ pub struct LiveSession {
     pub area: String,
     /// The client's TCP port (debug link key).
     pub port: u16,
+    /// Joined global and trade channel numbers (ChatJoinRequest).
+    pub global: Option<u16>,
+    pub trade: Option<u16>,
     kick: watch::Sender<bool>,
     chat: mpsc::UnboundedSender<ChatOut>,
 }
@@ -63,6 +66,8 @@ impl Live {
                 instance,
                 area: area.to_owned(),
                 port,
+                global: None,
+                trade: None,
                 kick,
                 chat,
             },
@@ -89,6 +94,11 @@ impl Live {
             .collect();
         out.sort_by(|a, b| a.character.cmp(&b.character));
         out
+    }
+
+    /// The character on a client port.
+    pub fn name_on_port(&self, port: u16) -> Option<String> {
+        self.sessions.lock().unwrap().values().find(|s| s.port == port).map(|s| s.character.clone())
     }
 
     /// The character's exact name if it is online.
@@ -124,6 +134,22 @@ impl Live {
             .filter(|s| to(s))
             .filter(|s| s.chat.send(line.clone()).is_ok())
             .count()
+    }
+
+    /// Records the channel a session joined (`trade`: trade chat, else global).
+    pub fn set_channel(&self, character: &str, trade: bool, channel: u16) {
+        if let Some(s) = self.sessions.lock().unwrap().get_mut(&character.to_lowercase()) {
+            if trade {
+                s.trade = Some(channel);
+            } else {
+                s.global = Some(channel);
+            }
+        }
+    }
+
+    /// The session's (global, trade) channels.
+    pub fn channels(&self, character: &str) -> (Option<u16>, Option<u16>) {
+        self.sessions.lock().unwrap().get(&character.to_lowercase()).map_or((None, None), |s| (s.global, s.trade))
     }
 
     pub fn mute(&self, character: &str, minutes: Option<u64>) {
