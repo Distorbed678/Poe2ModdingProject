@@ -2,8 +2,9 @@
 //!
 //! The server sends `PDB1` datagrams (`key\tvalue` lines: its simulation state, every second
 //! tick, and `ack` lines for commands) to the UDP socket the position reports come from;
-//! commands go back as `PDC1`, `u16 our TCP port of the session`, text (`teleport x y`,
-//! `turn_cell natural|own|heading`, `turn_timing on|off`, `face_cursor on|off`).
+//! commands go back as `PDC1`, `u16 our TCP port of the session`, text: a server command
+//! line (the server's registry, which it sends as `cmds` datagrams; `registry` asks for it
+//! again). `instances` datagrams carry the server's instance list for the Instances tab.
 //! Each state is paired with the client's own position at that moment for the Desync tab.
 
 use std::{
@@ -81,7 +82,144 @@ fn receiver() {
     }
 }
 
+/// One argument of a server command (`commands::wire` on the server).
+#[derive(Clone, Debug)]
+pub struct CmdArg {
+    pub name: String,
+    /// `int`, `text`, `rest`, `bool`, `choice=a|b`, `area`, `seed`, `topology`,
+    /// `orientation`, `instance`, `player`, `minutes`.
+    pub kind: String,
+    pub optional: bool,
+}
+
+/// A server command, from the server's registry.
+#[derive(Clone, Debug)]
+pub struct Cmd {
+    pub name: String,
+    pub group: String,
+    pub admin: bool,
+    pub args: Vec<CmdArg>,
+    pub help: String,
+}
+
+/// Who we are on the server.
+#[derive(Clone, Debug, Default)]
+pub struct Me {
+    pub account: String,
+    pub admin: bool,
+    /// Chat command prefix.
+    pub prefix: String,
+}
+
+/// An instance on the server.
+#[derive(Clone, Debug)]
+pub struct Inst {
+    pub id: u32,
+    pub area: String,
+    pub seed: Option<u32>,
+    pub topology: Option<u32>,
+    pub orientation: Option<u8>,
+    pub persistent: bool,
+    /// Seconds it has been empty.
+    pub empty_secs: Option<u64>,
+    /// Ours.
+    pub current: bool,
+    pub players: Vec<String>,
+}
+
+static REGISTRY: Mutex<(Vec<Cmd>, Option<Me>)> = Mutex::new((Vec::new(), None));
+static INSTANCES: Mutex<Option<(Instant, Vec<Inst>, u64)>> = Mutex::new(None);
+static STAGING: Mutex<Vec<Inst>> = Mutex::new(Vec::new());
+/// Command results (`ack`), newest last.
+static RESULTS: Mutex<VecDeque<(u64, String, String)>> = Mutex::new(VecDeque::new());
+
+fn opt<T: std::str::FromStr>(s: &str) -> Option<T> {
+    if s.is_empty() { None } else { s.parse().ok() }
+}
+
+fn handle_registry(text: &str) {
+    let mut reg = REGISTRY.lock().unwrap();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        match f.first().copied() {
+            Some("cmds") if f.get(1) == Some(&"begin") => reg.0.clear(),
+            Some("cmd") if f.len() >= 6 => {
+                let args = f[4]
+                    .split(',')
+                    .filter(|a| !a.is_empty())
+                    .filter_map(|a| {
+                        let (name, kind) = a.split_once(':')?;
+                        let optional = kind.ends_with('?');
+                        Some(CmdArg { name: name.to_owned(), kind: kind.trim_end_matches('?').to_owned(), optional })
+                    })
+                    .collect();
+                reg.0.push(Cmd { name: f[1].to_owned(), group: f[2].to_owned(), admin: f[3] == "1", args, help: f[5].to_owned() });
+            }
+            Some("you") if f.len() >= 4 => {
+                reg.1 = Some(Me { account: f[1].to_owned(), admin: f[2] == "1", prefix: f[3].to_owned() });
+            }
+            _ => {}
+        }
+    }
+}
+
+fn handle_instances(text: &str) {
+    let mut staging = STAGING.lock().unwrap();
+    let mut idle = None;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        match f.first().copied() {
+            Some("instances") if f.get(1) == Some(&"begin") => staging.clear(),
+            Some("inst") if f.len() >= 10 => {
+                if let Ok(id) = f[1].parse() {
+                    staging.push(Inst {
+                        id,
+                        area: f[2].to_owned(),
+                        seed: opt(f[3]),
+                        topology: opt(f[4]),
+                        orientation: opt(f[5]),
+                        persistent: f[6] == "1",
+                        empty_secs: opt(f[7]),
+                        current: f[8] == "1",
+                        players: f[9].split(',').filter(|p| !p.is_empty()).map(str::to_owned).collect(),
+                    });
+                }
+            }
+            Some("idle") => idle = f.get(1).and_then(|v| v.parse().ok()),
+            _ => {}
+        }
+    }
+    // The last datagram of a list ends with its `idle` line.
+    if let Some(idle) = idle {
+        *INSTANCES.lock().unwrap() = Some((Instant::now(), std::mem::take(&mut *staging), idle));
+    }
+}
+
+/// The server's command registry and who we are (empty until the server sent it).
+pub fn registry() -> (Vec<Cmd>, Option<Me>) {
+    REGISTRY.lock().unwrap().clone()
+}
+
+/// The server's instances (how old the list is, the list, idle minutes before an empty
+/// instance closes).
+pub fn instances() -> Option<(Duration, Vec<Inst>, u64)> {
+    INSTANCES.lock().unwrap().as_ref().map(|(at, l, idle)| (at.elapsed(), l.clone(), *idle))
+}
+
+/// Recent command results (unix ms, command, result), oldest first.
+pub fn results() -> Vec<(u64, String, String)> {
+    RESULTS.lock().unwrap().iter().cloned().collect()
+}
+
 fn handle(text: &str) {
+    if text.starts_with("cmds\t") {
+        handle_registry(text);
+        return;
+    }
+    if text.starts_with("instances\t") {
+        handle_instances(text);
+        return;
+    }
     let values: Vec<(String, String)> = text
         .lines()
         .filter_map(|l| {
@@ -91,6 +229,12 @@ fn handle(text: &str) {
         .collect();
     if let Some((_, rest)) = values.iter().find(|(k, _)| k == "ack") {
         crate::ui::notice(format!("Server: {}", rest.replace('\t', " -> ")));
+        let (cmd, result) = rest.split_once('\t').unwrap_or((rest.as_str(), ""));
+        let mut r = RESULTS.lock().unwrap();
+        if r.len() >= 200 {
+            r.pop_front();
+        }
+        r.push_back((poe_hook_shared::unix_ms(), cmd.to_owned(), result.to_owned()));
         return;
     }
     let map: HashMap<&str, &str> = values

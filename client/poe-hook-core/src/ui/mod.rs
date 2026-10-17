@@ -1,12 +1,15 @@
 //! The overlay's windows: the main debug window with its tabs, the read-only badge and
 //! short notices. Each tab keeps its own state in [`App`].
 
+mod commands_tab;
 mod coverage_tab;
 mod features_tab;
 mod game_tab;
 mod gamelog_tab;
 mod hooks_tab;
 mod inspect_tab;
+mod instances_tab;
+mod layout_form;
 mod log_tab;
 mod minimap_tab;
 mod notes_tab;
@@ -64,6 +67,8 @@ pub struct App {
     stats: game_tab::StatsView,
     minimap: minimap_tab::MinimapView,
     server: server_tab::ServerView,
+    commands: commands_tab::CommandsView,
+    instances: instances_tab::InstancesView,
 }
 
 impl App {
@@ -82,6 +87,8 @@ impl App {
             stats: game_tab::StatsView::new(),
             minimap: minimap_tab::MinimapView::new(),
             server: server_tab::ServerView::new(),
+            commands: commands_tab::CommandsView::new(),
+            instances: instances_tab::InstancesView::new(),
         }
     }
 
@@ -136,6 +143,12 @@ impl App {
                         }
                         if let Some(_t) = ui.tab_item("Desync") {
                             self.server.draw_desync(ui, plots);
+                        }
+                        if let Some(_t) = ui.tab_item("Commands") {
+                            self.commands.draw(ui);
+                        }
+                        if let Some(_t) = ui.tab_item("Instances") {
+                            self.instances.draw(ui);
                         }
                     }
                     if let Some(_t) = ui.tab_item("Minimap") {
