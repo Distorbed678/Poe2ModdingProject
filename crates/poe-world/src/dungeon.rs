@@ -545,7 +545,12 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         if grid.cells[i] != 0 {
             return Err(unsupported(format!("dungeon node {n} overlaps another room at {pos:?}")));
         }
-        let door = slots[n].first().map(|&e| graph.edges[e].edge_type.to_ascii_lowercase()).unwrap_or_default();
+        // `0x1420afa40`: the first edge whose type is not the default, else the default.
+        let door = slots[n]
+            .iter()
+            .map(|&e| graph.edges[e].edge_type.to_ascii_lowercase())
+            .find(|t| !t.is_empty() && t != "metadata/terrain/dungeon/rooms.et")
+            .unwrap_or_else(|| "metadata/terrain/dungeon/rooms.et".to_string());
         let mut list: Vec<((u32, u32), u32)> = sizes.iter().find(|s| s.0 == door).map(|s| s.1.clone()).unwrap_or_default();
         if let Some(forced) = forced_size(&graph.nodes[n].tags) {
             list.retain(|s| s.0 == forced);
