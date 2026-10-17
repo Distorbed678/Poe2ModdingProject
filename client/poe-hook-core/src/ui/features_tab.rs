@@ -15,9 +15,7 @@ pub fn draw(ui: &Ui) {
     ) {
         crate::dump_types::MOVEMENT_LOG.store(movement, Ordering::Relaxed);
     }
-    if read_only {
-        ui.text_disabled("position sync: off (read-only)");
-    } else {
+    if !read_only {
         let mut sync = crate::position_sync::ENABLED.load(Ordering::Relaxed);
         if ui.checkbox("position sync (reports to our instance server)", &mut sync) {
             crate::position_sync::ENABLED.store(sync, Ordering::Relaxed);
