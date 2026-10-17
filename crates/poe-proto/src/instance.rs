@@ -666,6 +666,70 @@ impl Message for ChatJoinRequest {
     }
 }
 
+/// S→C `0x0018` ChatMessage (class `0x14350abb8`, reader `0x142150ad0` → `0x1421a73d0`,
+/// writer `0x1421a71d0`): `u8` (1 in official captures), then the chat line: sender (the
+/// channel's prefix character and the character name: `#` global, `$` trade; none = local),
+/// text (an item link is a `_` placeholder), a third string (empty), two flag bytes
+/// (+0xa3, +0xa4; +0xa4 bit 3 adds a `u16`-length blob), `u8` +0xa1 (0..8 in captures, likely
+/// the sender's class), `u8` +0xa2 (5), `u64` +0x98, `u8` +0xa0, `u8` count of linked items
+/// (`u32` + an item each; kept raw here).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub unk_10: u8,
+    pub sender: String,
+    pub text: String,
+    pub extra: String,
+    pub flags: [u8; 2],
+    pub class: u8,
+    pub unk_a2: u8,
+    pub blob: Vec<u8>,
+    pub unk_98: u64,
+    pub unk_a0: u8,
+    /// Item count and the items as sent (not decoded).
+    pub items: u8,
+    pub items_raw: Vec<u8>,
+}
+
+impl Message for ChatMessage {
+    const NAME: &'static str = "ChatMessage";
+    const DIRECTION: Direction = Direction::Server;
+    fn encode(&self, w: &mut Writer) {
+        w.u8(self.unk_10)
+            .wstring(&self.sender)
+            .wstring(&self.text)
+            .wstring(&self.extra)
+            .bytes(&self.flags)
+            .u8(self.class)
+            .u8(self.unk_a2);
+        if self.flags[1] & 8 != 0 {
+            w.u16(self.blob.len() as u16).bytes(&self.blob);
+        }
+        w.u64(self.unk_98).u8(self.unk_a0).u8(self.items).bytes(&self.items_raw);
+    }
+    fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let unk_10 = r.u8()?;
+        let sender = r.wstring()?;
+        let text = r.wstring()?;
+        let extra = r.wstring()?;
+        let flags = r.array()?;
+        let class = r.u8()?;
+        let unk_a2 = r.u8()?;
+        let blob = if flags[1] & 8 != 0 {
+            let n = r.u16()? as usize;
+            r.bytes(n)?.to_vec()
+        } else {
+            Vec::new()
+        };
+        let unk_98 = r.u64()?;
+        let unk_a0 = r.u8()?;
+        let items = r.u8()?;
+        let items_raw = r.rest().to_vec();
+        let n = items_raw.len();
+        r.bytes(n)?;
+        Ok(Self { unk_10, sender, text, extra, flags, class, unk_a2, blob, unk_98, unk_a0, items, items_raw })
+    }
+}
+
 /// S→C chat channel joined (constructor `0x14215cb50`, reader `0x14215cc30`, handler
 /// `0x142124bca`): `u8 (+0x10), u16 channel (+0x1a), u8 trade (+0x18), u8 (+0x1c)`. Stores the
 /// channel in the session (trade +0x2738, global +0x2740) and ends the pending join; without
