@@ -92,12 +92,19 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
     let mut account: Option<Account> = None;
     // Changes when the account leaves the game (instance `0x1b`, see `LoginSessions`).
     let mut logout: Option<tokio::sync::watch::Receiver<u64>> = None;
+    // In-game instance changes for the account (see `LoginSessions::transfer`).
+    let mut transfers: Option<tokio::sync::mpsc::UnboundedReceiver<poe_cluster::Ticket>> = None;
     loop {
         let decoded = tokio::select! {
             d = conn.decode(|r| decode_client(&server.protocol, r)) => d,
             () = logged_out(&mut logout) => {
                 info!("account left the game: closing the login connection");
                 return Ok(());
+            }
+            Some(ticket) = next_transfer(&mut transfers) => {
+                info!(area = %ticket.area, instance = ?ticket.instance, ticket = format_args!("{:#010x}", ticket.id), "instance transfer");
+                send_instance_details(&server, &mut conn, &ticket).await?;
+                continue;
             }
         };
         let message = match decoded {
@@ -120,6 +127,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
             ClientMessage::Authenticate(auth) => {
                 let a = authenticate(&server, &mut conn, auth).await?;
                 logout = Some(server.sessions.subscribe(a.id));
+                transfers = Some(server.sessions.subscribe_transfers(a.id));
                 account = Some(a);
             }
             ClientMessage::RequestCharacterList(req) => {
@@ -153,6 +161,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 info!(account = %resumed.name, id = resumed.id, "session resumed");
                 send_authentication_result(&server, &mut conn, &resumed).await?;
                 logout = Some(server.sessions.subscribe(resumed.id));
+                transfers = Some(server.sessions.subscribe_transfers(resumed.id));
                 account = Some(resumed);
             }
             ClientMessage::DeleteCharacter(req) => {
@@ -200,6 +209,14 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 play_character(&server, &mut conn, account, play).await?;
             }
         }
+    }
+}
+
+/// The next transfer for the account; never without an account.
+async fn next_transfer(rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<poe_cluster::Ticket>>) -> Option<poe_cluster::Ticket> {
+    match rx {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -453,7 +470,16 @@ async fn play_character(
         warn!(area = %character.area, "play: character area not in game data");
         return Ok(());
     };
-    let ticket = server.tickets.issue(
+    // Towns and hideouts are shared (one kept instance each); other areas get the newest
+    // open instance, else a new one.
+    let instance = match server.instances.find(&area.id) {
+        Some(id) => id,
+        None => server.instances.create(
+            poe_cluster::InstanceSpec { area: area.id.clone(), seed: area.fixed_seed(), ..Default::default() },
+            area.is_town || area.is_hideout,
+        ),
+    };
+    let ticket = server.tickets.issue_for(
         account.id,
         TicketCharacter {
             id: character.id,
@@ -469,13 +495,23 @@ async fn play_character(
                 .map(|l| (l.seed, l.x, l.y)),
         },
         &area.id,
+        Some(instance),
     );
     info!(
         character = %character.name,
         area = %area.id,
+        instance,
         ticket = format_args!("{:#010x}", ticket.id),
         "handing off to instance server"
     );
+    send_instance_details(server, conn, &ticket).await
+}
+
+/// `InstanceDetails` for a ticket: where to connect, the area and the stream keys.
+async fn send_instance_details(server: &LoginServer, conn: &mut Connection, ticket: &poe_cluster::Ticket) -> anyhow::Result<()> {
+    let Some(area) = WorldArea::find(&server.data, &ticket.area)? else {
+        anyhow::bail!("ticket area {} not in game data", ticket.area);
+    };
     let details = InstanceDetails {
         host: server.config.instance.public_host.clone(),
         port: server.config.instance.public_port,

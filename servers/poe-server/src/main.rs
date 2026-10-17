@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use login_server::LoginServer;
-use poe_cluster::{MemorySessions, MemoryTickets};
+use poe_cluster::{MemoryInstances, MemorySessions, MemoryTickets};
 use poe_config::Config;
 use poe_data::GameData;
 use poe_proto::Protocol;
@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let store = Arc::new(SqliteStore::open(&config.database.path)?);
     let tickets = Arc::new(MemoryTickets::new(std::time::Duration::from_secs(60)));
     let sessions = Arc::new(MemorySessions::default());
+    let instances = Arc::new(MemoryInstances::default());
     let data = Arc::new(GameData::open(&config.game.game_dir, &config.game.schema)?);
     tracing::info!(game_dir = %config.game.game_dir.display(), "game data opened");
     let login = Arc::new(LoginServer {
@@ -29,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
         data: data.clone(),
         tickets: tickets.clone(),
         sessions: sessions.clone(),
+        instances: instances.clone(),
     });
 
     let instance = Arc::new(instance_server::InstanceServer {
@@ -43,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         )),
         reports: Default::default(),
         sessions,
+        instances,
     });
 
     tokio::try_join!(login.run(), instance.run())?;

@@ -53,6 +53,8 @@ pub struct InstanceServer {
     pub reports: Arc<sync::ClientReports>,
     /// Ends the account's login connection when the client leaves the game.
     pub sessions: Arc<dyn poe_cluster::LoginSessions>,
+    /// Instances of areas: which one a session is in, its seed and layout choice.
+    pub instances: Arc<dyn poe_cluster::InstanceDirectory>,
 }
 
 impl InstanceServer {
@@ -149,13 +151,16 @@ impl InstanceServer {
             let entry = list.get(i).cloned()?;
             Some((i, list.len(), entry))
         });
-        let seed = match &sweep {
+        let (instance, seed) = match &sweep {
             Some((_, _, (area, seed))) => {
                 conn.send(&self.area_info_command(&format!("{area} {seed}"), &ticket)?)
                     .await?;
-                *seed
+                (None, *seed)
             }
-            None => self.send_area(&mut conn, &ticket).await?,
+            None => {
+                let (instance, seed) = self.send_area(&mut conn, &ticket).await?;
+                (Some(instance), seed)
+            }
         };
 
         let hashes = match &sweep {
@@ -239,9 +244,17 @@ impl InstanceServer {
         }
         self.enter_world(&mut conn, &ticket, &player).await?;
 
+        let name = ticket.character.name.clone();
+        if let Some(id) = instance {
+            self.instances.join(id, &name);
+        }
+        let closed = instance.and_then(|id| self.instances.closed(id));
         let result = self
-            .run_session(&mut conn, &mut hnc, &ticket, &mut player, client_port)
+            .run_session(&mut conn, &mut hnc, &ticket, &mut player, client_port, closed)
             .await;
+        if let Some(id) = instance {
+            self.instances.leave(id, &name);
+        }
         if let Some(r) = self.reports.fresh(client_port) {
             // Where the client really is.
             player.apply_report(Some(r));
@@ -271,6 +284,7 @@ impl InstanceServer {
         ticket: &Ticket,
         player: &mut player::Player,
         client_port: u16,
+        mut closed: Option<tokio::sync::watch::Receiver<bool>>,
     ) -> anyhow::Result<()> {
         // Simulation frames: each tick marker closes a frame of `tick_ms` (InitialState).
         let tick = self.protocol.instance.encode(&SimulationTick)?;
@@ -285,6 +299,10 @@ impl InstanceServer {
         // Not decoded yet: log the client's decrypted messages (heartbeat 0x1c is skipped).
         loop {
             tokio::select! {
+                () = instance_closed(&mut closed) => {
+                    info!("instance closed: disconnecting the player");
+                    return Ok(());
+                }
                 n = conn.read_more() => {
                     if n? == 0 {
                         info!("client disconnected");
@@ -499,21 +517,45 @@ impl InstanceServer {
 
     /// Sends the area; returns the terrain seed (a saved location's seed when the character
     /// left this area, so it comes back to the same layout).
-    async fn send_area(&self, conn: &mut Connection, ticket: &Ticket) -> anyhow::Result<u32> {
+    /// The instance a ticket enters: its own, else the area's newest, else a new one.
+    fn ticket_instance(&self, ticket: &Ticket) -> anyhow::Result<u32> {
+        if let Some(id) = ticket.instance
+            && self.instances.get(id).is_some()
+        {
+            return Ok(id);
+        }
+        if let Some(id) = self.instances.find(&ticket.area) {
+            return Ok(id);
+        }
         let Some(area) = WorldArea::find(&self.data, &ticket.area)? else {
             anyhow::bail!("ticket area {} not in game data", ticket.area);
         };
-        let (instance_id, seed) = {
+        Ok(self.instances.create(
+            poe_cluster::InstanceSpec { area: area.id.clone(), seed: area.fixed_seed(), ..Default::default() },
+            area.is_town || area.is_hideout,
+        ))
+    }
+
+    /// AreaInfo for the session's instance; returns the instance and its seed.
+    async fn send_area(&self, conn: &mut Connection, ticket: &Ticket) -> anyhow::Result<(u32, u32)> {
+        let Some(area) = WorldArea::find(&self.data, &ticket.area)? else {
+            anyhow::bail!("ticket area {} not in game data", ticket.area);
+        };
+        let instance_id = self.ticket_instance(ticket)?;
+        let seed = {
             let mut rng = rand::rng();
             // RE experiment: `POE_SEED` pins the layout seed (to reproduce a layout).
             let pinned = std::env::var("POE_SEED").ok().and_then(|v| v.parse().ok());
             let saved = ticket.character.location.map(|(seed, _, _)| seed);
+            let spec_seed = self.instances.get(instance_id).and_then(|i| i.spec.seed);
             let seed = pinned
+                .or(spec_seed)
                 .or(area.fixed_seed())
                 .or(saved)
                 .or_else(|| self.seeds.pick(&area.id, rng.next_u32()))
                 .unwrap_or_else(|| rng.next_u32());
-            (rng.next_u32(), seed)
+            // The first player decides an instance's seed; later ones share it.
+            self.instances.settle_seed(instance_id, seed).unwrap_or(seed)
         };
         let msg = AreaInfo {
             instance_id,
@@ -525,8 +567,18 @@ impl InstanceServer {
         };
         info!(area = %area.id, seed = msg.seed, instance = msg.instance_id, "sending area");
         conn.send(&self.protocol.instance.encode(&msg)?).await?;
-        Ok(seed)
+        Ok((instance_id, seed))
     }
+}
+
+/// Resolves when the session's instance is closed; never without an instance.
+async fn instance_closed(rx: &mut Option<tokio::sync::watch::Receiver<bool>>) {
+    if let Some(rx) = rx {
+        // A closed instance's sender is dropped: an error also means closed.
+        let _ = rx.wait_for(|c| *c).await;
+        return;
+    }
+    std::future::pending().await
 }
 
 /// Entity id of the (only) player in an instance.
