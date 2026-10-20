@@ -1,4 +1,4 @@
-//! The terrain generator, ported pass by pass (`docs/re/terrain.md`, "Port notes").
+//! The terrain generator, ported pass by pass (`docs/re/terrain/tgr.md`, "Generation order").
 //! Each pass is checked against the client's generator trace before the next is added.
 //!
 //! Supported so far: a graph with one room node covering the map (towns): topology sub-seed,

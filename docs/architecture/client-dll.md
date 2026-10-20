@@ -1,6 +1,6 @@
 # Client DLLs (`modules/client-hook/`)
 
-The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`). Since the debug suite (M4, 2026-10-14) the client side is two DLLs in one Cargo workspace (`modules/client-hook/Cargo.toml`, the Poe2ClientHook submodule, separate from the server workspace):
+The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`). Since the debug suite (2026-10-14) the client side is two DLLs in one Cargo workspace (`modules/client-hook/Cargo.toml`, the Poe2ClientHook submodule, separate from the server workspace):
 
 | Crate | Built as | Deployed as | Role |
 |---|---|---|---|
@@ -47,7 +47,7 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
   - **Player**: grid, world position, facing (and lock), actions, WASD direction, actor flags.
   - **Entities**: entities created in the area (initial-state reader), type path from the object-type lookup just before, live grid position (Positioned found by its reader `0x141dd8820`). After a reload the player is adopted from its frame tick (type unknown).
   - **Server** (our server only): the instance server's simulation state for this session (debug link, refreshed every second tick: apply frame, synced, server/predicted position and velocity, last report, WASD, held click, last turn, turn modes, facing, roll, current action, pause) and quick controls for the registry's `teleport` (cell, or "Here"), `turn_cell`, `turn_timing`, `face_cursor` commands.
-  - **Commands** and **Instances** (our server only): the server's command registry as forms, and its instances with join/close and a new-instance form (area picker over every area, seed, topology, orientation). See [server-admin.md](server-admin.md).
+  - **Commands** and **Instances** (our server only): the server's command registry as forms, and its instances with join/close and a new-instance form: [../guides/server-admin.md](../guides/server-admin.md#overlay-pages-our-server-only-server-group).
   - Our-server-only pages (the SERVER group) are hidden while the read-only latch is on.
   - **Desync** (our server only): the server's predicted position and the last report against the client's own position (ImPlot), with a count of samples over 1.5 cells and the worst; desyncs over 6 cells are logged. The prediction is one frame ahead, so ~1.2 cells while walking is normal.
   - **Minimap**: the client's four cell grids around the player (terrain object found by vtable in the game world; tiles `+0x18`/`+0x20`, 23 cells per tile, 4 bits per cell at `+0xd0`, `+0xe8`, `+0x100`, `+0x118`), shaded by value, with the player and its facing, and the server's position (blue ring, our server). "Export area" writes `terrain_layout_*.tsv` / `terrain_grid_*.bin` on demand (also on official servers, where the automatic export is off).
@@ -68,7 +68,6 @@ Plaintext of every login and instance message, read inside the client (no cipher
 - The game also has its own plaintext taps (receive `stream+0x150`, send `stream+0x190`, called with `(tap, &ptr, &len)`), probably for packet recording; they are unused here (setting them would be a write).
 - Output: the Packets page (`[packets] keep` messages; restored from `packets.jsonl` after a core reload), `packets.jsonl` (one JSON object per message: seq, t, dir, chan, op, name, len, framed, redacted, official, hex) and `packets.txt` in the session folder. Names come from `modules/protocol/opcodes/0.5.5e/*.toml` (embedded at build time), decoded fields from `poe_proto::describe`.
 - `redact` (default on) drops the bodies of Authenticate, ResumeSession, AuthenticationResult, InstanceDetails, Hello and client `0x000e` (instance ticket) before anything is stored.
-- Finding (2026-10-14): the instance opening "Hello" is two messages, `0x000f` (u32) and `0x000e` (12 bytes, u32 ticket, u32, u8); the server still reads them as one (left as is for now).
 
 ### Field tracer (`protocol.rs`)
 While a message is decoded (inside the reader hook) or encoded (inside the session send), the stream primitives are hooked: `0x142197d30` read `(stream, dst, len)` at message offset `stream+0x278`, `0x142197e60` write `(stream, src, len)` at `+0x258` minus the message start. Each record is (offset, size, return address). The function containing the return address (from `.pdata`) is the deserializer/serializer; functions used by more than two opcodes are generic helpers (strings, chars) and are not chosen. Fields are in `packets.jsonl` (`"fields":"offset:size:caller ..."`) and restored after a reload. Messages sent outside the session (frame reports, login) are not traced.
@@ -84,14 +83,9 @@ Addresses in crash reports, exit traces, logging breakpoints and the Protocol pa
 The game resolves some functions (instance and device creation) before the loader's export patch is in place, so the loader takes the instance from `vkCreateWin32SurfaceKHR`, the physical device from the surface queries, the device from `vkCreateSwapchainKHR` and a present-capable queue family from `vkGetPhysicalDeviceSurfaceSupportKHR`.
 
 ## Using it on official servers (read-only)
-1. `cargo xtask deploy-client --official`: the original gateway list goes back into `GameFiles/`, and `poe-hook.toml` gets `mode = "official"`.
-2. Start Steam, then `cargo xtask run-client` (the GameFiles copy in its own Proton prefix; the Steam install is never touched). The GameFiles copy must be the same build as the live game; after a patch, update GameFiles first.
-3. Play. The overlay shows `OFFICIAL: read-only`. Packets, logs and snapshots go to `GameFiles/logs/poe-hook/<session>/`; the coverage counts official messages separately.
-4. `cargo xtask deploy-client` switches back to our server.
+The steps (`deploy-client --official`, `run-client`, switching back) are in [../guides/setup.md](../guides/setup.md#official-servers-read-only); the rules are in [../../CLAUDE.md](../../CLAUDE.md). In this mode the overlay shows `OFFICIAL: read-only`; packets, logs and snapshots go to the session folder, and the coverage page counts official messages separately. Comparing a capture with one from our server: [../re/captures.md](../re/captures.md).
 
-Compare a capture with one from our server: `third_party/pyenv/bin/python scripts/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`.
-
-Risk: the DLL is a third-party module inside the official client, even if it only observes. It can be detected (the client can also load server-delivered code modules, see [re/crypto.md](re/crypto.md#other-crypto-in-the-binary)), and it is against the game's terms; there is some risk to the account.
+Risk: the DLL is a third-party module inside the official client, even if it only observes. It can be detected (the client can also load server-delivered code modules, see [../re/crypto.md](../re/crypto.md#other-crypto-in-the-binary)), and it is against the game's terms; there is some risk to the account.
 
 ## Debug link with our server (`devlink.rs`)
 The DLL's position-report UDP socket also receives `PDB1` datagrams from the instance server (`key\tvalue` lines; `ack\t<command>\t<result>` for commands, shown as notices) and sends `PDC1` commands (`u16 our TCP port of the session`, then text). Server side: `[instance] debug_link` (default on), `sync.rs` remembers each client's UDP address and queues its commands, the session tick applies them (`dev_command`) and sends `Player::debug_state`. Never while read-only.
@@ -107,7 +101,7 @@ The DLL's position-report UDP socket also receives `PDB1` datagrams from the ins
 | Key | Default | Description |
 |---|---|---|
 | `crash_log` | on | Vectored handler. Logs fatal exceptions with Ghidra addresses, registers and game addresses on the stack (bounded by the thread's stack limits). It also logs C++ exceptions (type name and `what()`), and hooks `ExitProcess`/`TerminateProcess` to log exit codes with stack refs (`exit_trace`). |
-| `crypto_bypass` | on | Replaces the login verify-and-derive routine (found by its prologue pattern). The session key material becomes SHA-512(server public key), so no signature check or DH is needed. See [re/crypto.md](re/crypto.md). Off while read-only. |
+| `crypto_bypass` | on | Replaces the login verify-and-derive routine (found by its prologue pattern). The session key material becomes SHA-512(server public key), so no signature check or DH is needed. See [re/crypto.md](../re/crypto.md). Off while read-only. |
 | `net_trace` | off | Inline hooks on ws2_32 `send`/`WSASend`/`recv`/`WSARecv`. Logs payload prefixes and game addresses on the stack. Connects are logged by the loader's guard. |
 | `net_trace_dump_bytes` | 256 | Bytes of payload shown per call. |
 | `block_external` | on | Private mode: refuses connections to non-loopback addresses, so the client does not reach official services (shop, telemetry, uploads). Ignored in official mode. |
@@ -122,27 +116,20 @@ The DLL's position-report UDP socket also receives `PDB1` datagrams from the ins
 Note: the game's own login/instance TCP traffic does not go through these ws2_32 exports (it is invisible to `net_trace`). The libcurl HTTPS traffic does go through them.
 
 ## Game data for the DLL
-`cargo xtask deploy-client` also writes name tables from the game data into `GameFiles/poe-hook-data/`: `stats.tsv` (network key = `Stats.dat` row + 1, id) and `action_types.tsv` (`ActionTypes` key column, id). It also resets the client's remembered gateway (`gateway_id` in our test prefix's `poe2_production_Config.ini`) to our gateway for private deploys; after an official session it stayed on an official realm and the client never contacted our server.
+Deploying also writes name tables from the game data into `GameFiles/poe-hook-data/` ([../guides/setup.md](../guides/setup.md)): `stats.tsv` (network key = `Stats.dat` row + 1, id), `action_types.tsv` (`ActionTypes` key column, id) and `areas.tsv` (the Instances page's area picker).
 
 ## Building and deploying
-- `cargo xtask build-dll` runs `third_party/cargo-xwin/bin/cargo-xwin xwin build -p poe-hook -p poe-hook-core --target x86_64-pc-windows-msvc --release` in `modules/client-hook/`, keeping the MSVC SDK cache in `third_party/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
-- `cargo xtask deploy-client [--official] [--no-build]` installs both DLLs, the config and the gateway list (ours, or the original for `--official`). The deploy logic is the `poe-hook-deploy` crate in the same submodule (gateway list, `poe-hook.toml` edits, `steam_appid.txt`, DLL install and backup, Proton launch, crash-dump moving); xtask only passes the repo paths (GameFiles, `dumps/<version>`, the Proton prefix) and exports the DLL name tables.
+Commands: [../guides/setup.md](../guides/setup.md).
+- Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
+- The deploy logic is the `poe-hook-deploy` crate in the same submodule (gateway list, `poe-hook.toml` edits, `steam_appid.txt`, DLL install and backup, Proton launch, crash-dump moving); xtask only passes the repo paths (GameFiles, `dumps/<version>`, the Proton prefix) and exports the DLL name tables.
 - The opcode tables the Packets page uses are compiled in from Poe2Protocol (`poe_proto::opcodes::v0_5_5e`); `modules/client-hook/protocol` is the nested checkout.
 - Mod manifest (`mod.toml`) spec for the future loader and launcher: `modules/client-hook/docs/mod-manifest.md`.
-- `cargo xtask deploy-core [--no-build]` installs only the core; a running client reloads it within about a second.
 
 ## Terrain research (`terrain_tools.rs`)
-`[features] area_export` (on by default; read-only safe) writes every generated area to
-`dumps/<version>/terrain/area-exports/<session>/<n>_<hash16>_<seed>/` (`<dump_dir>/...`; without `dump_dir`:
-`<session>/areas/...`; layout, doodads, grids, generator objects, walkability probe) and checks the export by recomputing the client's tile and doodad hashes.
-`[features] generator_trace` / `POE_HOOK_GEN_TRACE=1` adds `generator_trace.tsv` (every terrain
-RNG draw and generator phase). Details and the seed sweep: [re/terrain.md](re/terrain.md).
-
-## Crash reports
-After a crash the client writes `PoE-<time>-<pid>.dmp` (plus `.txt`, `.log.txt` and `.poecap` side files) under `My Games/Path of Exile 2/poe2_production` in the prefix. A helper process uploads them, both right after the crash and on the next launch. With `block_external` installed from `DllMain`, the upload connections are refused. `cargo xtask run-client` also moves pending dumps to `runtime/crash-dumps/` (git-ignored) before launching, so nothing is left to upload and the dumps stay available for debugging.
+`[features] area_export` (on by default; read-only safe) writes every generated area to `dumps/<version>/terrain/area-exports/` and checks it by recomputing the client's tile and doodad hashes; `[features] generator_trace` / `POE_HOOK_GEN_TRACE=1` adds the generator trace. Formats and the seed sweep: [../re/terrain/README.md](../re/terrain/README.md#tools).
 
 ## Entity tracing (`dump_object_types`)
-Besides dumping the object-type table, this feature hooks `0x141e71120` (entity initial-state reader). It logs each entity's components (vtable, reader, owner), then wraps each serialized component's reader to log the blob span it consumed. That is how [protocol/entities.md](protocol/entities.md) was measured: send an all-zero blob, padded, and read the spans.
+Besides dumping the object-type table, this feature hooks `0x141e71120` (entity initial-state reader). It logs each entity's components (vtable, reader, owner), then wraps each serialized component's reader to log the blob span it consumed. That is how [protocol/entities.md](../protocol/entities.md) was measured: send an all-zero blob, padded, and read the spans.
 
 ### Player state probes (`dump_object_types`, 2026-10-13)
 Five seconds after the local player entity is created, the DLL logs:
@@ -162,16 +149,9 @@ It also hooks:
 Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the player's render visibility (`0x1416a9810`) as an experiment.
 
 ### Output folder (`dump_dir`)
-`dump_dir` (top level of `poe-hook.toml`) is where the DLL writes datamined and generated files. `cargo xtask deploy-client` sets it to `<repo>/dumps/<version>` as a Windows path (the client runs under Wine, where `Z:\` is `/`, e.g. `Z:\home\you\Poe2ModdingProject\dumps\0.5.5e`) and creates the folder. The DLL logs `dump_dir <path>` at start. Files go to:
+`dump_dir` (top level of `poe-hook.toml`) is where the DLL writes datamined and generated files. `cargo xtask deploy-client` sets it to `<repo>/dumps/<version>` as a Windows path (the client runs under Wine, where `Z:\` is `/`, e.g. `Z:\home\you\Poe2ModdingProject\dumps\0.5.5e`) and creates the folder. The DLL logs `dump_dir <path>` at start. It writes the terrain grids and layouts, area exports (with `generator_trace.tsv`) and the client tables (`object_types.txt`, `terrain_tiles.txt`) below it; which file lands in which folder is in [dumps/README.md](../../dumps/README.md).
 
-| File | Folder under `dump_dir` |
-|---|---|
-| `terrain_grid_<tile hash>.bin` | `terrain/grids/` |
-| `terrain_layout_<tile hash>.tsv` | `terrain/layouts/` |
-| `<session>/<n>_<hash16>_<seed>/` (area export, `generator_trace.tsv`) | `terrain/area-exports/` |
-| `object_types.txt`, `terrain_tiles.txt` | `client-tables/` |
-
-Unset, the old locations apply (next to the exe; the session folder's `areas/`). The tree is described in [../dumps/README.md](../dumps/README.md).
+Unset, the old locations apply (next to the exe; the session folder's `areas/`).
 
 ### Layout export format
 `terrain_layout_<tile hash>.tsv` (`terrain/layouts/`): a `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path<TAB>sub` per sub-tile (23×23 cells).
@@ -181,32 +161,18 @@ Unset, the old locations apply (next to the exe; the session folder's `areas/`).
 ### Send tracing (2026-10-14)
 `dump_object_types` also logs, once per opcode, the caller of the game-session send (`0x14211f880`, packet +8 = opcode). It logs the caller of the raw stream writer (`0x142197e60`) the first time `00 1c` is written, plus the HNC cipher object (stream +0xd0). That is how the frame report and the HNC channel were found.
 
-`poe-hook.keys` also accepts `close`, which posts `WM_CLOSE` to the game window (like its X button).
-
-### Input injection for movement tests (2026-10-14)
-- The game reads WASD through Raw Input, so posted key messages do not move the player.
-- **`in:<vk>[:ms]`** posts `WM_INPUT` with a marker handle. The DLL hooks `GetRawInputData` (user32) to return a synthetic keyboard record for that handle, and `GetKeyState` reports the key as held meanwhile.
-- **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
-- **`POE_HOOK_FAKE_FOCUS`** (set by `scripts/test-run.sh`): the hooked `GetForegroundWindow` returns the game's own window (`*[0x1445d8308]`), so a client on another desktop still sends cursor reports (AimTarget checks the foreground window). Never while read-only.
-- **Plain keys (`0x20`)** are still posted messages. Space (dodge roll) is read that way.
-- **`text:<chars>`** posts one `WM_CHAR` per character, for text boxes such as the character name.
-- **`inpress:x,y` / `inrelease:x,y`** hold and release the left button at a client position (held click-to-move); the hooked `GetKeyState` reports `VK_LBUTTON` held meanwhile.
-- Before each batch the DLL posts `WM_ACTIVATEAPP(1)`: the game ignores input while it thinks it is in the background, and this changes only its own flag, not the real focus.
-- **`0x77` (F8)** takes a game screenshot into the test prefix's `My Games/Path of Exile 2/Screenshots`, which shows the game even when its window is not visible.
-- Nothing goes to other windows. `SendInput` is not used, because it types into whatever window has focus.
+### Input injection for tests (2026-10-14)
+`poe-hook.keys` lets a test press keys and move the mouse in the client without touching other windows (never while read-only). The game reads WASD through Raw Input, so the DLL hooks `GetRawInputData`, `GetKeyState`, `GetCursorPos` and, for tests, `GetForegroundWindow` (`POE_HOOK_FAKE_FOCUS`). The entries and environment variables: [../guides/setup.md](../guides/setup.md#poe-hookkeys-entries).
 
 ### Movement log
 With `dump_object_types`, plus `movement_log = true` or the `POE_HOOK_MOVEMENT_LOG` environment variable (which `scripts/test-run.sh` sets), the DLL logs:
 - the player's world position at the start of each of its simulation updates (`frame #n dt world step grid`);
 - the Actor's WASD direction (+0x400) when it changes.
 
-It is off by default because it writes about 30 lines a second while moving. See [protocol/movement.md](protocol/movement.md).
+It is off by default because it writes about 30 lines a second while moving. See [protocol/movement.md](../protocol/movement.md).
 
 ### Facing probes (2026-10-15)
 With the movement log on, the DLL logs the player's facing (Positioned +0x44c and the lock bit) when it changes, and every distinct call stack of SetOrientation (`0x141ddc6a0`) for the player.
 
 ## Position sync
-`position_sync` (on by default) sends one UDP datagram per player simulation frame (format `PSY2`: the PSY1 fields plus the cursor's client-area position and the window size, for facing the cursor). It goes to the game's loopback TCP connection to the instance server (`position_sync_port`); the server listens for UDP on the same port. The local port is read with `getsockname` after the non-blocking connect and again when reporting while it is still 0. The DLL logs the target ("position sync: target port …"). So reports only ever go to a local server. Payload, 24 bytes little-endian: `b"PSY1", u16 local TCP port of that connection, u16 Actor +0x2a2 flags, u32 frame counter, f32 grid x, f32 grid y, u16 action type at Actor +0x238, u16 action type at +0x240`. The server keys reports by the TCP port. The connect hook records the connection and restores `WSAGetLastError` afterwards: the game checks it after a non-blocking `connect`, and changing it broke the login. This is a dev bridge for M3.5 until the server simulates movement exactly (M5); see [protocol/movement.md](protocol/movement.md#lag-m35).
-
-## Test window title
-With `POE_HOOK_WINDOW_TITLE=<title>` in the environment (set by `scripts/test-run.sh`), the DLL hooks `CreateWindowExW`/`SetWindowTextW` so the game window gets that title. A desktop rule can then match the test client, for example a KWin rule that moves the window to another virtual desktop without focus, so unattended tests do not cover the screen. No rule is installed by the project.
+`position_sync` (on by default) sends one UDP datagram per player simulation frame (format `PSY2`: the PSY1 fields plus the cursor's client-area position and the window size, for facing the cursor). It goes to the game's loopback TCP connection to the instance server (`position_sync_port`); the server listens for UDP on the same port. The local port is read with `getsockname` after the non-blocking connect and again when reporting while it is still 0. The DLL logs the target ("position sync: target port …"). So reports only ever go to a local server. Payload, 24 bytes little-endian: `b"PSY1", u16 local TCP port of that connection, u16 Actor +0x2a2 flags, u32 frame counter, f32 grid x, f32 grid y, u16 action type at Actor +0x238, u16 action type at +0x240`. The server keys reports by the TCP port. The connect hook records the connection and restores `WSAGetLastError` afterwards: the game checks it after a non-blocking `connect`, and changing it broke the login. This is a dev bridge until the server simulates movement exactly (server movement with collision); see [../protocol/movement.md](../protocol/movement.md#lag).

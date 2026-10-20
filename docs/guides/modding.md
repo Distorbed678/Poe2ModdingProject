@@ -9,6 +9,6 @@ Modding is a design goal from the start. This page records the hooks that alread
 - **Data-driven content:** server logic reads game tables by column name, so modified tables flow through without code changes.
 
 ## Client
-- **Debug core (exists):** `modules/client-hook/poe-hook-core` is hot-reloadable (`cargo xtask deploy-core` while the game runs); its features are toggled in `poe-hook.toml` ([client-dll.md](client-dll.md)). The loader (`modules/client-hook/poe-hook`) keeps the permanent hooks.
-- **Mod manifest (spec only):** `mod.toml` (id, version, game version compatibility, load order, dependencies, entry DLL, data files) is specified in [modules/client-hook/docs/mod-manifest.md](../modules/client-hook/docs/mod-manifest.md); the loader and the launcher will both read it.
+- **Debug core (exists):** `modules/client-hook/poe-hook-core` is hot-reloadable (a running client reloads a redeployed core, see [setup.md](setup.md)); its features are toggled in `poe-hook.toml` ([../architecture/client-dll.md](../architecture/client-dll.md)). The loader (`modules/client-hook/poe-hook`) keeps the permanent hooks.
+- **Mod manifest (spec only):** `mod.toml` (id, version, game version compatibility, load order, dependencies, entry DLL, data files) is specified in [modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md); the loader and the launcher will both read it.
 - **Planned:** a loose-file override hook so client mods can ship replacement assets (sharing the same `mods/<name>/` layout as the server), plus packet hooks for custom messages.

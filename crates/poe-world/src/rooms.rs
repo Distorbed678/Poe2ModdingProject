@@ -1,5 +1,5 @@
 //! Room nodes: the room set (`.rs`), edge types (`.et`), ground types (`.gt`) and the
-//! placement of a graph node's room (`0x1420c87a0`). See `docs/re/terrain.md`,
+//! placement of a graph node's room (`0x1420c87a0`). See `docs/re/terrain/tgr.md`,
 //! "Room placement".
 //!
 //! - A node's key (`0x1420d2e20`): each graph edge goes to the side it leaves the node by

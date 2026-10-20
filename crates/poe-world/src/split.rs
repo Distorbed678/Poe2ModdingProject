@@ -1,6 +1,6 @@
 //! Splitting virtual edges into two parallel edges (`0x1420bc400` → `0x1420bb4f0`): a wide
 //! river becomes its two banks, each with its own edge type, at a random width per internal
-//! point. See `docs/re/terrain.md`, "Virtual edges".
+//! point. See `docs/re/terrain/tgr.md`, "Virtual edges".
 
 use crate::{
     rng::TerrainRng,

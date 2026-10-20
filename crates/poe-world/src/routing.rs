@@ -1,6 +1,6 @@
 //! Edge routing (`0x1420cdc30`): graph edges (rivers, paths) are routed tile by tile between
-//! the rooms' exits over a random cost grid. See `docs/re/terrain.md`, "Edge
-//! routing".
+//! the rooms' exits over a random cost grid. See `docs/re/terrain/tgr.md`, "Repulsion,
+//! exits and routing".
 //!
 //! 1. After each room pass (`0x1420c9970`) the room's edges end at its exits
 //!    (`0x1420c5b50`): exit `e` on a side is tile `e / 3`, cell `[3, 11, 19][e % 3]` along the

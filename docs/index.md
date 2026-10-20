@@ -1,31 +1,55 @@
 # Documentation index
 
-A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start with [setup.md](setup.md), then read [architecture.md](architecture.md).
+A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules and the project overview: [../CLAUDE.md](../CLAUDE.md). Start with [guides/setup.md](guides/setup.md), then [architecture/overview.md](architecture/overview.md).
 
+## Guides
 | Document | Contents |
 |---|---|
-| [setup.md](setup.md) | Cloning (submodules), toolchain, tools, building, deploying to `GameFiles/`, running client and server |
-| [architecture.md](architecture.md) | Crates, servers, data flow, design rules |
-| [milestones.md](milestones.md) | Roadmap and current status |
-| [server-admin.md](server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers |
-| [terrain-status.md](terrain-status.md) | Terrain port: results per area, where work stopped, next steps |
-| [multiplayer.md](multiplayer.md) | Multiplayer readiness: what blocks remote players, same-machine dependencies, shared world plan |
-| [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
-| [../modules/client-hook/docs/mod-manifest.md](../modules/client-hook/docs/mod-manifest.md) | `mod.toml` spec for client mods (Poe2ClientHook submodule; spec only) |
-| [modding.md](modding.md) | Server and client modding hooks (planned and existing) |
-| [datamining.md](datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, useful tables, the dumps folder |
-| [../dumps/README.md](../dumps/README.md) | `dumps/<version>/` (git-ignored): terrain grids, layouts, area exports, vectors, client tables, Ghidra exports, captures; what produces each and `scripts/dumps/migrate.sh` |
-| [protocol/official-comparison.md](protocol/official-comparison.md) | Official servers vs ours: what differs, what was fixed, what is open |
-| [client-dll.md](client-dll.md) | The client DLLs: version.dll loader, hot-reloadable debug core, modes (read-only), features and config |
+| [guides/setup.md](guides/setup.md) | Commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, official read-only sessions, crash dumps |
+| [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat |
+| [guides/hosting.md](guides/hosting.md) | What blocks remote players and the same-machine dependencies; suggested order |
+| [guides/launcher.md](guides/launcher.md) | The planned player launcher |
+| [guides/modding.md](guides/modding.md) | Server and client modding hooks (planned and existing) |
+
+## Architecture
+| Document | Contents |
+|---|---|
+| [architecture/overview.md](architecture/overview.md) | Data flow between client, login server and instance server; design rules |
+| [architecture/crates.md](architecture/crates.md) | Every crate, server and submodule and its role |
+| [architecture/client-dll.md](architecture/client-dll.md) | The client DLLs: loader, hot-reloadable core, overlay, packet capture, modes (read-only), features |
+| [architecture/accounts.md](architecture/accounts.md) | Account model today and planned |
+| [architecture/instance-world.md](architecture/instance-world.md) | Instance directory, per-connection simulation today, the shared-world plan |
+| [architecture/web-api.md](architecture/web-api.md) | The planned web API and admin site |
+
+## Protocol (client 0.5.5e)
+| Document | Contents |
+|---|---|
 | [protocol/framing.md](protocol/framing.md) | Wire format: encodings, framing, encryption |
-| [protocol/login.md](protocol/login.md) | Login protocol messages |
-| [protocol/instance.md](protocol/instance.md) | Instance protocol: opening sequence, area info, inventories, spawn |
-| [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components, actor skills) |
-| [protocol/movement.md](protocol/movement.md) | Lockstep movement: WASD, click-to-move, skills and dodge roll |
-| [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the DLL bypass |
-| [re/findings-2026-10-13.md](re/findings-2026-10-13.md) | Offline analysis: live-log comparison, client packet classes, rendering/spawn notes |
-| [re/terrain.md](re/terrain.md) | Terrain generator: phases, RNG (mt19937), tile/doodad hashes, tile records, area export, generator trace, seed sweep |
-| [re/dungeon.md](re/dungeon.md) | `.dgr` dungeon layouts (most act 1 areas): call chain, grid, room pick (port in progress) |
-| [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Reverse-engineering findings (Ghidra addresses) for 0.5.5e |
+| [protocol/login.md](protocol/login.md) | Login messages, character list, leagues, hand-off |
+| [protocol/instance.md](protocol/instance.md) | Instance messages: opening sequence, area info, inventories, frames, pause, chat, leaving the game |
+| [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components, actor skills, NPCs) |
+| [protocol/movement.md](protocol/movement.md) | Lockstep movement: WASD, click-to-move, skills, dodge roll, facing, lag |
+
+## Reverse engineering and data
+| Document | Contents |
+|---|---|
+| [re/README.md](re/README.md) | How the client is analysed: Ghidra access, `scripts/re`, where findings go |
+| [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Ghidra addresses of functions and structures |
+| [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the HNC side channel, the DLL bypass |
+| [re/datamining.md](re/datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, the dumps folder |
+| [re/captures.md](re/captures.md) | Official servers vs ours, and the live client log |
+| [re/terrain/README.md](re/terrain/README.md) | Terrain generator overview: phases, RNG, hashes, tile records, tools, the port crate |
+| [re/terrain/tgr.md](re/terrain/tgr.md) | `.tgr` areas: generation order, graph layout, rooms, routing, edge tiles |
+| [re/terrain/dungeon.md](re/terrain/dungeon.md) | `.dgr` dungeon areas: call chain, rooms, corridors, tile pass |
+| [re/terrain/shared-passes.md](re/terrain/shared-passes.md) | Passes both kinds share: topology choice, lattice, fill, de-repetition, outer buffer |
+| [../dumps/README.md](../dumps/README.md) | `dumps/<version>/` (git-ignored): what produces each file and `scripts/dumps/migrate.sh` |
+
+## Status, research, plans
+| Document | Contents |
+|---|---|
+| [status/terrain.md](status/terrain.md) | The only terrain status: results per area, where work stopped, next steps |
+| [status/history.md](status/history.md) | What was built when, and the open items |
 | [research/poe1-prior-art.md](research/poe1-prior-art.md) | What public PoE1 research says about the protocol |
 | [research/tools.md](research/tools.md) | Survey of datamining and RE tools |
+| [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
+| [../modules/client-hook/docs/mod-manifest.md](../modules/client-hook/docs/mod-manifest.md) | `mod.toml` spec for client mods (Poe2ClientHook submodule; spec only) |

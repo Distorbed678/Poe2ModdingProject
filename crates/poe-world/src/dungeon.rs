@@ -1,5 +1,5 @@
 //! Dungeon layouts (`.dgr` topologies, `0x1420ac3e0`): rooms on a grid of room units, joined by
-//! corridors. Findings: `docs/re/dungeon.md`. Ported so far: typed-node room placement.
+//! corridors. Findings: `docs/re/terrain/dungeon.md`. Ported so far: typed-node room placement.
 
 use std::collections::HashMap;
 

@@ -79,6 +79,8 @@ Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatc
 | — | C→S | `0x0012` CreateCharacter | `astring name, astring league, u32 (1), u32, u32, wstring start_state, 32 bytes` |
 | — | S→C | `0x0013` CharacterCreated | `u16 result (0 = ok), u8 notify, u32 account_id` (deserializer `0x14214ea70`); then a fresh CharacterList. On 0 the create screen (callback `0x140ed2ab0`) plays the creation scene, finds the new character **by name** in the list (`0x140ec8b20`) and sends PlayCharacter (`0x140ecee50`, "character_creation_done"), so a new character goes straight into the game. Before 2026-10-14 the server sent `0x0016`, which is a different message (handler `0x1420e8da6`, signal +0x288, meaning unknown): the first character still worked because the client fell back to the select screen, but a second character left the create screen stuck after Continue |
 
+New characters are stored with their start area (`[player] start_area`).
+
 ### CharacterList entry fields (confirmed so far)
 | Field | Meaning |
 |---|---|
@@ -130,7 +132,7 @@ Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the selec
 | C→S `0x0e` PlayCharacter | `u8 flags, varuint count, (u32 character_index, u32 account_id)[count]` (one entry per local split-screen player) |
 | S→C `0x14` InstanceDetails | `astring host, u16 port (+0x38), u32 (+0x30), u16 area HASH16 (+0x3a, must exist in WorldAreas), u32 (+0x34), 64-byte key material (+0x3c), 8 bytes (+0x7c), u8 (+0x84)` |
 
-- **S→C `0x0017`** (`u16` reason): the client closes its login connection (handler case in `0x1420e8130`, `ClientLoginSession_ProcessPacket` → `0x1420e7140` → `0x1420e71d0`: `shutdown()`). Official servers send `0x0017 0x0014` right after InstanceDetails; we do not (in-game transfers use the open connection, see [server-admin.md](../server-admin.md)).
+- **S→C `0x0017`** (`u16` reason): the client closes its login connection (handler case in `0x1420e8130`, `ClientLoginSession_ProcessPacket` → `0x1420e7140` → `0x1420e71d0`: `shutdown()`). Official servers send `0x0017 0x0014` right after InstanceDetails; we do not (in-game transfers use the open connection, see [server-admin.md](../guides/server-admin.md#transfers)).
 - InstanceDetails while the client is in an instance is received and ignored; at character selection it is followed even unasked.
 
 Evidence: deserializer `0x14214ece0`; handler `0x1420e8ef8`; the instance connect (`0x14211dbb0`) logs host = the string and port = struct +0x80 (packet +0x38).

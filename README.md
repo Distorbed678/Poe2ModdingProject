@@ -12,6 +12,6 @@ A private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust, desig
 - `scripts/`: test-run, screenshot and reverse-engineering helpers. `third_party/`: downloaded tools (git-ignored). `runtime/`: server data and logs (git-ignored).
 - `docs/`: start at [docs/index.md](docs/index.md).
 
-What works: login, character creation and selection, entering any area (the client generates the terrain from the area and seed), movement (WASD, click-to-move, dodge roll), instances and transfers between them, chat channels, server commands (chat `!` and the overlay), and server-side terrain generation for most act 1 areas ([terrain-status.md](docs/terrain-status.md)).
+What works: login, character creation and selection, entering any area (the client generates the terrain from the area and seed), movement (WASD, click-to-move, dodge roll), instances and transfers between them, chat channels, server commands (chat `!` and the overlay), and server-side terrain generation for most act 1 areas ([docs/status/terrain.md](docs/status/terrain.md)).
 
-Quick start: [docs/setup.md](docs/setup.md). Server commands and admins: [docs/server-admin.md](docs/server-admin.md). Personal and educational project.
+Quick start: [docs/guides/setup.md](docs/guides/setup.md). Server commands and admins: [docs/guides/server-admin.md](docs/guides/server-admin.md). Personal and educational project.

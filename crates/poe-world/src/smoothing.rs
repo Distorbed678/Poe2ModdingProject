@@ -1,6 +1,6 @@
 //! Edge smoothing after routing (`0x1420bd650`): virtual edges leaving a room get an arc so
 //! they start (and end) along the exit's direction, then corners are rounded. All integer,
-//! no RNG. See `docs/re/terrain.md`, "Edge smoothing".
+//! no RNG. See `docs/re/terrain/tgr.md`, "Edge smoothing".
 
 pub type Pos = (i32, i32);
 

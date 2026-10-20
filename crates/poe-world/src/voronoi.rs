@@ -2,7 +2,7 @@
 //! sweepline in the `VoronoiDiagramGenerator` layout, adapted by GGG to 32-bit integers. The
 //! generator uses it to jitter graph nodes inside their cells (`crate::layout`), so it is
 //! ported operation by operation, integer rounding and overflow included
-//! (`docs/re/terrain.md`, "Graph layout").
+//! (`docs/re/terrain/tgr.md`, "Graph layout").
 //!
 //! - Sites are sorted by (y, x) (`0x141f05c10`); the bounding box is `(0, 0, w, h)` in grid
 //!   cells.

@@ -14,17 +14,11 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14219f3b0` | builds the two-direction Salsa20 cipher from the key material | |
 | `0x142198530` | installs a cipher on a Tcpstream | |
 | `0x142b030b0` | Crypto++ Salsa20 key setup | |
-| `0x142102c20` | loader for server-delivered encrypted code modules | see re/crypto.md |
+| `0x142102c20` | loader for server-delivered encrypted code modules | see [crypto.md](crypto.md) |
 
 ## Imports of interest
 - `VERSION.dll`: `GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`. These are proxied by poe-hook.
 - `WS2_32.dll`: sockets. `bcrypt.dll` and `CRYPT32.dll` are present. The crypto strings in the binary (CALG_*, TLS_*, RSA) belong to bundled curl/OpenSSL for HTTPS. The game protocol cipher has no string anchors.
-
-## Client log lines (GameFiles/logs/Client.txt)
-- `Connected to <host> in Nms.` is the login connection.
-- `Got Instance Details from login server` is the hand-off.
-- `Connecting to instance server at <ip>:<port>`.
-- `Generating level N area "<AreaId>" with seed <u32>`: the client generates terrain itself.
 
 ## Entities and rendering (2026-10-13)
 | Address | What |
@@ -74,7 +68,7 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14016ba40` | `AimReport_Tick`: per frame, AimTarget mode 2/3 via `0x14016b820` (33 ms) only while mode 1 was sent (+0x418, WASD input mode), `GetForegroundWindow() == *[0x1445d8308]`, the Player component (`local player +0x188`) has combat stance (+0x20d), and UI checks pass |
 | `0x141dcf320` / `0x141dd0a10` | Player component reader (full, vtable `0x1433a7708` +0x98) / delta reader (+0xb0, `u16` raw mask; see `PlayerDelta`) |
 | `0x141dd47e0` | Player vfunc +0x138: set combat stance (+0x20d); +0x20c is the networked byte |
-| `0x141ffe940` / `0x141fefa20` | `TerrainGen_Run` (generator driver) / `TerrainGen_Construct`; phases, RNG and hashes in [terrain.md](terrain.md) |
+| `0x141ffe940` / `0x141fefa20` | `TerrainGen_Run` (generator driver) / `TerrainGen_Construct`; phases, RNG and hashes in [terrain/README.md](terrain/README.md) |
 | `0x14167b270` / `0x14212f500` | `ClientWorld_LoadArea` (in-game world) / `HeadlessWorld_LoadArea` (server-side world class in the client) |
 | `0x141f9c020` / `0x140a58a70` / `0x141f0d7f0` | terrain RNG seed (TLS +0x20190) / `std::mt19937` next / MSVC `uniform_int` draw |
 | `0x141d141d0` / `0x141ff5550` / `0x141ff3310` | tile hash / doodad pass (doodad hash → world +0x118) / per-tile doodads and entities |
@@ -88,7 +82,7 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x141939e40` | `[NETWORKING] networking_type` option reader |
 | `0x142120b70` | game session update: frame reports, auto network-mode switch, world update |
 
-## Roll, sprint and steering (M3.5, 2026-10-14)
+## Roll, sprint and steering (2026-10-14)
 | Address | What |
 |---|---|
 | `0x141b76c20` | end of a dodge roll: decides whether it carries on as a sprint |
@@ -163,4 +157,4 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14209f050` | dungeon border tile placement | fallbacks: middle exits `0x14209fa10`, height flattening `0x14209fb00`, neighbour repair `0x14209ec70` |
 | `0x14209d180` | dungeon door groups | door sizes per edge set `0x141d09700` (sets built by `0x141d09ab0`) |
 | `0x141ff7a10` / `0x141ff05f0` | per-graph outer fill + buffer / subgraph generation | subgraphs run the whole pipeline in a window (`0x141f9e130`) of the main map |
-| `0x141fd5ff0` / `0x141fd71c0` | outer fill with height repair / one levelling round | see [dungeon.md](dungeon.md) |
+| `0x141fd5ff0` / `0x141fd71c0` | outer fill with height repair / one levelling round | see [terrain/dungeon.md](terrain/dungeon.md) |

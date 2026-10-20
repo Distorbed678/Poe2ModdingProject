@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive a terrain seed sweep (docs/re/terrain.md): the server (with `POE_SWEEP` or
+"""Drive a terrain seed sweep (docs/re/terrain/README.md): the server (with `POE_SWEEP` or
 `[instance] sweep`) generates one listed area/seed per instance session and then closes it; this
 script logs the test client in again and presses Play for the next entry, through the DLL's
 key file (posted to the game window only, never SendInput).

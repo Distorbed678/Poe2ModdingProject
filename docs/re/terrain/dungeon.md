@@ -2,12 +2,11 @@
 
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
-with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
-(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_6, G1_7, G1_8 and G1_9 (seeds 1001–1003 each; G1_6 and G1_8 with forced topologies, e.g. G1_8 1:3 / 11:3 / 4:1, G1_6 2:7 / 2:7 / 1:6; `cargo run --release -p poe-world --example area_vectors -- dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv`).
-Not ported yet: height-change edge types (G1_11), the height fallback of `0x14209f050`, 3×3
-door spots (`0x14209dc90`; guarded), subgraph file groups and nested
-subgraphs, injector and blank special rooms, and the request-driven extra rooms
-and shrines (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`).
+with `.tgr` ([shared-passes.md](shared-passes.md)); after them the client runs a separate dungeon
+layout. Port: `crates/poe-world/src/dungeon.rs` (layout) and `dungeon_tiles.rs` (tile pass). Which
+areas match the client and what is still missing: [../../status/terrain.md](../../status/terrain.md).
+The tools (`area_trace`, `area_vectors`, `wiggle_check`, debug switches) are listed in
+[README.md](README.md#tools).
 
 ## Call chain
 
@@ -117,7 +116,7 @@ The draws match the `.tgr` path for the first 11 (existence rolls `0x141feeb10`)
 starts at draw 11 (`0x1420aebc9`). Later call sites: `0x1420aff12` (`below(2964)`),
 `0x1420a62b0`, `0x1420a5f8a`, `0x141fa81a3`, `0x1420b125c`/`0x1420b134c`, `0x1420a4e94`/
 `0x1420a4ec7`, `0x1420a9b9f`, then the tile pass (`0x142098d18`, `0x14209f8b8`), fill, outer
-buffer and de-repetition as for `.tgr`.
+buffer and de-repetition as for `.tgr` ([shared-passes.md](shared-passes.md)).
 
 ## After the rooms (`0x1420ac3e0` step 4 onwards)
 
@@ -210,9 +209,7 @@ buffer and de-repetition as for `.tgr`.
 
 ## Later findings
 
-- Region orientation table `0x142f020c8` (9 × 3 bytes): `[0,1,1] [1,0,1] [0,0,0] [1,1,0] [0,0,1]
-  [1,0,0] [0,1,0] [1,1,1] [0,1,1]` (rows 5 and 7 were swapped in the port before; one shared
-  table in `region.rs` now).
+- Region orientation table `0x142f020c8`: see [shared-passes.md](shared-passes.md#region-orientation).
 - `.dgr` node random offsets (`0x141fea2e0` → `0x141fee830`, before the existence rolls): node
   values 5..9 are x min, y min, x max, y max; x += min + `range(0, max − min)`, then y. The graph
   turn (`0x141d14b30`) turns the offsets with the positions; a node with the lock flag (+0x41)
@@ -268,35 +265,8 @@ buffer and de-repetition as for `.tgr`.
   block (`outer_buffer_window`).
 - Typeless nodes (`0x1420afdd0` → `0x1420afa40`): the size list is the one of the first edge
   (node slots in order) whose type is not the default, else the default type's.
-- Fill tiles may overhang the region by one cell (`0x141f9e5f0`: x, y ≥ −1, far side ≤ size + 1),
+- Fill tiles may overhang the region by one cell (`0x141f9e5f0`: x, y ≥ −1, far side ≤ size + 1; see
+  [shared-passes.md](shared-passes.md#region-overhang)),
   so 3×3 ground slots on the region's border fill from −1. The outer fill aligns a 3×3 tile one
   cell outside when the region's corner and size are 1 mod 3. Fill rooms floor their slot heights
   like pass A; de-repetition keeps the replaced tile's height.
-
-## Where the port stands (2026-10-16)
-
-Vectors (`area_vectors -- dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv all`): town 2/2, G1_1/2/3/6/7/8/9 3/3, G1_4 2/3,
-G1_5 0/3, G1_11 0/3, G1_12 0/1, G1_13–15 no traces. Topologies for G1_6/G1_8 are found by the
-forced search (the natural choice needs the world-map pins, not ported).
-
-In progress, G1_12 1001 (forced `2:7`, `CanopyE_S.dgr`, two `graph` nodes: `_CanopyE_S.dgr` with
-`canopy_master.tsi`, `Trees_Subscene.dgr` with `subscene_master.tsi`): all 2385 terrain draws
-match, but our map is 169×85 and the client's 174×87. G1_12's `master.tsi` has `RoomOverlap 0`
-(unit 29); the grid overlap (`Grid::overlap`, master +0x14b) seems to default to 1, so check
-where `dungeon::layout` reads it. Then compare the layout. The subgraph margin and window code
-(above) is new and only checked by "no regression" so far.
-
-Still to do, by area:
-- G1_4 1003: overlay placement after the fill (phase 2, `overlay.rs`).
-- G1_5: edge routing "could not tilise edge 14".
-- G1_11: height-change (cliff) edge types: chirality for `woodscliff_height.et` (virtual /
-  height-change door types, `0x141d047b0`).
-- G1_13–15: record client traces first.
-- Not ported anywhere: doodads (doodad hash), `0x14209dc90` (3×3 door spots), FileGroups
-  subgraphs, nested subgraphs, the request-driven extra rooms and shrines.
-- Then the server: send `map_force_topology` / `map_force_orientation`, area transfer (dev
-  command + DLL overlay panel), collision later.
-
-Debug switches: `POE_DBG` (rooms, stuck height repair), `POE_DBG_WIGGLE` (exit wiggle keys and
-placements), `POE_DBG_KEYS`, `POE_DBG_SLOTS`, `POE_DBG_GRID`, `POE_DBG_PATHS`, `POE_DUMP_DRAWS`,
-`POE_LAYOUT_DIFFS=n` (area_trace), `wiggle_check` example (client tiles the wiggle could move).

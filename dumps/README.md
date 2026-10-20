@@ -30,7 +30,7 @@ dumps/0.5.5e/
 | `terrain/vectors/sweep-results.tsv` | The server's seed sweep (`[instance] sweep`). `sweep-vectors.tsv`, `sweep-*.txt` are sweep inputs and extracts for `area_vectors`. | `scripts/re/sweep_drive.py`. |
 | `client-tables/` | Client DLL (`dump_object_types`): object types, and the tile grid's raw records. | Play. |
 | `ghidra/ghidra_named_functions_p*.json` | Ghidra MCP `search_functions_enhanced(has_custom_name=true)`; read by `scripts/re/export_symbols.py`. | Export again from Ghidra. |
-| `ghidra/instance_factory*_s2c.json`, `packet_classes_*.json` | `scripts/re/dump_factory.py` and the vtable scan in [docs/re/findings-2026-10-13.md](../docs/re/findings-2026-10-13.md). | Rerun the script on the exe. |
+| `ghidra/instance_factory*_s2c.json`, `packet_classes_*.json` | `scripts/re/dump_factory.py` and the vtable scan in [docs/protocol/instance.md](../docs/protocol/instance.md#client-packet-classes). | Rerun the script on the exe. |
 | `captures/{official,local}/` | Copies of `GameFiles/logs/poe-hook/<session>/` (`packets.jsonl`, `packets.txt`, `protocol.tsv`, snapshots). Official = the session ran in official mode or connected to a non-loopback address. | Play; `scripts/dumps/migrate.sh` copies new sessions. |
 | `strings/clientstrings.txt` | Strings extracted from the exe. | Rerun the extraction. |
 

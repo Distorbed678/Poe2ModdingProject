@@ -65,9 +65,9 @@ tile hash 1655364279 equals the server's forced generation):
    connects to the new instance and loads its area.
 
 What does not work: `InstanceDetails` while the client is in an instance (received, ignored),
-and a second AreaInfo on one connection (crash). The login connection must stay open: login
-`0x0017` (official servers send `0x0017 0x0014` after every InstanceDetails) makes the client
-`shutdown()` it, so we leave it out (`[login] close_after_handoff = false`). How official
+and a second AreaInfo on one connection (crash). The login connection must stay open, so the
+server does not send login `0x0017` after the hand-off (`[login] close_after_handoff = false`;
+why: [../protocol/login.md](../protocol/login.md#hand-off-to-the-instance-server)). How official
 servers reconnect for later transfers is still to be captured.
 
 Forced layouts: an instance with a topology or orientation sends them in AreaInfo's first stat

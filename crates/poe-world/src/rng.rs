@@ -1,5 +1,5 @@
 //! The terrain generator's random number generator, bit-exact with the client
-//! (`docs/re/terrain.md`): MSVC's `std::mt19937`, kept thread-local by the client and
+//! (`docs/re/terrain/README.md`): MSVC's `std::mt19937`, kept thread-local by the client and
 //! seeded with the area seed (`0x141f9c020`), and MSVC's `uniform_int` draw (`0x141f0d7f0`).
 
 const N: usize = 624;

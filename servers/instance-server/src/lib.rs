@@ -1170,7 +1170,7 @@ impl InstanceServer {
 
         // InitialState must follow 0x24 and the player entity (its handler uses the entity).
         // `frame_ms` is the length of each simulation frame.
-        // Flag values not understood yet are the official ones (official-comparison.md).
+        // Flag values not understood yet are the official ones (docs/re/captures.md).
         let initial = InitialState {
             frame_ms: self.config.instance.tick_ms as u32,
             flags: 0x07,

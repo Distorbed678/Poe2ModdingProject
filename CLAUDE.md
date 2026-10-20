@@ -50,8 +50,8 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 - `cargo xtask deploy-client` / `cargo xtask revert-client` install and remove the gateway entry, DLL and config in `GameFiles/`.
 - `cargo xtask run-client` launches `GameFiles/PathOfExileSteam.exe` through Proton with its own prefix (`third_party/proton-prefix`). Steam must be running.
 - `cargo xtask dll-data` rewrites only the DLL's name tables in `GameFiles/poe-hook-data/` (stats, action types, areas).
-- Unattended in-game tests (Steam running): start the server writing to `runtime/server-run.log`, then `scripts/test-run.sh <name> [seconds]` logs in and enters the game; `scripts/re/send_dev.py auto <command>` runs a server command; `echo 0x2d > GameFiles/poe-hook.keys` presses Insert; `scripts/shot.sh <name>` screenshots. See docs/setup.md.
-- Server commands and admins: docs/server-admin.md (`[admin] accounts`, chat prefix `!`).
+- Unattended in-game tests (Steam running): start the server writing to `runtime/server-run.log`, then `scripts/test-run.sh <name> [seconds]` logs in and enters the game; `scripts/re/send_dev.py auto <command>` runs a server command; `echo 0x2d > GameFiles/poe-hook.keys` presses Insert; `scripts/shot.sh <name>` screenshots. See docs/guides/setup.md.
+- Server commands and admins: docs/guides/server-admin.md (`[admin] accounts`, chat prefix `!`).
 - `third_party/poe_data_tools/poe_data_tools -p 2 --steam GameFiles list '<glob>'` lists and extracts game files.
 
 ## Reference data from live play

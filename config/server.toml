@@ -34,7 +34,7 @@ known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
 movement_trace = "runtime/movement-trace.tsv"
 # Cell sent with a turn: "natural" (the cell the client reaches in that frame; it is put on
 # its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
-# See docs/protocol/movement.md#lag-m35.
+# See docs/protocol/movement.md#lag.
 turn_cell = "natural"
 # Hold a turn back by up to one frame when that lands it nearer a cell centre (smaller
 # snaps at turns, some turns 33 ms later).
@@ -54,7 +54,7 @@ sweep_results = "dumps/0.5.5e/terrain/vectors/sweep-results.tsv"
 [terrain]
 # Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
 # with the one the client reports. The client always generates the terrain itself; leave this
-# off until the generator covers every area (docs/terrain-status.md).
+# off until the generator covers every area (docs/status/terrain.md).
 generate = false
 
 [instances]

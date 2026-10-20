@@ -1,4 +1,6 @@
-# Official servers vs ours
+# Captures: official servers vs ours, and the live client log
+
+## Official servers vs ours
 
 Comparison of the debug DLL's captures of official sessions (2026-10-14: login, character
 delete/create, the Riverbank intro, moving, sprinting, a bow pickup, three kills) with our
@@ -6,6 +8,8 @@ server's traffic, and what was changed to match. Tools: the DLL's Packets/Protoc
 `modules/protocol/poe-proto/examples/check_capture.rs` (decodes every captured message with our layouts;
 `--dump <channel> <in|out> <0xop>` prints them) and `scripts/re/packets_diff.py`.
 Run it inside the Poe2Protocol submodule (it is not a member of the main workspace): `cd modules/protocol && cargo run -p poe-proto --example check_capture -- opcodes/0.5.5e <packets.jsonl> [--show N]`, with captures from `dumps/0.5.5e/captures/`.
+
+Compare a capture with one from our server: `third_party/pyenv/bin/python scripts/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`. How a capture is made: [../guides/setup.md](../guides/setup.md#official-servers-read-only), [../architecture/client-dll.md](../architecture/client-dll.md#packet-capture-packets-packetsrs).
 
 ## Layout check
 Every official message we have a decoder for decodes without errors or leftover bytes, except
@@ -35,17 +39,25 @@ optional blocks and `AddInventory` items.
 2. **Messages official servers send at entry that we do not** (all decoded sizes in the
    session's `protocol.tsv`). Known so far: `0x0021` = MonsterVarieties rows to preload (`u8`,
    `u16` count, `u16`, count x `u16` row, count x `u8`; session dispatcher `0x142121f70` case
-   `0x142123a2c`, monsters milestone); `0x0066` = skill bar (`u8` local, `bool`, `u8` count,
-   64-byte records: `u32` skill id, ..., reader `0x142153de0`; skills milestone); `0x005a` = `u32`
+   `0x142123a2c`, needed for monsters); `0x0066` = skill bar (`u8` local, `bool`, `u8` count,
+   64-byte records: `u32` skill id, ..., reader `0x142153de0`; needed for skills); `0x005a` = `u32`
    + 22 bytes kept on the session (+0x2318, all zero officially); `0x00c6` = a social-list entry
    (account name). Others: `0x0021` (u16 id list), `0x00c6` (account name `Name#1234`),
    `0x0043`, `0x0045`, `0x018b`, `0x018c`, `0x0229`, `0x0226`, `0x0237`, `0x0066` (389 bytes,
    looks like the skill bar), `0x003a`, `0x02db`, `0x00c4`, `0x02d8`, `0x0325` (5.5 KB),
    `0x005a`, `0x0329`, `0x0320`, `0x031d`, `0x0271`, `0x00de` (per-inventory data),
    `0x02a6`, `0x0352`, `0x0358`, `0x0222`.
-3. **AreaInfo** 221 vs 39 bytes: the layout is now known (instance.md); missing are the
+3. **AreaInfo** 221 vs 39 bytes: the layout is now known ([../protocol/instance.md](../protocol/instance.md)); missing are the
    object-type preload list (needs the area's spawns), a u16 key list, scalar bytes and the
    optional blocks.
 4. **CharacterList**: experience (+0x40) is now sent. Still missing for characters that have
    played: `unk_51` 0x40, the 91-byte gear blob (component 8 delta format) and the stat pairs.
-5. Skills, monsters, items, sprint buff: later milestones; the captures have the sequences.
+5. Skills, monsters, items, the sprint buff: later work; the captures have the sequences.
+
+## Live client log (`Client.txt` from real play, read only)
+
+The user's log from official sessions (rules and location: [../../CLAUDE.md](../../CLAUDE.md)) shows what a correct session looks like.
+- `scripts/re/clientlog_entries.py`: per-entry timelines (area, seed, first log lines with ms offsets).
+- `scripts/re/clientlog_terrain.py`: (area, level, seed, tile hash, doodad hash) test vectors into `dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv`. That gives 1,744 vectors across 260 areas, for the terrain generator ([terrain/README.md](terrain/README.md)); towns and hideouts always use seed 1 (details there).
+- A live `G1_1` entry follows the same client log order as ours up to `[SCENE] Set Source [The Riverbank]`. Live then shows `Joined guild …` and `InstanceClientSetSelfPartyInvitationSecurityCode = 0` (both server messages we don't send), `Tried to SetExtraActivationRangeAroundTile() after level generation was complete` (client-side noise, see [terrain/README.md](terrain/README.md#client-side-facts-offline-analysis-2026-10-13)), and the washed-up intro dialogue ("Wounded Man: By the First Ones! You're alive!").
+- Log lines of interest: `Connected to <host> in Nms.` is the login connection; `Got Instance Details from login server` the hand-off; `Connecting to instance server at <ip>:<port>`; `Generating level N area "<AreaId>" with seed <u32>` the client generating its terrain.

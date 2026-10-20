@@ -1,0 +1,22 @@
+# History
+
+What was built when, newest last. Detail lives in the topic docs linked from each line; the open work is at the end. Terrain progress is in [terrain.md](terrain.md).
+
+- **2026-10-12, foundation and login.** Repo, tools, workspace, config, data access (Bundles2 and `.datc64`), the `version.dll` proxy and deploy tooling. The DLL loads under Proton, the client reads our gateway entry and the server logs its first message. Login works end to end: key exchange (DLL crypto bypass), authentication by machine hash, character creation and selection, Standard and Hardcore leagues ([../protocol/login.md](../protocol/login.md), [../re/crypto.md](../re/crypto.md)).
+- **2026-10-13, first zone.** Play, hand-off, encryption, area info, inventories, player entity and initial state; the Ranger stands in Clearfell Encampment and a new character lies under the Riverbank intro tree, with default stats from game data ([../protocol/instance.md](../protocol/instance.md), [../protocol/entities.md](../protocol/entities.md)). The invisible-player bug was the frame length of InitialState. The same day: start position on the Riverbank shore ([../architecture/instance-world.md](../architecture/instance-world.md)), character deletion, exit to character selection with a resume ticket, login and instance heartbeats, pause, chat joins, "full access", non-Steam shortcut ([../guides/setup.md](../guides/setup.md)).
+- **2026-10-14, movement.** WASD, click-to-move and the dodge roll, pause stops the server simulation, area and position are saved on exit ([../protocol/movement.md](../protocol/movement.md)). Follow-up after play-testing: lag traced to the server (slow A*, undecoded steering messages), position sync from the DLL, smoother turns, held click-to-move, "exit to log in screen", second-character creation.
+- **2026-10-14, debug suite.** The DLL split into a permanent loader and a hot-reloadable core with a Vulkan imgui overlay, packet capture and snapshots, and read-only operation on official servers ([../architecture/client-dll.md](../architecture/client-dll.md)). Official sessions were captured 2026-10-14/15 and compared with ours ([../re/captures.md](../re/captures.md)).
+- **2026-10-15, facing and terrain tooling.** The player faces the cursor. Terrain generator tooling: area export with hash self-check, generator trace, seed sweep ([../re/terrain/README.md](../re/terrain/README.md)); the server's generator reproduced Clearfell and the Riverbank.
+- **By 2026-10-16, dungeon layouts.** `.dgr` areas ported (G1_3, G1_6 to G1_9; [../re/terrain/dungeon.md](../re/terrain/dungeon.md)).
+- **2026-10-17, instances, transfers, chat.** Instance directory, transfers between instances, forced layouts, the Instances page, chat channels, server commands in chat and the overlay, overlay sidebar and command palette ([../guides/server-admin.md](../guides/server-admin.md)). Multiplayer gap analysis ([../guides/hosting.md](../guides/hosting.md)).
+- **2026-10-20, restructure.** Docs, scripts and runtime data moved into the current layout; protocol and client hook split into submodules; datamined outputs moved to `dumps/` ([../plans/orchestration-2026-10.md](../plans/orchestration-2026-10.md)).
+
+## Open items
+
+- Terrain generator: remaining areas and ports in [terrain.md](terrain.md); then server collision and exact server movement ([../protocol/movement.md](../protocol/movement.md)).
+- Sprint is partial: a full sprint needs the buff system.
+- Inventory and items, monsters and skills, buffs: not started; the captures hold the sequences ([../re/captures.md](../re/captures.md)).
+- Transfers: waypoints and area transitions; transfers without the character-select step need an official capture of a zone change ([../guides/server-admin.md](../guides/server-admin.md#transfers)).
+- Login: the meaning of the remaining CharacterList entry fields, and the error codes for refused character creation ([../protocol/login.md](../protocol/login.md)).
+- NPCs: server-sent NPCs need their StateMachine and quest states ([../protocol/entities.md](../protocol/entities.md)).
+- Multiplayer, accounts, web admin and launcher: planned ([../guides/hosting.md](../guides/hosting.md), [../architecture/accounts.md](../architecture/accounts.md), [../architecture/instance-world.md](../architecture/instance-world.md), [../architecture/web-api.md](../architecture/web-api.md), [../guides/launcher.md](../guides/launcher.md)).

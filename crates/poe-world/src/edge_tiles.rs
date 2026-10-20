@@ -1,6 +1,6 @@
 //! Edge tiles (`0x1420b6950`): each chain of layout-graph edges between rooms becomes a path
 //! of edge tiles, found by a tile-level search over an occupancy grid, then each path tile gets
-//! an edge tile from the tile set. Findings: `docs/re/terrain.md`, "Edge tiles".
+//! an edge tile from the tile set. Findings: `docs/re/terrain/tgr.md`, "Edge tiles".
 
 use std::collections::{BTreeSet, HashMap};
 

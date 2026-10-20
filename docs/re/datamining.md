@@ -7,16 +7,10 @@
 - Terrain graphs are `metadata/terrain/**/*.tgr` (148 files).
 - Characters and objects are under `metadata/characters/**` (`.ot`, `.otc`, `.ao`, `.act`).
 
-CLI examples (run from the repo root):
-```sh
-T=third_party/poe_data_tools/poe_data_tools
-$T -p 2 --steam GameFiles list 'data/balance/*.datc64'
-$T -p 2 --steam GameFiles extract 'metadata/characters/str/*' out/
-$T -p 2 --steam GameFiles dump-tables ...      # tables -> CSV/JSON using the schema
-```
+CLI examples (`list`, `extract`, `dump-tables`): [../guides/setup.md](../guides/setup.md#tools).
 
 ## Dumps folder
-Everything we extract or generate that is not source (terrain grids and layouts, area exports, test vectors, client tables, Ghidra exports, packet captures, strings) lives in the git-ignored `dumps/<version>/`. The layout, what produces each file and how to regenerate it: [../dumps/README.md](../dumps/README.md). Old files from `GameFiles/` and `runtime/` are sorted in by `scripts/dumps/migrate.sh`. Ghidra exports and factory maps that used to be committed under `docs/re/*.json` are there now (`dumps/<version>/ghidra/`); they are local data, so a fresh clone must regenerate them (`scripts/re/dump_factory.py`, Ghidra `search_functions_enhanced`).
+Everything we extract or generate that is not source (terrain grids and layouts, area exports, test vectors, client tables, Ghidra exports, packet captures, strings) lives in the git-ignored `dumps/<version>/`. The layout, what produces each file and how to regenerate it: [dumps/README.md](../../dumps/README.md). Old files from `GameFiles/` and `runtime/` are sorted in by `scripts/dumps/migrate.sh`. Ghidra exports and factory maps that used to be committed under `docs/re/*.json` are there now (`dumps/<version>/ghidra/`); they are local data, so a fresh clone must regenerate them (`scripts/re/dump_factory.py`, Ghidra `search_functions_enhanced`; see [README.md](README.md)).
 
 ## Tables in the server
 `poe_data::GameData::open(game_dir, schema)` then `.table("WorldAreas")` returns a `Table` (cached). Rows are read by column name: `row.str("Id")`, `row.int("AreaLevel")`, `row.row_ref("ParentTown")`. Unnamed columns are addressed as `"_<index>"`.
