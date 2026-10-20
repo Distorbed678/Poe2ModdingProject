@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Development automation: DLL build, client deploy/revert/launch"
+description = "Development automation: DLL build, client deploy/revert/launch (wrappers over poe-hook-deploy)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -11,4 +11,5 @@ anyhow.workspace = true
 clap.workspace = true
 poe-config.workspace = true
 poe-data.workspace = true
+poe-hook-deploy.workspace = true
 poe-world.workspace = true

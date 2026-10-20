@@ -1,8 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "servers/*", "xtask"]
-# The client DLL targets Windows and is built separately (cargo xtask build-dll).
-exclude = ["client"]
+# modules/ holds the git submodules (Poe2Protocol, Poe2ClientHook, ...), each its own Cargo
+# workspace. They are consumed as path dependencies only. The client DLLs target Windows and
+# are built separately (cargo xtask build-dll).
+exclude = ["modules"]
 
 [workspace.package]
 edition = "2024"
@@ -29,8 +31,11 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 hex = "0.4"
 
 poe-config = { path = "crates/poe-config" }
-poe-net = { path = "crates/poe-net" }
-poe-proto = { path = "crates/poe-proto" }
+# Poe2Protocol submodule. The servers use poe-net's TCP connection (feature `tokio`).
+poe-net = { path = "modules/protocol/poe-net", features = ["tokio"] }
+poe-proto = { path = "modules/protocol/poe-proto" }
+# Poe2ClientHook submodule: host-side deploy library used by xtask.
+poe-hook-deploy = { path = "modules/client-hook/poe-hook-deploy" }
 poe-store = { path = "crates/poe-store" }
 poe-cluster = { path = "crates/poe-cluster" }
 poe-data = { path = "crates/poe-data" }

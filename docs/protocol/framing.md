@@ -16,4 +16,4 @@ Status: **assumptions from PoE1 research, not yet verified for 0.5.5e.** Each it
 - **Compact integers:** 1–4 byte prefix-coded varint. *(unverified)*
 - **Encryption:** Salsa20 per direction after the login key exchange. *(confirmed; see [../re/crypto.md](../re/crypto.md))*
 
-Implemented in `crates/poe-net/src/codec.rs` (`Reader`/`Writer`).
+Implemented in `modules/protocol/poe-net/src/codec.rs` (`Reader`/`Writer`).

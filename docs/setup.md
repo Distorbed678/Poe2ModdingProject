@@ -10,11 +10,21 @@
 ## Tools
 Run `third_party/fetch-tools.sh` to download every external tool into `third_party/` (listed in [third_party/README.md](../third_party/README.md)): poe_data_tools CLI, dat-schema, LibGGPK3, cargo-xwin, the Python venv `pyenv` for `scripts/re`, reference repos and the pinned toolchain.
 
+## Clone
+The repo uses git submodules (`modules/protocol`, `modules/client-hook` with its nested `protocol`; private repos, `gh auth login` first):
+```sh
+git clone --recursive https://github.com/Distorbed678/Poe2ModdingProject.git
+# or, after a plain clone / after pulling a changed submodule pointer:
+git submodule update --init --recursive
+```
+Submodule changes: commit and push inside the submodule (`modules/...`) first, then commit the new pointer here.
+
 ## Build and test
 ```sh
 cargo build                 # server workspace
 cargo test                  # unit tests; poe-data tests read GameFiles if present
-cargo xtask build-dll       # client/ -> version.dll (loader) + poe_hook_core.dll (x86_64-pc-windows-msvc)
+cargo xtask build-dll       # modules/client-hook -> version.dll (loader) + poe_hook_core.dll (x86_64-pc-windows-msvc);
+                            # output modules/client-hook/target/x86_64-pc-windows-msvc/release/
 ```
 
 ## Run
@@ -27,13 +37,13 @@ cargo xtask run-client      # launches the client through Proton (Steam must be 
 cargo xtask revert-client   # restores GameFiles/ to the original state
 ```
 
-`deploy-client` does the following:
+`deploy-client` does the following (the logic is `poe-hook-deploy` in `modules/client-hook`; xtask passes the paths):
 - Backs up `GameFiles/gateway_list.txt` to `gateway_list.txt.orig` (only once).
 - Writes a single UTF-16LE gateway entry, built from `[gateway]`/`[login]` in `config/server.toml`.
 - Copies the loader to `GameFiles/version.dll` and the debug core next to it.
 - Writes `dump_dir` (`<repo>/dumps/<version>` as a `Z:\` path) into `GameFiles/poe-hook.toml`; the DLL writes terrain grids and layouts, area exports and client tables there ([../dumps/README.md](../dumps/README.md)).
 - Writes the DLL's name tables to `GameFiles/poe-hook-data/` (`stats.tsv`, `action_types.tsv`, `areas.tsv` for the area picker).
-- Copies `client/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
+- Copies `modules/client-hook/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
 - Sets `position_sync_port` in that file's `[features]` to `[instance] public_port`, so position reports go to the instance server.
 - Writes `steam_appid.txt`.
 

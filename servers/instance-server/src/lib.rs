@@ -1097,7 +1097,7 @@ impl InstanceServer {
         })?)
         .await?;
 
-        // The inventories an official server creates (protocol/<version>/inventories.tsv),
+        // The inventories an official server creates (modules/protocol/opcodes/<version>/inventories.tsv),
         // else one empty inventory per Inventories.dat slot.
         let mut out = Vec::new();
         let official = load_inventories(&self.config.game.protocol_dir.join("inventories.tsv"));

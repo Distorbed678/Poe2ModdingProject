@@ -10,7 +10,7 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 - Documentation goes in `docs/` (start at `docs/index.md`). Update it in the same commit as the code it describes. RE findings and addresses go in `docs/re/`.
 - Commit and push (`origin main`, private repo `Distorbed678/Poe2ModdingProject`) after each working step.
 - Avoid hardcoding:
-  - Opcodes go in `protocol/<version>/{login,instance,hnc}.toml`.
+  - Opcodes go in `modules/protocol/opcodes/<version>/{login,instance,hnc}.toml` (Poe2Protocol repo).
   - Ports, leagues and start areas go in `config/server.toml`.
   - Classes, areas and items come from game data (`poe-data`).
   - Subsystems sit behind traits so implementations can be swapped.
@@ -26,8 +26,6 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 ## Layout
 - `crates/`: libraries.
   - `poe-config`: TOML config.
-  - `poe-net`: TCP, byte codec, cipher trait, traces.
-  - `poe-proto`: packet definitions, with opcodes from `protocol/`.
   - `poe-data`: game data from Bundles2 plus dat-schema.
   - `poe-store`: persistence (SQLite).
   - `poe-cluster`: tickets, login sessions (logout, transfers), instance directory.
@@ -35,13 +33,15 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
   - `poe-game`: simulation (movement, stats).
   - Planned: `poe-mod-api` (mod hooks).
 - `servers/`: `login-server`, `instance-server`, and `poe-server` (a dev launcher that runs both).
-- `client/`: the client DLLs, built for `x86_64-pc-windows-msvc` with cargo-xwin; **excluded from the workspace** (own Cargo workspace). `poe-hook` = `version.dll` loader (permanent hooks), `poe-hook-core` = hot-reloadable debug core and overlay, `poe-hook-shared` = config and ABI.
+- `modules/`: git submodules (private repos under `Distorbed678`); **excluded from the workspace**, each its own Cargo workspace, used as path dependencies. Clone with `--recursive`; commit and push inside a submodule first, then bump the pointer here.
+  - `modules/protocol` (Poe2Protocol): `poe-proto` (packet definitions; opcode tables as constants `poe_proto::opcodes::v0_5_5e::*`), `poe-net` (byte codec, cipher trait, hexdump; TCP `Connection` behind the `tokio` feature, enabled by the servers), `opcodes/<version>/*.toml`.
+  - `modules/client-hook` (Poe2ClientHook): the client DLLs, built for `x86_64-pc-windows-msvc` with cargo-xwin: `poe-hook` = `version.dll` loader (permanent hooks), `poe-hook-core` = hot-reloadable debug core and overlay, `poe-hook-shared` = config and ABI. `poe-hook-deploy` = host-side deploy/revert/launch library used by xtask. Has `modules/client-hook/protocol` as a nested submodule. Mod manifest spec: `modules/client-hook/docs/mod-manifest.md`.
 - `xtask/`: dev automation (`cargo xtask <cmd>`).
 - `scripts/`: shell and Python helpers (`test-run.sh`, `shot.sh`, `re/*.py`).
 - `third_party/`: downloaded tools and reference repos (git-ignored except README and fetch script).
 - `dumps/<version>/`: datamined and generated outputs (terrain grids/layouts, area exports, vectors, client tables, Ghidra exports, packet captures, strings; git-ignored, see `dumps/README.md`; `scripts/dumps/migrate.sh` sorts old files in). The client DLL writes there via `dump_dir`.
 - `runtime/`: server and test output (sqlite, logs, traces, crash dumps; git-ignored).
-- `config/`, `protocol/`, `docs/`.
+- `config/`, `docs/`.
 
 ## Commands
 - `cargo build` / `cargo test`. The toolchain is pinned to `nightly-2026-08-10` because `poe_data_tools` needs nightly.

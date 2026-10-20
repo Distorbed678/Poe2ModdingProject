@@ -3,7 +3,7 @@
 How the client moves the player and what the server sends back. Code:
 - `servers/instance-server/src/player.rs` (session state, replies);
 - `crates/poe-game/src/movement.rs` and `pathfinding.rs` (the simulation);
-- messages in `crates/poe-proto/src/instance.rs`.
+- messages in `modules/protocol/poe-proto/src/instance.rs`.
 
 ## Lockstep: the server starts every movement
 - The in-game world is created in frame mode 2 (world +0x661, constructor `0x14212eb60` called from `0x14100b7e9` with a constant 2): **lockstep**.

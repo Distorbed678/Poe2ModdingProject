@@ -1675,6 +1675,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "poe-hook-deploy"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "poe-net"
 version = "0.1.0"
 dependencies = [
@@ -1692,7 +1699,6 @@ version = "0.1.0"
 dependencies = [
  "poe-net",
  "serde",
- "serde_json",
  "thiserror",
  "toml",
 ]
@@ -3154,6 +3160,7 @@ dependencies = [
  "clap",
  "poe-config",
  "poe-data",
+ "poe-hook-deploy",
  "poe-world",
 ]
 

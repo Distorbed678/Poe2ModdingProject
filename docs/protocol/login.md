@@ -19,7 +19,7 @@ Verified 2026-10-12: the server decrypts the client stream correctly (clean `00 
 
 ## Message layouts
 
-Encodings: integers big-endian. `wstring` uses the compact per-character encoding (see [framing.md](framing.md)). `astring` = u16 length + bytes. Rust types: `crates/poe-proto/src/login.rs`. Opcodes: `protocol/0.5.5e/login.toml`.
+Encodings: integers big-endian. `wstring` uses the compact per-character encoding (see [framing.md](framing.md)). `astring` = u16 length + bytes. Rust types: `modules/protocol/poe-proto/src/login.rs`. Opcodes: `modules/protocol/opcodes/0.5.5e/login.toml`.
 
 ### C→S `0x0005` Authenticate (client serializer `0x1420e34f0`, built in `0x1420e7e00`)
 | Field | Type | Notes |

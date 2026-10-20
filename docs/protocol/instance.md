@@ -1,7 +1,7 @@
 # Instance protocol (0.5.5e)
 
 Connection: client to `InstanceDetails.host:port` (ours: `127.0.0.1:6112`).
-Opcodes: `protocol/0.5.5e/instance.toml`. Rust types: `crates/poe-proto/src/instance.rs`.
+Opcodes: `modules/protocol/opcodes/0.5.5e/instance.toml`. Rust types: `modules/protocol/poe-proto/src/instance.rs`.
 The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the full opcode → class map (with deserializer addresses) is in `dumps/0.5.5e/ghidra/instance_factory_s2c.json` (316 classes; local and git-ignored, see [dumps/README.md](../../dumps/README.md)). The game-session handler is `0x142121f70` (`ClientInstanceGameSession::ProcessPacket`); in-game packets are handled by `0x1420ee310` (`ClientInstanceAccountSession::ProcessPacket`).
 
 ## Opening sequence (verified 2026-10-13)
@@ -124,12 +124,12 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 - Without it the chat box shows "Timeout while joining {global|trade} chat" (ClientStrings `ChatTimeoutMessage`, formatted by `0x1401b6940`). The server answers a join with the requested channel number (`[chat] default_channel` for "any") and remembers it for routing ([server-admin.md](../server-admin.md#chat)).
 
 ## Splitting client messages
-Client messages have no length prefix. The instance server decodes the known messages one after another (`InstanceServer::handle_client_message`). Fixed-size messages that are not decoded yet are listed by name in `[client_body_sizes]` of `protocol/0.5.5e/instance.toml` and skipped. Anything else ends the batch, and the rest is logged.
+Client messages have no length prefix. The instance server decodes the known messages one after another (`InstanceServer::handle_client_message`). Fixed-size messages that are not decoded yet are listed by name in `[client_body_sizes]` of `modules/protocol/opcodes/0.5.5e/instance.toml` and skipped. Anything else ends the batch, and the rest is logged.
 
 ## Aim (cursor) and inventories (2026-10-14, from official captures)
 - **C→S `0x0062` AimTarget**: `u8 local player, u8 mode`, then mode 2 `i32 x, i32 y` (the cursor's cell), mode 3 `u32` (an entity, probably hovered), modes 0/1 nothing. Sent while the cursor moves once the client reports aims (see [official-comparison.md](official-comparison.md)).
 - **The client only sends AimTarget mode 2 while** it is in WASD input mode (`user_input_mode=wasd`; mode 1 is sent first), its window is in the foreground, and **the Player component is in combat stance** (`0x14016ba40`). Official servers set the stance with a `0x02f9` delta on the first Move (and 1 then 0 at entry); our server sets it on the player's first movement or skill.
 - **S→C `0x02f9` ComponentDelta**: header (official: entity, `0xffffffff`, 0, 0), varuint length, then `u8` component index (template order, Player = 6) and the component's own delta (component vfunc +0xb0). Player delta (`0x141dd0a10`): `u16` raw little-endian mask; `0x0002` flag words (`u16` count, (`u8` key, `u64`) entries), `0x0400` combat stance `u8`, `0x1000` `u8` (+0x3e7); other bits in `entity::PlayerDelta`'s reader notes.
 - **S→C `0x01dc` SetAimTarget** (Actor handler `0x142149640` case `0x1dc`): header, `u8 kind` (0 = cell, 1 = entity), `i32 x, i32 y`. Official servers echo each AimTarget cell one frame later; the client turns the player toward it.
-- **AddInventory**: the byte after width/height is a flags byte (official values in `protocol/0.5.5e/inventories.tsv`), then the item count. The server sends the official inventory set; the client needs all of it before it starts the world.
+- **AddInventory**: the byte after width/height is a flags byte (official values in `modules/protocol/opcodes/0.5.5e/inventories.tsv`), then the item count. The server sends the official inventory set; the client needs all of it before it starts the world.
 - **Local player index** is 1 on official servers (LocalPlayers, PlayerEntity, AddInventory, and the client's own messages).

@@ -1,6 +1,6 @@
-# Client DLLs (`client/`)
+# Client DLLs (`modules/client-hook/`)
 
-The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`). Since the debug suite (M4, 2026-10-14) the client side is two DLLs in one Cargo workspace (`client/Cargo.toml`, separate from the server workspace):
+The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSizeW`, `VerQueryValueW`). Since the debug suite (M4, 2026-10-14) the client side is two DLLs in one Cargo workspace (`modules/client-hook/Cargo.toml`, the Poe2ClientHook submodule, separate from the server workspace):
 
 | Crate | Built as | Deployed as | Role |
 |---|---|---|---|
@@ -8,7 +8,7 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 | `poe-hook-core` | `poe_hook_core.dll` | `GameFiles/poe_hook_core.dll` | **Debug core**, hot-reloadable: every feature and the overlay. |
 | `poe-hook-shared` | (library) | | Config (`poe-hook.toml`), the loader ↔ core C ABI (`abi.rs`), guarded memory reads, module/pattern helpers. |
 
-## Loader (`client/poe-hook`)
+## Loader (`modules/client-hook/poe-hook`)
 | File | Role |
 |---|---|
 | `lib.rs` | `DllMain`. Loads the config, creates the session folder `logs/poe-hook/<date_time>_<pid>/`, opens the logs and installs the network guard synchronously (the client's crash-report helper connects out within milliseconds), then starts a thread that hooks Vulkan and loads the core. |
@@ -19,7 +19,7 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 | `window.rs` | Subclasses the game window (from the Vulkan surface) and passes each message to the core first. |
 | `core.rs` | Loads `poe_hook_core.dll` from a temp copy (so the file can be replaced while the game runs) and reloads it when the file changes (`[reload] auto`) or the core asks (overlay button). Unload: the core's `stop`, then a write lock that waits for loader → core calls in flight, then `FreeLibrary`. |
 
-## Core (`client/poe-hook-core`)
+## Core (`modules/client-hook/poe-hook-core`)
 - `poe_core_start(&HostApi) -> *const CoreApi` is its only export (`poe-hook-shared/src/abi.rs`; `ABI_VERSION` must match).
 - `hooks.rs`: every hook goes through `hooks::install`, which saves the target's first 16 bytes; `stop` writes them back, leaks the trampolines (a thread may still be in one), waits until no callback runs (each callback holds `hooks::enter()`), and joins the core's threads (`hooks::spawn`, which loop while `hooks::running()`).
 - After a reload the core has missed the entity creations: it adopts the player (entity id 1 on our server) from its next frame tick.
@@ -66,7 +66,7 @@ Plaintext of every login and instance message, read inside the client (no cipher
 - **Sent:** a JmpBack hook at `0x142198037` inside the stream flush `0x142197fc0`, after its lock and before the cipher (`stream+0x1b8`, slot 1) encrypts in place: pending plaintext `[+0x280] + [+0x260 .. +0x258]`, rbx = stream. Boundaries come from the game-session send `0x14211f880` (stream `session+0x20f8`, opcode `packet+8`), which records where each message starts and ends in the send buffer. Bytes sent outside it (frame reports, login messages) are split with the fixed sizes from `instance.toml` `[client_body_sizes]` and the `poe-proto` decoders, and marked "unframed".
 - Streams without a reply yet are classified by their socket (`stream+0`) and the connection's port: ports in `gateway_list.txt` are login, everything else instance.
 - The game also has its own plaintext taps (receive `stream+0x150`, send `stream+0x190`, called with `(tap, &ptr, &len)`), probably for packet recording; they are unused here (setting them would be a write).
-- Output: the Packets page (`[packets] keep` messages; restored from `packets.jsonl` after a core reload), `packets.jsonl` (one JSON object per message: seq, t, dir, chan, op, name, len, framed, redacted, official, hex) and `packets.txt` in the session folder. Names come from `protocol/0.5.5e/*.toml` (embedded at build time), decoded fields from `poe_proto::describe`.
+- Output: the Packets page (`[packets] keep` messages; restored from `packets.jsonl` after a core reload), `packets.jsonl` (one JSON object per message: seq, t, dir, chan, op, name, len, framed, redacted, official, hex) and `packets.txt` in the session folder. Names come from `modules/protocol/opcodes/0.5.5e/*.toml` (embedded at build time), decoded fields from `poe_proto::describe`.
 - `redact` (default on) drops the bodies of Authenticate, ResumeSession, AuthenticationResult, InstanceDetails, Hello and client `0x000e` (instance ticket) before anything is stored.
 - Finding (2026-10-14): the instance opening "Hello" is two messages, `0x000f` (u32) and `0x000e` (12 bytes, u32 ticket, u32, u8); the server still reads them as one (left as is for now).
 
@@ -125,8 +125,10 @@ Note: the game's own login/instance TCP traffic does not go through these ws2_32
 `cargo xtask deploy-client` also writes name tables from the game data into `GameFiles/poe-hook-data/`: `stats.tsv` (network key = `Stats.dat` row + 1, id) and `action_types.tsv` (`ActionTypes` key column, id). It also resets the client's remembered gateway (`gateway_id` in our test prefix's `poe2_production_Config.ini`) to our gateway for private deploys; after an official session it stayed on an official realm and the client never contacted our server.
 
 ## Building and deploying
-- `cargo xtask build-dll` runs `third_party/cargo-xwin/bin/cargo-xwin xwin build --workspace --target x86_64-pc-windows-msvc --release` in `client/`, keeping the MSVC SDK cache in `third_party/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
-- `cargo xtask deploy-client [--official] [--no-build]` installs both DLLs, the config and the gateway list (ours, or the original for `--official`).
+- `cargo xtask build-dll` runs `third_party/cargo-xwin/bin/cargo-xwin xwin build -p poe-hook -p poe-hook-core --target x86_64-pc-windows-msvc --release` in `modules/client-hook/`, keeping the MSVC SDK cache in `third_party/xwin-cache`. Hooks use `ilhook` (pure Rust, iced-x86), because `retour`'s libudis86 C dependency does not build under clang-cl.
+- `cargo xtask deploy-client [--official] [--no-build]` installs both DLLs, the config and the gateway list (ours, or the original for `--official`). The deploy logic is the `poe-hook-deploy` crate in the same submodule (gateway list, `poe-hook.toml` edits, `steam_appid.txt`, DLL install and backup, Proton launch, crash-dump moving); xtask only passes the repo paths (GameFiles, `dumps/<version>`, the Proton prefix) and exports the DLL name tables.
+- The opcode tables the Packets page uses are compiled in from Poe2Protocol (`poe_proto::opcodes::v0_5_5e`); `modules/client-hook/protocol` is the nested checkout.
+- Mod manifest (`mod.toml`) spec for the future loader and launcher: `modules/client-hook/docs/mod-manifest.md`.
 - `cargo xtask deploy-core [--no-build]` installs only the core; a running client reloads it within about a second.
 
 ## Terrain research (`terrain_tools.rs`)

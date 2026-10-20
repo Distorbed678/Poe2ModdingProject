@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the client DLL's symbol table (client/poe-hook-core/assets/symbols.tsv).
+"""Build the client DLL's symbol table (modules/client-hook/poe-hook-core/assets/symbols.tsv).
 
 Sources, later ones win:
 1. Ghidra's named functions (MSVC runtime and library names), exported with the Ghidra MCP
@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "client/poe-hook-core/assets/symbols.tsv"
+OUT = ROOT / "modules/client-hook/poe-hook-core/assets/symbols.tsv"
 
 
 def clean(text: str) -> str:

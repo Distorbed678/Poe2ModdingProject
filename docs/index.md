@@ -4,13 +4,14 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 
 | Document | Contents |
 |---|---|
-| [setup.md](setup.md) | Toolchain, tools, building, deploying to `GameFiles/`, running client and server |
+| [setup.md](setup.md) | Cloning (submodules), toolchain, tools, building, deploying to `GameFiles/`, running client and server |
 | [architecture.md](architecture.md) | Crates, servers, data flow, design rules |
 | [milestones.md](milestones.md) | Roadmap and current status |
 | [server-admin.md](server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers |
 | [terrain-status.md](terrain-status.md) | Terrain port: results per area, where work stopped, next steps |
 | [multiplayer.md](multiplayer.md) | Multiplayer readiness: what blocks remote players, same-machine dependencies, shared world plan |
 | [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
+| [../modules/client-hook/docs/mod-manifest.md](../modules/client-hook/docs/mod-manifest.md) | `mod.toml` spec for client mods (Poe2ClientHook submodule; spec only) |
 | [modding.md](modding.md) | Server and client modding hooks (planned and existing) |
 | [datamining.md](datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, useful tables, the dumps folder |
 | [../dumps/README.md](../dumps/README.md) | `dumps/<version>/` (git-ignored): terrain grids, layouts, area exports, vectors, client tables, Ghidra exports, captures; what produces each and `scripts/dumps/migrate.sh` |

@@ -31,9 +31,9 @@ done
 echo "== cargo-xwin (Windows MSVC cross-linking for the client DLL)"
 cargo +stable install cargo-xwin --locked --root cargo-xwin
 
-echo "== pyenv (Python venv for scripts/re: capstone, numpy, pefile)"
+echo "== pyenv (Python venv for scripts/re: capstone, numpy, pefile, git-filter-repo)"
 python3 -m venv --clear pyenv
-pyenv/bin/pip install -q capstone==5.0.9 numpy==2.5.4 pefile==2024.8.26
+pyenv/bin/pip install -q capstone==5.0.9 numpy==2.5.4 pefile==2024.8.26 git-filter-repo==2.47.0
 
 echo "== nightly toolchain pinned by rust-toolchain.toml"
 rustup toolchain install nightly-2026-08-10 --profile minimal -c rustfmt,clippy,rust-src -t x86_64-pc-windows-msvc

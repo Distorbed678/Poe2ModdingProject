@@ -3,8 +3,9 @@
 Comparison of the debug DLL's captures of official sessions (2026-10-14: login, character
 delete/create, the Riverbank intro, moving, sprinting, a bow pickup, three kills) with our
 server's traffic, and what was changed to match. Tools: the DLL's Packets/Protocol/Coverage tabs,
-`crates/poe-proto/examples/check_capture.rs` (decodes every captured message with our layouts;
+`modules/protocol/poe-proto/examples/check_capture.rs` (decodes every captured message with our layouts;
 `--dump <channel> <in|out> <0xop>` prints them) and `scripts/re/packets_diff.py`.
+Run it inside the Poe2Protocol submodule (it is not a member of the main workspace): `cd modules/protocol && cargo run -p poe-proto --example check_capture -- opcodes/0.5.5e <packets.jsonl> [--show N]`, with captures from `dumps/0.5.5e/captures/`.
 
 ## Layout check
 Every official message we have a decoder for decodes without errors or leftover bytes, except
@@ -15,7 +16,7 @@ optional blocks and `AddInventory` items.
 | What | Official | Ours before | Now |
 |---|---|---|---|
 | Local player index | 1 (`LocalPlayers` entry, `PlayerEntity 01 01`, first byte of `AddInventory`); the client copies it into its messages (`0062 01 ..`, `0063 01 ..`) | 0 | 1 |
-| Inventories at entry | 118 inventories (ids 1-94, 122-144) with real sizes and a flags byte (0x00/01/03/04/60/61/65) | ~120 from `Inventories.dat`, mostly 1x1, flags 0 | the official table, `protocol/0.5.5e/inventories.tsv`. **Without ids 122-144 the client never starts the world** (found while bisecting) |
+| Inventories at entry | 118 inventories (ids 1-94, 122-144) with real sizes and a flags byte (0x00/01/03/04/60/61/65) | ~120 from `Inventories.dat`, mostly 1x1, flags 0 | the official table, `modules/protocol/opcodes/0.5.5e/inventories.tsv`. **Without ids 122-144 the client never starts the world** (found while bisecting) |
 | `MoveDirectionUpdate` (`0x64`) | header (entity, entity, 9 = Actor component, 0), last byte `0xf1` | header (entity, 0, 0, 0), last byte 0 | official |
 | Cursor facing | client `0x0062` AimTarget (mode 2 = cell), server echoes `0x01dc` SetAimTarget one frame later | DLL cursor report + SetOrientation lock | official. The client only sends cells in WASD input mode and while the Player component is in combat stance, which official servers set with a `0x02f9` ComponentDelta on the first Move; ours does it on the first movement or skill. In click-to-move mode the client sends no AimTarget, so the DLL path stays for it |
 | `0x0062` size | 4, 8 or 12 bytes by mode | fixed 4 in `client_body_sizes` (would misread the batch) | decoded by mode |

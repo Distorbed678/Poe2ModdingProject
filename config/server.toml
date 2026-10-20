@@ -8,7 +8,7 @@ game_dir = "GameFiles"
 # Community .datc64 schema (third_party/fetch-tools.sh downloads it).
 schema = "third_party/dat-schema/schema-poe2.min.json"
 # Opcode tables for this client version.
-protocol_dir = "protocol/0.5.5e"
+protocol_dir = "modules/protocol/opcodes/0.5.5e"
 
 [login]
 bind = "0.0.0.0:20481"

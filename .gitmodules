@@ -1,0 +1,6 @@
+[submodule "modules/protocol"]
+	path = modules/protocol
+	url = https://github.com/Distorbed678/Poe2Protocol.git
+[submodule "modules/client-hook"]
+	path = modules/client-hook
+	url = https://github.com/Distorbed678/Poe2ClientHook.git

@@ -4,8 +4,11 @@ A private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust, desig
 
 - `servers/`: login and instance servers, plus `poe-server` (both in one process).
 - `crates/`: config, networking, protocol, game data (reads the client's Bundles2 directly), storage, instances/tickets, terrain generation, simulation.
-- `client/`: the client DLLs: `poe-hook` (`version.dll` loader), `poe-hook-core` (hot-reloadable debug core with the in-game overlay), `poe-hook-shared`.
-- `xtask`: `cargo xtask build-dll | deploy-client | deploy-core | revert-client | run-client | dll-data`.
+- `modules/`: git submodules (private repos), each its own Cargo workspace:
+  - `modules/protocol` ([Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol)): `poe-proto`, `poe-net` (codec and ciphers; TCP behind the `tokio` feature) and the opcode tables `opcodes/<version>/*.toml`.
+  - `modules/client-hook` ([Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook)): the client DLLs (`poe-hook` = `version.dll` loader, `poe-hook-core` = hot-reloadable debug core with the in-game overlay, `poe-hook-shared`) and `poe-hook-deploy` (host-side deploy and launch library). Carries Poe2Protocol as a nested submodule.
+- Clone with `git clone --recursive`, or run `git submodule update --init --recursive` afterwards.
+- `xtask`: `cargo xtask build-dll | deploy-client | deploy-core | revert-client | run-client | dll-data` (thin wrappers over `poe-hook-deploy`).
 - `scripts/`: test-run, screenshot and reverse-engineering helpers. `third_party/`: downloaded tools (git-ignored). `runtime/`: server data and logs (git-ignored).
 - `docs/`: start at [docs/index.md](docs/index.md).
 
