@@ -41,19 +41,19 @@ Start at [docs/index.md](docs/index.md): guides, architecture, the wire protocol
 Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xtask tracker`; do not edit this block by hand. The history of what was built when is in [docs/status/history.md](docs/status/history.md), the terrain generator in [docs/status/terrain.md](docs/status/terrain.md).
 
 <!-- tracker:start -->
-> **Current task:** [Phase 2: movement rewrite (WP2.1 capture analysis)](docs/plans/orchestration-2026-10.md)
+> **Current task:** [Phase 2: movement rewrite (WP2.2 instance world design; capture gate G-MOVE open)](docs/plans/orchestration-2026-10.md)
 
 | Subsystem | Progress | Done |
 |---|---|---|
 | [Login](#login) | `███████░░░ 70%` | 3/5 |
 | [Accounts](#accounts) | `███░░░░░░░ 33%` | 2/6 |
 | [Instances/Transfers](#instancestransfers) | `███████░░░ 67%` | 4/6 |
-| [Movement](#movement) | `███░░░░░░░ 29%` | 0/7 |
+| [Movement](#movement) | `████░░░░░░ 36%` | 0/7 |
 | [Multiplayer](#multiplayer) | `░░░░░░░░░░ 0%` | 0/6 |
 | [Chat/Commands](#chatcommands) | `█████████░ 88%` | 3/4 |
 | [Terrain](#terrain) | `██░░░░░░░░ 23%` | 1/11 |
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
-| [Monsters/Skills](#monstersskills) | `██░░░░░░░░ 20%` | 1/5 |
+| [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `████████░░ 80%` | 4/5 |
 | [Launcher](#launcher) | `░░░░░░░░░░ 0%` | 0/5 |
 | [Web Admin](#web-admin) | `░░░░░░░░░░ 0%` | 0/4 |
@@ -109,7 +109,7 @@ Docs: [docs/protocol/movement.md](docs/protocol/movement.md)
 | 🟡 | Dodge roll | roll speed profile only; no official reply sequence |
 | 🟡 | Facing the cursor | turn_cell / turn_timing / face_cursor workarounds |
 | 🟡 | [Sprint](docs/status/history.md) | a full sprint needs the buff system |
-| ⬜ | [Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences](docs/plans/orchestration-2026-10.md) | WP2.1 (current task) |
+| 🟡 | [Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences](docs/protocol/movement.md) | decoded; click-to-move, standing/chained rolls and stance changes wait for a capture (gap list) |
 | ⬜ | [Server-authoritative movement on the walkability grid (official packets only)](docs/plans/orchestration-2026-10.md) | WP2.2 to WP2.4 |
 | ❌ | [Server collision](docs/status/terrain.md) | needs the terrain generator to cover more areas |
 
@@ -174,7 +174,7 @@ Docs: [docs/protocol/entities.md](docs/protocol/entities.md)
 | ✅ | [Player entity with default stats from game data](docs/protocol/entities.md) |  |
 | ❌ | NPCs (StateMachine and quest states) | POE_NPC adds one object for experiments only |
 | ❌ | Monsters and spawns |  |
-| ❌ | [Skills, skill replies 0x1ae / 0x1af / 0x1b1](docs/plans/orchestration-2026-10.md) | decoded in WP2.1 |
+| 🟡 | [Skills, skill replies 0x1ae / 0x1af / 0x1b1](docs/protocol/instance.md) | decoded (poe-proto skill.rs); not sent by the server yet |
 | ❌ | Buffs |  |
 
 ### Client Hook

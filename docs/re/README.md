@@ -24,6 +24,7 @@ Run them with the project's Python environment, which `third_party/fetch-tools.s
 | `packet_layout.py <opcode…>` | Recover a packet's layout from its serializer and deserializer; the vtable-to-opcode map is in `dumps/0.5.5e/ghidra/packet_classes_0.5.5e.json` |
 | `export_symbols.py` | Build the DLL's symbol table (`modules/client-hook/poe-hook-core/assets/symbols.tsv`) from Ghidra's named functions (exported into `dumps/0.5.5e/ghidra/`) and the address tables in [addresses-0.5.5e.md](addresses-0.5.5e.md); rerun it after documenting new addresses |
 | `packets_diff.py`, `clientlog_entries.py`, `clientlog_terrain.py` | Compare captures, and read the live client log: [captures.md](captures.md) |
+| `movement_sequences.py list\|events\|scen\|never <session>` | Movement and skill message sequences in a capture, with frame offsets against `0x2f4` ticks: [../protocol/movement.md](../protocol/movement.md) |
 | `movement_trace.py` | Movement hitches in a server movement trace: [../protocol/movement.md](../protocol/movement.md#movement-trace) |
 | `sweep_drive.py`, `send_dev.py` | Drive a terrain seed sweep, send a server command over the debug link: [terrain/README.md](terrain/README.md#tools), [../guides/setup.md](../guides/setup.md#unattended-client-tests) |
 

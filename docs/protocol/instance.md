@@ -124,12 +124,26 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 - **C→S `0x0016` ChatSend**: `u8` (1), wstring text (as typed, prefixes included), `u8` (0). From our own session (`!where`, `!help`).
 - Without it the chat box shows "Timeout while joining {global|trade} chat" (ClientStrings `ChatTimeoutMessage`, formatted by `0x1401b6940`). The server answers a join with the requested channel number (`[chat] default_channel` for "any") and remembers it for routing ([server-admin.md](../guides/server-admin.md#chat)).
 
+## Skill messages and their acknowledgements (WP2.1, 2026-10-20)
+Opcode notes only; layouts, sequences and timing are in [movement.md](movement.md), structs in `modules/protocol/poe-proto/src/skill.rs`, addresses in [../re/addresses-0.5.5e.md](../re/addresses-0.5.5e.md#skill-acknowledgements-buffs-sprint-wp21-2026-10-20).
+
+| C→S | S→C reply (Player component, `0x14171cc70`) |
+|---|---|
+| `0x1a5` UseSkill | `0x1ae` UseSkillAck (absolute target, target flags `\| 0x04`) |
+| `0x1a8` UpdateSkillTarget | `0x1af` UpdateSkillTargetAck |
+| `0x1aa` UpdateSkillTargetEntity | `0x1b0` UpdateSkillTargetEntityAck |
+| `0x1ac` SkillInputEnd (was `Unknown01ac`, `u8 player`) | `0x1b1` SkillInputEndAck (header only) |
+| `0x1ad` SkillReleased | `0x1b2` SkillReleasedAck (`u32 skill, u8`) |
+| `0x2e6` SprintInput | `0x2e7` SprintState |
+
+Also: `0x1eb` BuffAdded / `0x1ec` BuffRemoved (the three sprint buffs), `0x1ca` (header only, with each roll start). Official servers never send `0x1cb` or `0x1df` for movement.
+
 ## Splitting client messages
 Client messages have no length prefix. The instance server decodes the known messages one after another (`InstanceServer::handle_client_message`). Fixed-size messages that are not decoded yet are listed by name in `[client_body_sizes]` of `modules/protocol/opcodes/0.5.5e/instance.toml` and skipped. Anything else ends the batch, and the rest is logged.
 
 ## Aim (cursor) and inventories (2026-10-14, from official captures)
 - **C→S `0x0062` AimTarget**: `u8 local player, u8 mode`, then mode 2 `i32 x, i32 y` (the cursor's cell), mode 3 `u32` (an entity, probably hovered), modes 0/1 nothing. Sent while the cursor moves once the client reports aims (see [captures.md](../re/captures.md)).
-- **The client only sends AimTarget mode 2 while** it is in WASD input mode (`user_input_mode=wasd`; mode 1 is sent first), its window is in the foreground, and **the Player component is in combat stance** (`0x14016ba40`). Official servers set the stance with a `0x02f9` delta on the first Move (and 1 then 0 at entry); our server sets it on the player's first movement or skill.
+- **The client only sends AimTarget mode 2 while** it is in WASD input mode (`user_input_mode=wasd`; mode 1 is sent first), its window is in the foreground, and **the Player component is in combat stance** (`0x14016ba40`). Official servers set the stance with a `0x02f9` delta at entry (frame ~10: `mask 0x0400` stance 1 in the 2026-10-15/17 sessions; in the 2026-10-14 ones stance 1 at frame 10 and 0 at frame 11); no stance change during play is in the captures ([movement.md](movement.md#combat-stance)). Our server sets it on the player's first movement or skill.
 - **S→C `0x02f9` ComponentDelta**: header (official: entity, `0xffffffff`, 0, 0), varuint length, then `u8` component index (template order, Player = 6) and the component's own delta (component vfunc +0xb0). Player delta (`0x141dd0a10`): `u16` raw little-endian mask; `0x0002` flag words (`u16` count, (`u8` key, `u64`) entries), `0x0400` combat stance `u8`, `0x1000` `u8` (+0x3e7); other bits in `entity::PlayerDelta`'s reader notes.
 - **S→C `0x01dc` SetAimTarget** (Actor handler `0x142149640` case `0x1dc`): header, `u8 kind` (0 = cell, 1 = entity), `i32 x, i32 y`. Official servers echo each AimTarget cell one frame later; the client turns the player toward it.
 - **AddInventory**: the byte after width/height is a flags byte (official values in `modules/protocol/opcodes/0.5.5e/inventories.tsv`), then the item count. The server sends the official inventory set; the client needs all of it before it starts the world.

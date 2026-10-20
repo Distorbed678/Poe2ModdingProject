@@ -158,3 +158,31 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14209d180` | dungeon door groups | door sizes per edge set `0x141d09700` (sets built by `0x141d09ab0`) |
 | `0x141ff7a10` / `0x141ff05f0` | per-graph outer fill + buffer / subgraph generation | subgraphs run the whole pipeline in a window (`0x141f9e130`) of the main map |
 | `0x141fd5ff0` / `0x141fd71c0` | outer fill with height repair / one levelling round | see [terrain/dungeon.md](terrain/dungeon.md) |
+
+## Skill acknowledgements, buffs, sprint (WP2.1, 2026-10-20)
+Names below were set in Ghidra on 2026-10-20.
+Layouts and sequences: [../protocol/movement.md](../protocol/movement.md). Structs: `modules/protocol/poe-proto/src/skill.rs`.
+
+| Address | Ghidra name | What |
+|---|---|---|
+| `0x142186800` | `UseSkillAck_1ae_Read` | S→C `0x1ae` reader: sim header (`SimMsg_ReadHeader`, `0x141f4b680`) then the skill block |
+| `0x141ecde00` / `0x141ecdd00` | `SkillUseParams_Read` / `_Write` | shared block: `u32 skill, u16 flags, u8, u8 target flags, [u32 entity if flags & 8], i32 x, i32 y` (C→S `0x1a5` writes it after `u8 player`) |
+| `0x141f6d520` | `SkillTargetAck_1af_Read` | S→C `0x1af`: header, `i32 x, i32 y, u32 skill` |
+| `0x1421868e0` | | S→C `0x1b0`: header, `u32 entity, i32 x, i32 y, u32 skill` |
+| `0x141f4b680` | `SimMsg_ReadHeader` | `0x1b1` (and `0x1c6`, `0x1c7`, `0x1ca`) have no body past the header; vtable `0x14350bea8` |
+| class vtable `0x14350c0a8` | | S→C `0x1b2`: header, `u32 skill, u8` (ctor `0x142187ec5`) |
+| `0x14210fd40` | `Session_SendSkillInputEnd_1ac` | C→S `0x1ac` (`u8 local player`); in lockstep (world +0x661 == 2) the client only waits for `0x1b1`, otherwise it calls Player vfunc +0x118 itself |
+| `0x14210fdc0` | `Session_SendSkillReleased_1ad` | C→S `0x1ad` (`u8, u32 skill, u8`); the local fallback is Player vfunc +0x120 |
+| `0x14210f920` | `Session_SendUseSkill_1a5` | builds the packet with the cursor relative to the player (`x -= Positioned +0x444`, `y -= +0x448`; absolute when a target entity is given). Outside lockstep it ORs `0x04` into the local copy and calls Player vfunc +0x108 |
+| `0x14210fbb0` | | C→S `0x1a8` / `0x1a9` / `0x1aa` target updates (already listed above) |
+| `0x142134240` (`0x142134bef`, `0x142135b99`) | | frame processor: `0x64`/`0x65` go straight to the Actor handler `0x142149640`; the opcode switch at `0x142135b99` (base `0x1af`) sends `0x1ae`..`0x1b2`, `0x26f`, `0x270` to `Entity_GetPlayerComponent` + vfunc +0xc0 |
+| `0x14171cc70` | `Player_SimulationHandler` | Player component sim handler (vtable `0x1433a7708` +0xc0); jump table over opcode - `0x1ae`: `0x1ae` → `0x14171d205`, `0x1af` → `0x14171d23d`, `0x1b0` → `0x14171d27c`, `0x1b1` → `0x14171d2b5`, `0x1b2` → `0x14171d2e2`, `0x26f`/`0x270` → `0x14171ccd0`/`0x14171cdaf`. Each of `0x1ae`..`0x1b2` is skipped when `[Player +0x430] != 0` and the world vfunc +0x1d8 returns 1 (predictive); in lockstep they always run |
+| `0x141dd4270` | `Player_ApplyServerSkillUse` | Player vfunc +0x108 (`0x1ae`): copies the block (24 bytes) into the pending-skill slot (+0x214, or +0x22c when the skill is Move `0x20002909`), marks it valid. Target flags bit `0x04` set → stop. Else, if the player may act (vfunc +0x128) and bit `0x01` is clear, starts the skill locally (`0x141ecd8e0`); bit `0x02` with a running action of the same skill cancels it |
+| `0x141dd43d0` | `Player_ApplyServerSkillTarget` | Player vfunc +0x110 (`0x1af`, `0x1b0`): stores the position (+0x21c / +0x234) and entity (+0x218 / +0x230) of the matching pending slot, then Actor vfunc +0x128 `(pos, skill, entity)` re-targets that skill's running action |
+| `0x141dd4520` | `Player_ClearHeldSkill` | Player vfunc +0x118 (`0x1b1`): clears both pending slots (+0x214, +0x22c), then ends the held action unless Player flag +0x226 bit 2 |
+| `0x141dd4610` | `Player_ApplyServerSkillRelease` | Player vfunc +0x120 (`0x1b2`, `u32 skill, u8`): clears the slot of that skill (Move → +0x22c) and runs +0x118 for the main slot; a running Actor action (+0x248) of that skill is ended (except a Move with the `u8` clear); with the `u8` set and the Move slot (+0x240) matching, the walk is finished (`0x141e45c20`) |
+| `0x14014fe20` / `0x14014e870` | `Entity_GetPlayerComponent` / `Entity_GetActorComponent` | component lookup by name (the name is a static string pointer; Player at `0x1434d58d4`) |
+| `0x141f6bbf0` | `BuffAdded_1eb_Read` | S→C `0x1eb`: header, `u16 index, u16 buff row, u32, u16, u16 flags`, optional fields by flag (`0x01` varuint,u32,u8,u16; `0x02` f32; `0x80` f32; `0x04` u16; `0x08` u16,u32,u8; `0x10` u16 buff-definition lookup; `0x20` u8), a definition-dependent `u16` (definition +0xfe) and `u32` list (definition +0x7c), then `u32 n` + `n` x `u32` |
+| `0x141f6c1a0` | `BuffRemoved_1ec_Read` | S→C `0x1ec`: header, `u16 index`; the Actor-side opcodes `0x1eb`..`0x1ed` share the handler at `0x142135bf8` |
+| `0x14214a13e` | | Actor case `0x1ca` (header only): decrements `Actor +0x348`; in predictive mode also restarts the action; seen with every roll start and sprint end by an attack |
+| `0x141b76c20` | | end of a roll: whether it becomes a sprint (already listed above); official servers decide server-side: `is_sprinting` is set 15 frames into a held roll |

@@ -8,7 +8,7 @@
 # status = "done" (1.0) | "partial" (0.5) | "missing" (0) | "planned" (0).
 #   missing = needed and not started or known broken; planned = scheduled in a plan document.
 
-current_task = "Phase 2: movement rewrite (WP2.1 capture analysis)"
+current_task = "Phase 2: movement rewrite (WP2.2 instance world design; capture gate G-MOVE open)"
 current_task_link = "docs/plans/orchestration-2026-10.md"
 
 # ---------------------------------------------------------------------------------------------
@@ -142,9 +142,9 @@ link = "docs/status/history.md"
 
 [[subsystem.item]]
 name = "Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences"
-status = "planned"
-note = "WP2.1 (current task)"
-link = "docs/plans/orchestration-2026-10.md"
+status = "partial"
+note = "decoded; click-to-move, standing/chained rolls and stance changes wait for a capture (gap list)"
+link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
 name = "Server-authoritative movement on the walkability grid (official packets only)"
@@ -333,9 +333,9 @@ status = "missing"
 
 [[subsystem.item]]
 name = "Skills, skill replies 0x1ae / 0x1af / 0x1b1"
-status = "missing"
-note = "decoded in WP2.1"
-link = "docs/plans/orchestration-2026-10.md"
+status = "partial"
+note = "decoded (poe-proto skill.rs); not sent by the server yet"
+link = "docs/protocol/instance.md"
 
 [[subsystem.item]]
 name = "Buffs"
