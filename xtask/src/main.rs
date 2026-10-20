@@ -84,6 +84,13 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Write the web API's OpenAPI document to docs/architecture/openapi.json (the web admin
+    /// and the launcher generate their types from it).
+    Openapi {
+        /// Only check; exit 1 if the file is out of date.
+        #[arg(long)]
+        check: bool,
+    },
     /// Make the standalone client sign `<account>` in without a password: writes the 32-byte
     /// remember-me token (64 hex digits) and `[LOGIN] username` / `save_login` into the
     /// Proton prefix's `Documents/My Games/Path of Exile 2/` (see docs/guides/setup.md).
@@ -109,6 +116,9 @@ fn main() -> Result<()> {
     if let Cmd::Tracker { check } = cli.cmd {
         return tracker::run(&root, check);
     }
+    if let Cmd::Openapi { check } = cli.cmd {
+        return openapi(&root, check);
+    }
     if let Cmd::LoginToken { account, token_hex } = &cli.cmd {
         return login_token(&root, account, token_hex);
     }
@@ -123,11 +133,26 @@ fn main() -> Result<()> {
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::DllData => export_dll_data(&config),
-        Cmd::Tracker { .. } | Cmd::LoginToken { .. } => {
+        Cmd::Tracker { .. } | Cmd::Openapi { .. } | Cmd::LoginToken { .. } => {
             unreachable!("handled before the config is loaded")
         }
         Cmd::RunClient { proton } => run_client(&root, &config, &proton),
     }
+}
+
+/// Writes (or checks) `docs/architecture/openapi.json` from `poe_web_api::openapi_json`.
+fn openapi(root: &Path, check: bool) -> Result<()> {
+    let path = root.join("docs/architecture/openapi.json");
+    let text = poe_web_api::openapi_json() + "\n";
+    if check {
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+            bail!("{} is out of date: run `cargo xtask openapi`", path.display());
+        }
+        return Ok(());
+    }
+    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    println!("wrote {}", path.display());
+    Ok(())
 }
 
 fn repo_root() -> PathBuf {

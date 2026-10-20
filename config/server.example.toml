@@ -88,6 +88,18 @@ prefix = "!"
 # Every admin command is appended here (time, account, command, result). Empty = off.
 audit_log = ""   # default: empty (off); the dev config writes runtime/admin-audit.log
 
+[web]
+# HTTP API and web admin (docs/architecture/web-api.md). Passwords travel in request bodies:
+# keep the bind on loopback, or put a TLS reverse proxy in front.
+enabled = true   # default true
+bind = "127.0.0.1:8080"   # default
+# Directory with the built web admin (served at / with an index.html fallback). Empty = none.
+static_dir = ""   # default: none
+# Browser origins allowed to call the API, e.g. ["http://localhost:5173"] for the Vite dev server.
+cors_origins = []   # default: none
+# Recent log events kept for the live log viewer.
+log_buffer = 2000   # default
+
 [database]
 # required
 path = "runtime/server.sqlite"
@@ -99,7 +111,7 @@ path = "runtime/server.sqlite"
 # named <name_prefix><id>, with no password.
 dev_machine_hash_login = false   # default false; the dev config sets true
 name_prefix = "Exile"
-# Whether the web API may register accounts (later); server commands always can.
+# Whether POST /api/v1/register may create accounts (docs/architecture/web-api.md); server commands always can.
 open_registration = false
 # How long a "Remember Me" login stays valid (days).
 remember_days = 30

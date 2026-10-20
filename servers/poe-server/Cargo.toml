@@ -17,6 +17,7 @@ poe-data.workspace = true
 poe-game.workspace = true
 poe-proto.workspace = true
 poe-store.workspace = true
+poe-web-api.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

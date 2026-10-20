@@ -35,11 +35,11 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    fn ok(text: impl Into<String>) -> Self {
+    pub(crate) fn ok(text: impl Into<String>) -> Self {
         Self { text: text.into(), ok: true, ..Default::default() }
     }
 
-    fn err(text: impl Into<String>) -> Self {
+    pub(crate) fn err(text: impl Into<String>) -> Self {
         Self { text: text.into(), ok: false, ..Default::default() }
     }
 }
@@ -58,44 +58,48 @@ impl InstanceServer {
         if parsed.spec.admin && !self.is_admin(&ctx.account) {
             return Outcome::err(format!("{} is for admins only", parsed.spec.name));
         }
-        // Passwords never reach the log or the audit file.
+        let out = self.execute(ctx, player, &parsed);
+        self.finish(&ctx.account, &parsed, line, out)
+    }
+
+    /// Runs a command that needs no game session of its own (the web API's `AdminControl`):
+    /// the same registry, role check, log and audit as chat commands. `account` is the label
+    /// logged and audited.
+    pub(crate) fn run_global(&self, account: &str, actor: &str, line: &str) -> Outcome {
+        let parsed = match commands::parse(line) {
+            Ok(p) => p,
+            Err(e) => return Outcome::err(e),
+        };
+        if parsed.spec.admin && !self.is_admin(actor) {
+            return Outcome::err(format!("{} is for admins only", parsed.spec.name));
+        }
+        let out = self.execute_global(actor, &parsed).unwrap_or_else(|| {
+            Ok(Outcome::err(format!("{} needs your own game session", parsed.spec.name)))
+        });
+        self.finish(account, &parsed, line, out)
+    }
+
+    /// Logs a command's result and appends admin commands to the audit file. Passwords never
+    /// reach either.
+    pub(crate) fn finish(&self, account: &str, parsed: &Parsed, line: &str, result: anyhow::Result<Outcome>) -> Outcome {
         let shown = match parsed.spec.name {
             "account" => poe_accounts::redact(parsed.get("action").unwrap_or_default(), line),
             _ => line.to_string(),
         };
-        let out = match self.execute(ctx, player, &parsed) {
+        let out = match result {
             Ok(o) => o,
             Err(e) => Outcome::err(format!("{e:#}")),
         };
-        info!(account = %ctx.account, command = %shown, ok = out.ok, result = %out.text, "command");
+        info!(account = %account, command = %shown, ok = out.ok, result = %out.text, "command");
         if parsed.spec.admin {
-            self.audit(&ctx.account, &shown, &out.text);
+            self.audit(account, &shown, &out.text);
         }
         out
     }
 
-    fn execute(&self, ctx: &SessionCtx<'_>, player: &mut player::Player, p: &Parsed) -> anyhow::Result<Outcome> {
-        let name = &ctx.ticket.character.name;
-        Ok(match p.spec.name {
-            "help" => match p.get("command") {
-                Some(c) => match commands::find(c) {
-                    Some(spec) => Outcome::ok(format!("{}{}: {}", self.config.commands.prefix, commands::usage(spec), spec.help)),
-                    None => Outcome::err(format!("no command {c}")),
-                },
-                None => {
-                    let list: Vec<&str> = commands::COMMANDS.iter().filter(|c| ctx.admin || !c.admin).map(|c| c.name).collect();
-                    Outcome::ok(format!("commands ({}help <command>): {}", self.config.commands.prefix, list.join(", ")))
-                }
-            },
-            "where" => {
-                let (x, y) = player.cell();
-                Outcome::ok(format!(
-                    "instance {} area {} seed {} cell {x} {y}",
-                    ctx.instance.map_or("-".to_string(), |i| i.to_string()),
-                    ctx.ticket.area,
-                    ctx.seed
-                ))
-            }
+    /// The commands that work without a game session. `None`: the command needs one.
+    pub(crate) fn execute_global(&self, actor: &str, p: &Parsed) -> Option<anyhow::Result<Outcome>> {
+        Some(Ok(match p.spec.name {
             "who" => {
                 let rows: Vec<String> = self
                     .live
@@ -145,9 +149,58 @@ impl InstanceServer {
                     .collect();
                 Outcome::ok(format!("{} instances: {}", rows.len(), rows.join("; ")))
             }
-            "instance_new" => {
-                let id = self.new_instance(p)?;
-                Outcome::ok(format!("created instance #{id}"))
+            "instance_new" => match self.new_instance(p) {
+                Ok(id) => Outcome::ok(format!("created instance #{id}")),
+                Err(e) => return Some(Err(e)),
+            },
+            "close" => {
+                let id = p.int("instance").unwrap_or(0) as u32;
+                if self.instances.close(id) { Outcome::ok(format!("closed instance #{id}")) } else { Outcome::err(format!("no instance #{id}")) }
+            }
+            "account" => match poe_accounts::run_account_command(
+                &*self.accounts,
+                Some(actor),
+                p.get("action").unwrap_or_default(),
+                p.get("name"),
+                p.get("value"),
+            ) {
+                Ok(done) => {
+                    if let Some(id) = done.kick_account {
+                        // Ends its login connection and its game session.
+                        self.sessions.supersede(id);
+                    }
+                    Outcome::ok(done.text)
+                }
+                Err(e) => Outcome::err(e),
+            },
+            _ => return None,
+        }))
+    }
+
+    fn execute(&self, ctx: &SessionCtx<'_>, player: &mut player::Player, p: &Parsed) -> anyhow::Result<Outcome> {
+        if let Some(done) = self.execute_global(&ctx.account, p) {
+            return done;
+        }
+        let name = &ctx.ticket.character.name;
+        Ok(match p.spec.name {
+            "help" => match p.get("command") {
+                Some(c) => match commands::find(c) {
+                    Some(spec) => Outcome::ok(format!("{}{}: {}", self.config.commands.prefix, commands::usage(spec), spec.help)),
+                    None => Outcome::err(format!("no command {c}")),
+                },
+                None => {
+                    let list: Vec<&str> = commands::COMMANDS.iter().filter(|c| ctx.admin || !c.admin).map(|c| c.name).collect();
+                    Outcome::ok(format!("commands ({}help <command>): {}", self.config.commands.prefix, list.join(", ")))
+                }
+            },
+            "where" => {
+                let (x, y) = player.cell();
+                Outcome::ok(format!(
+                    "instance {} area {} seed {} cell {x} {y}",
+                    ctx.instance.map_or("-".to_string(), |i| i.to_string()),
+                    ctx.ticket.area,
+                    ctx.seed
+                ))
             }
             "transfer" => {
                 let id = self.new_instance(p)?;
@@ -165,10 +218,6 @@ impl InstanceServer {
                 self.move_to(ctx, id)?;
                 Outcome { leave: true, ..Outcome::ok(format!("moving to instance #{id}")) }
             }
-            "close" => {
-                let id = p.int("instance").unwrap_or(0) as u32;
-                if self.instances.close(id) { Outcome::ok(format!("closed instance #{id}")) } else { Outcome::err(format!("no instance #{id}")) }
-            }
             "teleport" => {
                 let (x, y) = (p.int("x").unwrap_or(0) as i32, p.int("y").unwrap_or(0) as i32);
                 player.teleport((x, y));
@@ -178,22 +227,6 @@ impl InstanceServer {
                 self.generate_terrain(&ctx.ticket.area, ctx.seed, ctx.tile_hash, ctx.instance);
                 Outcome::ok("generating on the server: the result is in the server log")
             }
-            "account" => match poe_accounts::run_account_command(
-                &*self.accounts,
-                Some(&ctx.account),
-                p.get("action").unwrap_or_default(),
-                p.get("name"),
-                p.get("value"),
-            ) {
-                Ok(done) => {
-                    if let Some(id) = done.kick_account {
-                        // Ends its login connection and its game session.
-                        self.sessions.supersede(id);
-                    }
-                    Outcome::ok(done.text)
-                }
-                Err(e) => Outcome::err(e),
-            },
             "area_info" => {
                 let args = format!("{} {}", p.get("area").unwrap_or_default(), p.get("seed").unwrap_or("1"));
                 let mut o = Outcome::ok("sent a second AreaInfo");
@@ -209,7 +242,7 @@ impl InstanceServer {
 
     /// Creates an instance from `area [seed] [topology] [orientation]`, checking the layout
     /// choice against the area's topologies.
-    fn new_instance(&self, p: &Parsed) -> anyhow::Result<u32> {
+    pub(crate) fn new_instance(&self, p: &Parsed) -> anyhow::Result<u32> {
         let id = p.get("area").unwrap_or_default();
         let Some(area) = WorldArea::find(&self.data, id)? else {
             anyhow::bail!("no area {id} in WorldAreas");
@@ -236,14 +269,18 @@ impl InstanceServer {
     /// Hands this session's client to instance `id` (its login connection sends
     /// InstanceDetails; the client then leaves this instance).
     fn move_to(&self, ctx: &SessionCtx<'_>, id: u32) -> anyhow::Result<()> {
+        self.hand_off(ctx.ticket.account_id, ctx.ticket.character.clone(), id)
+    }
+
+    /// Issues a ticket for instance `id` and gives it to the account's login connection.
+    pub(crate) fn hand_off(&self, account_id: u32, mut character: poe_cluster::TicketCharacter, id: u32) -> anyhow::Result<()> {
         let Some(target) = self.instances.get(id) else {
             anyhow::bail!("no instance #{id}");
         };
-        let mut character = ctx.ticket.character.clone();
         // A saved position belongs to the old layout.
         character.location = None;
-        let ticket = self.tickets.issue_for(ctx.ticket.account_id, character, &target.spec.area, Some(id));
-        if !self.sessions.transfer(ctx.ticket.account_id, ticket) {
+        let ticket = self.tickets.issue_for(account_id, character, &target.spec.area, Some(id));
+        if !self.sessions.transfer(account_id, ticket) {
             anyhow::bail!("no login connection for this account (cannot hand off)");
         }
         Ok(())

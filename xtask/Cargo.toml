@@ -12,6 +12,7 @@ clap.workspace = true
 poe-config.workspace = true
 poe-data.workspace = true
 poe-hook-deploy.workspace = true
+poe-web-api.workspace = true
 poe-world.workspace = true
 serde.workspace = true
 toml.workspace = true

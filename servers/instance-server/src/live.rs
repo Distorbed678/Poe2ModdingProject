@@ -101,6 +101,11 @@ impl Live {
         self.sessions.lock().unwrap().values().find(|s| s.port == port).map(|s| s.character.clone())
     }
 
+    /// The account id and exact name of an online character.
+    pub fn account_of(&self, character: &str) -> Option<(u32, String)> {
+        self.sessions.lock().unwrap().get(&character.to_lowercase()).map(|s| (s.account_id, s.character.clone()))
+    }
+
     /// The character's exact name if it is online.
     pub fn find(&self, character: &str) -> Option<String> {
         self.sessions.lock().unwrap().get(&character.to_lowercase()).map(|s| s.character.clone())

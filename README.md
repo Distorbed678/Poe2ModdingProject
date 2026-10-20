@@ -56,7 +56,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `█████████░ 90%` | 4/5 |
 | [Launcher](#launcher) | `░░░░░░░░░░ 0%` | 0/5 |
-| [Web Admin](#web-admin) | `░░░░░░░░░░ 0%` | 0/4 |
+| [Web Admin](#web-admin) | `███████░░░ 67%` | 4/6 |
 | [Modding](#modding) | `█████░░░░░ 50%` | 2/5 |
 
 ✅ done · 🟡 partial · ❌ missing · ⬜ planned. Progress counts done as 1 and partial as 0.5.
@@ -82,9 +82,9 @@ Docs: [docs/architecture/accounts.md](docs/architecture/accounts.md)
 | ✅ | [Machine-hash accounts with SQLite storage (accounts, characters, unique names)](docs/architecture/accounts.md) |  |
 | ✅ | Tickets, resume tickets and login sessions (many accounts at once) |  |
 | ✅ | [Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)](docs/architecture/accounts.md) | WP3.2; verified by tests, not yet with the real standalone screen (WP3.3) |
-| ✅ | [Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)](docs/architecture/accounts.md) | game tokens in use; launcher and web kinds exist in the store, issuing them is WP4 |
+| ✅ | [Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)](docs/architecture/accounts.md) | game tokens in use; launcher and web tokens issued by the web API (WP4.1) |
 | ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; unit-tested, not yet tried with two clients |
-| ⬜ | [Rate limiting of password attempts, web registration](docs/architecture/accounts.md) |  |
+| ⬜ | [Rate limiting of password attempts](docs/architecture/accounts.md) |  |
 | ⬜ | Admin role in the database (replaces the config list) |  |
 | ⬜ | Duplicate login kicks the old session |  |
 
@@ -209,10 +209,12 @@ Docs: [docs/architecture/web-api.md](docs/architecture/web-api.md)
 
 | | Item | Note |
 |---|---|---|
-| ⬜ | [Web API crate (axum, in poe-server)](docs/architecture/web-api.md) | WP4.1 |
+| ✅ | [Web API crate (axum, in poe-server)](docs/architecture/web-api.md) | WP4.1; register/login/password, tokens, 20 endpoints; tested with oneshot and a smoke run on shifted ports |
+| ✅ | [OpenAPI spec (utoipa) for the SPA and launcher types](docs/architecture/openapi.json) | docs/architecture/openapi.json, `cargo xtask openapi` |
 | ⬜ | [Poe2WebAdmin SPA (Svelte 5)](docs/plans/orchestration-2026-10.md) | WP4.2 |
-| ⬜ | Live log viewer over WebSocket |  |
-| ⬜ | Instances, accounts and characters pages |  |
+| ✅ | [Live log over WebSocket (ring buffer, level/target/text filter)](docs/architecture/web-api.md) | server side; the viewer page is WP4.2 |
+| ✅ | [Admin endpoints: sessions, instances, kick/mute/transfer/announce, accounts, characters](docs/architecture/web-api.md) | run the command registry via AdminControl; the pages are WP4.2 |
+| ⬜ | Instances, accounts and characters pages | WP4.2 |
 
 ### Modding
 

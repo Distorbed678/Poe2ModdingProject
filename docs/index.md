@@ -19,7 +19,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [architecture/client-dll.md](architecture/client-dll.md) | The client DLLs: loader, hot-reloadable core, overlay, packet capture, modes (read-only), features |
 | [architecture/accounts.md](architecture/accounts.md) | Account model today and planned |
 | [architecture/instance-world.md](architecture/instance-world.md) | Instance directory, per-connection simulation today, the shared-world plan |
-| [architecture/web-api.md](architecture/web-api.md) | The planned web API and admin site |
+| [architecture/web-api.md](architecture/web-api.md) | The web API (accounts, admin endpoints, live log, OpenAPI) and the planned admin site |
 
 ## Protocol (client 0.5.5e)
 | Document | Contents |

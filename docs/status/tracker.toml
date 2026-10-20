@@ -67,7 +67,7 @@ link = "docs/architecture/accounts.md"
 [[subsystem.item]]
 name = "Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)"
 status = "done"
-note = "game tokens in use; launcher and web kinds exist in the store, issuing them is WP4"
+note = "game tokens in use; launcher and web tokens issued by the web API (WP4.1)"
 link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
@@ -77,7 +77,7 @@ note = "LoginSessions::supersede; unit-tested, not yet tried with two clients"
 link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
-name = "Rate limiting of password attempts, web registration"
+name = "Rate limiting of password attempts"
 status = "planned"
 link = "docs/architecture/accounts.md"
 
@@ -419,9 +419,15 @@ link = "docs/architecture/web-api.md"
 
 [[subsystem.item]]
 name = "Web API crate (axum, in poe-server)"
-status = "planned"
-note = "WP4.1"
+status = "done"
+note = "WP4.1; register/login/password, tokens, 20 endpoints; tested with oneshot and a smoke run on shifted ports"
 link = "docs/architecture/web-api.md"
+
+[[subsystem.item]]
+name = "OpenAPI spec (utoipa) for the SPA and launcher types"
+status = "done"
+note = "docs/architecture/openapi.json, `cargo xtask openapi`"
+link = "docs/architecture/openapi.json"
 
 [[subsystem.item]]
 name = "Poe2WebAdmin SPA (Svelte 5)"
@@ -430,12 +436,21 @@ note = "WP4.2"
 link = "docs/plans/orchestration-2026-10.md"
 
 [[subsystem.item]]
-name = "Live log viewer over WebSocket"
-status = "planned"
+name = "Live log over WebSocket (ring buffer, level/target/text filter)"
+status = "done"
+note = "server side; the viewer page is WP4.2"
+link = "docs/architecture/web-api.md"
+
+[[subsystem.item]]
+name = "Admin endpoints: sessions, instances, kick/mute/transfer/announce, accounts, characters"
+status = "done"
+note = "run the command registry via AdminControl; the pages are WP4.2"
+link = "docs/architecture/web-api.md"
 
 [[subsystem.item]]
 name = "Instances, accounts and characters pages"
 status = "planned"
+note = "WP4.2"
 
 # ---------------------------------------------------------------------------------------------
 

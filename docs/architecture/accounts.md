@@ -27,7 +27,7 @@ digest = SHA-256(password encoded as UTF-16LE, no BOM, no terminator)
 stored = argon2id(digest)            // poe_accounts::AccountStore takes the digest, never the text
 ```
 
-`poe_accounts::password_digest(&str)` does the first step. The server commands (`account create`, `account passwd`) and the future web API (registration, password change, launcher login) must go through it, or an account made on the web would not accept the same password in game. The web API receives the plain password over TLS and hashes it with the same function; it never needs the stored hash.
+`poe_accounts::password_digest(&str)` does the first step. The server commands (`account create`, `account passwd`) and the web API (registration, login, password change, launcher login: `crates/poe-web-api`) go through it, or an account made on the web would not accept the same password in game. The web API receives the plain password in the request body (use TLS outside the local machine) and hashes it with the same function; it never needs the stored hash.
 
 Consequence of the client's design: the digest is a password equivalent for this server (whoever has it can log in), but it is stored only inside an argon2id hash.
 
@@ -38,7 +38,7 @@ Consequence of the client's design: the digest is a password equivalent for this
 - A token is valid when its hash is known, its `cluster_id` equals `[cluster] id`, it is not revoked, not expired, of an accepted kind, and the account is not disabled. On a token login the client's saved user name must also match the token's account.
 - A new password (`account passwd`) and disabling an account revoke all the account's tokens.
 - **Cluster id:** change `[cluster] id` to invalidate every saved login at once; a database copied between clusters keeps its accounts and passwords, but no token from the other cluster works.
-- Launcher and web tokens use the same table and trait (`TokenKind::Launcher`, `TokenKind::Web`); the token login of the game accepts `game_remember` and `launcher`, so the launcher can pass a token for auto-login (WP3.3/WP4).
+- Launcher and web tokens use the same table and trait (`TokenKind::Launcher`, `TokenKind::Web`), issued by `POST /api/v1/login` ([web-api.md](web-api.md)): web 12 hours, launcher `remember_days`. The token login of the game accepts `game_remember` and `launcher`, so the launcher can pass a token for auto-login (WP3.3/WP5); the admin API accepts `web` only.
 
 Result codes the client gets for failures: [login.md](../protocol/login.md#authentication-results).
 
@@ -58,7 +58,7 @@ Accounts that existed before migration `0006` (machine-hash accounts) are kept w
 
 Admin is the `admin` role. Commands (chat `!account ...`, the overlay's Commands page, or offline `cargo run -p poe-server -- account ...`): `create`, `role`, `disable`, `enable`, `passwd`, `list`; see [../guides/server-admin.md](../guides/server-admin.md). The first admin is made offline: `account create <name> <password>`, then `account role <name> admin`. Passwords typed in chat are replaced by `***` in the log and the audit file. An admin cannot demote or disable themselves.
 
-`[accounts] open_registration` (default false) is reserved for the web API (WP4.1); server commands always work.
+`[accounts] open_registration` (default false) lets `POST /api/v1/register` of the web API create player accounts ([web-api.md](web-api.md)); server commands always work.
 
 ## One session per account
 
@@ -74,6 +74,6 @@ A new login of an account ends the old one: `LoginSessions::supersede(account)` 
 ## Not done yet
 
 - Rate limiting of password attempts (the client has a "too many attempts" code, `0x49`).
-- Web registration and login (WP4.1), launcher token issue.
+- Rate limiting of the web login (`/api/v1/login` shares the missing limit).
 - Per-account settings.
 - Whether `0x0f`/`0x62` behave as inferred in the client: [../re/standalone-login.md](../re/standalone-login.md) section 8, to be checked once the DLL forces the standalone screen (WP3.3).

@@ -14,6 +14,7 @@ use poe_config::Config;
 use poe_game::stats::StatRegistry;
 use poe_store::Store;
 
+mod admin;
 pub mod chat;
 pub mod commands;
 mod exec;

@@ -71,6 +71,9 @@ pub trait Store: Send + Sync {
     fn create_account(&self, login_key: &str, name_prefix: &str) -> Result<Account>;
     /// Characters of an account, oldest first.
     fn characters(&self, account_id: u32) -> Result<Vec<Character>>;
+    /// Every character of every account, by id (web admin).
+    fn all_characters(&self) -> Result<Vec<Character>>;
+    fn character_by_id(&self, id: u32) -> Result<Option<Character>>;
     /// Creates a character; `Ok(None)` if the name is already taken.
     fn create_character(&self, new: &NewCharacter) -> Result<Option<Character>>;
     /// Deletes an account's character by name; `Ok(false)` if there is none.

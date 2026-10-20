@@ -1,0 +1,1971 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PoE2 private server API",
+    "description": "Accounts, administration and live log of the private server. Passwords are sent as plain text: use HTTPS outside the local machine.",
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "1"
+  },
+  "paths": {
+    "/api/v1/admin/accounts": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every account.",
+        "operationId": "accounts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/accounts/{name}/disable": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Disables an account: its tokens are revoked and its sessions end.",
+        "operationId": "disable_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "e.g. disabling yourself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/accounts/{name}/enable": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Enables an account again.",
+        "operationId": "enable_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/accounts/{name}/role": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Sets an account's role (`player` or `admin`). You cannot demote yourself.",
+        "operationId": "set_role",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/announce": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A `<Server>` chat line to every player.",
+        "operationId": "announce",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnounceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/characters": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Characters of all accounts, or of one (`?account=`).",
+        "operationId": "characters",
+        "parameters": [
+          {
+            "name": "account",
+            "in": "query",
+            "description": "Only this account's characters (account name).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CharacterInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/characters/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "One character.",
+        "operationId": "character",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "character id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharacterInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/instances": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every instance with its players.",
+        "operationId": "instances",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InstanceView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Creates an instance without moving anyone into it.",
+        "operationId": "create_instance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewInstanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedInstance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/instances/{id}/close": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Closes an instance; its players are disconnected.",
+        "operationId": "close_instance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "instance id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/logs/ws": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Live log over WebSocket (upgrade). Server messages are JSON with a `type` of `hello`\n(`buffer`), `event` (a `LogEvent`), `reset` (the filter changed, new history follows),\n`lagged` (`missed`) or `error`. The client sends a `LogFilter` as JSON text, first and\nwhenever it changes: `{\"min_level\":\"info\",\"target\":\"poe_net\",\"text\":\"kick\",\"history\":200}`.",
+        "operationId": "logs_ws",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "description": "The admin's web token, because browsers cannot set headers on a WebSocket (the\n`Authorization` header works too).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "switching protocols"
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/players/{name}/kick": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Disconnects a player.",
+        "operationId": "kick",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "character name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not online",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/players/{name}/mute": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Stops a player's chat, for `minutes` or until unmuted.",
+        "operationId": "mute",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "character name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "optional",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/players/{name}/transfer": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Moves a player in game to an existing instance (`instance`) or a new one (`area`).",
+        "operationId": "transfer",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "character name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/players/{name}/unmute": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Lets a muted player chat again.",
+        "operationId": "unmute",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "character name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/sessions": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Players in game now.",
+        "operationId": "sessions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OnlinePlayerInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/login": {
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Username and password for a token (`kind` `web` by default, or `launcher`).",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "wrong username or password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "account is disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/logout": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Revokes the token that was used.",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/password": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Changes the caller's password. Revokes all of the account's tokens (game logins included)\nand returns a fresh token of the same kind as the one used.",
+        "operationId": "password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "wrong current password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/register": {
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Creates a player account (only when `[accounts] open_registration` is on).",
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "registration is closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "name taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/server": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Server name, version, cluster, players online and where the game client connects.",
+        "operationId": "server",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "role",
+          "created_at",
+          "disabled",
+          "has_password"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "has_password": {
+            "type": "boolean",
+            "description": "`false` for dev machine-hash accounts: they cannot log in with a password."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "last_login": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "role": {
+            "type": "string",
+            "description": "`player` or `admin`."
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "AnnounceRequest": {
+        "type": "object",
+        "description": "`POST /admin/announce`.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "CharacterInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "name",
+          "league",
+          "class_id",
+          "start_state",
+          "level",
+          "experience",
+          "area",
+          "intro_done",
+          "online"
+        ],
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The owning account's name, when it is known."
+          },
+          "account_id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "area": {
+            "type": "string",
+            "description": "`WorldAreas.Id` of the current or return area."
+          },
+          "class_id": {
+            "type": "integer",
+            "format": "int32",
+            "description": "`Characters.IntegerId` of the class.",
+            "minimum": 0
+          },
+          "experience": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "intro_done": {
+            "type": "boolean"
+          },
+          "league": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "location": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocationInfo"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "start_state": {
+            "type": "string"
+          }
+        }
+      },
+      "CommandResult": {
+        "type": "object",
+        "description": "What a command printed.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "CreatedInstance": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "Body of every error response.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "InstanceView": {
+        "type": "object",
+        "required": [
+          "id",
+          "area",
+          "players",
+          "created_unix_ms",
+          "persistent"
+        ],
+        "properties": {
+          "area": {
+            "type": "string"
+          },
+          "created_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "empty_for_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds since the instance went empty; absent while players are in it.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "orientation": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "persistent": {
+            "type": "boolean",
+            "description": "Towns and hideouts: kept when empty."
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Character names."
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "topology": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Forced topology (1-based); absent: the client's choice.",
+            "minimum": 0
+          }
+        }
+      },
+      "LocationInfo": {
+        "type": "object",
+        "required": [
+          "seed",
+          "x",
+          "y"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "x": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "y": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "LogEvent": {
+        "type": "object",
+        "description": "One log event.",
+        "required": [
+          "seq",
+          "ts_ms",
+          "level",
+          "target",
+          "message",
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "type": "object",
+            "description": "The event's other fields, formatted as text.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "message": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Increases by one per event since the server started.",
+            "minimum": 0
+          },
+          "target": {
+            "type": "string"
+          },
+          "ts_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix time in milliseconds.",
+            "minimum": 0
+          }
+        }
+      },
+      "LogFilter": {
+        "type": "object",
+        "description": "What a client wants to see. Sent as JSON over the WebSocket, first and whenever it changes.",
+        "properties": {
+          "history": {
+            "type": "integer",
+            "description": "How many of the newest matching buffered events to send first.",
+            "default": 200,
+            "minimum": 0
+          },
+          "min_level": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LogLevel",
+                "description": "Events at this severity or worse."
+              }
+            ],
+            "default": "info"
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only targets starting with this (`poe_net`, `instance_server::exec`).",
+            "default": null
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only events whose message or fields contain this text (case-insensitive).",
+            "default": null
+          }
+        }
+      },
+      "LogLevel": {
+        "type": "string",
+        "description": "Severity, ordered from most severe to most verbose (`Error < Warn < ... < Trace`), so\n\"at least `min_level`\" is `level <= min_level`.",
+        "enum": [
+          "error",
+          "warn",
+          "info",
+          "debug",
+          "trace"
+        ]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "description": "`POST /login`.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`web` (default, 12 hours) or `launcher` (`[accounts] remember_days`; the game login\nalso accepts it)."
+          },
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": [
+          "token",
+          "kind",
+          "expires_at",
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountInfo"
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`web` or `launcher`."
+          },
+          "token": {
+            "type": "string",
+            "description": "64 hex characters: send as `Authorization: Bearer <token>`. Shown only once."
+          }
+        }
+      },
+      "MuteRequest": {
+        "type": "object",
+        "description": "`POST /admin/players/{name}/mute`.",
+        "properties": {
+          "minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Absent: until unmuted.",
+            "minimum": 0
+          }
+        }
+      },
+      "NewInstanceRequest": {
+        "type": "object",
+        "description": "`POST /admin/instances`, and the `New` form of a transfer.",
+        "required": [
+          "area"
+        ],
+        "properties": {
+          "area": {
+            "type": "string",
+            "description": "`WorldAreas.Id`, e.g. `G1_1`."
+          },
+          "orientation": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Forced orientation 0..8; absent: the client's choice.",
+            "minimum": 0
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Terrain seed; absent: the server picks one.",
+            "minimum": 0
+          },
+          "topology": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Forced topology, 1-based in the area's list; absent: the client's choice.",
+            "minimum": 0
+          }
+        }
+      },
+      "OnlinePlayerInfo": {
+        "type": "object",
+        "required": [
+          "character",
+          "account",
+          "area"
+        ],
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string",
+            "description": "`WorldAreas.Id`."
+          },
+          "character": {
+            "type": "string"
+          },
+          "instance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "PasswordRequest": {
+        "type": "object",
+        "description": "`POST /password`.",
+        "required": [
+          "old_password",
+          "new_password"
+        ],
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "description": "Plain text, at least 8 characters."
+          },
+          "old_password": {
+            "type": "string"
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "description": "`POST /register`.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "Plain text, at least 8 characters. Use HTTPS outside the local machine."
+          },
+          "username": {
+            "type": "string",
+            "description": "3-64 characters from `A-Za-z0-9_.@+-`."
+          }
+        }
+      },
+      "RoleRequest": {
+        "type": "object",
+        "description": "`POST /admin/accounts/{name}/role`.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`player` or `admin`."
+          }
+        }
+      },
+      "ServerInfo": {
+        "type": "object",
+        "description": "`GET /server`.",
+        "required": [
+          "name",
+          "version",
+          "cluster_id",
+          "online",
+          "open_registration",
+          "login_host",
+          "login_port",
+          "uptime_secs"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string"
+          },
+          "login_host": {
+            "type": "string",
+            "description": "Host the game client connects to."
+          },
+          "login_port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The gateway's display name."
+          },
+          "online": {
+            "type": "integer",
+            "description": "Players in game now.",
+            "minimum": 0
+          },
+          "open_registration": {
+            "type": "boolean"
+          },
+          "uptime_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "The game client version this server speaks."
+          }
+        }
+      },
+      "TransferRequest": {
+        "type": "object",
+        "description": "`POST /admin/players/{name}/transfer`: give `instance`, or `area` (with the optional\nlayout fields) for a new one.",
+        "properties": {
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "instance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "orientation": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "topology": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "64 hex characters from POST /login"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "public",
+      "description": "No login needed"
+    },
+    {
+      "name": "account",
+      "description": "Any logged-in account"
+    },
+    {
+      "name": "admin",
+      "description": "Admin role and a web token"
+    }
+  ]
+}

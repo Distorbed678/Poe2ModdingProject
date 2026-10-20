@@ -138,6 +138,20 @@ impl Store for SqliteStore {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    fn all_characters(&self) -> Result<Vec<Character>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {CHARACTER_COLUMNS} FROM characters ORDER BY id"))?;
+        let rows = stmt.query_map([], character_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn character_by_id(&self, id: u32) -> Result<Option<Character>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {CHARACTER_COLUMNS} FROM characters WHERE id = ?1"))?;
+        let mut rows = stmt.query_map(params![id], character_from_row)?;
+        Ok(rows.next().transpose()?)
+    }
+
     fn set_intro_done(&self, character_id: u32) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -229,6 +243,9 @@ mod character_tests {
         };
         assert!(store.create_character(&dup).unwrap().is_none());
         assert_eq!(store.characters(a.id).unwrap(), vec![c.clone()]);
+        assert_eq!(store.all_characters().unwrap(), vec![c.clone()]);
+        assert_eq!(store.character_by_id(c.id).unwrap(), Some(c.clone()));
+        assert_eq!(store.character_by_id(c.id + 99).unwrap(), None);
         // Locations are saved with the area.
         assert_eq!(c.location, None);
         let at = Location {

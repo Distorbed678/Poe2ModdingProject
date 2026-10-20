@@ -16,7 +16,9 @@ use std::{
 use rand::RngCore;
 use tokio::sync::watch;
 
+pub mod admin;
 pub mod instances;
+pub use admin::{AdminControl, AdminOutcome, NewInstance, OnlinePlayer, TransferTarget};
 pub use instances::{InstanceDirectory, InstanceInfo, InstanceSpec, MemoryInstances};
 
 /// The character being handed off (what the instance server needs to spawn it).

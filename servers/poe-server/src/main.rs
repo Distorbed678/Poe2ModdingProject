@@ -6,14 +6,20 @@ use poe_config::Config;
 use poe_data::GameData;
 use poe_proto::Protocol;
 use poe_store::SqliteStore;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Arc::new(Config::load_default()?);
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(&config.logging.filter));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // The web API keeps recent events for its live log viewer (`[web] log_buffer`).
+    let logs = poe_web_api::LogBuffer::new(config.web.log_buffer);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(logs.layer())
+        .init();
     tracing::info!(version = %config.game.version, "starting poe-server");
 
     let protocol = Arc::new(Protocol::load(&config.game.protocol_dir)?);
@@ -57,16 +63,33 @@ async fn main() -> anyhow::Result<()> {
         data: data.clone(),
         stats: Arc::new(poe_game::stats::StatRegistry::load(&data)?),
         store: store.clone(),
-        accounts,
+        accounts: accounts.clone(),
         seeds: Arc::new(instance_server::seeds::KnownSeeds::load(
             &config.dev.known_seeds,
         )),
         reports: Default::default(),
         sessions,
-        instances,
+        instances: instances.clone(),
         live: Default::default(),
     });
 
-    tokio::try_join!(login.run(), instance.run())?;
+    let web_state = poe_web_api::WebState {
+        config: config.clone(),
+        accounts: accounts.clone(),
+        store: store.clone(),
+        instances: instances.clone(),
+        admin: instance.clone(),
+        logs: logs.clone(),
+        started: std::time::Instant::now(),
+    };
+    let web = async move {
+        if config.web.enabled {
+            poe_web_api::serve(web_state).await
+        } else {
+            tracing::info!("web api disabled ([web] enabled = false)");
+            std::future::pending().await
+        }
+    };
+    tokio::try_join!(login.run(), instance.run(), web)?;
     Ok(())
 }

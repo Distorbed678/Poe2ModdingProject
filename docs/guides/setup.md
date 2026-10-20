@@ -42,12 +42,13 @@ python3 scripts/check-links.py   # relative links and #anchors in the docs, READ
 
 ## Run
 ```sh
-cargo run -p poe-server     # login (20481) + instance (6112) servers, config/server.toml (add --release for play)
+cargo run -p poe-server     # login (20481) + instance (6112) servers + web API (127.0.0.1:8080), config/server.toml (add --release for play)
 cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: read-only, official servers; --no-build)
 cargo xtask deploy-core     # rebuilds and installs only the debug core; a running client reloads it within about a second (--no-build)
 cargo xtask dll-data        # rewrites only GameFiles/poe-hook-data/ (stats, action types, areas)
 cargo xtask run-client      # launches the client through Proton (Steam must be running)
 cargo xtask revert-client   # restores GameFiles/ to the original state
+cargo xtask openapi         # writes docs/architecture/openapi.json from the web API code (--check: fail if stale)
 cargo xtask tracker         # renders docs/status/tracker.toml into the README.md status tables (--check: fail if README.md is stale)
 ```
 
@@ -65,6 +66,10 @@ cargo xtask tracker         # renders docs/status/tracker.toml into the README.m
 
 `run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
 
+### Web API
+
+`poe-server` also serves the web API on `[web] bind` (default `127.0.0.1:8080`; `[web] enabled = false` turns it off). Try it: `curl localhost:8080/api/v1/server`. To use the admin endpoints make an admin offline (`cargo run -p poe-server -- account create alice "a long password"`, then `account role alice admin`), log in with `POST /api/v1/login` and send the token as `Authorization: Bearer <token>`. To serve the built web admin set `[web] static_dir` to its `dist` directory; for development with Vite put its origin in `[web] cors_origins`. Details: [../architecture/web-api.md](../architecture/web-api.md). To run a second server on shifted ports (for a smoke test), copy `config/server.toml`, change `[network.login] bind`, `[network.instance] bind`/`public_port`, `[web] bind`, `[database] path` and the audit log path, and start with `POE_CONFIG=<copy>`.
+
 ### Remember-me token (launcher auto-login)
 
 With `login_mode = "standalone"` the client's Remember Me stores a 32-byte token issued by the login server (`AuthenticationResult.session_token`). A launcher, or you by hand, can sign an account in without typing the password:
@@ -81,7 +86,7 @@ It writes the token to `third_party/proton-prefix/pfx/drive_c/users/steamuser/Do
 
 ## Config
 
-`config/server.toml` is the working dev config; `config/server.example.toml` is a fully commented copy with every key and its default (a `poe-config` test parses both). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]`, `[cluster]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
+`config/server.toml` is the working dev config; `config/server.example.toml` is a fully commented copy with every key and its default (a `poe-config` test parses both). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]`, `[cluster]`, `[web]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
 
 ### Config migration (2026-10)
 
@@ -103,7 +108,8 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | `[admin] accounts = [...]` | removed: admin is the account's role (`account role <name> admin`; the migration made `Exile1` an admin). A leftover `[admin]` section is ignored |
 | (new) `[cluster] id` | cluster identity; login tokens from another id are invalid (default `"local"`) |
 | (new) `[accounts] dev_machine_hash_login` | Steam `0x0005` login without a password, auto-creating `Exile<id>` accounts (default `false`; `config/server.toml` sets `true` for now) |
-| (new) `[accounts] open_registration` | web registration switch for later (default `false`) |
+| (new) `[accounts] open_registration` | whether `POST /api/v1/register` may create accounts (default `false`) |
+| (new) `[web]` | `enabled` (`true`), `bind` (`127.0.0.1:8080`), `static_dir`, `cors_origins`, `log_buffer` (`2000`): the web API ([../architecture/web-api.md](../architecture/web-api.md)) |
 | (new) `[accounts] remember_days` | lifetime of a Remember Me login (default `30`) |
 
 Removed keys in a config file are ignored (unknown keys do not fail the load).

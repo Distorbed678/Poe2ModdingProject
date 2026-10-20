@@ -64,6 +64,51 @@ pub struct Config {
     /// Development and research bridges (debug link, position sync, traces, seed sweep).
     #[serde(default)]
     pub dev: DevConfig,
+    /// HTTP API and web admin (`crates/poe-web-api`).
+    #[serde(default)]
+    pub web: WebConfig,
+}
+
+/// The web API (REST and WebSocket) and the optional static web admin.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebConfig {
+    /// Start the web API with poe-server.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Address to listen on. Loopback by default: put a TLS reverse proxy in front before
+    /// exposing it (passwords travel in the request body).
+    #[serde(default = "default_web_bind")]
+    pub bind: std::net::SocketAddr,
+    /// Directory with the built web admin (SPA), served at `/` with an `index.html` fallback
+    /// for client-side routes. Empty = no static files.
+    #[serde(default)]
+    pub static_dir: PathBuf,
+    /// Origins allowed to call the API from a browser (CORS), e.g. a Vite dev server.
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
+    /// How many recent log events the live log viewer keeps.
+    #[serde(default = "default_log_buffer")]
+    pub log_buffer: usize,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: default_web_bind(),
+            static_dir: PathBuf::new(),
+            cors_origins: Vec::new(),
+            log_buffer: default_log_buffer(),
+        }
+    }
+}
+
+fn default_web_bind() -> std::net::SocketAddr {
+    std::net::SocketAddr::from(([127, 0, 0, 1], 8080))
+}
+
+fn default_log_buffer() -> usize {
+    2000
 }
 
 /// Server-side terrain generation (`poe-world`). The client always builds the terrain itself
@@ -500,6 +545,16 @@ mod tests {
         assert!(!cfg.leagues.is_empty());
     }
 
+    #[test]
+    fn web_section() {
+        let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
+        assert!(cfg.web.enabled);
+        assert_eq!(cfg.web.bind.to_string(), "127.0.0.1:8080");
+        assert!(cfg.web.static_dir.as_os_str().is_empty());
+        assert!(cfg.web.cors_origins.is_empty());
+        assert_eq!(cfg.web.log_buffer, 2000);
+    }
+
     /// The example documents the defaults: a config with only the required keys must equal it
     /// for every defaulted section.
     #[test]
@@ -543,6 +598,7 @@ mod tests {
             format!("{:?}", example.cluster),
             format!("{:?}", minimal.cluster)
         );
+        assert_eq!(format!("{:?}", example.web), format!("{:?}", minimal.web));
         // Accounts: the example documents the defaults of the optional keys.
         let (e, m) = (&example.accounts, &minimal.accounts);
         assert_eq!(
