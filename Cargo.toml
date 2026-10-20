@@ -29,6 +29,7 @@ sha2 = "0.10"
 rand = "0.9"
 rusqlite = { version = "0.37", features = ["bundled"] }
 hex = "0.4"
+argon2 = "0.5"
 
 poe-config = { path = "crates/poe-config" }
 # Poe2Protocol submodule. The servers use poe-net's TCP connection (feature `tokio`).
@@ -37,6 +38,7 @@ poe-proto = { path = "modules/protocol/poe-proto" }
 # Poe2ClientHook submodule: host-side deploy library used by xtask.
 poe-hook-deploy = { path = "modules/client-hook/poe-hook-deploy" }
 poe-store = { path = "crates/poe-store" }
+poe-accounts = { path = "crates/poe-accounts" }
 poe-cluster = { path = "crates/poe-cluster" }
 poe-data = { path = "crates/poe-data" }
 poe-game = { path = "crates/poe-game" }

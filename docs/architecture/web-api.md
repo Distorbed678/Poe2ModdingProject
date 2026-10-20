@@ -4,7 +4,7 @@ Planned, nothing built yet. The work packages are in [../plans/orchestration-202
 
 ## Today
 
-Administration is by server commands, run from chat (`!` prefix) or the overlay's Commands page, with admins from `[admin] accounts` and an audit log: [../guides/server-admin.md](../guides/server-admin.md). They go through one command registry (`servers/instance-server/src/commands.rs`), which is what the web API would reuse. The overlay's debug link is loopback only ([../guides/hosting.md](../guides/hosting.md)).
+Administration is by server commands, run from chat (`!` prefix) or the overlay's Commands page, with admins by account role and an audit log: [../guides/server-admin.md](../guides/server-admin.md). They go through one command registry (`servers/instance-server/src/commands.rs`), which is what the web API would reuse. The overlay's debug link is loopback only ([../guides/hosting.md](../guides/hosting.md)).
 
 ## Planned
 

@@ -13,9 +13,9 @@ places:
   Results arrive as `ack` lines. Commands added to the registry show up in the overlay by
   themselves.
 
-Execution is in `exec.rs` (`InstanceServer::run_command`). Admin commands are checked against
-`[admin] accounts` (account names, e.g. `Exile1`) and appended to `[commands] audit_log`
-(`unix ms, account, command, result`).
+Execution is in `exec.rs` (`InstanceServer::run_command`). Admin commands need the **admin role**
+of the account (checked when the command runs; see Accounts below) and are appended to
+`[commands] audit_log` (`unix ms, account, command, result`; passwords are written as `***`).
 
 | Command | Admin | What it does |
 |---|---|---|
@@ -31,7 +31,7 @@ Execution is in `exec.rs` (`InstanceServer::run_command`). Admin commands are ch
 | `join <instance>` | yes | moves you into an existing instance |
 | `close <instance>` | yes | closes an instance; its players are disconnected |
 | `teleport <x> <y>` | yes | moves you to a grid cell |
-| `turn_cell`, `turn_timing`, `face_cursor` | yes | movement switches (see `[movement]`) |
+| `account <action> [name] [value]` | yes | accounts, see below |
 | `terrain` | yes | generates this instance's terrain on the server and logs the comparison |
 | `area_info <area> <seed>` | yes | research: a second AreaInfo on the connection (the client may crash) |
 
@@ -39,6 +39,28 @@ Execution is in `exec.rs` (`InstanceServer::run_command`). Admin commands are ch
 client's own choice). Any area in `WorldAreas` works, not only act 1. Topology numbers are
 1-based in the area's topology list; orientations are checked against that topology's allowed
 ones.
+
+## Accounts
+
+Admins are accounts with the `admin` role; there is no admin list in the config. Model, hashing and tokens: [../architecture/accounts.md](../architecture/accounts.md).
+
+| Command | What it does |
+|---|---|
+| `account create <name> <password>` | new player account. The server hashes the password the way the client does (SHA-256 of the UTF-16LE text), then argon2id. Minimum 8 characters, username 3-64 of `A-Za-z0-9_.@+-` |
+| `account role <name> <player\|admin>` | sets the role; takes effect on the next command |
+| `account disable <name>` / `account enable <name>` | a disabled account cannot log in; disabling revokes its saved logins and ends its sessions |
+| `account passwd <name> <password>` | new password; revokes the account's saved logins (Remember Me, launcher, web) |
+| `account list` | every account: id, role, state, last login (`no password (dev)` marks machine-hash accounts) |
+
+An admin cannot demote or disable themselves. Passwords typed in chat travel over the game connection and appear on screen: prefer the offline form for real passwords. It runs against the database, also while the server is up, and works for the first admin:
+
+```
+cargo run -p poe-server -- account create alice "a long password"
+cargo run -p poe-server -- account role alice admin
+cargo run -p poe-server -- account list
+```
+
+A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and `Exile1` was made an admin by the database migration.
 
 ## Instances
 

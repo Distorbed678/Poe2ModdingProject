@@ -8,7 +8,7 @@
 # status = "done" (1.0) | "partial" (0.5) | "missing" (0) | "planned" (0).
 #   missing = needed and not started or known broken; planned = scheduled in a plan document.
 
-current_task = "Phase 2: movement rewrite (WP2.2 instance world design; capture gate G-MOVE open)"
+current_task = "Phase 2: movement rewrite (WP2.3 built; WP2.4 in-game verification next; capture gate G-MOVE open)"
 current_task_link = "docs/plans/orchestration-2026-10.md"
 
 # ---------------------------------------------------------------------------------------------
@@ -39,9 +39,9 @@ link = "docs/status/history.md"
 
 [[subsystem.item]]
 name = "Standalone email/password login screen"
-status = "planned"
-note = "RE spike WP3.1"
-link = "docs/plans/orchestration-2026-10.md"
+status = "partial"
+note = "RE done (WP3.1), the DLL forces it (WP3.3, `login_mode`) and the login server handles 0x0003 (WP3.2, tested with encoded packets); the in-game check is open"
+link = "docs/re/standalone-login.md"
 
 # ---------------------------------------------------------------------------------------------
 
@@ -59,15 +59,27 @@ name = "Tickets, resume tickets and login sessions (many accounts at once)"
 status = "done"
 
 [[subsystem.item]]
-name = "Passwords (argon2) and chosen account names"
-status = "planned"
-note = "WP3.2, new crate poe-accounts"
-link = "docs/plans/orchestration-2026-10.md"
+name = "Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)"
+status = "done"
+note = "WP3.2; verified by tests, not yet with the real standalone screen (WP3.3)"
+link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
-name = "Launcher and web tokens, per-cluster"
+name = "Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)"
+status = "done"
+note = "game tokens in use; launcher and web kinds exist in the store, issuing them is WP4"
+link = "docs/architecture/accounts.md"
+
+[[subsystem.item]]
+name = "Duplicate login ends the old session"
+status = "done"
+note = "LoginSessions::supersede; unit-tested, not yet tried with two clients"
+link = "docs/architecture/accounts.md"
+
+[[subsystem.item]]
+name = "Rate limiting of password attempts, web registration"
 status = "planned"
-link = "docs/plans/orchestration-2026-10.md"
+link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
 name = "Admin role in the database (replaces the config list)"
@@ -121,24 +133,26 @@ link = "docs/protocol/movement.md"
 [[subsystem.item]]
 name = "WASD and click-to-move (held click, turns)"
 status = "partial"
-note = "works, but via 0x1cb/0x1df and workarounds that official servers never use"
+note = "server-authoritative World/Locomotion with the official reply sequences (WASD verified against captures by replay tests); click-to-move and held click are derived from client code (gap #1), in-game check pending"
 link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
 name = "Dodge roll"
 status = "partial"
-note = "roll speed profile only; no official reply sequence"
+note = "official reply batch (stats, 0x1ae, 0x1af steering, 0x1ca not yet in instance.toml); standing roll and roll edge cases unverified (gaps #2-#4)"
+link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
 name = "Facing the cursor"
 status = "partial"
-note = "turn_cell / turn_timing / face_cursor workarounds"
+note = "0x62 aim echoed as 0x1dc like official servers (replay-tested); the cursor/0x1df workarounds are gone; in-game check pending (WP2.4)"
+link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
 name = "Sprint"
 status = "partial"
-note = "a full sprint needs the buff system"
-link = "docs/status/history.md"
+note = "official sequence (3 buffs, stats, 0x64 stream, end); sprint into roll and zero WASD during a sprint unverified (gaps #4, #5)"
+link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
 name = "Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences"
@@ -148,8 +162,8 @@ link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
 name = "Server-authoritative movement on the walkability grid (official packets only)"
-status = "planned"
-note = "WP2.2 to WP2.4"
+status = "partial"
+note = "built (WP2.3): one World per session, thin packet glue, PSY2 is a drift checker only; in-game verification is WP2.4"
 link = "docs/plans/orchestration-2026-10.md"
 
 [[subsystem.item]]
@@ -166,8 +180,8 @@ link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
 name = "Remote client login (trusted_servers in the DLL)"
-status = "planned"
-note = "WP3.3; the DLL treats every non-loopback server as official today"
+status = "partial"
+note = "WP3.3: DLL side built and unit-tested (trusted servers are not blocked, not latched, get the crypto bypass); not yet tried against a LAN server in game"
 link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
@@ -217,9 +231,8 @@ name = "Live registry: who, kick, tell, broadcast, mute"
 status = "done"
 
 [[subsystem.item]]
-name = "Admins by account name from config"
-status = "partial"
-note = "tied to auto-generated names; moves to a role (accounts)"
+name = "Admins by account role, account commands (create, role, disable, passwd, list)"
+status = "done"
 link = "docs/architecture/accounts.md"
 
 # ---------------------------------------------------------------------------------------------
@@ -366,9 +379,9 @@ link = "docs/architecture/crates.md"
 
 [[subsystem.item]]
 name = "Standalone login screen, token auto-login, trusted_servers"
-status = "planned"
-note = "WP3.1 / WP3.3"
-link = "docs/plans/orchestration-2026-10.md"
+status = "partial"
+note = "WP3.3: login_mode patch, shared is_trusted, `cargo xtask login-token`; in-game test plan pending"
+link = "docs/architecture/client-dll.md#login-mode-and-trusted-servers"
 
 # ---------------------------------------------------------------------------------------------
 

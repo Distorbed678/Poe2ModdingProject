@@ -41,20 +41,20 @@ Start at [docs/index.md](docs/index.md): guides, architecture, the wire protocol
 Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xtask tracker`; do not edit this block by hand. The history of what was built when is in [docs/status/history.md](docs/status/history.md), the terrain generator in [docs/status/terrain.md](docs/status/terrain.md).
 
 <!-- tracker:start -->
-> **Current task:** [Phase 2: movement rewrite (WP2.2 instance world design; capture gate G-MOVE open)](docs/plans/orchestration-2026-10.md)
+> **Current task:** [Phase 2: movement rewrite (WP2.3 built; WP2.4 in-game verification next; capture gate G-MOVE open)](docs/plans/orchestration-2026-10.md)
 
 | Subsystem | Progress | Done |
 |---|---|---|
-| [Login](#login) | `███████░░░ 70%` | 3/5 |
-| [Accounts](#accounts) | `███░░░░░░░ 33%` | 2/6 |
+| [Login](#login) | `████████░░ 80%` | 3/5 |
+| [Accounts](#accounts) | `██████░░░░ 63%` | 5/8 |
 | [Instances/Transfers](#instancestransfers) | `███████░░░ 67%` | 4/6 |
-| [Movement](#movement) | `████░░░░░░ 36%` | 0/7 |
-| [Multiplayer](#multiplayer) | `░░░░░░░░░░ 0%` | 0/6 |
-| [Chat/Commands](#chatcommands) | `█████████░ 88%` | 3/4 |
+| [Movement](#movement) | `████░░░░░░ 43%` | 0/7 |
+| [Multiplayer](#multiplayer) | `█░░░░░░░░░ 8%` | 0/6 |
+| [Chat/Commands](#chatcommands) | `██████████ 100%` | 4/4 |
 | [Terrain](#terrain) | `██░░░░░░░░ 23%` | 1/11 |
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
-| [Client Hook](#client-hook) | `████████░░ 80%` | 4/5 |
+| [Client Hook](#client-hook) | `█████████░ 90%` | 4/5 |
 | [Launcher](#launcher) | `░░░░░░░░░░ 0%` | 0/5 |
 | [Web Admin](#web-admin) | `░░░░░░░░░░ 0%` | 0/4 |
 | [Modding](#modding) | `█████░░░░░ 50%` | 2/5 |
@@ -71,7 +71,7 @@ Docs: [docs/protocol/login.md](docs/protocol/login.md)
 | ✅ | [Authenticate, leagues, character list, hand-off to the instance server](docs/protocol/login.md) |  |
 | ✅ | Character creation, selection and deletion |  |
 | 🟡 | [CharacterList entry fields and creation error codes](docs/status/history.md) | some entry fields are still unexplained; refusal codes unknown |
-| ⬜ | [Standalone email/password login screen](docs/plans/orchestration-2026-10.md) | RE spike WP3.1 |
+| 🟡 | [Standalone email/password login screen](docs/re/standalone-login.md) | RE done (WP3.1), the DLL forces it (WP3.3, `login_mode`) and the login server handles 0x0003 (WP3.2, tested with encoded packets); the in-game check is open |
 
 ### Accounts
 
@@ -81,8 +81,10 @@ Docs: [docs/architecture/accounts.md](docs/architecture/accounts.md)
 |---|---|---|
 | ✅ | [Machine-hash accounts with SQLite storage (accounts, characters, unique names)](docs/architecture/accounts.md) |  |
 | ✅ | Tickets, resume tickets and login sessions (many accounts at once) |  |
-| ⬜ | [Passwords (argon2) and chosen account names](docs/plans/orchestration-2026-10.md) | WP3.2, new crate poe-accounts |
-| ⬜ | [Launcher and web tokens, per-cluster](docs/plans/orchestration-2026-10.md) |  |
+| ✅ | [Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)](docs/architecture/accounts.md) | WP3.2; verified by tests, not yet with the real standalone screen (WP3.3) |
+| ✅ | [Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)](docs/architecture/accounts.md) | game tokens in use; launcher and web kinds exist in the store, issuing them is WP4 |
+| ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; unit-tested, not yet tried with two clients |
+| ⬜ | [Rate limiting of password attempts, web registration](docs/architecture/accounts.md) |  |
 | ⬜ | Admin role in the database (replaces the config list) |  |
 | ⬜ | Duplicate login kicks the old session |  |
 
@@ -105,12 +107,12 @@ Docs: [docs/protocol/movement.md](docs/protocol/movement.md)
 
 | | Item | Note |
 |---|---|---|
-| 🟡 | [WASD and click-to-move (held click, turns)](docs/protocol/movement.md) | works, but via 0x1cb/0x1df and workarounds that official servers never use |
-| 🟡 | Dodge roll | roll speed profile only; no official reply sequence |
-| 🟡 | Facing the cursor | turn_cell / turn_timing / face_cursor workarounds |
-| 🟡 | [Sprint](docs/status/history.md) | a full sprint needs the buff system |
+| 🟡 | [WASD and click-to-move (held click, turns)](docs/protocol/movement.md) | server-authoritative World/Locomotion with the official reply sequences (WASD verified against captures by replay tests); click-to-move and held click are derived from client code (gap #1), in-game check pending |
+| 🟡 | [Dodge roll](docs/protocol/movement.md) | official reply batch (stats, 0x1ae, 0x1af steering, 0x1ca not yet in instance.toml); standing roll and roll edge cases unverified (gaps #2-#4) |
+| 🟡 | [Facing the cursor](docs/protocol/movement.md) | 0x62 aim echoed as 0x1dc like official servers (replay-tested); the cursor/0x1df workarounds are gone; in-game check pending (WP2.4) |
+| 🟡 | [Sprint](docs/protocol/movement.md) | official sequence (3 buffs, stats, 0x64 stream, end); sprint into roll and zero WASD during a sprint unverified (gaps #4, #5) |
 | 🟡 | [Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences](docs/protocol/movement.md) | decoded; click-to-move, standing/chained rolls and stance changes wait for a capture (gap list) |
-| ⬜ | [Server-authoritative movement on the walkability grid (official packets only)](docs/plans/orchestration-2026-10.md) | WP2.2 to WP2.4 |
+| 🟡 | [Server-authoritative movement on the walkability grid (official packets only)](docs/plans/orchestration-2026-10.md) | built (WP2.3): one World per session, thin packet glue, PSY2 is a drift checker only; in-game verification is WP2.4 |
 | ❌ | [Server collision](docs/status/terrain.md) | needs the terrain generator to cover more areas |
 
 ### Multiplayer
@@ -119,7 +121,7 @@ Docs: [docs/guides/hosting.md](docs/guides/hosting.md)
 
 | | Item | Note |
 |---|---|---|
-| ⬜ | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | WP3.3; the DLL treats every non-loopback server as official today |
+| 🟡 | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | WP3.3: DLL side built and unit-tested (trusted servers are not blocked, not latched, get the crypto bypass); not yet tried against a LAN server in game |
 | ⬜ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](docs/plans/orchestration-2026-10.md) | WP3.4 |
 | ⬜ | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5; needs an official capture of a town with other players |
 | ⬜ | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6; every connection is a private simulation today |
@@ -135,7 +137,7 @@ Docs: [docs/guides/server-admin.md](docs/guides/server-admin.md)
 | ✅ | Chat channels (join, global, local, whisper) |  |
 | ✅ | Server commands in chat (!) and in the overlay command palette |  |
 | ✅ | Live registry: who, kick, tell, broadcast, mute |  |
-| 🟡 | [Admins by account name from config](docs/architecture/accounts.md) | tied to auto-generated names; moves to a role (accounts) |
+| ✅ | [Admins by account role, account commands (create, role, disable, passwd, list)](docs/architecture/accounts.md) |  |
 
 ### Terrain
 
@@ -187,7 +189,7 @@ Docs: [docs/architecture/client-dll.md](docs/architecture/client-dll.md)
 | ✅ | Overlay (Vulkan imgui), packet capture, snapshots |  |
 | ✅ | Read-only mode on official servers (latch) |  |
 | ✅ | [Deploy and launch library (poe-hook-deploy)](docs/architecture/crates.md) |  |
-| ⬜ | [Standalone login screen, token auto-login, trusted_servers](docs/plans/orchestration-2026-10.md) | WP3.1 / WP3.3 |
+| 🟡 | [Standalone login screen, token auto-login, trusted_servers](docs/architecture/client-dll.md#login-mode-and-trusted-servers) | WP3.3: login_mode patch, shared is_trusted, `cargo xtask login-token`; in-game test plan pending |
 
 ### Launcher
 

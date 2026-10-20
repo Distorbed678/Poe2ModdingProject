@@ -53,11 +53,12 @@ pub struct Config {
     pub player: PlayerConfig,
     #[serde(default)]
     pub terrain: TerrainConfig,
+    /// The cluster these servers belong to (tokens are not valid across clusters).
     #[serde(default)]
-    pub admin: AdminConfig,
+    pub cluster: ClusterConfig,
     #[serde(default)]
     pub commands: CommandsConfig,
-    /// Movement tuning (kept until the movement rewrite, phase 2).
+    /// Movement simulation tuning.
     #[serde(default)]
     pub movement: MovementConfig,
     /// Development and research bridges (debug link, position sync, traces, seed sweep).
@@ -75,12 +76,24 @@ pub struct TerrainConfig {
     pub generate: bool,
 }
 
-/// Server administrators: the accounts allowed to use admin commands.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct AdminConfig {
-    /// Account names (as shown in game, e.g. `Exile1`).
-    #[serde(default)]
-    pub accounts: Vec<String>,
+/// Cluster identity. Login tokens carry the id of the cluster that issued them, so a token
+/// (or a database copied from another cluster) does not log in here.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClusterConfig {
+    #[serde(default = "default_cluster_id")]
+    pub id: String,
+}
+
+impl Default for ClusterConfig {
+    fn default() -> Self {
+        Self {
+            id: default_cluster_id(),
+        }
+    }
+}
+
+fn default_cluster_id() -> String {
+    "local".into()
 }
 
 /// Chat commands (`!help` lists them).
@@ -272,40 +285,27 @@ fn default_tick_ms() -> u64 {
     33
 }
 
-/// `[movement]`: how the server answers client movement (until the movement rewrite).
+/// `[movement]`: tuning of the server-side movement simulation (`poe-game`'s `Locomotion`).
+/// Everything else (skill ids, walking speed, roll distance) comes from game data; the defaults
+/// here are the values of the official 0.5.5e captures.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MovementConfig {
-    /// Which cell a turn (`0x64`/`0x1c8`) is sent with: "own" (the client's cell when the
-    /// turn applies: the client only re-aims its walk, as with a server that simulates it
-    /// exactly), "heading" (a cell one step along the new heading: the client is put on its
-    /// centre) or "natural" (the cell the client would reach in that frame).
-    #[serde(default = "default_turn_cell")]
-    pub turn_cell: String,
-    /// Hold a turn back by up to one frame when that puts the player nearer its path (the
-    /// client puts it on a cell centre at every turn).
-    #[serde(default = "default_true")]
-    pub turn_timing: bool,
-    /// Turn the player toward the cursor (except while it walks by click-to-move or rolls),
-    /// from the cursor position in the client's position reports (dev bridge, see
-    /// `cursor_to_grid`).
-    #[serde(default = "default_true")]
-    pub face_cursor: bool,
-    /// Cursor (client pixels from the window centre, scaled to a 1440-pixel-high window) to
-    /// grid offset from the player: `gx = a·sx + b·sy + c`, `gy = d·sx + e·sy + f` as
-    /// `[a, b, c, d, e, f]` (calibrated from dodge-roll targets, 2026-10-15).
-    #[serde(default = "default_cursor_to_grid")]
-    pub cursor_to_grid: [f32; 6],
+    /// `BuffDefinitions` rows of the three buffs a sprint adds (official captures: 2758, 2737,
+    /// 2853).
+    #[serde(default = "default_sprint_buff_rows")]
+    pub sprint_buff_rows: [u16; 3],
 }
 
 impl Default for MovementConfig {
     fn default() -> Self {
         Self {
-            turn_cell: default_turn_cell(),
-            turn_timing: true,
-            face_cursor: true,
-            cursor_to_grid: default_cursor_to_grid(),
+            sprint_buff_rows: default_sprint_buff_rows(),
         }
     }
+}
+
+fn default_sprint_buff_rows() -> [u16; 3] {
+    [2758, 2737, 2853]
 }
 
 /// `[dev]`: development and research bridges. None of these are needed for normal play.
@@ -315,10 +315,19 @@ pub struct DevConfig {
     /// picks one for areas listed there, since some random seeds fail to generate.
     #[serde(default)]
     pub known_seeds: PathBuf,
-    /// Accept the client DLL's per-frame position reports (UDP on the instance port) and
-    /// follow them (movement dev bridge until the server simulates movement exactly, M5).
+    /// Listen for the client DLL's UDP datagrams on the instance port: per-frame position
+    /// reports (only read by the drift checker, `drift_check`), and the debug link's overlay
+    /// commands. Reports never move the player.
     #[serde(default = "default_true")]
     pub position_sync: bool,
+    /// Drift checker: log the server's player position against the client's reported one
+    /// (distance in cells) every `drift_interval_ms`. Needs `position_sync` and the DLL; the
+    /// reports are compared only, never fed into the simulation.
+    #[serde(default)]
+    pub drift_check: bool,
+    /// Interval of the drift checker's log lines.
+    #[serde(default = "default_drift_interval_ms")]
+    pub drift_interval_ms: u64,
     /// Movement trace: every client position report, movement input and movement reply
     /// is appended to this TSV file, for analysing a play session. Empty: off.
     #[serde(default)]
@@ -346,6 +355,8 @@ impl Default for DevConfig {
         Self {
             known_seeds: PathBuf::new(),
             position_sync: true,
+            drift_check: false,
+            drift_interval_ms: default_drift_interval_ms(),
             movement_trace: PathBuf::new(),
             debug_link: true,
             sweep: PathBuf::new(),
@@ -358,12 +369,8 @@ fn default_sweep_results() -> PathBuf {
     "dumps/0.5.5e/terrain/vectors/sweep-results.tsv".into()
 }
 
-fn default_cursor_to_grid() -> [f32; 6] {
-    [0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]
-}
-
-fn default_turn_cell() -> String {
-    "natural".into()
+fn default_drift_interval_ms() -> u64 {
+    1000
 }
 
 fn default_true() -> bool {
@@ -388,6 +395,21 @@ pub struct AccountsConfig {
     /// Stash tab names an account gets (sent in InitialState; official: "1".."4").
     #[serde(default = "default_stash_tabs")]
     pub stash_tabs: Vec<String>,
+    /// Dev only: the Steam login (`0x0005`) auto-creates and logs into an account keyed by the
+    /// client's machine hash, with no password. Off: only username/password and token logins
+    /// (`0x0003`) work.
+    #[serde(default)]
+    pub dev_machine_hash_login: bool,
+    /// Whether the web API may register accounts (WP4.1); server commands always can.
+    #[serde(default)]
+    pub open_registration: bool,
+    /// How long a "Remember Me" login token stays valid (days).
+    #[serde(default = "default_remember_days")]
+    pub remember_days: u32,
+}
+
+fn default_remember_days() -> u32 {
+    30
 }
 
 fn yes() -> bool {
@@ -508,8 +530,32 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(format!("{:?}", example.instance), format!("{:?}", minimal.instance));
-        assert_eq!(format!("{:?}", example.movement), format!("{:?}", minimal.movement));
+        assert_eq!(
+            format!("{:?}", example.instance),
+            format!("{:?}", minimal.instance)
+        );
+        assert_eq!(
+            format!("{:?}", example.movement),
+            format!("{:?}", minimal.movement)
+        );
         assert_eq!(format!("{:?}", example.chat), format!("{:?}", minimal.chat));
+        assert_eq!(
+            format!("{:?}", example.cluster),
+            format!("{:?}", minimal.cluster)
+        );
+        // Accounts: the example documents the defaults of the optional keys.
+        let (e, m) = (&example.accounts, &minimal.accounts);
+        assert_eq!(
+            (
+                e.dev_machine_hash_login,
+                e.open_registration,
+                e.remember_days
+            ),
+            (
+                m.dev_machine_hash_login,
+                m.open_registration,
+                m.remember_days
+            )
+        );
     }
 }

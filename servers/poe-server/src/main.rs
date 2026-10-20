@@ -18,6 +18,22 @@ async fn main() -> anyhow::Result<()> {
 
     let protocol = Arc::new(Protocol::load(&config.game.protocol_dir)?);
     let store = Arc::new(SqliteStore::open(&config.database.path)?);
+    let accounts: Arc<dyn poe_accounts::AccountStore> =
+        Arc::new(poe_accounts::SqliteAccounts::new(store.clone(), config.cluster.id.clone()));
+    // `poe-server account <create|role|disable|enable|passwd|list> [name] [value]` manages
+    // accounts offline (the first admin), then exits.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("account") {
+        let sub = args.get(1).map(String::as_str).unwrap_or("list");
+        let value = (args.len() > 3).then(|| args[3..].join(" "));
+        return match poe_accounts::run_account_command(&*accounts, None, sub, args.get(2).map(String::as_str), value.as_deref()) {
+            Ok(done) => {
+                println!("{}", done.text);
+                Ok(())
+            }
+            Err(e) => anyhow::bail!(e),
+        };
+    }
     let tickets = Arc::new(MemoryTickets::new(std::time::Duration::from_secs(60)));
     let sessions = Arc::new(MemorySessions::default());
     let instances = Arc::new(MemoryInstances::default());
@@ -27,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         protocol: protocol.clone(),
         store: store.clone(),
+        accounts: accounts.clone(),
         data: data.clone(),
         tickets: tickets.clone(),
         sessions: sessions.clone(),
@@ -40,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         data: data.clone(),
         stats: Arc::new(poe_game::stats::StatRegistry::load(&data)?),
         store: store.clone(),
+        accounts,
         seeds: Arc::new(instance_server::seeds::KnownSeeds::load(
             &config.dev.known_seeds,
         )),

@@ -2,11 +2,13 @@
 //! `gateway_list.txt`. Handles the key exchange, authentication, leagues and the character
 //! list, and hands the client off to an instance server.
 
+mod auth;
 mod handshake;
 mod session;
 
 use std::sync::Arc;
 
+use poe_accounts::AccountStore;
 use poe_cluster::TicketRegistry;
 use poe_config::Config;
 use poe_data::GameData;
@@ -20,6 +22,8 @@ pub struct LoginServer {
     pub config: Arc<Config>,
     pub protocol: Arc<Protocol>,
     pub store: Arc<dyn Store>,
+    /// Usernames, passwords and login tokens.
+    pub accounts: Arc<dyn AccountStore>,
     pub data: Arc<GameData>,
     pub tickets: Arc<dyn TicketRegistry>,
     /// Lets an instance server close an account's login connection when it leaves the game.

@@ -1,23 +1,79 @@
 # Accounts and identity
 
-Current state and the plan. How a remote player gets to the server: [../guides/hosting.md](../guides/hosting.md).
+How a player logs in, how accounts and tokens are stored, and how admins are chosen. How a remote player reaches the server: [../guides/hosting.md](../guides/hosting.md). Wire format: [../protocol/login.md](../protocol/login.md). The client side: [../re/standalone-login.md](../re/standalone-login.md).
 
-## Current state
+The code is the `poe-accounts` crate (`AccountStore` trait, `SqliteAccounts` implementation over the `poe-store` database, migration `0006_accounts_auth.sql`). The login server decides in `servers/login-server/src/auth.rs`.
 
-- **Account = machine hash.** The login server keys accounts by `auth.machine_hash` of the client's Authenticate message (`login-server/src/session.rs:247`, layout in [../protocol/login.md](../protocol/login.md)). The hash is stable per machine and comes from the client, so two people on one PC share an account and anyone can claim anyone's account. Account names are `Exile<id>`, not chosen.
-- **Storage:** accounts, characters and per-account character lists are in SQLite (`poe-store`, `Store` trait). Character names are unique across accounts (case-insensitive). The slot limit comes from config.
-- **Tickets and sessions** (`poe-cluster`): tickets with random keys per hand-off; resume tickets (single use) for "exit to character selection"; login sessions per account (logout, transfers). The pieces work for many accounts at once.
-- **Admins:** `[admin] accounts = ["Exile1"]` in `config/server.toml`, tied to the auto-generated names, which change if the database is reset ([../guides/server-admin.md](../guides/server-admin.md)).
-- **Account settings:** `[accounts] flags`, `full_access`, `stash_tabs` are global for every account.
-- **Same account twice:** `poe-cluster` `MemorySessions`: a second login replaces the first's transfer channel; nothing kicks the old session.
-- **Authentication limits:** the Authenticate message carries the Steam encrypted app ticket. GGG's key encrypts it, so the server cannot verify it; at best it identifies the account and does not authenticate it.
+## Model
 
-## Planned
-
-| What | Plan |
+| | |
 |---|---|
-| Real login | The DLL (or a small launcher, see [../guides/launcher.md](../guides/launcher.md)) supplies a username and password or token. Options: (a) check whether this exe still has the standalone email/password login path (Ghidra, open question); (b) the DLL puts a token from `poe-hook.toml` into the auth packet's unused bytes; (c) the Steam ticket (identifies only). |
-| Admins | Name accounts at registration. Admin list by name or by an `admin` column in the database. |
-| Duplicate login | Official behaviour: the new login kicks the old one. Do the same. |
-| Account settings | Per-account columns instead of the global flags (stash tabs come with the stash). |
-| Web administration | [web-api.md](web-api.md). |
+| Account | `accounts` table: `id`, `name` (the username; unique case-insensitively), `password_hash`, `role`, `created_at`, `last_login`, `disabled`. Characters belong to the account id. |
+| Role | `player` or `admin`. Admin commands check the role at the time of the command; there is no config list any more. |
+| Disabled | A disabled account cannot log in (result `0x47`), its tokens are revoked and its running sessions are ended. |
+| Token | `account_tokens` table: `kind` (`game_remember`, `launcher`, `web`), `token_hash`, `cluster_id`, `created_at`, `expires_at`, `revoked`, `last_used`. |
+| Cluster | `[cluster] id` in `config/server.toml`. Every token records the id of the cluster that issued it. |
+
+Usernames are 3-64 characters from `A-Za-z0-9_.@+-` (so an email address works as the account name on the client's login screen). Server commands require passwords of at least 8 characters.
+
+## Passwords: what is hashed
+
+The client never sends the plain password. Its login screen sends `SHA-256(UTF-16LE(password))` (32 bytes, no salt; [login.md](../protocol/login.md#cs-0x0003-credentials-standalone-platform)). The stored secret is **argon2id over that digest** (PHC string with a random salt per hash; default cost 19 MiB, 2 passes).
+
+Everything that sets or checks a password must produce the same digest first:
+
+```
+digest = SHA-256(password encoded as UTF-16LE, no BOM, no terminator)
+stored = argon2id(digest)            // poe_accounts::AccountStore takes the digest, never the text
+```
+
+`poe_accounts::password_digest(&str)` does the first step. The server commands (`account create`, `account passwd`) and the future web API (registration, password change, launcher login) must go through it, or an account made on the web would not accept the same password in game. The web API receives the plain password over TLS and hashes it with the same function; it never needs the stored hash.
+
+Consequence of the client's design: the digest is a password equivalent for this server (whoever has it can log in), but it is stored only inside an argon2id hash.
+
+## Tokens
+
+- 32 random bytes (never all zero). The server keeps only `SHA-256(token)`; the raw bytes exist once, in the `0x0004` reply (`session_token`) or the launcher/web response.
+- `game_remember`: issued when a password login has `save_login = 1`. The client saves it in its credentials file and sends it back as `password_hash` with `token_login = 1`. **Rolling:** each token login revokes the token it used and returns a fresh one, so the file always holds a valid token and a stolen old copy dies. Lifetime `[accounts] remember_days` (30).
+- A token is valid when its hash is known, its `cluster_id` equals `[cluster] id`, it is not revoked, not expired, of an accepted kind, and the account is not disabled. On a token login the client's saved user name must also match the token's account.
+- A new password (`account passwd`) and disabling an account revoke all the account's tokens.
+- **Cluster id:** change `[cluster] id` to invalidate every saved login at once; a database copied between clusters keeps its accounts and passwords, but no token from the other cluster works.
+- Launcher and web tokens use the same table and trait (`TokenKind::Launcher`, `TokenKind::Web`); the token login of the game accepts `game_remember` and `launcher`, so the launcher can pass a token for auto-login (WP3.3/WP4).
+
+Result codes the client gets for failures: [login.md](../protocol/login.md#authentication-results).
+
+## Login paths
+
+| Path | Packet | When |
+|---|---|---|
+| Username and password | `0x0003`, `token_login = 0` | the standalone login screen (needs the DLL patch of WP3.3) |
+| Saved token | `0x0003`, `token_login = 1` | Remember Me, launcher auto-login |
+| Machine hash (dev) | `0x0005` (Steam) | only with `[accounts] dev_machine_hash_login = true`; auto-creates `Exile<id>` accounts without a password. Default in `config/server.toml` for now, off in code |
+
+With `dev_machine_hash_login = false` a `0x0005` gets result `9` ("Access to the game is not currently enabled") with a notice.
+
+Accounts that existed before migration `0006` (machine-hash accounts) are kept with a null password: they can only log in on the dev path, and `account passwd <name> <password>` gives one a real password. The migration made `Exile1` an admin, as the old `[admin] accounts` list of the dev config did.
+
+## Admins and account commands
+
+Admin is the `admin` role. Commands (chat `!account ...`, the overlay's Commands page, or offline `cargo run -p poe-server -- account ...`): `create`, `role`, `disable`, `enable`, `passwd`, `list`; see [../guides/server-admin.md](../guides/server-admin.md). The first admin is made offline: `account create <name> <password>`, then `account role <name> admin`. Passwords typed in chat are replaced by `***` in the log and the audit file. An admin cannot demote or disable themselves.
+
+`[accounts] open_registration` (default false) is reserved for the web API (WP4.1); server commands always work.
+
+## One session per account
+
+A new login of an account ends the old one: `LoginSessions::supersede(account)` (`poe-cluster`) closes the account's login connections and signals its instance sessions, which disconnect. It runs after a successful login, before the new connection subscribes, so the new session is not affected. The same call ends the sessions of a disabled account. A resumed session (`0x0008`, "Exit to character selection") does not supersede.
+
+## Other state
+
+- **Storage:** accounts, characters and per-account character lists are in SQLite (`poe-store`). Character names are unique across accounts (case-insensitive). The slot limit comes from config.
+- **Tickets and sessions** (`poe-cluster`): tickets with random keys per hand-off; resume tickets (single use); login sessions per account (logout, supersede, transfers).
+- **Account settings:** `[accounts] flags`, `full_access`, `stash_tabs` are still global for every account (per-account columns come with the stash).
+- **Authentication limits of the Steam path:** the `0x0005` message carries the Steam encrypted app ticket. GGG's key encrypts it, so the server cannot verify it; it only identifies the machine.
+
+## Not done yet
+
+- Rate limiting of password attempts (the client has a "too many attempts" code, `0x49`).
+- Web registration and login (WP4.1), launcher token issue.
+- Per-account settings.
+- Whether `0x0f`/`0x62` behave as inferred in the client: [../re/standalone-login.md](../re/standalone-login.md) section 8, to be checked once the DLL forces the standalone screen (WP3.3).

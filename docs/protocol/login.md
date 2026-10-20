@@ -27,12 +27,13 @@ Encodings: integers big-endian. `wstring` uses the compact per-character encodin
 | ticket_len | u16 | |
 | flags_lo | u8 | `0x40` set plus a client global |
 | client_hash | 32 bytes | from `0x1420e7580` |
-| machine_hash | 32 bytes | from `0x1421c1340`; stable per machine; the server uses it as the account key |
+| machine_hash | 32 bytes | from `0x1421c1340`; stable per machine; only the dev machine-hash login (`[accounts] dev_machine_hash_login`) uses it as the account key |
 | flags_hi | u8 | |
 | ticket | bytes[ticket_len] | Steam encrypted app ticket (from `GetEncryptedAppTicket`). Encrypted for GGG, so the server cannot read it |
 
 ### C→S `0x0003` Credentials (standalone platform)
-Sent instead of `0x0005` when the client platform is 0 (email/password screen). Serializer `0x1420e3b60`, builder `0x1420e7af0`; analysis and the patch that forces this path on the Steam exe: [../re/standalone-login.md](../re/standalone-login.md). Not yet in `login.toml` / `poe-proto`.
+Sent instead of `0x0005` when the client platform is 0 (email/password screen). Serializer `0x1420e3b60`, builder `0x1420e7af0`; analysis and the patch that forces this path on the Steam exe: [../re/standalone-login.md](../re/standalone-login.md).
+Opcode in `login.toml` (`Credentials`), Rust type `poe_proto::login::Credentials`; handled by `servers/login-server/src/auth.rs`.
 | Field | Type | Notes |
 |---|---|---|
 | mode | u32 | constant `2` |
@@ -45,7 +46,21 @@ Sent instead of `0x0005` when the client platform is 0 (email/password screen). 
 | flags_lo | u8 | UI language id `\| 0x40` (same as `0x0005`) |
 | flags_hi | u8 | optional login-state byte, 0 when unset |
 
-Answer with the same `0x0004`. Unknown account / wrong password: result `5` / `6` plus a `notice` text (a present notice is shown as the error; inferred from the client's message table). Codes `0x62` and `0x0f` tell the client that a saved token is no longer valid.
+Answer with the same `0x0004`. With `save_login = 1` (or a token login) a successful answer carries a fresh 32-byte `session_token`, which the client saves for Remember Me; without it the token is all zeros. `password_hash` is checked against the argon2id hash of the digest ([../architecture/accounts.md](../architecture/accounts.md)). Failures are listed under [Authentication results](#authentication-results).
+
+### Authentication results
+`result` codes our login server sends (`servers/login-server/src/auth.rs`, `auth::code`). A present `notice` is shown by the client as the error text. Behaviour of the codes is inferred from the client ([../re/standalone-login.md](../re/standalone-login.md) section 5) and not yet seen at runtime.
+
+| Code | When | Client effect |
+|---|---|---|
+| `0` | accepted | continues to the character list |
+| `5` | unknown account name | "The specified account does not exist." |
+| `6` | wrong password (also an account without a password) | "The password is not correct for this account." |
+| `0x62` | saved token expired or revoked, or used with another account name | "Your saved credentials are out of date. Please re-enter your password." (file kept) |
+| `0x0f` | saved token unknown, or issued by another cluster | the client deletes its saved credentials file |
+| `0x47` | account disabled | shows our notice |
+| `9` | `0x0005` Steam login while `dev_machine_hash_login` is off | shows our notice |
+| `0x13` | account database error | shows our notice |
 
 ### S→C `0x0004` AuthenticationResult (deserializer `0x14214da60`, handler `0x1420e829d`)
 | Field | Type | Notes |
@@ -53,7 +68,7 @@ Answer with the same `0x0004`. Unknown account / wrong password: result `5` / `6
 | account_id | u32 | stored in the logged-in account record |
 | result | u16 | 0 = success; non-zero goes to the error path |
 | notice | wstring (+0x38) | shown in a popup after login when non-empty; may hold language-tagged sections (`0x140ef5140`). It used to carry the account name, which caused the "Exile1 / OK" popup |
-| session_token | 32 bytes | kept with the account |
+| session_token | 32 bytes | kept with the account; on the standalone path it is the Remember Me token the client saves (all zero = nothing to save) |
 | account_flags | 2 bytes | split into booleans in the account entry. **Byte 0:** bit 2 opens the terms-of-use window, bit 3 the cheating warning, bit 4 the RMT warning, bit 7 "update required" (`LoginState::AuthenticationResultHandler` `0x140ef5140`); keep these clear. Setting bits 0, 1, 5 and 6 of byte 0 plus bits 0 and 1 of byte 1 (`[0x63, 0x03]`, config `[accounts] flags`) removes the "Get Full Access" button; which single bit does it is TBD |
 | account_name | astring (+0x68) | the account name kept by the login session |
 

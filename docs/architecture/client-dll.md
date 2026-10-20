@@ -6,15 +6,16 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 |---|---|---|---|
 | `poe-hook` | `poe_hook.dll` | `GameFiles/version.dll` | **Loader**, never unloaded: version.dll proxy, log sink, network guard and read-only latch, Vulkan and window hooks, loads and hot-reloads the core. Under Proton it needs `WINEDLLOVERRIDES=version=n,b`. |
 | `poe-hook-core` | `poe_hook_core.dll` | `GameFiles/poe_hook_core.dll` | **Debug core**, hot-reloadable: every feature and the overlay. |
-| `poe-hook-shared` | (library) | | Config (`poe-hook.toml`), the loader ↔ core C ABI (`abi.rs`), guarded memory reads, module/pattern helpers. |
+| `poe-hook-shared` | (library) | | Config (`poe-hook.toml`), the loader ↔ core C ABI (`abi.rs`), guarded memory reads, module/pattern helpers, `trust.rs` (`is_trusted`), `login.rs` (addresses and bytes of the login patch). Host-buildable: `cargo test -p poe-hook-shared` in the submodule. |
 
 ## Loader (`modules/client-hook/poe-hook`)
 | File | Role |
 |---|---|
-| `lib.rs` | `DllMain`. Loads the config, creates the session folder `logs/poe-hook/<date_time>_<pid>/`, opens the logs and installs the network guard synchronously (the client's crash-report helper connects out within milliseconds), then starts a thread that hooks Vulkan and loads the core. |
+| `lib.rs` | `DllMain`. Loads the config, creates the session folder `logs/poe-hook/<date_time>_<pid>/`, opens the logs and installs the network guard synchronously (the client's crash-report helper connects out within milliseconds), applies the standalone-login patch (`login_patch.rs`), then starts a thread that hooks Vulkan and loads the core. |
 | `proxy.rs` | Forwards all 16 version.dll exports to the system DLL, resolved lazily. |
 | `logsink.rs` | Buffered (flushed at once for warnings/errors, otherwise every 250-500 ms; per-line flushes cost frames). One sink for both DLLs: `poe-hook.log` next to the exe (appended per process with a `---- process <pid> ----` header; `run-client` clears it per launch), the session folder's `poe-hook.log`, and a 50 000-record ring the overlay's Log tab reads (it survives core reloads). |
-| `guard.rs` | Hooks `connect`/`WSAConnect`: refuses non-loopback connections in private mode (`block_external`), records every connection for the core, and sets the **read-only latch** (official mode, or the first external connection). |
+| `guard.rs` | Hooks `connect`/`WSAConnect`: refuses untrusted connections in private mode (`block_external`), records every connection for the core, and sets the **read-only latch** (official mode, or the first untrusted ("external") connection). Trusted = loopback or `trusted_servers` ([below](#login-mode-and-trusted-servers)). |
+| `login_patch.rs` | `login_mode = "standalone"`: patches the client's `ClientPlatform_Detect` so it shows the account-name/password screen ([below](#login-mode-and-trusted-servers)). |
 | `vulkan.rs` | Redirects `vkGetInstanceProcAddr`/`vkGetDeviceProcAddr` in `vulkan-1.dll`'s **export table** (jump stubs near the module; under Wine both exports forward to `winevulkan`). Inline hooks there hung the game: Wine's exports are tiny thunks. The game (`0x1410262d0`) resolves everything through them, so it gets our wrappers for instance/device/queue/surface/swapchain creation and `vkQueuePresentKHR`. The swapchain gets `COLOR_ATTACHMENT` and `TRANSFER_SRC` usage added when the surface supports them. |
 | `window.rs` | Subclasses the game window (from the Vulkan surface) and passes each message to the core first. |
 | `core.rs` | Loads `poe_hook_core.dll` from a temp copy (so the file can be replaced while the game runs) and reloads it when the file changes (`[reload] auto`) or the core asks (overlay button). Unload: the core's `stop`, then a write lock that waits for loader → core calls in flight, then `FreeLibrary`. |
@@ -46,7 +47,7 @@ Dear ImGui 1.92 through [dear-imgui-rs](https://github.com/Latias94/dear-imgui-r
   - **Game log**: this launch's lines of `logs/Client.txt` (Wine reuses process ids, so lines are taken from the launch time in the session folder name).
   - **Player**: grid, world position, facing (and lock), actions, WASD direction, actor flags.
   - **Entities**: entities created in the area (initial-state reader), type path from the object-type lookup just before, live grid position (Positioned found by its reader `0x141dd8820`). After a reload the player is adopted from its frame tick (type unknown).
-  - **Server** (our server only): the instance server's simulation state for this session (debug link, refreshed every second tick: apply frame, synced, server/predicted position and velocity, last report, WASD, held click, last turn, turn modes, facing, roll, current action, pause) and quick controls for the registry's `teleport` (cell, or "Here"), `turn_cell`, `turn_timing`, `face_cursor` commands.
+  - **Server** (our server only): the instance server's simulation state for this session (debug link, refreshed every second tick: frame, server position, movement state, WASD, sprint key, combat stance, pause, skills, and with a fresh report the client's position, action and the drift in cells) and a quick control for the registry's `teleport` command (cell, or "Here").
   - **Commands** and **Instances** (our server only): the server's command registry as forms, and its instances with join/close and a new-instance form: [../guides/server-admin.md](../guides/server-admin.md#overlay-pages-our-server-only-server-group).
   - Our-server-only pages (the SERVER group) are hidden while the read-only latch is on.
   - **Desync** (our server only): the server's predicted position and the last report against the client's own position (ImPlot), with a count of samples over 1.5 cells and the worst; desyncs over 6 cells are logged. The prediction is one frame ahead, so ~1.2 cells while walking is normal.
@@ -93,9 +94,38 @@ The DLL's position-report UDP socket also receives `PDB1` datagrams from the ins
 
 ## Modes and the read-only latch
 `mode` in `poe-hook.toml` (set by `cargo xtask deploy-client [--official]`):
-- `private` (default): our server. Crypto bypass on, external connections refused.
-- `official`: official servers, **read-only**. The latch is on from the start: no crypto bypass (the real handshake runs), no position sync, no test input or window-title hooks, no memory writes. External connections are allowed. The DLL only observes and logs.
-- In either mode the latch switches on by itself at the first external connection that goes through, and features that act (crypto bypass, position sync) check it again when they act.
+- `private` (default): our server. Crypto bypass on, untrusted ("external") connections refused.
+- `official`: official servers, **read-only**. The latch is on from the start: no crypto bypass (the real handshake runs), no position sync, no test input or window-title hooks, no memory writes, no login patch. External connections are allowed. The DLL only observes and logs.
+- In either mode the latch switches on by itself at the first untrusted connection that goes through, and features that act (crypto bypass, position sync) check it again when they act.
+
+## Login mode and trusted servers
+Two top-level keys of `poe-hook.toml`, written by `deploy-client` (WP3.3):
+
+| Key | Values | Effect |
+|---|---|---|
+| `login_mode` | `"standalone"` (default in private mode), `"steam"` | `standalone`: the loader patches `ClientPlatform_Detect` (Ghidra `0x142196ec0`, `40 55 53` → `31 C0 C3`, `xor eax,eax; ret`) in `DllMain`, before the client's first platform query. The client then shows `LoginScreen.ui` (account name, password, Remember Me), sends `0x0003` instead of the Steam ticket `0x0005` and does not initialise the Steam API. Evidence and the packet: [../re/standalone-login.md](../re/standalone-login.md). `steam`: no patch at all. **Forced to `steam` in official mode** (deploy writes it, and the config loader overrides the file). |
+| `trusted_servers` | `["ip:port", "ip:*", "ip"]` (IPv4 literals) | Servers treated like loopback. Deploy writes `[network] public_host` with the login port and the instance port, resolving names to IPs. Empty in official mode (also enforced when the DLL reads the file). |
+
+Patch safety (`poe-hook/src/login_patch.rs`): applied only for `standalone` and only while the latch is off; the three original bytes are verified first, and on a mismatch (another client build) the patch is skipped with a logged error and the Steam login stays; the page is made writable for the write, restored, and the instruction cache is flushed; if the platform cache guard (`0x144717114`) is already set, the cached value (`0x144717118`) is reset to 0. The addresses and bytes are constants in `poe-hook-shared/src/login.rs` (with the byte logic unit-tested). Log lines start with `login_mode`.
+
+**One trust decision**, `poe_hook_shared::trust::is_trusted(addr)`: loopback (`127.0.0.0/8`, `::1`) is always trusted; otherwise the address must match a `trusted_servers` entry (IPv6 never does). It is used by:
+
+| Where | Use |
+|---|---|
+| `guard.rs` | `external = !is_trusted`. |
+| `abi.rs` `Connection.external` | the same flag, recorded for the core (Status page, position sync target). |
+| `crypto_bypass.rs` | the bypass runs unless the latch is on or a recorded connection is untrusted. |
+| `ui/mod.rs` `custom_server()` | overlay features that talk to our server need the latch off and every connection trusted. |
+
+How the latch treats each kind of server:
+
+| Server | `block_external` (private) | Read-only latch | Crypto bypass | Position sync / overlay server pages |
+|---|---|---|---|---|
+| Loopback | allowed | no | yes | yes |
+| In `trusted_servers` | allowed | no | yes | yes (reports go to the trusted address) |
+| Anything else (official) | refused; allowed if `block_external = false` or in official mode | **yes**, permanently for the process | no (real handshake) | no |
+
+A client with `login_mode = "standalone"` must not be pointed at an official server (the official login rejects `0x0003`); the latch still protects it. Launcher auto-login needs no DLL code: see [../guides/setup.md](../guides/setup.md#remember-me-token-launcher-auto-login).
 
 ## Features (`[features]`)
 | Key | Default | Description |
@@ -104,7 +134,7 @@ The DLL's position-report UDP socket also receives `PDB1` datagrams from the ins
 | `crypto_bypass` | on | Replaces the login verify-and-derive routine (found by its prologue pattern). The session key material becomes SHA-512(server public key), so no signature check or DH is needed. See [re/crypto.md](../re/crypto.md). Off while read-only. |
 | `net_trace` | off | Inline hooks on ws2_32 `send`/`WSASend`/`recv`/`WSARecv`. Logs payload prefixes and game addresses on the stack. Connects are logged by the loader's guard. |
 | `net_trace_dump_bytes` | 256 | Bytes of payload shown per call. |
-| `block_external` | on | Private mode: refuses connections to non-loopback addresses, so the client does not reach official services (shop, telemetry, uploads). Ignored in official mode. |
+| `block_external` | on | Private mode: refuses connections to untrusted addresses (not loopback, not in `trusted_servers`), so the client does not reach official services (shop, telemetry, uploads). Ignored in official mode. |
 | `dump_object_types` | on | The research hooks on entities, frames and area loads (below). Position sync needs them. The terrain layout export runs only when not read-only. |
 | `entity_trace` | off | Per-entity tracing: each entity's components, the blob span each component reader consumes, terrain dumps on the Positioned reader. **Slow**: on the first official session (2026-10-14) each spawned entity froze the game for ~2.3 s (a 4554-tile dump per Positioned read), and a three-monster spawn froze it for 7 s, after which the server dropped the connection ("Abnormal disconnect"). Research on our server only. |
 | `position_sync` | on | Reports the player's position and actions to the instance server every frame (see [Position sync](#position-sync)). Never while read-only. |

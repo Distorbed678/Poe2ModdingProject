@@ -28,8 +28,6 @@ pub struct SessionCtx<'a> {
 pub struct Outcome {
     pub text: String,
     pub ok: bool,
-    /// Simulation replies for this session's player.
-    pub replies: Vec<player::Reply>,
     /// Raw messages for this session's client.
     pub raw: Vec<u8>,
     /// End this session after the reply (the client is being handed to another instance).
@@ -56,16 +54,22 @@ impl InstanceServer {
             Ok(p) => p,
             Err(e) => return Outcome::err(e),
         };
-        if parsed.spec.admin && !ctx.admin {
+        // The role is checked at the time of the command (a demoted admin loses it at once).
+        if parsed.spec.admin && !self.is_admin(&ctx.account) {
             return Outcome::err(format!("{} is for admins only", parsed.spec.name));
         }
+        // Passwords never reach the log or the audit file.
+        let shown = match parsed.spec.name {
+            "account" => poe_accounts::redact(parsed.get("action").unwrap_or_default(), line),
+            _ => line.to_string(),
+        };
         let out = match self.execute(ctx, player, &parsed) {
             Ok(o) => o,
             Err(e) => Outcome::err(format!("{e:#}")),
         };
-        info!(account = %ctx.account, command = %line, ok = out.ok, result = %out.text, "command");
+        info!(account = %ctx.account, command = %shown, ok = out.ok, result = %out.text, "command");
         if parsed.spec.admin {
-            self.audit(&ctx.account, line, &out.text);
+            self.audit(&ctx.account, &shown, &out.text);
         }
         out
     }
@@ -84,7 +88,7 @@ impl InstanceServer {
                 }
             },
             "where" => {
-                let (x, y) = player.mover.cell();
+                let (x, y) = player.cell();
                 Outcome::ok(format!(
                     "instance {} area {} seed {} cell {x} {y}",
                     ctx.instance.map_or("-".to_string(), |i| i.to_string()),
@@ -167,26 +171,29 @@ impl InstanceServer {
             }
             "teleport" => {
                 let (x, y) = (p.int("x").unwrap_or(0) as i32, p.int("y").unwrap_or(0) as i32);
-                let mut o = Outcome::ok(format!("teleported to {x} {y}"));
-                o.replies = player.teleport((x, y));
-                o
-            }
-            "turn_cell" => {
-                player.turn_cell = player::TurnCell::parse(p.get("mode").unwrap_or("natural"));
-                Outcome::ok(format!("{:?}", player.turn_cell))
-            }
-            "turn_timing" => {
-                player.turn_timing = p.bool("on");
-                Outcome::ok(player.turn_timing.to_string())
-            }
-            "face_cursor" => {
-                player.face_cursor = p.bool("on").then_some(self.config.movement.cursor_to_grid);
-                Outcome::ok(player.face_cursor.is_some().to_string())
+                player.teleport((x, y));
+                Outcome::ok(format!("teleported to {x} {y}"))
             }
             "terrain" => {
                 self.generate_terrain(&ctx.ticket.area, ctx.seed, ctx.tile_hash, ctx.instance);
                 Outcome::ok("generating on the server: the result is in the server log")
             }
+            "account" => match poe_accounts::run_account_command(
+                &*self.accounts,
+                Some(&ctx.account),
+                p.get("action").unwrap_or_default(),
+                p.get("name"),
+                p.get("value"),
+            ) {
+                Ok(done) => {
+                    if let Some(id) = done.kick_account {
+                        // Ends its login connection and its game session.
+                        self.sessions.supersede(id);
+                    }
+                    Outcome::ok(done.text)
+                }
+                Err(e) => Outcome::err(e),
+            },
             "area_info" => {
                 let args = format!("{} {}", p.get("area").unwrap_or_default(), p.get("seed").unwrap_or("1"));
                 let mut o = Outcome::ok("sent a second AreaInfo");
@@ -259,8 +266,14 @@ impl InstanceServer {
         }
     }
 
-    /// Whether an account may use admin commands (`[admin] accounts`).
+    /// Whether an account may use admin commands: its role is admin and it is not disabled.
     pub(crate) fn is_admin(&self, account: &str) -> bool {
-        self.config.admin.accounts.iter().any(|a| a.eq_ignore_ascii_case(account))
+        match self.accounts.find(account) {
+            Ok(found) => found.is_some_and(|a| a.role == poe_accounts::Role::Admin && !a.disabled),
+            Err(e) => {
+                warn!(account, "role lookup failed: {e}");
+                false
+            }
+        }
     }
 }

@@ -209,6 +209,13 @@ pub trait LoginSessions: Send + Sync {
     fn subscribe(&self, account_id: u32) -> watch::Receiver<u64>;
     /// Ends the account's login connections.
     fn logout(&self, account_id: u32);
+    /// Called by an instance session once its account is known; the receiver changes when the
+    /// account logs in again elsewhere or is disabled ([`supersede`](Self::supersede)).
+    fn subscribe_superseded(&self, account_id: u32) -> watch::Receiver<u64>;
+    /// Ends the account's current sessions, login connections and instance sessions: a new
+    /// login for the same account replaces them (official behaviour), or the account was
+    /// disabled. Call it before subscribing the new session; later subscribers are not hit.
+    fn supersede(&self, account_id: u32);
     /// Called by a login connection once its account is known: transfers for the account
     /// (in-game instance changes) arrive here. The latest connection of an account gets them.
     fn subscribe_transfers(&self, account_id: u32) -> tokio::sync::mpsc::UnboundedReceiver<Ticket>;
@@ -221,6 +228,7 @@ pub trait LoginSessions: Send + Sync {
 #[derive(Default)]
 pub struct MemorySessions {
     accounts: Mutex<HashMap<u32, watch::Sender<u64>>>,
+    superseded: Mutex<HashMap<u32, watch::Sender<u64>>>,
     transfers: Mutex<HashMap<u32, tokio::sync::mpsc::UnboundedSender<Ticket>>>,
 }
 
@@ -238,6 +246,24 @@ impl LoginSessions for MemorySessions {
         if let Some(tx) = self.accounts.lock().unwrap().get(&account_id) {
             tx.send_modify(|n| *n += 1);
         }
+    }
+
+    fn subscribe_superseded(&self, account_id: u32) -> watch::Receiver<u64> {
+        self.superseded
+            .lock()
+            .unwrap()
+            .entry(account_id)
+            .or_insert_with(|| watch::channel(0).0)
+            .subscribe()
+    }
+
+    fn supersede(&self, account_id: u32) {
+        self.logout(account_id);
+        if let Some(tx) = self.superseded.lock().unwrap().get(&account_id) {
+            tx.send_modify(|n| *n += 1);
+        }
+        // Pending transfers belong to the old session.
+        self.transfers.lock().unwrap().remove(&account_id);
     }
 
     fn subscribe_transfers(&self, account_id: u32) -> tokio::sync::mpsc::UnboundedReceiver<Ticket> {
@@ -273,5 +299,21 @@ mod session_tests {
         assert!(!late.has_changed().unwrap());
         sessions.logout(3);
         assert!(!b.has_changed().unwrap());
+    }
+
+    #[tokio::test]
+    async fn supersede_ends_old_sessions_but_not_later_ones() {
+        let sessions = MemorySessions::default();
+        let mut old_login = sessions.subscribe(1);
+        let mut old_instance = sessions.subscribe_superseded(1);
+        let other = sessions.subscribe_superseded(2);
+        sessions.supersede(1);
+        old_login.changed().await.unwrap();
+        old_instance.changed().await.unwrap();
+        assert!(!other.has_changed().unwrap());
+        // The replacing session subscribes afterwards and is left alone.
+        let new_login = sessions.subscribe(1);
+        let new_instance = sessions.subscribe_superseded(1);
+        assert!(!new_login.has_changed().unwrap() && !new_instance.has_changed().unwrap());
     }
 }

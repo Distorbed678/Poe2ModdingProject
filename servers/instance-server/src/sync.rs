@@ -1,10 +1,11 @@
-//! Client position reports (dev bridge until the server simulates movement exactly, M5).
+//! Client position reports and the drift checker (dev bridge).
 //!
 //! The client DLL (`poe-hook` `position_sync`) sends one UDP datagram per simulation frame
 //! to the instance port with the player's position and current action. The server keys the
-//! reports by the client's TCP port and uses the latest one to send positions that match the
-//! client (no snapping) and to know when the client's dodge roll ended. Without reports the
-//! server falls back to its own simulation.
+//! reports by the client's TCP port. Since the movement rewrite (WP2.3) the server simulation
+//! is authoritative and **reports never feed it**: they are only compared with the server's
+//! position by [`DriftCheck`] (`[dev] drift_check`), which logs the distance in cells.
+//! The same UDP socket carries the debug link (overlay commands, state for the overlay).
 
 use std::{
     collections::HashMap,
@@ -83,6 +84,76 @@ impl ClientReport {
     pub fn cell(&self) -> (i32, i32) {
         (self.x.floor() as i32, self.y.floor() as i32)
     }
+}
+
+/// Distance between two positions in cells.
+pub fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
+    (a.0 - b.0).hypot(a.1 - b.1)
+}
+
+/// Drift checker (`[dev] drift_check`): compares the server's player position with the client's
+/// latest position report and logs, every `interval`, the current and the largest distance (in
+/// cells) since the last line. The client trails the server by the round trip (about two
+/// frames, so up to ~2.5 cells while walking and ~4 while sprinting); a distance that keeps
+/// growing, or stays high while standing, is real drift.
+pub struct DriftCheck {
+    interval: Duration,
+    next: Instant,
+    max: f32,
+    samples: u32,
+}
+
+impl DriftCheck {
+    pub fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            next: Instant::now() + interval,
+            max: 0.0,
+            samples: 0,
+        }
+    }
+
+    /// Notes one frame; returns a line to log when the interval has passed. `state` describes
+    /// the server's movement state, `report` is the client's fresh report (none: the client
+    /// sent nothing recently).
+    pub fn sample(
+        &mut self,
+        server: (f32, f32),
+        state: impl FnOnce() -> String,
+        report: Option<&ClientReport>,
+    ) -> Option<DriftLine> {
+        let d = report.map(|r| distance(server, (r.x, r.y)));
+        if let Some(d) = d {
+            self.max = self.max.max(d);
+            self.samples += 1;
+        }
+        if Instant::now() < self.next {
+            return None;
+        }
+        self.next = Instant::now() + self.interval;
+        let line = DriftLine {
+            server,
+            client: report.map(|r| (r.x, r.y)),
+            cells: d,
+            max_cells: (self.samples > 0).then_some(self.max),
+            samples: self.samples,
+            state: state(),
+        };
+        self.max = 0.0;
+        self.samples = 0;
+        Some(line)
+    }
+}
+
+/// One drift log line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriftLine {
+    pub server: (f32, f32),
+    pub client: Option<(f32, f32)>,
+    pub cells: Option<f32>,
+    pub max_cells: Option<f32>,
+    pub samples: u32,
+    pub state: String,
 }
 
 /// Latest report per client TCP port, plus the client DLL's debug link: the UDP address its
@@ -268,5 +339,34 @@ mod tests {
             height: 1440,
         };
         assert_eq!(r.cursor, Some(cursor));
+    }
+
+    #[test]
+    fn drift_check_logs_once_per_interval_with_the_largest_distance() {
+        let mut d = DriftCheck::new(Duration::ZERO);
+        let report = |x: f32| ClientReport {
+            frame: 1,
+            x,
+            y: 10.0,
+            action: 0,
+            action2: 0,
+            flags: 0,
+            cursor: None,
+            at: Instant::now(),
+        };
+        let line = d
+            .sample((13.0, 10.0), || "Idle".into(), Some(&report(10.0)))
+            .unwrap();
+        assert_eq!(line.cells, Some(3.0));
+        assert_eq!(line.max_cells, Some(3.0));
+        // The next interval starts over; without a report there is no distance.
+        let line = d.sample((13.0, 10.0), || "Idle".into(), None).unwrap();
+        assert_eq!((line.cells, line.max_cells, line.samples), (None, None, 0));
+        // A long interval stays quiet.
+        let mut d = DriftCheck::new(Duration::from_secs(3600));
+        assert!(
+            d.sample((0.0, 0.0), || "Idle".into(), Some(&report(0.0)))
+                .is_none()
+        );
     }
 }

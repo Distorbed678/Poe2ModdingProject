@@ -58,15 +58,30 @@ cargo xtask tracker         # renders docs/status/tracker.toml into the README.m
 - Writes `dump_dir` (`<repo>/dumps/<version>` as a `Z:\` path) into `GameFiles/poe-hook.toml`; the DLL writes terrain grids and layouts, area exports and client tables there ([../../dumps/README.md](../../dumps/README.md)).
 - Writes the DLL's name tables to `GameFiles/poe-hook-data/` (`stats.tsv`, `action_types.tsv`, `areas.tsv` for the area picker).
 - Copies `modules/client-hook/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
+- Sets `login_mode` (`standalone` by default; `--login-mode steam` keeps the Steam login) and `trusted_servers` (`[network] public_host` with the login and instance ports) at the top of that file. `--official` writes `login_mode = "steam"` and `trusted_servers = []`.
 - Sets `position_sync_port` in that file's `[features]` to `[network.instance] public_port`, so position reports go to the instance server.
 - Resets `auto_keys` to `[]`, and the client's remembered gateway (`gateway_id` in the test prefix's `poe2_production_Config.ini`) to ours for private deploys (after an official session it stays on an official realm and the client never contacts our server).
 - Writes `steam_appid.txt`.
 
 `run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
 
+### Remember-me token (launcher auto-login)
+
+With `login_mode = "standalone"` the client's Remember Me stores a 32-byte token issued by the login server (`AuthenticationResult.session_token`). A launcher, or you by hand, can sign an account in without typing the password:
+
+```
+cargo xtask login-token <account> <64 hex digits>
+```
+
+It writes the token to `third_party/proton-prefix/pfx/drive_c/users/steamuser/Documents/My Games/Path of Exile 2/poe2_production_login.credentials` (32 raw bytes, owner-only) and sets `[LOGIN] username=<account>` and `save_login=true` in `poe2_production_Config.ini` there. Start the client with `run-client` and press **Login** with the password box empty. The client reads both files itself; the DLL has no part in it. The credentials file name is the RE's best reading and has not yet been seen on disk (check after a first Remember-Me login; `poe_hook_deploy::LoginTokenFiles` makes the names a parameter). A rejected token (`0x62`/`0x0f` from the server) makes the client delete the file. Library API: `poe_hook_deploy::write_login_token(prefix_or_documents_dir, account, token)`.
+
+### Migration: `login_mode` and `trusted_servers` (WP3.3)
+
+`cargo xtask deploy-client` now writes `login_mode = "standalone"` into `GameFiles/poe-hook.toml`: the client shows the account/password screen and sends `0x0003`, so the login server must handle it (until it does, deploy with `--login-mode steam`). The unattended tests (`scripts/test-run.sh`, `auto_keys` pressing Enter) assume the Steam login and need `--login-mode steam` until the standalone flow is covered. Existing configs get the keys on the next deploy; to go back to the old behaviour set `login_mode = "steam"` and `trusted_servers = []`. `cargo xtask deploy-core` does not touch the config.
+
 ## Config
 
-`config/server.toml` is the working dev config; `config/server.example.toml` is a fully commented copy with every key and its default (a `poe-config` test parses both). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]`, `[admin]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
+`config/server.toml` is the working dev config; `config/server.example.toml` is a fully commented copy with every key and its default (a `poe-config` test parses both). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]`, `[cluster]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
 
 ### Config migration (2026-10)
 
@@ -81,11 +96,17 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | `[instance] public_port` | `[network.instance] public_port` |
 | `[instances] idle_minutes` | `[instance] idle_minutes` |
 | `[instance] tick_ms` | `[instance] tick_ms` (unchanged; `[instance]` and `[instances]` are merged) |
-| `[instance] turn_cell`, `turn_timing`, `face_cursor`, `cursor_to_grid` | `[movement]` (same names) |
+| the four movement-workaround keys of the old `[instance]` (turn cell, turn timing, face cursor, cursor projection) | removed with WP2.3 (the server simulates movement itself, no workarounds); `[movement]` now holds `sprint_buff_rows` only |
+| (new) | `[dev] drift_check` (default `false`) and `drift_interval_ms` (default 1000): the drift checker |
 | `[instance] known_seeds`, `position_sync`, `movement_trace`, `debug_link`, `sweep`, `sweep_results` | `[dev]` (same names) |
 | `[accounts]` (`name_prefix`, `max_characters`, `flags`, `full_access`, `stash_tabs`) | unchanged |
+| `[admin] accounts = [...]` | removed: admin is the account's role (`account role <name> admin`; the migration made `Exile1` an admin). A leftover `[admin]` section is ignored |
+| (new) `[cluster] id` | cluster identity; login tokens from another id are invalid (default `"local"`) |
+| (new) `[accounts] dev_machine_hash_login` | Steam `0x0005` login without a password, auto-creating `Exile<id>` accounts (default `false`; `config/server.toml` sets `true` for now) |
+| (new) `[accounts] open_registration` | web registration switch for later (default `false`) |
+| (new) `[accounts] remember_days` | lifetime of a Remember Me login (default `30`) |
 
-Defaults changed: `[movement] turn_timing` and `face_cursor` now default to `true` (they were `false` when the key was missing; `config/server.toml` already set them to `true`).
+Removed keys in a config file are ignored (unknown keys do not fail the load).
 
 ## Playing from Steam (non-Steam game shortcut)
 One-time setup, after `cargo xtask deploy-client`:
@@ -108,12 +129,12 @@ To play:
 Notes:
 - The DLL config `GameFiles/poe-hook.toml` presses Enter 20 s after start (`auto_keys`, used by unattended tests). It just logs in; set `auto_keys = []` to turn it off.
 - Keep `dump_object_types = true`: the spawn position relies on the tile layout and cell grid the DLL exports to `dumps/<version>/terrain/{layouts,grids}/` (the server reads them through `[spawn] layout_dir`; it has no collision of its own yet).
-- Admin commands (`!help`, the overlay's Commands and Instances pages) need your account name in `[admin] accounts` in `config/server.toml` (accounts are named `Exile<id>`); see [server-admin.md](server-admin.md).
+- Admin commands (`!help`, the overlay's Commands and Instances pages) need an account with the admin role. On the dev machine-hash login the first account `Exile1` is an admin; otherwise `cargo run -p poe-server -- account create <name> <password>` then `account role <name> admin`; see [server-admin.md](server-admin.md).
 - Movement: WASD works in the default input mode. For click-to-move, pick the mouse input method in the game's options (in the config file: `user_input_mode=mouse_and_keyboard`). Space is the dodge roll in both modes.
 - After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
 
 ## Official servers (read-only)
-1. `cargo xtask deploy-client --official`: the original gateway list goes back into `GameFiles/`, and `poe-hook.toml` gets `mode = "official"`. The GameFiles copy must be the same build as the live game; after a patch, update GameFiles first.
+1. `cargo xtask deploy-client --official`: the original gateway list goes back into `GameFiles/`, and `poe-hook.toml` gets `mode = "official"`, `login_mode = "steam"` (the client is not patched; the Steam login screen shows) and `trusted_servers = []`. The GameFiles copy must be the same build as the live game; after a patch, update GameFiles first.
 2. Start Steam, then `cargo xtask run-client` (the GameFiles copy in its own Proton prefix; the Steam install is never touched).
 3. The user plays. The overlay shows `OFFICIAL: read-only`; packets, logs and snapshots go to the session folder (see [Logs](#logs)). What the DLL does and does not do in this mode: [../architecture/client-dll.md](../architecture/client-dll.md#modes-and-the-read-only-latch).
 4. `cargo xtask deploy-client` switches back to our server.

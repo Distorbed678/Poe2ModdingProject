@@ -68,7 +68,7 @@ pub struct Spec {
     pub name: &'static str,
     /// Overlay section.
     pub group: &'static str,
-    /// Only `[admin] accounts` may use it.
+    /// Only accounts with the admin role may use it.
     pub admin: bool,
     pub args: &'static [Arg],
     pub help: &'static str,
@@ -95,10 +95,8 @@ pub const COMMANDS: &[Spec] = &[
     Spec { name: "join", group: "instances", admin: true, args: &[arg("instance", Kind::Instance)], help: "Moves you into an existing instance." },
     Spec { name: "close", group: "instances", admin: true, args: &[arg("instance", Kind::Instance)], help: "Closes an instance (its players are disconnected)." },
     Spec { name: "teleport", group: "player", admin: true, args: &[arg("x", Kind::Int), arg("y", Kind::Int)], help: "Moves you to a grid cell." },
-    Spec { name: "turn_cell", group: "movement", admin: true, args: &[arg("mode", Kind::Choice(&["natural", "own", "heading"]))], help: "Cell sent with a turn (see config turn_cell)." },
-    Spec { name: "turn_timing", group: "movement", admin: true, args: &[arg("on", Kind::Bool)], help: "Hold turns back to land nearer cell centres." },
-    Spec { name: "face_cursor", group: "movement", admin: true, args: &[arg("on", Kind::Bool)], help: "Turn the player toward the cursor." },
     Spec { name: "terrain", group: "terrain", admin: true, args: &[], help: "Generates this instance's terrain on the server and compares it with the client's." },
+    Spec { name: "account", group: "accounts", admin: true, args: &[arg("action", Kind::Choice(&["list", "create", "role", "disable", "enable", "passwd"])), opt("name", Kind::Text), opt("value", Kind::Rest)], help: "Accounts: create <name> <password>, role <name> player|admin, disable|enable <name>, passwd <name> <password>, list." },
     Spec { name: "area_info", group: "terrain", admin: true, args: &[arg("area", Kind::Area), arg("seed", Kind::Seed)], help: "Research: a second AreaInfo on this connection (the client may crash)." },
 ];
 
@@ -227,7 +225,7 @@ mod tests {
         assert_eq!((p.seed(), p.topology(), p.orientation()), (None, None, None));
         assert!(parse("teleport 1").is_err());
         assert!(parse("teleport 1 x").is_err());
-        assert!(parse("turn_cell sideways").is_err());
+        assert!(parse("teleport 1 2 3").is_err());
         assert_eq!(parse("announce hello there all").unwrap().get("message"), Some("hello there all"));
         assert!(parse("nonsense").is_err());
         assert!(parse("where extra").is_err());

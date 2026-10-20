@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+poe-accounts.workspace = true
 poe-cluster.workspace = true
 poe-config.workspace = true
 poe-data.workspace = true
@@ -18,3 +19,6 @@ poe-world.workspace = true
 rand.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

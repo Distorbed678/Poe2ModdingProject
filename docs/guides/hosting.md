@@ -1,8 +1,9 @@
 # Hosting: letting other players connect
 
 Analysis of 2026-10-17. Goal: several people on different machines play on one server and see
-each other, as on official servers. Nothing here is built yet unless it says so; today only a
-client on the same machine as the server works. The two other halves of the plan are in
+each other, as on official servers. Nothing here is built yet unless it says so. Since WP3.3
+the DLL can connect to a remote cluster ([below](#connecting-to-a-remote-cluster)); the rest of
+the server still assumes a client on the same machine. The two other halves of the plan are in
 [../architecture/accounts.md](../architecture/accounts.md) (who is logging in) and
 [../architecture/instance-world.md](../architecture/instance-world.md) (the shared world).
 
@@ -11,9 +12,9 @@ client on the same machine as the server works. The two other halves of the plan
 Chat, the cluster plumbing (tickets, login sessions, transfers, instance directory) and
 per-account storage already work for many accounts. Three things stop real multiplayer:
 
-1. **A remote client cannot log in at all.** The DLL treats every non-loopback server as
-   official. It refuses the connection (`block_external`), or, if allowed, turns on the
-   read-only latch, which disables the crypto bypass.
+1. ~~A remote client cannot log in at all.~~ Fixed in the DLL by `trusted_servers` (WP3.3):
+   the DLL used to treat every non-loopback server as official, refusing the connection
+   (`block_external`) or turning on the read-only latch, which disables the crypto bypass.
 2. **Several parts of the server only work when the client runs on the same machine.** These
    are the spawn point, the walkability grid, position sync and the debug link.
 3. **There is no shared world.** Each connection is a private simulation with the player as
@@ -22,13 +23,37 @@ per-account storage already work for many accounts. Three things stop real multi
 Already in place: the login and instance servers bind `0.0.0.0` and hold many concurrent
 connections (one tokio task each).
 
+## Connecting to a remote cluster
+
+The client machine needs its own legal install, the hook DLLs and a `poe-hook.toml` that
+trusts the server. With a checkout of this repo and the client files in `GameFiles/`:
+
+1. On the server: set `[network] public_host` in `config/server.toml` to the LAN or public
+   address clients use (not `127.0.0.1`), open TCP `[network.login] bind` port (20481) and
+   TCP/UDP `[network.instance] public_port` (6112), and start `cargo run -p poe-server`.
+2. On the client machine, with the same `server.toml` (or its `public_host` and ports):
+   `cargo xtask deploy-client`. It writes the gateway entry `public_host:20481`,
+   `login_mode = "standalone"` and `trusted_servers = ["<public_host>:20481", "<public_host>:6112"]`
+   (host names are resolved to IPv4 when written; the DLL only reads IP literals). Edit
+   `GameFiles/poe-hook.toml` by hand to add more servers, e.g. `"203.0.113.7:*"` (any port).
+3. `cargo xtask run-client`, log in with the account name and password (or a launcher token,
+   [setup.md](setup.md#remember-me-token-launcher-auto-login)).
+
+What a trusted address changes: `block_external` does not refuse it, the read-only latch stays
+off, the crypto bypass runs, and position reports go to it. Everything else (official servers,
+the shop, telemetry) is still refused or read-only exactly as before; no config key can
+trust anything in official mode. Details and the table of each case:
+[../architecture/client-dll.md](../architecture/client-dll.md#login-mode-and-trusted-servers).
+Position sync to a remote server still needs the server-side work below (`PSY2` is accepted
+from loopback senders only today, WP3.4).
+
 ## Connecting from another machine
 
 | What | Where | Problem | Fix |
 |---|---|---|---|
-| External connections refused | `modules/client-hook/poe-hook/src/guard.rs` `on_connect` | Private mode blocks every non-127.x address, so a friend can't reach your IP. | A `trusted_servers` list (IP:port) in `poe-hook.toml`, written by deploy. Only listed addresses count as "ours". Everything else stays blocked or latches read-only as today, so the official read-only rule is unchanged. |
-| Read-only latch disables the crypto bypass | `crypto_bypass.rs:69`, `guard.rs` | Any external connection latches read-only, so login to a remote custom server fails. | Same list: a trusted address does not latch. |
-| "Custom server" detection | `ui/mod.rs` `custom_server()`, `abi.rs` `Connection.external` | The overlay hides server features on any external connection. | Use the trusted list instead of the loopback test. |
+| External connections refused | `modules/client-hook/poe-hook/src/guard.rs` `on_connect` | Private mode blocked every non-127.x address, so a friend couldn't reach your IP. | **Done (WP3.3):** a `trusted_servers` list (IP:port) in `poe-hook.toml`, written by deploy. Only listed addresses (and loopback) count as "ours". Everything else stays blocked or latches read-only as before, so the official read-only rule is unchanged. |
+| Read-only latch disables the crypto bypass | `crypto_bypass.rs`, `guard.rs` | Any external connection latched read-only, so login to a remote custom server failed. | **Done:** a trusted address does not latch. |
+| "Custom server" detection | `ui/mod.rs` `custom_server()`, `abi.rs` `Connection.external` | The overlay hid server features on any external connection. | **Done:** all use `poe_hook_shared::trust::is_trusted`. |
 | Advertised addresses | `config/server.toml` `[network] public_host` = `127.0.0.1` | The gateway entry and InstanceDetails send loopback, so a remote client connects to itself. | Set them to the LAN/WAN address. Optionally, a per-client address (LAN vs internet) based on where the login came from. |
 | Client setup for friends | `cargo xtask deploy-client` ([setup.md](setup.md)) | It reads this repo's `server.toml` and needs our GameFiles copy. | `cargo xtask client-pack --host <ip>`: a zip with `version.dll`, the core, `poe-hook.toml` (trusted list, host) and `gateway_list.txt`, and no game files. Each player uses their own legal install; it works on Windows natively and under Proton. |
 | Ports | `config/server.toml` | TCP 20481 (login), TCP 6112 (instance), UDP 6112 (reports/debug link). | Document port forwarding. Bind is already `0.0.0.0`. |

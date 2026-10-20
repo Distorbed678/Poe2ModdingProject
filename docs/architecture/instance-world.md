@@ -1,11 +1,11 @@
 # Instance world
 
-How instances and the simulation are organised: what runs today, the `World` in `crates/poe-game` that replaces the per-connection movement (WP2.2, built; WP2.3 wires it into the instance server), and the shared-world plan. The wire side is in [../protocol/instance.md](../protocol/instance.md), the movement spec in [../protocol/movement.md](../protocol/movement.md), the commands that manage instances in [../guides/server-admin.md](../guides/server-admin.md#instances).
+How instances and the simulation are organised: what runs today, the `World` in `crates/poe-game` that replaces the per-connection movement (WP2.2, built; wired into the instance server by WP2.3), and the shared-world plan. The wire side is in [../protocol/instance.md](../protocol/instance.md), the movement spec in [../protocol/movement.md](../protocol/movement.md), the commands that manage instances in [../guides/server-admin.md](../guides/server-admin.md#instances).
 
-## Current state (instance server, until WP2.3)
+## Current state (instance server)
 
 - **Instance directory** (`poe_cluster::InstanceDirectory`, in-process `MemoryInstances`): holds every instance (area, seed, forced topology and orientation, the players in it, since when it is empty). Find, create, join, leave, close and idle expiry work; towns and hideouts are persistent. An "instance" is metadata today: area, seed, layout and player count.
-- **One simulation per connection.** `run_session` (`servers/instance-server/src/lib.rs`) owns one `Player` (`player.rs`) with `PLAYER_ENTITY` = 1, runs its own frame clock (`SimulationTick` every `tick_ms`) and sends only that player's AddObject. Two players in the "same" instance share only chat and the player count; they cannot see each other. The movement logic in `player.rs` (`TurnCell`, `turn_timing`, `face_cursor`, `0x1cb`/`0x1df`) is what WP2.3 replaces.
+- **One simulation per connection (for now).** `run_session` (`servers/instance-server/src/lib.rs`) owns one `Player` (`player.rs`), which owns a `World` with the one player entity (`PLAYER_ENTITY` = 1) behind a small `Sim` handle, runs the frame clock (`World::tick()` every `tick_ms`, then the `SimulationTick` marker) and sends only that player's messages. Two players in the "same" instance share only chat and the player count; they cannot see each other. Phase 3 moves the `World` into an instance actor ([wiring](#wiring-it-into-the-instance-server-wp23)).
 - **Live registry** of online players (`live.rs`): who, kick, tell, broadcast, mute.
 - **Terrain on the server:** the client generates the terrain itself from the area and seed. The server picks the start cell from the layout and cell grid the DLL exports to `dumps/0.5.5e/terrain/{layouts,grids}/` (`[spawn] layout_dir`, `spawn.rs`): `[spawn.start_tiles.G1_1] point` is a grid cell in the start tile's own orientation (the Riverbank start is on the shore beside the intro tree, inside the `Intro_Tree_01` tile), and the server finds which of the 8 rotations or mirrors the tile was placed with (`PlacedTile`, from the sub-tile index in the layout export, see [client-dll.md](client-dll.md#layout-export-format)) and maps the point onto the map. Server-side generation (`[terrain] generate`, `!terrain`) is for comparison only: [../status/terrain.md](../status/terrain.md). Until it covers every area the server picks seeds the client is known to accept (`instance.known_seeds`, from live logs) or a random one.
 - **Saved location:** when a session ends the server stores the character's area, terrain seed and cell (`poe_store::Location`, migration `0005_character_location.sql`); the next login into that area gets the same seed, so the same layout, and spawns on the saved cell (or the nearest walkable cell if it is blocked). Characters that have never been in the game start at the area's start position.
@@ -89,12 +89,24 @@ The code marks everything the captures do not show with `// UNVERIFIED (gap #n)`
 
 ## Wiring it into the instance server (WP2.3)
 
-- **One world per instance.** The instance actor owns the `World` and one tick timer (`tick_ms` from `config/server.toml`). `run_session` stops owning movement: it decodes the client packet into a `MoveInput` (the packet structs are in `poe-proto`), calls `world.input(entity, input)`, and forwards the events the tick returns for its client.
-- **Event → packet mapping** is a single function in the instance server (table above), using `poe-proto` structs and opcodes from `modules/protocol/opcodes/<version>/instance.toml`. The simulation header is `(entity, 0, 0, 0)`; sending zeros is valid. Stat keys come from the game data stat table by `MoveStat::id()`; skill ids and the three sprint buff rows come from `poe-data` when `MovementConfig` is built.
-- **Frames.** Each `tick()`'s events are sent in order, then the `SimulationTick` marker. The `frame` of a `WorldEvent` is the number of that batch.
-- **Terrain.** The world is created with `Arc<dyn GridSource>`: the client's dump `Grid` while the terrain bridge exists, later `poe-world`'s collision grid.
-- **Removed with WP2.3:** `TurnCell`, `turn_timing`, `face_cursor`, `cursor_to_grid`, the use of `0x1cb`/`0x1df` for movement; PSY2 (`sync.rs`, `position_sync.rs`) becomes an opt-in drift checker that reads `Locomotion::position()`. Existing `player.rs` tests that still hold are ported to the world; the pure movement ones already live in `movement.rs`.
+The glue is two pure mappings plus a small owner, all in `servers/instance-server/src/`:
+
+| File | Role |
+|---|---|
+| `movement.rs` | `client_input(name, reader)`: client packet (by name in the opcode table) to `MoveInput`. `Codec::encode(entity, &MoveEvent)`: event to the official messages (`Out { name, bytes, trace }`). Opcodes come from `instance.toml` through `poe-proto`; stat keys through a `StatKeys` closure over the game's `Stats` table; no entity or session state. |
+| `player.rs` | `Player`: the character's skills and a `Sim { world, entity }` handle. `input`, `tick` (events of this entity, encoded), `set_paused`, `teleport`, `cell`/`position`, `debug_state`. `sim_config` builds the `MovementConfig` from game data (Move skill = `0x20000000 | ActionTypes.Move`, the roll skill = the owned skill whose action type is DodgeRoll with its `dodge_roll_base_travel_distance`, walking speed `Pathfinding.base_speed`, `sprint_movement_speed_+%` of the class) and `[movement] sprint_buff_rows`. |
+| `sync.rs` | client position reports (UDP) and `DriftCheck`, the drift checker ([movement.md](../protocol/movement.md#drift-checker-psy2)). Reports never feed the simulation. |
+| `lib.rs` | the session loop: client packet to `movement::client_input` to `Player::input`; the frame timer to `Player::tick`, the messages, then `SimulationTick`. |
+
+- **Frames.** An input received between ticks is queued and answered by the next tick (`r+0`). The tick's events are sent in order, then the `SimulationTick` marker. The `frame` of a `WorldEvent` is the number of that batch.
+- **Header.** `(entity, 0, 0, 0)` for everything except `0x64` (`(entity, entity, 9, 0)`) and the stance delta (`(entity, 0xffffffff, 0, 0)`); official servers use ordering values in `u1a` that the client does not need.
+- **Terrain.** The world is created with `Arc<dyn GridSource>`: the client's dump `Grid` while the terrain bridge exists (or `Open` when the dump is missing), later `poe-world`'s collision grid. The saved or start cell is moved to the nearest walkable cell first.
 - **Pause** (`0x1ff`): `World::set_paused`.
+- **Dev teleport**: `World::teleport`, reported by the next tick as a `0x64` pair.
+- **To move the World into an instance actor** only `Sim` changes: its `input` would send to the actor and `tick` would receive this entity's `WorldEvent`s from the actor's batch. `Codec` and `client_input` are already independent of the session; the actor encodes each entity's events once per recipient.
+- **Missing opcode.** `0x1ca` (`ActionEvent`) is not in the protocol repository's `instance.toml` yet: `Codec` skips it (debug log) and sends it as soon as `ActionEvent = 0x01ca` is added there.
+- **Tests.** `servers/instance-server/src/replay_tests.rs`: the same fixtures as the `poe-game` replay tests go in as encoded client packets and the batches come out as encoded packets, compared per frame by message name, order and field values; plus glue tests for the roll batch, acks, stance, click-to-move, pause, teleport and `sim_config`.
+- **Removed with WP2.3:** the turn-cell/turn-timing/face-cursor workarounds (and the cursor projection), the use of `0x1cb`/`0x1df` for movement and their three server commands; PSY2 is now only the opt-in drift checker.
 
 ## Planned: shared world
 

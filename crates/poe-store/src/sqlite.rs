@@ -11,6 +11,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003_character_area.sql"),
     include_str!("../migrations/0004_character_intro.sql"),
     include_str!("../migrations/0005_character_location.sql"),
+    include_str!("../migrations/0006_accounts_auth.sql"),
 ];
 
 pub struct SqliteStore {
@@ -30,6 +31,12 @@ impl SqliteStore {
 
     pub fn in_memory() -> Result<Self> {
         Self::from_connection(Connection::open_in_memory()?)
+    }
+
+    /// Runs `f` with the connection. For sibling crates that own tables in this database
+    /// (`poe-accounts`); the schema itself is migrated here.
+    pub fn with_connection<R>(&self, f: impl FnOnce(&mut Connection) -> R) -> R {
+        f(&mut self.conn.lock().unwrap())
     }
 
     fn from_connection(mut conn: Connection) -> Result<Self> {
@@ -243,6 +250,26 @@ mod character_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0006 on a database created by 0001-0005: machine-hash accounts survive as dev accounts
+    /// (null password, player role, `Exile1` becomes admin as `[admin] accounts` had it).
+    #[test]
+    fn migration_0006_keeps_existing_accounts() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (i, sql) in MIGRATIONS.iter().take(5).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", i + 1).unwrap();
+        }
+        conn.execute("INSERT INTO accounts (login_key, name) VALUES ('aa', 'Exile1'), ('bb', 'Exile2')", []).unwrap();
+        let store = SqliteStore::from_connection(conn).unwrap();
+        let rows: Vec<(String, Option<String>, String, bool)> = store.with_connection(|c| {
+            let mut st = c.prepare("SELECT name, password_hash, role, disabled FROM accounts ORDER BY id").unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|r| r.unwrap()).collect()
+        });
+        assert_eq!(rows[0], ("Exile1".into(), None, "admin".into(), false));
+        assert_eq!(rows[1], ("Exile2".into(), None, "player".into(), false));
+        assert_eq!(store.account_by_login_key("bb").unwrap().unwrap().name, "Exile2");
+    }
 
     #[test]
     fn creates_and_finds_accounts() {

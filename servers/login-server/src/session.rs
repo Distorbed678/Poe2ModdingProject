@@ -8,7 +8,7 @@ use poe_net::{Connection, DecodeError, Reader, hexdump::hexdump};
 use poe_proto::{
     Direction, Message, Protocol,
     login::{
-        Authenticate, AuthenticationResult, CharacterCreated, CharacterDetails, CharacterEntry,
+        Authenticate, AuthenticationResult, Credentials, CharacterCreated, CharacterDetails, CharacterEntry,
         CharacterList, CreateCharacter, DeleteCharacter, DeleteCharacterResult, InstanceDetails,
         KeepAlive, KeepAliveReply, LeagueEntry, LeagueList, PlayCharacter, RequestCharacterDetails,
         RequestCharacterList, ResumeSession,
@@ -18,12 +18,13 @@ use poe_store::{Account, Character, NewCharacter};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
 
-use crate::{LoginServer, handshake};
+use crate::{LoginServer, auth, handshake};
 
 /// Messages the login server understands after the key exchange.
-enum ClientMessage {
+pub(crate) enum ClientMessage {
     KeepAlive,
     Authenticate(Authenticate),
+    Credentials(Credentials),
     RequestCharacterList(RequestCharacterList),
     CreateCharacter(CreateCharacter),
     RequestCharacterDetails(RequestCharacterDetails),
@@ -54,12 +55,13 @@ pub async fn read_message<M: Message>(
 
 /// Decodes the next client message. Unknown opcodes are fatal: without a length prefix
 /// the rest of the stream cannot be framed.
-fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessage, DecodeError> {
+pub(crate) fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<ClientMessage, DecodeError> {
     let at = r.position();
     let opcode = r.u16()?;
     match protocol.login.name(Direction::Client, opcode) {
         Some(KeepAlive::NAME) => Ok(ClientMessage::KeepAlive),
         Some(Authenticate::NAME) => Authenticate::decode(r).map(ClientMessage::Authenticate),
+        Some(Credentials::NAME) => Credentials::decode(r).map(ClientMessage::Credentials),
         Some(RequestCharacterList::NAME | "RequestCharacterListAlt") => {
             RequestCharacterList::decode(r).map(ClientMessage::RequestCharacterList)
         }
@@ -130,10 +132,18 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                     .await?;
             }
             ClientMessage::Authenticate(auth) => {
-                let a = authenticate(&server, &mut conn, auth).await?;
-                logout = Some(server.sessions.subscribe(a.id));
-                transfers = Some(server.sessions.subscribe_transfers(a.id));
-                account = Some(a);
+                if let Some(a) = authenticate(&server, &mut conn, auth).await? {
+                    logout = Some(server.sessions.subscribe(a.id));
+                    transfers = Some(server.sessions.subscribe_transfers(a.id));
+                    account = Some(a);
+                }
+            }
+            ClientMessage::Credentials(creds) => {
+                if let Some(a) = credentials(&server, &mut conn, creds).await? {
+                    logout = Some(server.sessions.subscribe(a.id));
+                    transfers = Some(server.sessions.subscribe_transfers(a.id));
+                    account = Some(a);
+                }
             }
             ClientMessage::RequestCharacterList(req) => {
                 if account.as_ref().map(|a| a.id) != Some(req.account_id) {
@@ -239,11 +249,18 @@ async fn logged_out(logout: &mut Option<tokio::sync::watch::Receiver<u64>>) {
     std::future::pending().await
 }
 
+/// Dev-only Steam login (`0x0005`): the account is keyed by the machine hash, no password.
+/// Off unless `[accounts] dev_machine_hash_login`.
 async fn authenticate(
     server: &LoginServer,
     conn: &mut Connection,
     auth: Authenticate,
-) -> anyhow::Result<Account> {
+) -> anyhow::Result<Option<Account>> {
+    if !server.config.accounts.dev_machine_hash_login {
+        warn!("Steam login (0x0005) refused: [accounts] dev_machine_hash_login is off");
+        send_refusal(server, conn, auth::code::NOT_ENABLED, "This server needs a username and password login.").await?;
+        return Ok(None);
+    }
     let login_key = hex::encode(auth.machine_hash);
     let account = match server.store.account_by_login_key(&login_key)? {
         Some(a) => a,
@@ -255,14 +272,68 @@ async fn authenticate(
             a
         }
     };
+    if server.accounts.find_by_id(account.id)?.is_some_and(|r| r.disabled) {
+        warn!(account = %account.name, "disabled account refused");
+        send_refusal(server, conn, auth::code::DISABLED, "This account has been disabled.").await?;
+        return Ok(None);
+    }
+    server.accounts.record_login(account.id)?;
     info!(
         account = %account.name,
         id = account.id,
         ticket_len = auth.ticket.len(),
-        "authenticated"
+        "authenticated (dev machine hash)"
     );
+    // A second login of the account replaces the first one (login connection and game).
+    server.sessions.supersede(account.id);
     send_authentication_result(server, conn, &account).await?;
-    Ok(account)
+    Ok(Some(account))
+}
+
+/// Standalone login (`0x0003`): username and password hash, or a saved login token.
+async fn credentials(
+    server: &LoginServer,
+    conn: &mut Connection,
+    creds: Credentials,
+) -> anyhow::Result<Option<Account>> {
+    if creds.mode != 2 {
+        warn!(mode = creds.mode, "0x0003 with an unexpected mode");
+    }
+    let accounts = server.accounts.clone();
+    let config = server.config.clone();
+    let name = creds.account_name.clone();
+    let token_login = creds.token_login != 0;
+    // argon2id is deliberately slow: keep it off the async workers.
+    let verdict = tokio::task::spawn_blocking(move || auth::credentials_login(&*accounts, &config.accounts, &creds)).await?;
+    let reply = auth::reply(&server.config.accounts, &verdict);
+    match &verdict {
+        auth::Verdict::Refused { result, .. } => {
+            warn!(account = %name, token_login, result, "login refused");
+            conn.send(&server.protocol.login.encode(&reply)?).await?;
+            Ok(None)
+        }
+        auth::Verdict::Accepted { account, token } => {
+            let Some(stored) = server.store.account_by_id(account.id)? else {
+                anyhow::bail!("account {} has no row in the accounts table", account.id);
+            };
+            info!(account = %stored.name, id = stored.id, token_login, remembered = token.is_some(), "authenticated");
+            // A second login of the account replaces the first one (login connection and game).
+            server.sessions.supersede(stored.id);
+            conn.send(&server.protocol.login.encode(&reply)?).await?;
+            Ok(Some(stored))
+        }
+    }
+}
+
+async fn send_refusal(
+    server: &LoginServer,
+    conn: &mut Connection,
+    result: u16,
+    notice: &'static str,
+) -> anyhow::Result<()> {
+    let reply = auth::reply(&server.config.accounts, &auth::Verdict::Refused { result, notice });
+    conn.send(&server.protocol.login.encode(&reply)?).await?;
+    Ok(())
 }
 
 async fn send_authentication_result(

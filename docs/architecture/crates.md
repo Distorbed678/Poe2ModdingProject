@@ -4,11 +4,12 @@
 
 | Crate | Role |
 |---|---|
-| `crates/poe-config` | Typed `config/server.toml`: ports, hosts, leagues, paths, logging, terrain toggle, admins, commands, instances, movement tuning, dev bridges (`config/server.example.toml` lists every key). |
+| `crates/poe-config` | Typed `config/server.toml`: ports, hosts, leagues, paths, logging, terrain toggle, cluster id, account switches, commands, instances, movement tuning, dev bridges (`config/server.example.toml` lists every key). |
 | `modules/protocol/poe-net` | Transport (Poe2Protocol submodule): `StreamCipher` trait (Salsa20 for login and instance streams), big-endian `Reader`/`Writer` with PoE string and varint encodings, hexdump; the buffered TCP `Connection` is behind the `tokio` cargo feature (the servers enable it, the client DLL does not). |
 | `modules/protocol/poe-proto` | Message definitions (Poe2Protocol submodule); opcodes come from `modules/protocol/opcodes/<version>/{login,instance,hnc}.toml`. `describe` decodes captured messages for the DLL. |
 | `crates/poe-data` | Game data: `GameFiles` (Bundles2 through `poe_data_tools`, with override directories in front) and `GameData::table("WorldAreas")` (`.datc64` decoded with the community schema, columns accessed by name). |
-| `crates/poe-store` | `Store` trait plus SQLite: accounts, characters, saved positions. |
+| `crates/poe-store` | `Store` trait plus SQLite: accounts, characters, saved positions; owns the schema migrations (`0006` adds passwords, roles and tokens). |
+| `crates/poe-accounts` | `AccountStore` trait and SQLite implementation: usernames, argon2id passwords (over the client's SHA-256(UTF-16LE) digest), roles, revocable per-cluster tokens, the `account` command. |
 | `crates/poe-cluster` | Coordination between servers: tickets (`TicketRegistry`), login sessions (logout, transfers), the instance directory (`InstanceDirectory`). In-process implementations now; traits for a split deployment later. |
 | `crates/poe-world` | Terrain generation (the client's generator, ported; see [../status/terrain.md](../status/terrain.md)). |
 | `crates/poe-game` | Simulation: the instance `World` (entities, frame clock), `GridSource` terrain grids (client dump `Grid`, `VecGrid`), the server-authoritative movement component `Locomotion` (typed inputs and events, no opcodes; built from [../protocol/movement.md](../protocol/movement.md)), `Mover` and A* pathfinding, character stats. Design: [instance-world.md](instance-world.md). Replay tests use fixtures under `tests/fixtures/` derived by `scripts/re/movement_fixtures.py`. |

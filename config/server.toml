@@ -36,30 +36,23 @@ idle_minutes = 15
 tick_ms = 33
 
 [movement]
-# Movement tuning, kept until the movement rewrite (docs/protocol/movement.md).
-# Cell sent with a turn: "natural" (the cell the client reaches in that frame; it is put on
-# its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
-# See docs/protocol/movement.md#lag.
-turn_cell = "natural"
-# Hold a turn back by up to one frame when that lands it nearer a cell centre (smaller
-# snaps at turns, some turns 33 ms later).
-turn_timing = true
-# Turn the player toward the cursor, except while walking by click-to-move or rolling (the
-# client reports the cursor with its position; mapped to grid cells by cursor_to_grid).
-face_cursor = true
-# Cursor offset (client pixels from the window centre, scaled to a 1440-pixel-high window) to
-# grid offset: gx = a*sx + b*sy + c, gy = d*sx + e*sy + f as [a, b, c, d, e, f].
-# Calibrated from dodge-roll targets (2026-10-15).
-cursor_to_grid = [0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]
+# Server-side movement simulation (crates/poe-game, docs/protocol/movement.md). Skill ids,
+# walking speed and roll distance come from game data; these are the official 0.5.5e values.
+# BuffDefinitions rows of the three buffs a sprint adds.
+sprint_buff_rows = [2758, 2737, 2853]
 
 [dev]
 # Development and research bridges; none are needed for normal play.
 # Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
 # seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
 known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
-# Accept the client DLL's per-frame position reports (UDP on the instance port) and follow
-# them (movement dev bridge until the server simulates movement exactly).
+# Listen for the client DLL's UDP datagrams on the instance port (position reports, overlay
+# commands). Reports are only read by the drift checker; they never move the player.
 position_sync = true
+# Drift checker: log the server's player position against the client's reported one (cells)
+# every drift_interval_ms. Needs position_sync and the DLL.
+drift_check = false
+drift_interval_ms = 1000
 # Movement trace: client position reports, inputs and movement replies as TSV
 # (docs/protocol/movement.md#movement-trace). Empty to turn it off.
 movement_trace = "runtime/movement-trace.tsv"
@@ -78,9 +71,10 @@ sweep_results = "dumps/0.5.5e/terrain/vectors/sweep-results.tsv"
 # off until the generator covers every area (docs/status/terrain.md).
 generate = false
 
-[admin]
-# Accounts allowed to use admin commands (chat `!` commands and the overlay's server tools).
-accounts = ["Exile1"]
+[cluster]
+# Identity of this cluster (docs/architecture/accounts.md). Login tokens carry it; a token
+# issued under another id does not validate here. Change it to invalidate every saved login.
+id = "local"
 
 [commands]
 # Prefix for server commands typed in chat (`/` stays with the client's own commands).
@@ -92,9 +86,17 @@ audit_log = "runtime/admin-audit.log"
 path = "runtime/server.sqlite"
 
 [accounts]
-# Accounts are created automatically on first login, keyed by the client's machine hash,
-# and named <name_prefix><id>.
+# Real accounts have a username and a password (`account create <name> <password>`, admins by
+# role: `account role <name> admin`; docs/guides/server-admin.md). Admin is the account's role.
+# Dev only: the Steam login (0x0005) still works without a password and auto-creates accounts
+# keyed by the client's machine hash, named <name_prefix><id>. Turn it off once the client
+# logs in through the standalone screen (WP3.3).
+dev_machine_hash_login = true
 name_prefix = "Exile"
+# Whether the web API may register accounts (later); server commands always can.
+open_registration = false
+# How long a "Remember Me" login stays valid (days).
+remember_days = 30
 # Character slots per account (sent to the client and enforced on creation).
 max_characters = 24
 # Two account flag bytes sent with the authentication result; the client splits them into

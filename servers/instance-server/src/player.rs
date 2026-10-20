@@ -1,22 +1,27 @@
-//! The player's simulated state in an instance: movement (WASD, click-to-move, dodge roll,
-//! sprint) and the skills the server gave the character.
+//! The player's session state in an instance: the skills the server gave the character and a
+//! handle to the movement simulation.
 //!
-//! The client runs in lockstep (docs/protocol/movement.md): it starts a movement only
-//! when the server says so, then moves the entity itself every frame. The server answers each
-//! input with the message that starts the movement on the client and simulates the same
-//! movement here, frame by frame, so it knows where the player is.
+//! Movement is not computed here. The client runs in lockstep (docs/protocol/movement.md): it
+//! starts a movement only when the server says so, and the server answers each input with the
+//! official messages. That logic is `poe_game::world::World` / `Locomotion`; this file only
+//! owns the World for now (one per session) behind [`Sim`], so that it can later move into an
+//! instance actor without changing the packet mapping ([`crate::movement`]):
+//!
+//! - client packet -> [`crate::movement::client_input`] -> [`Player::input`]
+//! - the session's frame tick -> [`Player::tick`] -> encoded messages, followed by the
+//!   `SimulationTick` marker.
+
+use std::sync::Arc;
 
 use poe_data::views::GrantedSkill;
-use poe_game::movement::{Motion, Mover, Open};
-use poe_proto::{
-    entity::{PLAYER_COMPONENT, PlayerDelta, Skill},
-    instance::{
-        AimTarget, ComponentDelta, MoveDirection, MoveDirectionUpdate, SetAimTarget,
-        SetOrientation, SimulationHeader, SprintInput, SprintState, StartAction,
-        UpdateActionTarget, UpdateSkillTarget, UseSkill,
-    },
+use poe_game::{
+    grid::GridSource,
+    locomotion::{MoveInput, MovementConfig as SimConfig, SkillIds},
+    world::{EntityId, Event, World, WorldConfig},
 };
-use tracing::{debug, info};
+use poe_proto::entity::Skill;
+
+use crate::movement::{Codec, Out};
 
 /// A skill the server gave the character.
 pub struct OwnedSkill {
@@ -27,276 +32,91 @@ pub struct OwnedSkill {
     pub stats: Vec<(u32, i32)>,
 }
 
-/// A message for the client, produced by input or by the simulation.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Reply {
-    Direction(MoveDirectionUpdate),
-    Start(StartAction),
-    Sprint(SprintState),
-    Orientation(SetOrientation),
-    /// Turn toward the cursor (official echo of the client's AimTarget).
-    Aim(SetAimTarget),
-    /// A component's state changed (the Player component's combat stance).
-    Component(ComponentDelta),
+/// Basic-action skill ids are this plus the action type key.
+pub const BASIC_ACTION_SKILL: u32 = 0x2000_0000;
+
+/// Roll length when the skill does not list `dodge_roll_base_travel_distance`.
+const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
+
+/// Builds the simulation's movement configuration from game data and `[movement]`:
+/// - `move_skill`: the Move basic action (`BASIC_ACTION_SKILL | ActionTypes key`);
+/// - the roll skill: the owned skill whose action type is `roll_action` (DodgeRoll), with its
+///   `dodge_roll_base_travel_distance`;
+/// - `speed`: the class's walking speed, `sprint_bonus` its `sprint_movement_speed_+%`.
+///
+/// Skills that are missing get an id nothing sends (`u32::MAX`), so the component treats
+/// everything as a generic action.
+pub fn sim_config(
+    config: &poe_config::MovementConfig,
+    skills: &[OwnedSkill],
+    move_skill: Option<u32>,
+    roll_action: Option<u16>,
+    speed: f32,
+    sprint_bonus: Option<f32>,
+) -> SimConfig {
+    let roll = roll_action.and_then(|t| skills.iter().find(|s| s.granted.action_type == Some(t)));
+    let mut cfg = SimConfig::new(
+        SkillIds {
+            move_skill: move_skill.unwrap_or(u32::MAX),
+            roll_skill: roll.map_or(u32::MAX, |s| s.id),
+        },
+        config.sprint_buff_rows,
+    );
+    cfg.walk_speed = speed;
+    cfg.roll.travel_distance = roll
+        .and_then(|s| s.granted.constant_stat("dodge_roll_base_travel_distance"))
+        .map_or(ROLL_DEFAULT_DISTANCE, |d| d as f32);
+    if let Some(bonus) = sprint_bonus {
+        cfg.sprint.speed_scale = 1.0 + bonus / 100.0;
+        cfg.sprint.move_speed_percent = bonus.round() as i32;
+        cfg.sprint.velocity_permyriad = (bonus * 100.0).round() as i32;
+    }
+    cfg
 }
 
-/// The action the player is running (started by a StartAction).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Current {
-    action_id: u16,
-    skill: u32,
+/// What a [`Player`] needs to be created.
+pub struct PlayerInit {
+    /// Entity id of the player (the first id of its world).
+    pub entity_id: u32,
+    pub cell: (i32, i32),
+    /// Walking speed, cells per second.
+    pub speed: f32,
+    pub skills: Vec<OwnedSkill>,
+    pub movement: SimConfig,
+    /// Milliseconds per simulation frame.
+    pub tick_ms: u32,
+    pub grid: Arc<dyn GridSource>,
+    pub codec: Codec,
 }
 
-/// Input that arrived during a dodge roll: it starts when the roll ends.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Pending {
-    Direction(MoveDirection),
-    Skill(UseSkill),
+/// The session's handle to the movement simulation. Today it owns a `World` with the one player
+/// in it; an instance actor would own the World and this would send it the inputs and receive
+/// this entity's events.
+struct Sim {
+    world: World,
+    entity: EntityId,
 }
 
 pub struct Player {
     pub entity_id: u32,
-    pub mover: Mover,
     pub skills: Vec<OwnedSkill>,
-    /// Skill id of the basic Move action (`0x20000000 | ActionTypes key`).
-    pub move_skill: Option<u32>,
-    /// While paused the simulation does not advance.
-    pub paused: bool,
-    /// Sprint speed relative to walking (`sprint_movement_speed_+%`).
-    pub sprint_scale: f32,
-    next_action: u16,
-    current: Option<Current>,
-    pending: Option<Pending>,
-    /// The WASD direction currently held.
-    wasd: (i32, i32),
-    /// Held click-to-move: the walk direction last sent, and the last cursor offset.
-    held_dir: Option<(i32, i32)>,
-    held_target: Option<(i32, i32)>,
-    /// The sprint key (Space) is held.
-    sprint_held: bool,
-    /// The client's latest position report (movement dev bridge, [`crate::sync`]).
-    client: Option<crate::sync::ClientReport>,
-    /// Reports have arrived in this session: from then on the client's last report is the
-    /// player's state, also while reports pause.
-    synced: bool,
-    /// The last call had a fresh report (for logging).
-    fresh: bool,
-    /// The client's movement per frame, from its last two reports.
-    velocity: (f32, f32),
-    /// Client frame of the older of those two reports.
-    velocity_from: u32,
-    /// The last walk direction sent: until reports show the walk, the client's position is
-    /// predicted from it (the reports around a placement do not show the walking speed).
-    last_turn: Option<Turn>,
-    /// The frame in which a message sent now applies on the client (set by the session:
-    /// the tick being built, or the next one for input answered between ticks).
-    pub apply_frame: i64,
-    pub turn_cell: TurnCell,
-    /// Hold a turn back by a frame when that places the player nearer its path (`turn`).
-    pub turn_timing: bool,
-    /// A held-back turn and the frame it goes out in.
-    pending_turn: Option<(MoveDirection, i64)>,
-    /// Turn toward the cursor with this projection (`[instance] cursor_to_grid`), if enabled.
-    pub face_cursor: Option<[f32; 6]>,
-    /// The facing last sent: angle and whether it is locked.
-    facing: Option<(f32, bool)>,
-    /// The client's last aim cell (AimTarget mode 2), echoed in the next frame.
-    aim: Option<(i32, i32)>,
-    /// The client reports its aim itself (as with official servers): the cursor facing from
-    /// the DLL's reports (`face_cursor`) is not used any more.
-    aim_seen: bool,
-    /// The Player component's combat stance, and whether the client still has to be told.
-    /// Official servers turn it on with the first Move; the client only reports its cursor
-    /// (AimTarget mode 2) while it is on.
-    combat_stance: bool,
-    stance_changed: bool,
-    /// Length of a simulation frame in seconds (`tick_ms`).
-    pub frame_seconds: f32,
-    /// The client's walkability grid, only to keep [`Player::send_cell`] off unwalkable cells
-    /// (the server has no collision until M5).
-    pub walkable: Option<crate::spawn::Grid>,
-    /// Server frames sent minus the client's frame number when its report arrives (the
-    /// smallest seen; 0 so far).
-    frame_offset: Option<i64>,
-    /// A dodge roll is running (from its StartAction until it ends).
-    in_roll: bool,
-    /// The client has reported the roll action since it started.
-    roll_seen: bool,
-    roll_frames: u32,
-    /// Direction of the running roll (relative cells).
-    roll_dir: (f32, f32),
+    sim: Sim,
+    codec: Codec,
 }
-
-/// Index of the Actor component in the player's object (Positioned 0 .. Actor 9 .. BuffOrbs 12,
-/// as the DLL's component inspector lists them).
-const ACTOR_COMPONENT: u8 = 9;
-/// Last byte of `0x64` on official servers (unread by the client).
-const MOVE_UPDATE_TRAILER: u8 = 0xf1;
-
-/// Roll length when the skill does not list `dodge_roll_base_travel_distance`.
-const ROLL_DEFAULT_DISTANCE: f32 = 46.0;
-/// UseSkill `target_flags` bit 4: the input is held and the use repeats (about every 70 ms,
-/// e.g. a held click-to-move).
-const TARGET_REPEAT: u8 = 0x10;
-/// Which cell a turn is sent with (`[instance] turn_cell`, see [`Player::send_cell`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TurnCell {
-    /// The client's own cell when the turn applies: it only re-aims its walk.
-    Own,
-    /// A cell one normal step along the new heading: the client is put on its centre.
-    Heading,
-    /// The cell the client would reach in that frame.
-    #[default]
-    Natural,
-}
-
-impl TurnCell {
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "heading" => Self::Heading,
-            "own" => Self::Own,
-            _ => Self::Natural,
-        }
-    }
-}
-
-/// A walk direction sent to the client: at the end of `frame` (server frame numbers) the
-/// client is at `at` (the centre of the cell sent) and walks on along `dir` (unit, or zero
-/// for a stop) at walking speed.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Turn {
-    frame: i64,
-    at: (f32, f32),
-    dir: (f32, f32),
-}
-
-/// Smallest change of the cursor facing that is sent (radians, about 3 degrees).
-const FACING_STEP: f32 = 0.05;
-/// A turn is held back a frame only if that puts it this much (cells) nearer a cell centre.
-const TURN_TIMING_MARGIN: f32 = 0.1;
-
-/// Most frames a position is predicted ahead (beyond that the report is too old to trust).
-const MAX_LEAD_FRAMES: i64 = 4;
-/// Length of a WASD direction vector (W = (127, 127), D = (180, 0)).
-const WASD_LENGTH: f32 = 180.0;
-/// A held click closer than this (|dx| + |dy| cells) to the player stops the walk.
-const HELD_STOP_CELLS: i32 = 3;
-
-/// Whether two walk directions are within about 8 degrees.
-fn same_direction(a: (i32, i32), b: (i32, i32)) -> bool {
-    let dot = (a.0 * b.0 + a.1 * b.1) as f32;
-    let len = ((a.0 * a.0 + a.1 * a.1) as f32).sqrt() * ((b.0 * b.0 + b.1 * b.1) as f32).sqrt();
-    len > 0.0 && dot / len > 0.99
-}
-/// Basic-action skill ids are this plus the action type key.
-pub const BASIC_ACTION_SKILL: u32 = 0x2000_0000;
-/// Simulation header order key: apply after all entities have updated in the frame (used for
-/// actions that start when a roll ends during that frame).
-const AFTER_ENTITIES: u32 = 0xffff_ffff;
 
 impl Player {
-    pub fn new(
-        entity_id: u32,
-        cell: (i32, i32),
-        speed: f32,
-        skills: Vec<OwnedSkill>,
-        move_skill: Option<u32>,
-    ) -> Self {
+    pub fn new(init: PlayerInit) -> Self {
+        let mut config = WorldConfig::new(init.movement);
+        config.tick_ms = init.tick_ms;
+        config.first_entity_id = init.entity_id;
+        let mut world = World::new(config, init.grid);
+        let entity = world.spawn_player_with_speed(init.cell, init.speed);
         Self {
-            entity_id,
-            mover: Mover::at_cell(cell, speed),
-            skills,
-            move_skill,
-            paused: false,
-            sprint_scale: 1.5,
-            next_action: 0,
-            current: None,
-            pending: None,
-            wasd: (0, 0),
-            held_dir: None,
-            held_target: None,
-            sprint_held: false,
-            client: None,
-            synced: false,
-            fresh: false,
-            velocity: (0.0, 0.0),
-            velocity_from: 0,
-            last_turn: None,
-            apply_frame: 0,
-            frame_seconds: 0.033,
-            turn_cell: TurnCell::Heading,
-            turn_timing: false,
-            pending_turn: None,
-            face_cursor: None,
-            facing: None,
-            aim: None,
-            aim_seen: false,
-            combat_stance: false,
-            stance_changed: false,
-            walkable: None,
-            frame_offset: None,
-            in_roll: false,
-            roll_seen: false,
-            roll_frames: 0,
-            roll_dir: (0.0, 0.0),
+            entity_id: entity.0,
+            skills: init.skills,
+            sim: Sim { world, entity },
+            codec: init.codec,
         }
-    }
-
-    /// The client's latest report (or `None` without fresh reports): the server takes the
-    /// client's position, so positions it sends match the client's.
-    /// Notes that the client's report for its latest frame arrived after `sent` server frames
-    /// (lockstep: the client cannot play a frame before it was sent).
-    pub fn observe_frames(&mut self, sent: i64) {
-        if let Some(r) = self.client.filter(|_| self.fresh) {
-            let offset = sent - r.frame as i64;
-            if self.frame_offset.is_none_or(|o| offset < o) {
-                self.frame_offset = Some(offset);
-            }
-        }
-    }
-
-    pub fn apply_report(&mut self, report: Option<crate::sync::ClientReport>) {
-        if report.is_some() != self.fresh {
-            debug!(cell = ?self.mover.cell(), "client reports {}", if report.is_some() { "arriving" } else { "paused" });
-            self.fresh = report.is_some();
-        }
-        let Some(r) = report else {
-            // Keep the last report once synced: the client is where it last said.
-            if !self.synced {
-                self.client = None;
-            }
-            return;
-        };
-        let changed = self
-            .client
-            .is_none_or(|c| (c.action, c.action2, c.flags) != (r.action, r.action2, r.flags));
-        if changed {
-            debug!(
-                action = format_args!("{:#06x}", r.action),
-                action2 = format_args!("{:#06x}", r.action2),
-                flags = format_args!("{:#x}", r.flags),
-                cell = ?r.cell(),
-                "client action"
-            );
-        }
-        self.velocity = match self.client {
-            Some(c) if r.frame > c.frame && r.frame - c.frame <= 4 => {
-                let n = (r.frame - c.frame) as f32;
-                self.velocity_from = c.frame;
-                ((r.x - c.x) / n, (r.y - c.y) / n)
-            }
-            Some(c) if r.frame == c.frame => self.velocity,
-            _ => (0.0, 0.0),
-        };
-        self.mover.x = r.x;
-        self.mover.y = r.y;
-        self.synced = true;
-        self.client = Some(r);
-    }
-
-    /// Client position reports have arrived in this session.
-    pub fn synced(&self) -> bool {
-        self.synced
     }
 
     /// The skills to list in the player entity's Actor component.
@@ -312,536 +132,69 @@ impl Player {
             .collect()
     }
 
-    fn rolling(&self) -> bool {
-        self.in_roll
+    /// Client input; answered by the next [`tick`](Self::tick).
+    pub fn input(&mut self, input: MoveInput) {
+        self.sim.world.input(self.sim.entity, input);
     }
 
-    /// `ActionTypes` key of the roll skill's action (DodgeRoll).
-    fn roll_action(&self) -> Option<u16> {
-        self.current
-            .and_then(|c| self.skills.iter().find(|s| s.id == c.skill))
-            .and_then(|s| s.granted.action_type)
-    }
-
-    /// Whether the roll is over: with client reports, when the client's roll action ended
-    /// (or never showed up); without, when the server's simulated roll ended.
-    fn roll_over(&mut self) -> bool {
-        self.roll_frames += 1;
-        match (self.client, self.roll_action()) {
-            (Some(c), Some(t)) => {
-                let client_rolling = c.action == t || c.action2 == t;
-                if client_rolling {
-                    self.roll_seen = true;
-                }
-                (self.roll_seen && !client_rolling) || (!self.roll_seen && self.roll_frames > 15)
-            }
-            _ => !matches!(self.mover.motion, Motion::Roll { .. }),
-        }
-    }
-
-    fn sprinting(&self) -> bool {
-        matches!(self.mover.motion, Motion::Sprint { .. })
-    }
-
-    /// One simulation frame; returns messages that start in this frame (actions waiting for a
-    /// roll to end).
-    pub fn tick(&mut self, dt: f32) -> Vec<Reply> {
-        if self.paused {
-            return Vec::new();
-        }
-        let was = self.mover.motion;
-        // No collision until the server has the terrain (M5): the simulation moves in straight
-        // lines. Without terrain it would walk through walls, so once reports have arrived the
-        // player is only ever where the client last reported it.
-        if !self.synced {
-            self.mover.advance(dt, &Open);
-        }
+    /// One simulation frame: the messages for the client, in order (the caller sends the
+    /// `SimulationTick` marker after them).
+    pub fn tick(&mut self) -> anyhow::Result<Vec<Out>> {
         let mut out = Vec::new();
-        if std::mem::take(&mut self.stance_changed) {
-            out.push(Reply::Component(self.stance_delta()));
-        }
-        if self.aim_seen {
-            // The client's own aim drives the facing; a facing the DLL path locked is released.
-            if self.facing.is_some_and(|f| f.1) {
-                let angle = self.facing.map_or(0.0, |f| f.0);
-                self.facing = Some((angle, false));
-                out.push(Reply::Orientation(SetOrientation {
-                    header: self.header(),
-                    angle,
-                    locked: false,
-                }));
+        for e in self.sim.world.tick() {
+            if e.entity != self.sim.entity {
+                continue;
             }
-            if let Some((x, y)) = self.aim.take() {
-                out.push(Reply::Aim(SetAimTarget {
-                    header: self.header(),
-                    kind: 0,
-                    x,
-                    y,
-                }));
-            }
-        } else {
-            out.extend(self.face_cursor_replies());
-        }
-        // A turn held back for a better frame (`turn`) goes out in the frame it was meant for.
-        if let Some((req, frame)) = self.pending_turn
-            && self.apply_frame >= frame
-        {
-            self.pending_turn = None;
-            out.push(Reply::Direction(self.start_direction(&req)));
-        }
-        if self.in_roll {
-            if self.roll_over() {
-                self.in_roll = false;
-                if matches!(self.mover.motion, Motion::Roll { .. }) {
-                    self.mover.start(Motion::Idle);
-                }
-                // Holding the key turns the roll into a sprint (the client decides the same,
-                // `0x141b76c20`). With client reports the client moves itself; the server
-                // simulates the sprint only without them.
-                if self.sprint_held && self.client.is_none() {
-                    debug!(cell = ?self.mover.cell(), "roll ended, sprinting");
-                    let (sx, sy) = if self.wasd != (0, 0) {
-                        (self.wasd.0 as f32, self.wasd.1 as f32)
-                    } else {
-                        self.roll_dir
-                    };
-                    self.mover.start(Motion::Sprint {
-                        x: sx,
-                        y: sy,
-                        scale: self.sprint_scale,
-                    });
-                } else {
-                    debug!(cell = ?self.mover.cell(), "roll ended");
-                    self.current = None;
-                    // With reports the client's roll already ended in an earlier frame, so the
-                    // next action applies at the start of the frame; otherwise after the roll's
-                    // last update in this frame.
-                    let order = if self.client.is_some() {
-                        0
-                    } else {
-                        AFTER_ENTITIES
-                    };
-                    out.extend(self.resume(order));
-                }
-            }
-        } else if was != Motion::Idle && self.mover.motion == Motion::Idle {
-            debug!(cell = ?self.mover.cell(), "movement ended");
-            self.current = None;
-        }
-        out
-    }
-
-    /// Starts what was waiting for a roll to end, or the held WASD direction. With client
-    /// reports, a held WASD direction is not sent again: the client resumes walking by itself
-    /// after a roll (and sprints if the key is held), and only the server's simulation needs
-    /// to follow.
-    fn resume(&mut self, order: u32) -> Vec<Reply> {
-        let wasd = (self.wasd != (0, 0)).then_some(MoveDirection {
-            x: self.wasd.0,
-            y: self.wasd.1,
-            ..Default::default()
-        });
-        if self.client.is_some() {
-            match self.pending.take() {
-                Some(Pending::Skill(req)) => {
-                    if let Some(mut a) = self.start_skill(&req) {
-                        a.header.unk_14 = order;
-                        return vec![Reply::Start(a)];
-                    }
-                }
-                _ => {
-                    if let Some(req) = wasd {
-                        self.start_direction(&req);
-                    }
-                }
-            }
-            return Vec::new();
-        }
-        let pending = self.pending.take().or(wasd.map(Pending::Direction));
-        let mut out = Vec::new();
-        match pending {
-            Some(Pending::Direction(req)) => {
-                let mut r = self.start_direction(&req);
-                r.header.unk_14 = order;
-                out.push(Reply::Direction(r));
-            }
-            Some(Pending::Skill(req)) => {
-                if let Some(mut a) = self.start_skill(&req) {
-                    a.header.unk_14 = order;
-                    out.push(Reply::Start(a));
-                }
-            }
-            None => {}
-        }
-        out
-    }
-
-    /// Header of the player's Actor messages as official servers send them (`0x64`): ordered
-    /// after the entity's own Actor component (`unk_14` = the entity, `unk_18` = the Actor's
-    /// component index).
-    fn actor_header(&self) -> SimulationHeader {
-        SimulationHeader {
-            entity_id: self.entity_id,
-            unk_14: self.entity_id,
-            unk_18: ACTOR_COMPONENT,
-            unk_1a: 0,
-        }
-    }
-
-    fn header(&self) -> SimulationHeader {
-        SimulationHeader {
-            entity_id: self.entity_id,
-            ..Default::default()
-        }
-    }
-
-    fn next_action_id(&mut self) -> u16 {
-        // Server action ids are positive 15-bit values (negative ones are client predictions).
-        self.next_action = self.next_action % 0x7fff + 1;
-        self.next_action
-    }
-
-    /// WASD: the direction, echoed with the server's position of the player. During a roll it
-    /// waits for the roll to end; during a sprint it steers the sprint.
-    pub fn on_move_direction(&mut self, req: &MoveDirection) -> Option<MoveDirectionUpdate> {
-        self.wasd = (req.x, req.y);
-        if req.x != 0 || req.y != 0 {
-            self.enter_combat_stance();
-        }
-        if self.rolling() {
-            if self.client.is_some() {
-                // The client keeps WASD input during a roll and walks (or sprints) on when the
-                // roll ends, so it gets the direction now, with its own cell.
-                let (grid_x, grid_y) = self.send_cell(Some((req.x as f32, req.y as f32)));
-                return Some(MoveDirectionUpdate {
-                    header: self.actor_header(),
-                    dir_x: req.x,
-                    dir_y: req.y,
-                    grid_x,
-                    grid_y,
-                    unk_30: MOVE_UPDATE_TRAILER,
-                });
-            }
-            self.pending = Some(Pending::Direction(*req));
-            return None;
-        }
-        if self.sprinting() {
-            if req.x != 0 || req.y != 0 {
-                self.mover.motion = Motion::Sprint {
-                    x: req.x as f32,
-                    y: req.y as f32,
-                    scale: self.sprint_scale,
-                };
-            }
-            return None;
-        }
-        self.turn(*req)
-    }
-
-    /// The player's cell for a message that starts a movement heading `dir`.
-    ///
-    /// In the frame the message applies (`apply_frame`), the client puts the player on the
-    /// centre of the given cell (`0x142149640` / `0x141e41ae0`: a cell other than its own is set
-    /// as its position), then walks on from there in the next frame. So that frame's step is
-    /// from where the client is when the frame begins to that centre. The cell is chosen to make
-    /// it look like a normal step: about the client's speed long and along the new heading.
-    /// A cell from the last report pulled the player back at every turn; the nearest cell made
-    /// steps up to 0.7 cells too long or short.
-    fn send_cell(&self, dir: Option<(f32, f32)>) -> (i32, i32) {
-        if self.client.is_none() {
-            return self.mover.cell();
-        }
-        // Where the client is when the frame begins, and where it would be at its end.
-        let (start, (vx, vy)) = self.predict(self.apply_frame - 1);
-        let natural = ((start.0 + vx).floor() as i32, (start.1 + vy).floor() as i32);
-        match self.turn_cell {
-            TurnCell::Own => return (start.0.floor() as i32, start.1.floor() as i32),
-            TurnCell::Natural => return natural,
-            TurnCell::Heading => {}
-        }
-        // Standing still, the first frame would only go to the centre of the player's own cell
-        // (a dead frame): step to a neighbouring cell at walking speed instead.
-        let speed = match vx.hypot(vy) {
-            s if s > 0.3 => s,
-            _ => self.mover.speed * self.frame_seconds,
-        };
-        let Some((dx, dy)) = dir.filter(|d| d.0.hypot(d.1) > 0.0) else {
-            return natural;
-        };
-        let len = dx.hypot(dy);
-        let (dx, dy) = (dx / len, dy / len);
-        let cost = |(cx, cy): (i32, i32)| {
-            let (sx, sy) = (cx as f32 + 0.5 - start.0, cy as f32 + 0.5 - start.1);
-            let step = sx.hypot(sy);
-            if step < 1e-3 {
-                return f32::MAX;
-            }
-            (step - speed).abs() + speed * (1.0 - (sx * dx + sy * dy) / step)
-        };
-        let (bx, by) = (start.0.floor() as i32, start.1.floor() as i32);
-        let mut best = (natural, cost(natural));
-        for cy in by - 2..=by + 2 {
-            for cx in bx - 2..=bx + 2 {
-                let walkable = self
-                    .walkable
-                    .as_ref()
-                    .is_none_or(|g| poe_game::movement::Walkable::walkable(g, cx, cy));
-                let c = cost((cx, cy));
-                if walkable && c < best.1 {
-                    best = ((cx, cy), c);
-                }
-            }
-        }
-        best.0
-    }
-
-    /// The client's position at the end of server frame `f` and its velocity then: from the
-    /// last walk direction sent while the reports do not yet show it, else from the latest
-    /// report and the measured velocity.
-    fn predict(&self, f: i64) -> ((f32, f32), (f32, f32)) {
-        let Some(r) = self.client else {
-            return ((self.mover.x, self.mover.y), (0.0, 0.0));
-        };
-        let offset = self.frame_offset.unwrap_or(0);
-        let report_frame = r.frame as i64 + offset;
-        if let Some(t) = self.last_turn
-            && f >= t.frame
-            && (self.velocity_from as i64 + offset) < t.frame
-        {
-            let walk = self.mover.speed * self.frame_seconds;
-            let v = (t.dir.0 * walk, t.dir.1 * walk);
-            let n = (f - t.frame) as f32;
-            return ((t.at.0 + v.0 * n, t.at.1 + v.1 * n), v);
-        }
-        let n = (f - report_frame).clamp(0, MAX_LEAD_FRAMES) as f32;
-        let v = self.velocity;
-        ((self.mover.x + v.0 * n, self.mover.y + v.1 * n), v)
-    }
-
-    /// Facing the cursor (as on the official servers): the player faces the cursor, also while
-    /// walking with WASD, except while it walks by click-to-move or rolls (then movement turns
-    /// it). The facing is locked so movement does not turn it; a locked facing cannot be
-    /// changed (SetOrientation is skipped), so a new angle is sent as unlock, then set + lock.
-    fn face_cursor_replies(&mut self) -> Vec<Reply> {
-        let (Some(proj), Some(r)) = (self.face_cursor, self.client) else {
-            return Vec::new();
-        };
-        let locked = self.facing.is_some_and(|f| f.1);
-        let header = self.header();
-        let message = |angle: f32, locked: bool| {
-            Reply::Orientation(SetOrientation {
-                header,
-                angle,
-                locked,
-            })
-        };
-        let click_moving = self.held_dir.is_some()
-            || (self
-                .current
-                .is_some_and(|c| Some(c.skill) == self.move_skill)
-                && self.wasd == (0, 0)
-                && (r.action != 0 || r.action2 != 0));
-        if self.in_roll || click_moving {
-            if locked {
-                let angle = self.facing.map_or(0.0, |f| f.0);
-                self.facing = Some((angle, false));
-                return vec![message(angle, false)];
-            }
-            return Vec::new();
-        }
-        let Some(c) = r.cursor else {
-            return Vec::new();
-        };
-        // Pixels from the window centre, scaled to the 1440-pixel window the map was fitted on.
-        let scale = 1440.0 / c.height as f32;
-        let sx = (c.x as f32 - c.width as f32 / 2.0) * scale;
-        let sy = (c.y as f32 - c.height as f32 / 2.0) * scale;
-        let gx = proj[0] * sx + proj[1] * sy + proj[2];
-        let gy = proj[3] * sx + proj[4] * sy + proj[5];
-        if gx.hypot(gy) < 1.5 {
-            return Vec::new(); // the cursor is on the player
-        }
-        let angle = (gy.atan2(gx) + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU);
-        let turn = self.facing.is_none_or(|(a, _)| {
-            let d = (angle - a).rem_euclid(std::f32::consts::TAU);
-            d.min(std::f32::consts::TAU - d) > FACING_STEP
-        });
-        if locked && !turn {
-            return Vec::new();
-        }
-        self.facing = Some((angle, true));
-        let mut out = Vec::new();
-        if locked {
-            out.push(message(angle, false));
-        }
-        out.push(message(angle, true));
-        out
-    }
-
-    /// A walk direction change. With `turn_timing`, a turn may be held back by one frame: the
-    /// client is put on the centre of the cell it gets, so the turn goes out in whichever of
-    /// the next two frames puts that centre nearer the client's path (a later input in the
-    /// meantime replaces it). Stops and turns from standing still go out at once.
-    fn turn(&mut self, req: MoveDirection) -> Option<MoveDirectionUpdate> {
-        self.pending_turn = None;
-        let moving = self.velocity.0.hypot(self.velocity.1) > 0.3;
-        if self.turn_timing && self.client.is_some() && moving && (req.x != 0 || req.y != 0) {
-            let off_centre = |(x, y): (f32, f32)| (x.floor() + 0.5 - x).hypot(y.floor() + 0.5 - y);
-            let (now, _) = self.predict(self.apply_frame);
-            let (next, _) = self.predict(self.apply_frame + 1);
-            if off_centre(next) + TURN_TIMING_MARGIN < off_centre(now) {
-                debug!(dir = ?(req.x, req.y), "turn held back a frame");
-                self.pending_turn = Some((req, self.apply_frame + 1));
-                return None;
-            }
-        }
-        Some(self.start_direction(&req))
-    }
-
-    fn start_direction(&mut self, req: &MoveDirection) -> MoveDirectionUpdate {
-        self.current = None;
-        self.mover.start(if req.x == 0 && req.y == 0 {
-            Motion::Idle
-        } else {
-            Motion::Direction {
-                x: req.x as f32,
-                y: req.y as f32,
-            }
-        });
-        let (grid_x, grid_y) = self.send_cell(Some((req.x as f32, req.y as f32)));
-        debug!(dir = ?(req.x, req.y), cell = ?(grid_x, grid_y), "move direction");
-        if self.client.is_some() {
-            let len = (req.x as f32).hypot(req.y as f32);
-            self.last_turn = Some(if len > 0.0 {
-                Turn {
-                    frame: self.apply_frame,
-                    at: (grid_x as f32 + 0.5, grid_y as f32 + 0.5),
-                    dir: (req.x as f32 / len, req.y as f32 / len),
-                }
-            } else {
-                // A stop has no position: the client halts about where it is.
-                let (at, _) = self.predict(self.apply_frame);
-                Turn {
-                    frame: self.apply_frame,
-                    at,
-                    dir: (0.0, 0.0),
-                }
-            });
-        }
-        MoveDirectionUpdate {
-            header: self.actor_header(),
-            dir_x: req.x,
-            dir_y: req.y,
-            grid_x,
-            grid_y,
-            unk_30: MOVE_UPDATE_TRAILER,
-        }
-    }
-
-    /// A skill use: Move (click-to-move) or one of the character's skills (dodge roll).
-    /// Returns the action to start on the client; `None` if the skill is not known or the use
-    /// waits for a roll to end.
-    /// A skill use from the client. A held click-to-move repeats the Move use about every
-    /// 70 ms (target flag `0x10`). The client re-aims only the action in its first slot with
-    /// `0x1cb`, not a Move, and a new StartAction restarts the Move and costs most of a
-    /// frame's step. So while the button is held the player walks like WASD (`0x64` toward
-    /// the cursor, sent when the direction changes), and on release the Move goes to the last
-    /// cursor point ([`Player::on_skill_released`]).
-    pub fn on_skill_input(&mut self, req: &UseSkill) -> Vec<Reply> {
-        let repeat = req.target_flags & TARGET_REPEAT != 0;
-        if repeat && Some(req.skill) == self.move_skill && !self.rolling() {
-            self.held_target = Some((req.x, req.y));
-            // The cursor on the player: stop walking.
-            if req.x.abs() + req.y.abs() < HELD_STOP_CELLS {
-                return match self.held_dir.take() {
-                    Some(_) => vec![Reply::Direction(
-                        self.start_direction(&MoveDirection::default()),
-                    )],
-                    None => Vec::new(),
-                };
-            }
-            let len = ((req.x * req.x + req.y * req.y) as f32).sqrt();
-            let dir = (
-                (req.x as f32 * WASD_LENGTH / len).round() as i32,
-                (req.y as f32 * WASD_LENGTH / len).round() as i32,
-            );
-            let client_idle = self.client.is_some_and(|c| c.action == 0 && c.action2 == 0);
-            if let Some(prev) = self.held_dir
-                && !client_idle
-                && same_direction(prev, dir)
-            {
-                return Vec::new();
-            }
-            self.held_dir = Some(dir);
-            let walk = MoveDirection {
-                x: dir.0,
-                y: dir.1,
-                ..Default::default()
+            let Event::Movement(m) = &e.event else {
+                continue;
             };
-            return self.turn(walk).map(Reply::Direction).into_iter().collect();
+            out.extend(self.codec.encode(self.entity_id, m)?);
         }
-        self.held_dir = None;
-        self.held_target = None;
-        self.on_use_skill(req)
-            .map(Reply::Start)
-            .into_iter()
-            .collect()
+        Ok(out)
     }
 
-    /// The skill's input was released: a held click-to-move stops walking and goes to the last
-    /// cursor point (the stop also clears the client's walk direction, which it would
-    /// otherwise resume after the Move).
-    pub fn on_skill_released(&mut self, skill: u32) -> Vec<Reply> {
-        let target = self.held_target.take();
-        if Some(skill) != self.move_skill || self.held_dir.take().is_none() {
-            return Vec::new();
-        }
-        let mut out = vec![Reply::Direction(
-            self.start_direction(&MoveDirection::default()),
-        )];
-        if let Some((x, y)) = target
-            && x.abs() + y.abs() >= HELD_STOP_CELLS
-        {
-            let release = UseSkill {
-                skill,
-                unk_13: 0xff,
-                x,
-                y,
-                ..Default::default()
-            };
-            out.extend(self.start_skill(&release).map(Reply::Start));
-        }
-        out
+    /// Escape menu in a solo game: nothing moves or is answered while paused.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.sim.world.set_paused(paused);
     }
 
-    /// Dev command (the client DLL's overlay, our server only): put the player on `cell`. The
-    /// client checks the cell of a direction update only when the direction is not zero
-    /// (`0x142149640`); in lockstep it then places the player on that cell's centre. So: a
-    /// minimal direction with the cell, then a stop, in the same frame.
-    pub fn teleport(&mut self, cell: (i32, i32)) -> Vec<Reply> {
-        self.wasd = (0, 0);
-        self.held_dir = None;
-        self.held_target = None;
-        self.pending_turn = None;
-        self.last_turn = None;
-        self.mover.place(cell);
-        info!(?cell, "teleport (dev command)");
-        let update = |dir_x| {
-            Reply::Direction(MoveDirectionUpdate {
-                header: self.actor_header(),
-                dir_x,
-                dir_y: 0,
-                grid_x: cell.0,
-                grid_y: cell.1,
-                unk_30: MOVE_UPDATE_TRAILER,
-            })
-        };
-        vec![update(1), update(0)]
+    /// Dev command: put the player on `cell` (reported by the next tick).
+    pub fn teleport(&mut self, cell: (i32, i32)) {
+        self.sim.world.teleport(self.sim.entity, cell);
+    }
+
+    /// The grid cell the server has the player in.
+    pub fn cell(&self) -> (i32, i32) {
+        self.loco().cell()
+    }
+
+    /// The server's exact position in cells.
+    pub fn position(&self) -> (f32, f32) {
+        self.loco().position()
+    }
+
+    pub fn state(&self) -> &poe_game::locomotion::MoveState {
+        self.loco().state()
+    }
+
+    /// Frames ticked so far.
+    pub fn frame(&self) -> u64 {
+        self.sim.world.frame()
+    }
+
+    fn loco(&self) -> &poe_game::locomotion::Locomotion {
+        &self
+            .sim
+            .world
+            .entity(self.sim.entity)
+            .expect("the player entity lives as long as the session")
+            .movement
     }
 
     /// The simulation state for the client DLL's debug link, as `key\tvalue` lines.
-    pub fn debug_state(&self) -> String {
-        let (at, vel) = self.predict(self.apply_frame - 1);
+    pub fn debug_state(&self, report: Option<&crate::sync::ClientReport>) -> String {
+        let l = self.loco();
+        let (x, y) = l.position();
         let mut s = String::new();
         let mut kv = |k: &str, v: String| {
             s.push_str(k);
@@ -849,524 +202,33 @@ impl Player {
             s.push_str(&v);
             s.push('\n');
         };
-        kv("apply_frame", self.apply_frame.to_string());
-        kv("synced", self.synced.to_string());
-        kv("fresh", self.fresh.to_string());
-        kv("frame_offset", format!("{:?}", self.frame_offset));
+        kv("frame", self.frame().to_string());
+        kv("server_pos", format!("{x:.3} {y:.3}"));
+        kv("state", format!("{:?}", l.state()));
+        kv("wasd", format!("{} {}", l.wasd().0, l.wasd().1));
+        kv("sprint_held", l.sprint_held().to_string());
+        kv("combat_stance", l.in_combat_stance().to_string());
+        kv("paused", self.sim.world.paused().to_string());
         kv(
-            "server_pos",
-            format!("{:.3} {:.3}", self.mover.x, self.mover.y),
+            "skills",
+            self.skills
+                .iter()
+                .map(|s| format!("{}={:#x}", s.id_name, s.id))
+                .collect::<Vec<_>>()
+                .join(" "),
         );
-        kv("predicted_pos", format!("{:.3} {:.3}", at.0, at.1));
-        kv("predicted_vel", format!("{:.4} {:.4}", vel.0, vel.1));
-        if let Some(r) = &self.client {
+        if let Some(r) = report {
             kv("report_frame", r.frame.to_string());
             kv("report_pos", format!("{:.3} {:.3}", r.x, r.y));
             kv(
                 "report_action",
                 format!("{:#06x} {:#06x}", r.action, r.action2),
             );
+            kv(
+                "drift_cells",
+                format!("{:.2}", crate::sync::distance((x, y), (r.x, r.y))),
+            );
         }
-        kv(
-            "velocity",
-            format!("{:.4} {:.4}", self.velocity.0, self.velocity.1),
-        );
-        kv("wasd", format!("{} {}", self.wasd.0, self.wasd.1));
-        kv("held_dir", format!("{:?}", self.held_dir));
-        kv(
-            "last_turn",
-            match &self.last_turn {
-                Some(t) => format!(
-                    "frame {} at {:.3} {:.3} dir {:.3} {:.3}",
-                    t.frame, t.at.0, t.at.1, t.dir.0, t.dir.1
-                ),
-                None => "-".into(),
-            },
-        );
-        kv(
-            "pending_turn",
-            format!("{:?}", self.pending_turn.map(|(_, f)| f)),
-        );
-        kv("turn_cell", format!("{:?}", self.turn_cell));
-        kv("turn_timing", self.turn_timing.to_string());
-        kv("face_cursor", self.face_cursor.is_some().to_string());
-        kv("facing", format!("{:?}", self.facing));
-        kv("in_roll", self.in_roll.to_string());
-        kv("sprint_held", self.sprint_held.to_string());
-        kv(
-            "current_action",
-            format!("{:?}", self.current.map(|c| c.action_id)),
-        );
-        kv("paused", self.paused.to_string());
         s
-    }
-
-    /// The client's aim (cursor) report. Official servers echo a cell in the next frame as
-    /// SetAimTarget, which turns the player toward it; entity aims (mode 3) are not echoed.
-    /// The player acted (moved or used a skill): it enters combat stance, sent in the next
-    /// frame. Official servers do it with the first Move; that WASD movement does the same is
-    /// an assumption.
-    fn enter_combat_stance(&mut self) {
-        if !self.combat_stance {
-            self.combat_stance = true;
-            self.stance_changed = true;
-        }
-    }
-
-    fn stance_delta(&self) -> ComponentDelta {
-        ComponentDelta {
-            // Official: after all entities (order key 0xffffffff).
-            header: SimulationHeader {
-                entity_id: self.entity_id,
-                unk_14: 0xffff_ffff,
-                unk_18: 0,
-                unk_1a: 0,
-            },
-            component: PLAYER_COMPONENT,
-            delta: PlayerDelta {
-                combat_stance: Some(self.combat_stance),
-                ..Default::default()
-            }
-            .encode(),
-        }
-    }
-
-    pub fn on_aim_target(&mut self, req: &AimTarget) {
-        if let Some(cell) = req.cell {
-            if !self.aim_seen {
-                info!("the client reports its aim: facing follows AimTarget");
-            }
-            self.aim_seen = true;
-            self.aim = Some(cell);
-        }
-    }
-
-    pub fn on_use_skill(&mut self, req: &UseSkill) -> Option<StartAction> {
-        if self.rolling() {
-            // Moves wait for the roll to end (the latest one wins); a second roll is ignored.
-            if Some(req.skill) == self.move_skill {
-                self.pending = Some(Pending::Skill(*req));
-            }
-            return None;
-        }
-        self.start_skill(req)
-    }
-
-    fn start_skill(&mut self, req: &UseSkill) -> Option<StartAction> {
-        let (cx, cy) = self.mover.cell();
-        // Without a target entity the location is relative to the player's cell.
-        let (tx, ty) = match req.target_entity {
-            Some(_) => (req.x, req.y),
-            None => (cx + req.x, cy + req.y),
-        };
-        if Some(req.skill) == self.move_skill {
-            self.mover.start(Motion::MoveTo {
-                x: tx as f32 + 0.5,
-                y: ty as f32 + 0.5,
-            });
-        } else if let Some(skill) = self.skills.iter().find(|s| s.id == req.skill) {
-            let distance = skill
-                .granted
-                .constant_stat("dodge_roll_base_travel_distance")
-                .map_or(ROLL_DEFAULT_DISTANCE, |d| d as f32);
-            info!(skill = %skill.id_name, target = ?(tx, ty), "skill used");
-            let (dx, dy) = ((tx - cx) as f32, (ty - cy) as f32);
-            self.in_roll = dx != 0.0 || dy != 0.0;
-            self.roll_seen = false;
-            self.roll_frames = 0;
-            self.roll_dir = (dx, dy);
-            self.mover.start(if dx == 0.0 && dy == 0.0 {
-                Motion::Idle
-            } else {
-                Motion::Roll {
-                    x: dx,
-                    y: dy,
-                    remaining: distance,
-                    elapsed: 0.0,
-                }
-            });
-            self.pending = None;
-        } else {
-            return None;
-        }
-        self.enter_combat_stance();
-        let action_id = self.next_action_id();
-        self.current = Some(Current {
-            action_id,
-            skill: req.skill,
-        });
-        let (cx, cy) = self.send_cell(Some(((tx - cx) as f32, (ty - cy) as f32)));
-        // Actions (click-to-move, rolls) move differently: predict from reports again.
-        self.last_turn = None;
-        Some(StartAction {
-            header: self.header(),
-            flags: 0,
-            target_entity: req.target_entity,
-            grid_x: cx,
-            grid_y: cy,
-            target_x: tx,
-            target_y: ty,
-            skill: req.skill,
-            action_id,
-            unk_3c: req.unk_13,
-        })
-    }
-
-    /// New target for the running skill (roll or sprint steering, a held click): the server
-    /// moves its own target and tells the client (in lockstep it does not apply it itself).
-    pub fn on_update_target(&mut self, req: &UpdateSkillTarget) -> Option<UpdateActionTarget> {
-        let current = self.current.filter(|c| c.skill == req.skill)?;
-        Some(self.retarget(current, req.x, req.y))
-    }
-
-    /// Re-aims the running action at a location relative to the player's cell.
-    fn retarget(&mut self, current: Current, rx: i32, ry: i32) -> UpdateActionTarget {
-        let (cx, cy) = self.mover.cell();
-        let (tx, ty) = (cx + rx, cy + ry);
-        match &mut self.mover.motion {
-            Motion::Roll { x, y, .. } | Motion::Sprint { x, y, .. } if rx != 0 || ry != 0 => {
-                *x = rx as f32;
-                *y = ry as f32;
-                self.roll_dir = (*x, *y);
-            }
-            Motion::MoveTo { .. } => {
-                self.mover.start(Motion::MoveTo {
-                    x: tx as f32 + 0.5,
-                    y: ty as f32 + 0.5,
-                });
-            }
-            _ => {}
-        }
-        UpdateActionTarget {
-            header: self.header(),
-            action_id: current.action_id,
-            x: tx,
-            y: ty,
-        }
-    }
-
-    /// The sprint key: echoed to the client. Releasing it ends a sprint.
-    pub fn on_sprint_input(&mut self, req: &SprintInput) -> Vec<Reply> {
-        self.sprint_held = req.held;
-        let mut out = vec![Reply::Sprint(SprintState {
-            header: self.header(),
-            held: req.held,
-        })];
-        if !req.held && self.sprinting() {
-            debug!(cell = ?self.mover.cell(), "sprint ended");
-            self.mover.start(Motion::Idle);
-            self.current = None;
-            out.extend(self.resume(0));
-        }
-        out
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn player() -> Player {
-        let roll = OwnedSkill {
-            id: 1,
-            granted: GrantedSkill {
-                effect: 25,
-                effect_level_row: 899,
-                stat_set_rows: vec![905],
-                action_type: Some(60748),
-                constant_stats: vec![("dodge_roll_base_travel_distance".into(), 46)],
-                implicit_stats: Vec::new(),
-            },
-            id_name: "DodgeRollPlayer".into(),
-            stats: Vec::new(),
-        };
-        let mut p = Player::new(1, (100, 100), 37.0, vec![roll], Some(0x2000_2909));
-        // Already in combat stance, so the movement tests only see movement replies.
-        p.combat_stance = true;
-        p
-    }
-
-    #[test]
-    fn first_action_enters_combat_stance_once() {
-        let mut p = player();
-        p.combat_stance = false;
-        p.on_use_skill(&use_skill(0x2000_2909, 5, 0)).unwrap();
-        let out = p.tick(0.033);
-        assert!(matches!(&out[..], [Reply::Component(c)]
-            if c.component == 6 && c.delta == [0x00, 0x04, 0x01] && c.header.unk_14 == 0xffff_ffff));
-        p.on_use_skill(&use_skill(0x2000_2909, 0, 5)).unwrap();
-        assert!(
-            !p.tick(0.033)
-                .iter()
-                .any(|r| matches!(r, Reply::Component(_)))
-        );
-    }
-
-    fn use_skill(skill: u32, x: i32, y: i32) -> UseSkill {
-        UseSkill {
-            skill,
-            unk_13: 0xff,
-            x,
-            y,
-            ..Default::default()
-        }
-    }
-
-    fn run_until_idle(p: &mut Player) -> Vec<Reply> {
-        let mut out = Vec::new();
-        for _ in 0..200 {
-            out.extend(p.tick(0.033));
-            if !p.mover.is_moving() {
-                break;
-            }
-        }
-        out
-    }
-
-    #[test]
-    fn held_click_walks_like_wasd_and_ends_at_the_cursor() {
-        let mut p = player();
-        let first = p.on_skill_input(&use_skill(0x2000_2909, 30, 0));
-        assert!(matches!(&first[..], [Reply::Start(_)]));
-        let held = |x, y| UseSkill {
-            target_flags: 0x10,
-            ..use_skill(0x2000_2909, x, y)
-        };
-        // Repeats walk toward the cursor (direction scaled like WASD)...
-        let r = p.on_skill_input(&held(30, 0));
-        assert!(matches!(&r[..], [Reply::Direction(d)] if (d.dir_x, d.dir_y) == (180, 0)));
-        // ...but only when the direction changes.
-        assert!(p.on_skill_input(&held(31, 1)).is_empty());
-        let r = p.on_skill_input(&held(0, 20));
-        assert!(matches!(&r[..], [Reply::Direction(d)] if (d.dir_x, d.dir_y) == (0, 180)));
-        // Release: stop the walk, then move to the last cursor point.
-        let r = p.on_skill_released(0x2000_2909);
-        assert!(matches!(&r[..],
-            [Reply::Direction(d), Reply::Start(a)]
-                if (d.dir_x, d.dir_y) == (0, 0) && (a.target_x, a.target_y) == (100, 120)));
-        // A plain click release does nothing.
-        p.on_skill_input(&use_skill(0x2000_2909, 5, 5));
-        assert!(p.on_skill_released(0x2000_2909).is_empty());
-    }
-
-    #[test]
-    fn click_to_move_targets_relative_cells() {
-        let mut p = player();
-        let a = p.on_use_skill(&use_skill(0x2000_2909, 10, -5)).unwrap();
-        assert_eq!((a.grid_x, a.grid_y), (100, 100));
-        assert_eq!((a.target_x, a.target_y), (110, 95));
-        assert_eq!((a.action_id, a.unk_3c), (1, 0xff));
-        run_until_idle(&mut p);
-        assert_eq!(p.mover.cell(), (110, 95));
-        // Action ids increase.
-        assert_eq!(
-            p.on_use_skill(&use_skill(0x2000_2909, 1, 0))
-                .unwrap()
-                .action_id,
-            2
-        );
-    }
-
-    #[test]
-    fn unknown_skills_are_ignored() {
-        assert!(player().on_use_skill(&use_skill(0x1234, 1, 1)).is_none());
-    }
-
-    #[test]
-    fn roll_uses_the_travel_distance_and_pauses() {
-        let mut p = player();
-        p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
-        assert!(matches!(p.mover.motion, Motion::Roll { remaining, .. } if remaining == 46.0));
-        p.paused = true;
-        p.tick(0.033);
-        assert_eq!(p.mover.cell(), (100, 100));
-        p.paused = false;
-        run_until_idle(&mut p);
-        assert_eq!(p.mover.cell(), (100, 146));
-    }
-
-    #[test]
-    fn input_during_a_roll_waits_for_its_end() {
-        let mut p = player();
-        p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
-        p.tick(0.033);
-        // A click while rolling does not interrupt the roll; it starts when the roll ends.
-        assert!(p.on_use_skill(&use_skill(0x2000_2909, 20, 0)).is_none());
-        let out = run_until_idle(&mut p);
-        assert!(matches!(&out[..], [Reply::Start(a)]
-            if a.header.unk_14 == AFTER_ENTITIES && (a.grid_x, a.grid_y) == (100, 146)
-                && (a.target_x, a.target_y) == (120, 146)));
-        run_until_idle(&mut p);
-        assert_eq!(p.mover.cell(), (120, 146));
-    }
-
-    #[test]
-    fn roll_steers_and_turns_into_a_sprint_while_held() {
-        let mut p = player();
-        let start = p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
-        let held = p.on_sprint_input(&SprintInput {
-            player: 0,
-            held: true,
-        });
-        assert!(matches!(&held[..], [Reply::Sprint(s)] if s.held));
-        // Steering towards +x.
-        let t = p
-            .on_update_target(&UpdateSkillTarget {
-                x: 30,
-                y: 0,
-                skill: 1,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!((t.action_id, t.x, t.y), (start.action_id, 130, 100));
-        for _ in 0..40 {
-            p.tick(0.033);
-        }
-        assert!(p.sprinting());
-        let (x, _) = p.mover.cell();
-        let out = p.on_sprint_input(&SprintInput {
-            player: 0,
-            held: false,
-        });
-        assert!(matches!(&out[..], [Reply::Sprint(s)] if !s.held));
-        assert!(!p.mover.is_moving());
-        assert!(x > 140);
-    }
-
-    fn report(x: f32, y: f32, action: u16) -> Option<crate::sync::ClientReport> {
-        Some(crate::sync::ClientReport {
-            frame: 0,
-            x,
-            y,
-            action,
-            action2: 0,
-            flags: 0,
-            cursor: None,
-            at: std::time::Instant::now(),
-        })
-    }
-
-    #[test]
-    fn faces_the_cursor_locked_and_unlocks_for_rolls() {
-        let mut p = player();
-        p.face_cursor = Some([0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]);
-        let report = |x: i16, y: i16| crate::sync::ClientReport {
-            frame: 1,
-            x: 100.5,
-            y: 100.5,
-            action: 0,
-            action2: 0,
-            flags: 0,
-            cursor: Some(crate::sync::Cursor {
-                x,
-                y,
-                width: 2560,
-                height: 1440,
-            }),
-            at: std::time::Instant::now(),
-        };
-        let facing = |out: &[Reply]| -> Vec<(f32, bool)> {
-            out.iter()
-                .filter_map(|r| match r {
-                    Reply::Orientation(o) => Some((o.angle, o.locked)),
-                    _ => None,
-                })
-                .collect()
-        };
-        // Cursor up on the screen: grid (+x, +y), facing about 3π/4, locked.
-        p.apply_report(Some(report(1280, 300)));
-        let f = facing(&p.tick(0.033));
-        assert!(
-            matches!(&f[..], [(a, true)] if (a - 2.356).abs() < 0.1),
-            "{f:?}"
-        );
-        // Same cursor: nothing new.
-        assert!(facing(&p.tick(0.033)).is_empty());
-        // A new direction: unlock, then set and lock.
-        p.apply_report(Some(report(700, 720)));
-        let f = facing(&p.tick(0.033));
-        assert!(
-            matches!(&f[..], [(_, false), (a, true)] if (a - 3.93).abs() < 0.15),
-            "{f:?}"
-        );
-        // A dodge roll: unlocked so the roll turns the player.
-        p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
-        let f = facing(&p.tick(0.033));
-        assert!(matches!(&f[..], [(_, false)]), "{f:?}");
-    }
-
-    #[test]
-    fn turn_timing_holds_a_turn_for_a_frame_nearer_a_cell_centre() {
-        let mut p = player();
-        p.turn_timing = true;
-        p.turn_cell = TurnCell::Natural;
-        let at = |frame, y| crate::sync::ClientReport {
-            frame,
-            x: 100.5,
-            y,
-            action: 0,
-            action2: 0x2909,
-            flags: 0,
-            cursor: None,
-            at: std::time::Instant::now(),
-        };
-        // Walking +y at 1.233 cells per frame; reports for frames 1 and 2 have arrived.
-        p.apply_report(Some(at(1, 100.667)));
-        p.apply_report(Some(at(2, 101.9)));
-        p.observe_frames(2);
-        p.apply_frame = 3;
-        // At the end of frame 3 the player would be at y 103.13 (0.37 off a centre), at the
-        // end of frame 4 at 104.37 (0.13 off): the turn waits for frame 4.
-        let turn = MoveDirection {
-            x: 180,
-            ..Default::default()
-        };
-        assert!(p.on_move_direction(&turn).is_none());
-        p.apply_frame = 3;
-        assert!(p.tick(0.033).is_empty());
-        p.apply_frame = 4;
-        let out = p.tick(0.033);
-        assert!(
-            matches!(&out[..], [Reply::Direction(d)] if (d.dir_x, d.grid_x, d.grid_y) == (180, 100, 104))
-        );
-    }
-
-    #[test]
-    fn with_reports_the_roll_ends_with_the_clients() {
-        let mut p = player();
-        p.on_use_skill(&use_skill(1, 0, 30)).unwrap();
-        assert!(p.on_use_skill(&use_skill(0x2000_2909, 20, 0)).is_none());
-        // The client rolls for 40 frames (longer than the server's simulation) and ends up
-        // elsewhere than the server's straight roll.
-        for i in 0..40 {
-            p.apply_report(report(100.5, 100.5 + i as f32, 0xed4c));
-            assert!(p.tick(0.033).is_empty(), "frame {i}");
-        }
-        p.apply_report(report(103.5, 139.5, 0));
-        let out = p.tick(0.033);
-        // The waiting click starts at the start of the next frame, from the client's position:
-        // standing still, its first step goes to the neighbouring cell toward the target.
-        assert!(matches!(&out[..], [Reply::Start(a)]
-            if a.header.unk_14 == 0 && (a.grid_x, a.grid_y) == (104, 139)
-                && (a.target_x, a.target_y) == (123, 139)));
-    }
-
-    #[test]
-    fn wasd_echoes_the_direction_with_the_cell() {
-        let mut p = player();
-        let r = p
-            .on_move_direction(&MoveDirection {
-                x: 180,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!((r.dir_x, r.dir_y, r.grid_x, r.grid_y), (180, 0, 100, 100));
-        for _ in 0..10 {
-            p.tick(0.033);
-        }
-        let r = p.on_move_direction(&MoveDirection::default()).unwrap();
-        assert_eq!((r.dir_x, r.grid_y), (0, 100));
-        assert!(r.grid_x > 110);
-        assert!(!p.mover.is_moving());
     }
 }

@@ -1,6 +1,6 @@
 # Movement
 
-Specification of how the client moves the player and what an **official** server sends back, from six read-only official capture sessions (`dumps/0.5.5e/captures/official/`, 2026-10-14..17) and the client's code (Ghidra). The tool that produced every sequence below is `scripts/re/movement_sequences.py` (`list`, `events`, `scen`, `never`; see [Reproducing](#reproducing)). Code: `servers/instance-server/src/player.rs` (session state, replies), `crates/poe-game/src/locomotion.rs` (the movement component built from this spec, [instance-world.md](../architecture/instance-world.md)), `movement.rs` and `pathfinding.rs` (the simulation), messages in `modules/protocol/poe-proto/src/instance.rs` and `skill.rs`.
+Specification of how the client moves the player and what an **official** server sends back, from six read-only official capture sessions (`dumps/0.5.5e/captures/official/`, 2026-10-14..17) and the client's code (Ghidra). The tool that produced every sequence below is `scripts/re/movement_sequences.py` (`list`, `events`, `scen`, `never`; see [Reproducing](#reproducing)). Code: `crates/poe-game/src/locomotion.rs` (the movement component built from this spec, [instance-world.md](../architecture/instance-world.md)), `world.rs`, `movement.rs` and `pathfinding.rs` (the simulation), `servers/instance-server/src/{movement,player}.rs` (the packet glue, [below](#server-implementation)), messages in `modules/protocol/poe-proto/src/instance.rs` and `skill.rs`.
 
 Captures are from **WASD input mode** only. Real click-to-move, held clicks, standing rolls, chained rolls and stance changes are **not** in them; see the [gap list](#gap-list).
 
@@ -155,7 +155,7 @@ All numbers are from the official captures; `movement_sequences.py scen --scenar
 - Six sessions, ~630 direction inputs: every `0x63` has exactly one `0x64` (at most one input per session, the last of the capture, is unanswered).
 - **Start**: `f: 0x63 v` → `f+1: 0x64 v` with the cell where the player is (e.g. `0x63 (-127,-127)` at f856 → `0x64 (-127,-127) cell (284,1141)` at f857). **Turn**: same, new vector. **Stop**: `0x63 (0,0)` → `0x64 (0,0) cell`.
 - No other message accompanies WASD. A stance delta (`0x2f9`) is not sent on the first Move in the 2026-10-15/17 sessions (it comes at entry, see [Stance](#combat-stance)).
-- The reply cell moves ~1.23 cells per frame between replies; the client turns exactly when it receives `0x64` (frame `t+1`, see [current implementation](#current-server-implementation-to-be-replaced) for what that costs).
+- The reply cell moves ~1.23 cells per frame between replies; the client turns exactly when it receives `0x64` (frame `t+1`) and puts the entity on the centre of the cell it is given, so the server sends its own simulated cell (as the official one does) and keeps the simulation exact instead of correcting the client.
 - While rolling the server still answers each `0x63` immediately with a walking `0x64` (12 inputs in rolls).
 
 ### Click-to-move (no real data)
@@ -166,7 +166,7 @@ Rolls in the captures: 15 (all started while a WASD direction was held; none sta
 - **Moving** (all 15): the batch above. The roll's direction is the cursor offset from the `0x1a5`; `0x1c8.target = cell + offset` (e.g. `(371,1052) + (15,-35) = (386,1017)`), not clamped to 46 cells (offsets of 19..58 cells seen; the client rolls its fixed 46 cells).
 - **Steering**: every `0x1a8` (every 2 frames, key held or not, until the roll ends) → one `0x1af` with `x,y = server cell + offset`. Example (sprint): `0x1a8 (23,-27)` → `0x1af (430,1036)` with the server cell `(407,1063)`.
 - **Chained** (second roll 28/34/31/34 frames after the previous one; only taps): each is a full roll batch, the second may be delayed 2 batches (above).
-- Our own server's roll messages are different from this (`0x1cb` steering, no `0x1ae`/`0x1ca`/stat set): see [current implementation](#current-server-implementation-to-be-replaced).
+- Our server sends exactly this batch ([implementation](#server-implementation)); it no longer uses `0x1cb` steering.
 
 ### Sprint
 Hold Space after the roll: the sequences above (`t0+15`, `t0+30`, `t0+35`, stream, end). `0x2e6` is sent once (on down) and once (on up); the client repeats `0x1a5` with target flags `0x13` and flags 0 only in the 2026-10-14 22:23 session (7 repeats; none in the 2026-10-17 session), each acked with `0x1ae` flags 0, target flags `0x17`.
@@ -192,27 +192,33 @@ cd modules/protocol && cargo run -p poe-proto --example check_capture -- opcodes
 ```
 The decoders in the script match `poe-proto`'s (`skill.rs` has round-trip tests built from capture bytes). The script needs no dependencies; stat and action names come from `GameFiles/poe-hook-data/` (written by `cargo xtask dll-data`) when present.
 
-## Current server implementation (to be replaced)
-This is what the server does today (WP2.3 replaces it with the World/movement component driven by the sequences above).
-- **Held click** is driven like WASD: `0x1a5` repeats are answered with `0x64` toward the cursor (vector length 180), `0x1ad` with `0x64 (0,0)` and a StartAction. Official servers use `0x1ae`/`0x1af`/`0x1b2` here (unverified for Move, see above).
-- **Roll**: StartAction + simulated `Motion::Roll` (46 cells, speed profile above), steered with `0x1cb` (never sent officially); WASD inputs during the roll are held back (`Pending`) and started when the roll ends. Official: `0x64` immediately, steering by `0x1af`, stats `is_dodge_rolling` and the stun thresholds, and the two ends (16/30 frames).
-- **Sprint**: `0x2e7` echo and, with the buff system missing, only a client-position fallback. Official: stats + three buffs at `t0+15` and a `0x64` stream.
-- **`TurnCell`** (`[instance] turn_cell`, `natural`/`own`/`heading`): picks the cell placed in a direction-change `0x64` so the client's turn frame keeps its step (a `0x64`/`0x1c8` sent after server frame t applies in client frame t+1 and puts the player on the centre of the cell it is given). Official servers just send their own cell.
-- **`turn_timing`**: holds a turn back one frame when the client's path is nearer a cell centre.
-- **`face_cursor`**, `cursor_to_grid`: PSY2 reports + `0x1df` lock. Official servers send `0x1dc` per `0x62`.
-- **PSY2 / position sync** (`servers/instance-server/src/sync.rs`, `position_sync.rs`): the DLL reports the client position every frame over UDP; the server adopts it while fresh (250 ms) and uses the reported action to know when a roll ended. A dev bridge, to become a drift checker.
-- Server frame time: the A* is flat arrays with a 24-cell margin; run `--release`. No server collision (2026-10-14): straight lines; the client position is taken from reports.
-- Details of the measured behaviour of those parts (turn-frame step errors, prediction after a turn) are kept in git history (`docs/protocol/movement.md` before 2026-10-20).
+## Server implementation
+Since WP2.3 the instance server does not compute movement itself. It is thin glue around the `poe-game` World (design: [instance-world.md](../architecture/instance-world.md)):
+
+- **Input.** `servers/instance-server/src/movement.rs` `client_input` maps a client packet, looked up by its name in the opcode table, to a `MoveInput`: `0x63` MoveDirection, `0x1a5` UseSkill, `0x1a8` UpdateSkillTarget, `0x1ac` SkillInputEnd, `0x1ad` SkillReleased, `0x2e6` SprintInput, `0x62` AimTarget (mode 2 `Aim`, mode 3 `AimEntity`, modes 0/1 `AimMode`). `Player::input` queues it in the session's `World`. Nothing is answered at once.
+- **Tick.** The session's frame timer (`[instance] tick_ms`) calls `World::tick()`. The events of that frame are encoded by `Codec::encode` (opcodes from `instance.toml`, stat keys from the game's `Stats` table, skill ids and the walking speed from the character class and game data, `[movement] sprint_buff_rows` from config) and sent in order, followed by the `0x2f4` SimulationTick marker. So a reply to an input arrives in the first batch after the input (`r+0`), as on the official server; the batch number is the `World`'s frame.
+- **Event to message.** `MoveAck` is `0x64` (header `(entity, entity, 9, 0)`, the unscaled vector, or ×550/180 while sprinting), `ActionStart` is `0x1c8` (flags `0x410` for rolls and attacks, 0 for Move), `ActionEvent` is `0x1ca`, `Stats` is `0x1d3` set 0, `SkillAck` is `0x1ae` (the "confirmed" target flag `0x04` is set here), `TargetAck` `0x1af`, `InputEndAck` `0x1b1`, `ReleasedAck` `0x1b2`, `SprintState` `0x2e7`, `BuffAdded`/`BuffRemoved` `0x1eb`/`0x1ec`, `AimEcho` `0x1dc` kind 0, `StanceChanged` a `0x2f9` Player component delta (header `(entity, 0xffffffff, 0, 0)`), `Teleport` a `0x64` with direction `(1, 0)` and the new cell followed by one with `(0, 0)`. All other headers are `(entity, 0, 0, 0)`.
+- **`0x1ca` is skipped** until `ActionEvent = 0x01ca` is added to the protocol repository's `instance.toml` (the glue defines the empty message locally and checks the table). The client only decrements a counter for it.
+- **Terrain.** The world runs on the client's walkability grid dump (`spawn::client_grid`), or without collision (`Open`) when the dump is missing: A* for click-to-move, wall sliding for the rest. The server's position is authoritative.
+- **Pause.** `0x1ff` PauseRequest calls `World::set_paused`: frames still count (and the tick marker is still sent), but nothing moves or is answered, and inputs wait.
+- **Unknown or unanswered.** `0x1aa` UpdateSkillTargetEntity is decoded and logged only (there are no entities to target yet, so no `0x1b0`). A movement packet the table does not know ends the batch as any unknown client message does.
+- **Removed.** The earlier workarounds (turn-cell choice, turn timing, cursor facing with its projection, the use of `0x1cb` and `0x1df`, held-click-as-WASD, the roll `Pending` queue) are gone together with their three server commands. Details of what they measured stay in git history (`docs/protocol/movement.md` before 2026-10-20).
+
+### Drift checker (PSY2)
+The DLL's per-frame position report (`servers/instance-server/src/sync.rs`, DLL side `position_sync.rs`) no longer touches the simulation. With `[dev] drift_check = true` (default off; needs `[dev] position_sync` and the DLL) the session logs, every `[dev] drift_interval_ms` (default 1000 ms), one `drift` line at info level:
+
+`drift server=x,y client=x,y cells=<now> max_cells=<largest since the last line> samples=<n> state=<server movement state>`
+
+`cells` is the distance in grid cells between the server's exact position and the client's latest report (reports older than 250 ms count as none). The client trails the server by the reply latency, about two frames: expect up to ~2.5 cells while walking and ~4 while sprinting, and about 0 standing still. Real drift is a distance that grows over time or stays high while standing. A warning is logged once if the checker is on and no reports arrive within 5 s. The overlay's Server tab shows the same distance (`drift_cells`). Server-side only; nothing is sent to the client.
 
 ## Lag
 - **No lag compensation to turn on.** The world is always lockstep, and the client plays simulation frames as they arrive. `0x1d` PingReply only feeds the latency display. Lag therefore comes from the server: late frames freeze movement.
 - **Server frame time.** A debug build's A* (box-shaped search, heap allocations per node) took ~108 ms per 33 ms frame on the Riverbank grid. The A* uses flat arrays over a box around start and goal (`MARGIN` 24 cells) with a node budget (~0.5 ms debug). The server warns when a frame takes longer than the tick. Run `--release` for play.
 - **Unknown client messages end the parse of their whole batch** (no length prefix): before `0x1a8` was decoded, a `0x1a5` in the same batch was lost, which was one cause of input lag. `SkillInputEnd` (`0x1ac`) stays in `[client_body_sizes]` for the same reason.
-- **Reports are the player's position** (dev bridge): once position reports have arrived in a session the server never moves the player itself; a gap keeps the last report.
-- **Report target.** The DLL sends reports to `position_sync_port` (set by `cargo xtask deploy-client` from `[instance] public_port`); the server warns when none arrive within 5 s.
+- **Report target.** The DLL sends reports (and the debug link) to `position_sync_port` (set by `cargo xtask deploy-client` from `[network.instance] public_port`); only the [drift checker](#drift-checker-psy2) reads them.
 
 ## Pause
-`0x1ff` PauseRequest also pauses the server simulation (`Player::paused`). Nothing moves on either side while the escape menu is open in a solo game. Verified: with D held, Escape after 0.7 s, Escape again 2 s later, then D released 0.7 s after that. The client stopped for the 2 s, and both sides ended one cell apart, (330, 1106) on the server and (331, 1105) on the client.
+`0x1ff` PauseRequest also pauses the server simulation (`World::set_paused`). Nothing moves on either side while the escape menu is open in a solo game. Verified: with D held, Escape after 0.7 s, Escape again 2 s later, then D released 0.7 s after that. The client stopped for the 2 s, and both sides ended one cell apart, (330, 1106) on the server and (331, 1105) on the client.
 
 ## Saved location
 - When a session ends (exit to character selection, log out, closing the game or a dropped connection), the instance server stores the character's area, the area's terrain seed and its grid cell (`poe_store::Location`, migration `0005_character_location.sql`).
