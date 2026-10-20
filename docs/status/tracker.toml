@@ -1,0 +1,453 @@
+# Project status tracker. The single source for the progress tables in README.md.
+#
+# Edit this file, then run `cargo xtask tracker` to re-render README.md between the
+# `<!-- tracker:start -->` and `<!-- tracker:end -->` markers (`cargo xtask tracker --check`
+# fails if the README is stale).
+#
+# Links are relative to the repository root (they are rendered into README.md).
+# status = "done" (1.0) | "partial" (0.5) | "missing" (0) | "planned" (0).
+#   missing = needed and not started or known broken; planned = scheduled in a plan document.
+
+current_task = "Phase 2: movement rewrite (WP2.1 capture analysis)"
+current_task_link = "docs/plans/orchestration-2026-10.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Login"
+link = "docs/protocol/login.md"
+
+[[subsystem.item]]
+name = "Key exchange and encryption (DLL crypto bypass)"
+status = "done"
+link = "docs/re/crypto.md"
+
+[[subsystem.item]]
+name = "Authenticate, leagues, character list, hand-off to the instance server"
+status = "done"
+link = "docs/protocol/login.md"
+
+[[subsystem.item]]
+name = "Character creation, selection and deletion"
+status = "done"
+
+[[subsystem.item]]
+name = "CharacterList entry fields and creation error codes"
+status = "partial"
+note = "some entry fields are still unexplained; refusal codes unknown"
+link = "docs/status/history.md"
+
+[[subsystem.item]]
+name = "Standalone email/password login screen"
+status = "planned"
+note = "RE spike WP3.1"
+link = "docs/plans/orchestration-2026-10.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Accounts"
+link = "docs/architecture/accounts.md"
+
+[[subsystem.item]]
+name = "Machine-hash accounts with SQLite storage (accounts, characters, unique names)"
+status = "done"
+link = "docs/architecture/accounts.md"
+
+[[subsystem.item]]
+name = "Tickets, resume tickets and login sessions (many accounts at once)"
+status = "done"
+
+[[subsystem.item]]
+name = "Passwords (argon2) and chosen account names"
+status = "planned"
+note = "WP3.2, new crate poe-accounts"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Launcher and web tokens, per-cluster"
+status = "planned"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Admin role in the database (replaces the config list)"
+status = "planned"
+
+[[subsystem.item]]
+name = "Duplicate login kicks the old session"
+status = "planned"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Instances/Transfers"
+link = "docs/architecture/instance-world.md"
+
+[[subsystem.item]]
+name = "Instance directory (find, create, join, leave, close, idle expiry)"
+status = "done"
+
+[[subsystem.item]]
+name = "Transfers between instances (command, overlay Instances page)"
+status = "done"
+link = "docs/guides/server-admin.md"
+
+[[subsystem.item]]
+name = "Forced topology and orientation per instance"
+status = "done"
+
+[[subsystem.item]]
+name = "Saved location (area, seed, cell) restored on login"
+status = "done"
+
+[[subsystem.item]]
+name = "Waypoints and area transitions; transfers without character select"
+status = "missing"
+note = "needs an official capture of a zone change"
+link = "docs/status/history.md"
+
+[[subsystem.item]]
+name = "Instance actor (one World per instance)"
+status = "planned"
+note = "WP2.2 / WP3.6"
+link = "docs/plans/orchestration-2026-10.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Movement"
+link = "docs/protocol/movement.md"
+
+[[subsystem.item]]
+name = "WASD and click-to-move (held click, turns)"
+status = "partial"
+note = "works, but via 0x1cb/0x1df and workarounds that official servers never use"
+link = "docs/protocol/movement.md"
+
+[[subsystem.item]]
+name = "Dodge roll"
+status = "partial"
+note = "roll speed profile only; no official reply sequence"
+
+[[subsystem.item]]
+name = "Facing the cursor"
+status = "partial"
+note = "turn_cell / turn_timing / face_cursor workarounds"
+
+[[subsystem.item]]
+name = "Sprint"
+status = "partial"
+note = "a full sprint needs the buff system"
+link = "docs/status/history.md"
+
+[[subsystem.item]]
+name = "Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences"
+status = "planned"
+note = "WP2.1 (current task)"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Server-authoritative movement on the walkability grid (official packets only)"
+status = "planned"
+note = "WP2.2 to WP2.4"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Server collision"
+status = "missing"
+note = "needs the terrain generator to cover more areas"
+link = "docs/status/terrain.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Multiplayer"
+link = "docs/guides/hosting.md"
+
+[[subsystem.item]]
+name = "Remote client login (trusted_servers in the DLL)"
+status = "planned"
+note = "WP3.3; the DLL treats every non-loopback server as official today"
+link = "docs/guides/hosting.md"
+
+[[subsystem.item]]
+name = "Remote readiness: advertised host, layout/grid upload, session-keyed debug link"
+status = "planned"
+note = "WP3.4"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Remote-player protocol (add/remove, broadcast actions)"
+status = "planned"
+note = "WP3.5; needs an official capture of a town with other players"
+link = "docs/architecture/instance-world.md"
+
+[[subsystem.item]]
+name = "Shared world: players in one instance see each other"
+status = "planned"
+note = "WP3.6; every connection is a private simulation today"
+link = "docs/architecture/instance-world.md"
+
+[[subsystem.item]]
+name = "Two-client local test harness"
+status = "planned"
+note = "WP3.7"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Parties"
+status = "missing"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Chat/Commands"
+link = "docs/guides/server-admin.md"
+
+[[subsystem.item]]
+name = "Chat channels (join, global, local, whisper)"
+status = "done"
+
+[[subsystem.item]]
+name = "Server commands in chat (!) and in the overlay command palette"
+status = "done"
+
+[[subsystem.item]]
+name = "Live registry: who, kick, tell, broadcast, mute"
+status = "done"
+
+[[subsystem.item]]
+name = "Admins by account name from config"
+status = "partial"
+note = "tied to auto-generated names; moves to a role (accounts)"
+link = "docs/architecture/accounts.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Terrain"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "Client builds terrain from area and seed (any area loads)"
+status = "done"
+
+[[subsystem.item]]
+name = "Server-side generator, act 1: 25 of 33 sweep vectors match"
+status = "partial"
+note = "Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3; the per-area matrix comes later"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "G1_12: grid overlap (map size 169x85 vs 174x87)"
+status = "partial"
+note = "all 2385 terrain draws match; layout differs"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "G1_4: overlay phase 2 (seed 1003)"
+status = "partial"
+note = "2/3 seeds match"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "G1_5: edge routing (\"could not tilise edge 14\")"
+status = "missing"
+note = "0/3 seeds"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "G1_11: height-change (cliff) edge types, woodscliff_height.et chirality"
+status = "missing"
+note = "0/3 seeds"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "G1_13 to G1_15: client traces, then port"
+status = "missing"
+note = "the user records the traces"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "World-map pins (natural topology choice)"
+status = "missing"
+note = "forced topology covers it for now"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "Doodads and the doodad hash"
+status = "missing"
+link = "docs/status/terrain.md"
+
+[[subsystem.item]]
+name = "Per-area x topology x orientation matrix (cargo xtask terrain-matrix)"
+status = "planned"
+note = "WP7.1"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Collision and walkability output for server movement"
+status = "planned"
+link = "docs/plans/orchestration-2026-10.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Inventory"
+link = "docs/protocol/instance.md"
+
+[[subsystem.item]]
+name = "Inventories sent at area entry (empty, stash tab flags, full access)"
+status = "partial"
+note = "structure only; no items"
+
+[[subsystem.item]]
+name = "Items, equipment, stash"
+status = "missing"
+note = "the captures hold the sequences"
+link = "docs/re/captures.md"
+
+[[subsystem.item]]
+name = "Passive tree"
+status = "missing"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Monsters/Skills"
+link = "docs/protocol/entities.md"
+
+[[subsystem.item]]
+name = "Player entity with default stats from game data"
+status = "done"
+link = "docs/protocol/entities.md"
+
+[[subsystem.item]]
+name = "NPCs (StateMachine and quest states)"
+status = "missing"
+note = "POE_NPC adds one object for experiments only"
+
+[[subsystem.item]]
+name = "Monsters and spawns"
+status = "missing"
+
+[[subsystem.item]]
+name = "Skills, skill replies 0x1ae / 0x1af / 0x1b1"
+status = "missing"
+note = "decoded in WP2.1"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Buffs"
+status = "missing"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Client Hook"
+link = "docs/architecture/client-dll.md"
+
+[[subsystem.item]]
+name = "Loader (version.dll proxy) and hot-reloadable debug core"
+status = "done"
+
+[[subsystem.item]]
+name = "Overlay (Vulkan imgui), packet capture, snapshots"
+status = "done"
+
+[[subsystem.item]]
+name = "Read-only mode on official servers (latch)"
+status = "done"
+
+[[subsystem.item]]
+name = "Deploy and launch library (poe-hook-deploy)"
+status = "done"
+link = "docs/architecture/crates.md"
+
+[[subsystem.item]]
+name = "Standalone login screen, token auto-login, trusted_servers"
+status = "planned"
+note = "WP3.1 / WP3.3"
+link = "docs/plans/orchestration-2026-10.md"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Launcher"
+link = "docs/guides/launcher.md"
+
+[[subsystem.item]]
+name = "Poe2Launcher repo (Tauri 2 + Svelte)"
+status = "planned"
+note = "WP5.1"
+link = "docs/guides/launcher.md"
+
+[[subsystem.item]]
+name = "Server profiles and account login through the web API"
+status = "planned"
+
+[[subsystem.item]]
+name = "Install 0.5.5e from Steam depots"
+status = "planned"
+
+[[subsystem.item]]
+name = "Deploy and launch via poe-hook-deploy"
+status = "planned"
+
+[[subsystem.item]]
+name = "Mod install and ordering"
+status = "planned"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Web Admin"
+link = "docs/architecture/web-api.md"
+
+[[subsystem.item]]
+name = "Web API crate (axum, in poe-server)"
+status = "planned"
+note = "WP4.1"
+link = "docs/architecture/web-api.md"
+
+[[subsystem.item]]
+name = "Poe2WebAdmin SPA (Svelte 5)"
+status = "planned"
+note = "WP4.2"
+link = "docs/plans/orchestration-2026-10.md"
+
+[[subsystem.item]]
+name = "Live log viewer over WebSocket"
+status = "planned"
+
+[[subsystem.item]]
+name = "Instances, accounts and characters pages"
+status = "planned"
+
+# ---------------------------------------------------------------------------------------------
+
+[[subsystem]]
+name = "Modding"
+link = "docs/guides/modding.md"
+
+[[subsystem.item]]
+name = "Server file overrides in front of Bundles2"
+status = "done"
+
+[[subsystem.item]]
+name = "Server command registry (one place for chat and overlay)"
+status = "done"
+
+[[subsystem.item]]
+name = "mod.toml manifest spec for client mods"
+status = "partial"
+note = "spec only; loader does not read it yet"
+link = "modules/client-hook/docs/mod-manifest.md"
+
+[[subsystem.item]]
+name = "Hook bus for server mods (poe-mod-api)"
+status = "planned"
+
+[[subsystem.item]]
+name = "Client loose-file override hook and packet hooks"
+status = "planned"

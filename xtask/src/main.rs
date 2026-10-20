@@ -14,6 +14,8 @@ use clap::{Parser, Subcommand};
 use poe_config::Config;
 use poe_hook_deploy::{DeployOptions, GatewayEntry, Mode, launch::ProtonLaunch};
 
+mod tracker;
+
 /// The client DLL workspace (Poe2ClientHook submodule), relative to the repo root.
 const CLIENT_HOOK_DIR: &str = "modules/client-hook";
 /// The client's compile target.
@@ -56,6 +58,12 @@ enum Cmd {
     /// Only rewrite the DLL's name tables in `GameFiles/poe-hook-data/` (stats, action types,
     /// areas); leaves the gateway and installed DLLs as they are.
     DllData,
+    /// Render docs/status/tracker.toml into the README.md tracker block.
+    Tracker {
+        /// Only check; exit 1 if README.md is out of date.
+        #[arg(long)]
+        check: bool,
+    },
     /// Launch the client through Proton with a dedicated prefix (Steam must be running).
     RunClient {
         /// Proton installation to use (folder name under steamapps/common).
@@ -68,6 +76,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let root = repo_root();
     std::env::set_current_dir(&root)?;
+    // Needs no server config (and must work while that is being edited).
+    if let Cmd::Tracker { check } = cli.cmd {
+        return tracker::run(&root, check);
+    }
     let config = Config::load(&cli.config)?;
     match cli.cmd {
         Cmd::BuildDll { debug } => build_dll(&root, !debug).map(|_| ()),
@@ -77,6 +89,7 @@ fn main() -> Result<()> {
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::DllData => export_dll_data(&config),
+        Cmd::Tracker { .. } => unreachable!("handled before the config is loaded"),
         Cmd::RunClient { proton } => run_client(&root, &config, &proton),
     }
 }
@@ -147,11 +160,11 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
         gateway: Some(GatewayEntry {
             region: config.gateway.region.clone(),
             display_name: config.gateway.display_name.clone(),
-            host: config.login.public_host.clone(),
-            port: config.login.bind.port(),
+            host: config.network.public_host.clone(),
+            port: config.network.login.bind.port(),
         }),
         // Position reports go to the instance server's port only.
-        position_sync_port: Some(config.instance.public_port),
+        position_sync_port: Some(config.network.instance.public_port),
         // Generated outputs (terrain grids/layouts, area exports, client tables) go to
         // dumps/<version>/ in the repo.
         dump_dir: Some(root.join("dumps").join(&config.game.version)),

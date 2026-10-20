@@ -49,6 +49,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 |---|---|
 | [status/terrain.md](status/terrain.md) | The only terrain status: results per area, where work stopped, next steps |
 | [status/history.md](status/history.md) | What was built when, and the open items |
+| [status/tracker.toml](status/tracker.toml) | Data for the README status tables: current task, subsystems and items with done/partial/missing/planned; edit it, then run `cargo xtask tracker` ([guides/setup.md](guides/setup.md#run)) |
 | [research/poe1-prior-art.md](research/poe1-prior-art.md) | What public PoE1 research says about the protocol |
 | [research/tools.md](research/tools.md) | Survey of datamining and RE tools |
 | [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
