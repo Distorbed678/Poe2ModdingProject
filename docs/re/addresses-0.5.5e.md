@@ -210,3 +210,14 @@ Details and the patch: [standalone-login.md](standalone-login.md).
 | `0x141018170` | | `config.json` loader (`GGG_*`, `STEAM_APP_ID`, `GGG_CREDENTIAL_FILE_NAME`, `GGG_LOGIN_SERVER_PORT`, ...); defaults at `0x1446fc340` |
 | `0x140110960` | | Steam API init, returns 1 without touching Steam when the platform is not Steam |
 | `0x1421ee510` | | localized auth/error message table by result code (5 account missing, 6 wrong password, ...) |
+| `0x14011b820` | `Client_Startup` | start-up function (WinMain-level): single-instance check, config, `StandalonePatcher_Run` (call `0x14011bf76`), `CmdLine_ReadSuccessEvent`, then engine/state init; `SetEvent`+`CloseHandle` of `DAT_144431668` at `0x14011c916` |
+| `0x1401162d0` | `StandalonePatcher_Run` | returns bool; Steam/Epic return 1 at once; skipped (returns 1) when `--success-event` is given and `--disable-client-switching` is not; else the patcher window + patch-server connection. First bytes `48 8B C4`; the DLL safety net writes `B0 01 C3` |
+| `0x142737620` | `Patcher_RunPatching` | patching run ("Started patching ({} free bytes available)" `0x14358d340`, "No patching required" `0x14358d100`); only caller is `StandalonePatcher_Run` |
+| `0x1427370c0` / `0x142733af0` | | `/client/record-patching-metrics` sender / its only caller (inside the patcher) |
+| `0x1428ca5f0` / `0x1428cba30` / `0x1428cc930` | | patcher window: create (`MainWindowClass` `0x1435ac7f8`), class registration, `/launcher/patch/start` |
+| `0x140117c40` | `CmdLine_ReadSuccessEvent` | parses `--success-event <int>` into `DAT_144431668` (-1 initially) unless `--disable-client-switching` |
+| `0x140110d60` | `CmdLine_BuildOptionTable` | registers every command-line option (`--patching-server`, `--require-launch`, `--success-event`, `--nologo`, `--language`, ...); no `--nopatch` |
+| `0x1423cc1a0` | `CmdLine_ParseArgs` | parser: `--opt value` / `--opt=value`; unknown args only log `[CMD][Unrecognized]` (`0x143522628`) |
+| `0x1423cd120` | | reads an integer option value (`wistringstream`), throws "value is not an integer" |
+| `0x14010ac40` / `0x14010aca0` | | config singleton / its default builder (patch servers `us.patch.pathofexile2.com` `0x142f76fd0`, `patch.pathofexile2.tw`, `patch2/3.pathofexile2.tw`, `kr-patch.pathofexile2.com`) |
+| `0x141050a30` | `Window_CreateMain_POEWindowClass` | registers and creates the game window (class `POEWindowClass`, string `0x142f797b8`); `FUN_14011ac30` uses the same class for the single-instance check |

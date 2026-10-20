@@ -147,7 +147,7 @@ With Steam running (without it the client logs `Unable to init Steam API` and ex
   - `POE_HOOK_AUTO_KEYS=20000:13` (Enter at 20 s, the login; `[[ms, vk], ...]` in `auto_keys` form);
   - `POE_HOOK_MOVEMENT_LOG=1` (per-frame movement log, `movement_log` in the config);
   - `POE_HOOK_FAKE_FOCUS=1` (the hooked `GetForegroundWindow` returns the game's own window, `*[0x1445d8308]`, so a client on another desktop still sends cursor reports; never while read-only);
-  - `POE_HOOK_WINDOW_TITLE="PoE2 Test Client"` (the hooks on `CreateWindowExW`/`SetWindowTextW` give the game window that title, so a desktop rule can match it, for example a KWin rule that moves the window to another virtual desktop without focus; no rule is installed by the project).
+  - `POE_HOOK_WINDOW_TITLE="PoE2 Test Client"` (the hooks on `CreateWindowExW`/`SetWindowTextW` give the game's main window (class `POEWindowClass`; message boxes and other windows keep their titles) that title, so a desktop rule can match it, for example a KWin rule that moves the window to another virtual desktop without focus; no rule is installed by the project).
 - `scripts/re/send_dev.py auto <command>` sends a server command over the debug link (like the overlay).
 - `scripts/shot.sh <name>` takes a screenshot of the game monitor (Spectacle) into `runtime/shots/`; F8 below takes one inside the game.
 - `echo <entry> > GameFiles/poe-hook.keys` presses keys and moves the mouse in the client; `0x2d` is Insert (the overlay), `0x0d` Enter.
