@@ -12,7 +12,8 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Start
 | [multiplayer.md](multiplayer.md) | Multiplayer readiness: what blocks remote players, same-machine dependencies, shared world plan |
 | [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
 | [modding.md](modding.md) | Server and client modding hooks (planned and existing) |
-| [datamining.md](datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, useful tables |
+| [datamining.md](datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, useful tables, the dumps folder |
+| [../dumps/README.md](../dumps/README.md) | `dumps/<version>/` (git-ignored): terrain grids, layouts, area exports, vectors, client tables, Ghidra exports, captures; what produces each and `scripts/dumps/migrate.sh` |
 | [protocol/official-comparison.md](protocol/official-comparison.md) | Official servers vs ours: what differs, what was fixed, what is open |
 | [client-dll.md](client-dll.md) | The client DLLs: version.dll loader, hot-reloadable debug core, modes (read-only), features and config |
 | [protocol/framing.md](protocol/framing.md) | Wire format: encodings, framing, encryption |

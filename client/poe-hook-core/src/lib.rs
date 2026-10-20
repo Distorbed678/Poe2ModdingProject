@@ -53,6 +53,21 @@ pub fn config() -> &'static Config {
     CONFIG.get().expect("config loaded in poe_core_start")
 }
 
+/// Path of a generated output file: `<dump_dir>/<sub>/<name>` (the folder is created), or
+/// `<exe dir>/<name>` when `dump_dir` is not configured (the old behaviour).
+pub fn dump_path(sub: &str, name: &str) -> std::path::PathBuf {
+    match &config().dump_dir {
+        Some(root) => {
+            let dir = root.join(sub);
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                log::error!("dump dir {}: {e}", dir.display());
+            }
+            dir.join(name)
+        }
+        None => poe_hook_shared::exe_dir().join(name),
+    }
+}
+
 /// Entry point called by the loader after loading this DLL.
 ///
 /// # Safety
@@ -78,6 +93,10 @@ pub unsafe extern "C" fn poe_core_start(host: *const HostApi) -> *const CoreApi 
         host::reload_count(),
         host::read_only()
     );
+    match &config().dump_dir {
+        Some(dir) => log::info!("dump_dir {}", dir.display()),
+        None => log::info!("dump_dir not set: outputs go next to the exe / in the session folder"),
+    }
     // Build the symbol table off the game's threads (the first stack print would otherwise).
     hooks::spawn(|| {
         symbols::fmt(0);
@@ -146,9 +165,9 @@ fn start_features(config: &Config, main: &Module) {
         packets::init(main)?;
         protocol::init(main)
     });
-    let dump_path = poe_hook_shared::exe_dir().join("object_types.txt");
+    let object_types = dump_path("client-tables", "object_types.txt");
     report("dump_object_types", f.dump_object_types, || {
-        dump_types::init(main, dump_path)
+        dump_types::init(main, object_types)
     });
     let generator_trace = f.generator_trace || std::env::var_os("POE_HOOK_GEN_TRACE").is_some();
     report("area_export", f.area_export || generator_trace, || {

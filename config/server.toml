@@ -28,7 +28,7 @@ public_port = 6112
 tick_ms = 33
 # Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
 # seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
-known_seeds = "runtime/terrain-vectors.tsv"
+known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
 # Movement trace (dev): client position reports, inputs and movement replies as TSV
 # (docs/protocol/movement.md#movement-trace). Empty to turn it off.
 movement_trace = "runtime/movement-trace.tsv"
@@ -49,7 +49,7 @@ debug_link = true
 # (env POE_SWEEP overrides). Each session generates the next listed layout and ends
 # (scripts/re/sweep_drive.py logs the client in again).
 sweep = ""
-sweep_results = "runtime/sweep-results.tsv"
+sweep_results = "dumps/0.5.5e/terrain/vectors/sweep-results.tsv"
 
 [terrain]
 # Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
@@ -135,7 +135,7 @@ Flask1 = [5, 1]
 # exports the generated layout and the player starts on the area's start tile, or else on
 # the playable tile nearest the map centre.
 [spawn]
-layout_dir = "GameFiles"
+layout_dir = "dumps/0.5.5e/terrain"
 filler = ["fill", "blank"]
 
 # First visit plays the washed-up opening (new characters on the Riverbank).

@@ -2,6 +2,12 @@
 # across redeploys). Logs: poe-hook.log next to the exe, and a folder per process under
 # logs/poe-hook/<date_time>_<pid>/ (logs, packets, snapshots).
 
+# Where generated/datamined outputs go (terrain grids/layouts, area exports, object-type and tile
+# tables): <dump_dir>/terrain/{grids,layouts,area-exports/<session>}, <dump_dir>/client-tables.
+# Set by `cargo xtask deploy-client` to <repo>/dumps/<version> as a Windows path (the client runs
+# under Wine: `Z:` is `/`). Unset: next to the exe / in the session folder.
+# dump_dir = 'Z:\home\user\Poe2ModdingProject\dumps\0.5.5e'
+
 # private: our server (crypto bypass, external connections refused).
 # official: official servers, read-only: the DLL only observes and logs; nothing is sent,
 # altered or injected. Set by `cargo xtask deploy-client [--official]`.

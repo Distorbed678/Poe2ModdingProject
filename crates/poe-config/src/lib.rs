@@ -155,8 +155,9 @@ fn default_chat_channel() -> u16 {
 /// (M5) it relies on the layout exported by the client DLL.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SpawnConfig {
-    /// Directory where the DLL writes `terrain_layout_<tile hash>.tsv`; empty disables the
-    /// bridge.
+    /// Terrain dump directory (`dumps/<version>/terrain`): the client DLL writes
+    /// `layouts/terrain_layout_<tile hash>.tsv` and `grids/terrain_grid_<tile hash>.bin`
+    /// there (poe-hook.toml `dump_dir`); empty disables the bridge.
     #[serde(default)]
     pub layout_dir: String,
     /// Substrings of tile paths that are never playable (map filler).
@@ -294,7 +295,7 @@ pub struct InstanceConfig {
 }
 
 fn default_sweep_results() -> PathBuf {
-    "runtime/sweep-results.tsv".into()
+    "dumps/0.5.5e/terrain/vectors/sweep-results.tsv".into()
 }
 
 fn default_cursor_to_grid() -> [f32; 6] {

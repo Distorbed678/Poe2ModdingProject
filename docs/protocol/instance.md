@@ -2,7 +2,7 @@
 
 Connection: client to `InstanceDetails.host:port` (ours: `127.0.0.1:6112`).
 Opcodes: `protocol/0.5.5e/instance.toml`. Rust types: `crates/poe-proto/src/instance.rs`.
-The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the full opcode → class map (with deserializer addresses) is in `../re/instance_factory_s2c.json` (316 classes). The game-session handler is `0x142121f70` (`ClientInstanceGameSession::ProcessPacket`); in-game packets are handled by `0x1420ee310` (`ClientInstanceAccountSession::ProcessPacket`).
+The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the full opcode → class map (with deserializer addresses) is in `dumps/0.5.5e/ghidra/instance_factory_s2c.json` (316 classes; local and git-ignored, see [dumps/README.md](../../dumps/README.md)). The game-session handler is `0x142121f70` (`ClientInstanceGameSession::ProcessPacket`); in-game packets are handled by `0x1420ee310` (`ClientInstanceAccountSession::ProcessPacket`).
 
 ## Opening sequence (verified 2026-10-13)
 1. **C→S `0x000f` Hello** (plaintext, 29 bytes):
@@ -62,7 +62,7 @@ The server sends, in this order (`InstanceServer::enter_world`):
    - PlayerState (0x68): `u32 player id, u8 (bits 0-5: CharacterState index, 6, 7), u8 flags, u8, u8 rows[3], u16 n + u16[n]`. `rows` are `CharacterShapeshiftBasicSkills.dat` row indices, one per weapon set (local player +0x7980); 0xff (none) crashes the weapon-slot UI.
    - Entries are matched by player id, so InitialState must follow `0x24` and the player entity. Sent first, the client quits (`ExitProcess(0)`).
 
-### Simulation packets (factory 2, `0x142186aa0`; map in `../re/instance_factory2_s2c.json`)
+### Simulation packets (factory 2, `0x142186aa0`; map in `dumps/0.5.5e/ghidra/instance_factory2_s2c.json`)
 1. The stream reader `0x1421c5950` tries the registered packet handlers. Factory 2's handler (`0x1421c5810`) builds the packet and passes it to `0x1421340e0`.
 2. `0x1421340e0` **queues** the packet in the world's frame queue (world+0x6b0):
    - `0x2f4` (tick marker, no body) closes a frame;

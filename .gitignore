@@ -11,6 +11,10 @@
 !/third_party/README.md
 !/third_party/fetch-tools.sh
 
+# Datamined / generated outputs (layout and regeneration: dumps/README.md)
+/dumps/*
+!/dumps/README.md
+
 # Runtime data
 /runtime/
 /captures/

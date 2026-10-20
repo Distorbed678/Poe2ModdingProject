@@ -11,6 +11,13 @@ use serde::Deserialize;
 pub struct Config {
     /// `private` (our server) or `official` (read-only: see [`Mode`]).
     pub mode: Mode,
+    /// Where datamined/generated outputs go (terrain grids and layouts, area exports,
+    /// object-type and tile tables): `<dump_dir>/terrain/grids/`, `terrain/layouts/`,
+    /// `terrain/area-exports/<session>/`, `client-tables/`. A path the game process can open
+    /// (under Wine/Proton a `Z:\...` path); written by `cargo xtask deploy-client` as
+    /// `<repo>/dumps/<version>`. Unset: the old locations (next to the exe, in the session
+    /// folder).
+    pub dump_dir: Option<std::path::PathBuf>,
     pub log: LogConfig,
     pub features: FeatureConfig,
     pub overlay: OverlayConfig,

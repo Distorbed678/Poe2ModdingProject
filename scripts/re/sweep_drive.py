@@ -6,8 +6,8 @@ key file (posted to the game window only, never SendInput).
 
 Usage: scripts/re/sweep_drive.py [max entries]
 Start the server in sweep mode and the client with scripts/test-run.sh first; the first entry runs
-on the test-run's own login. Results: runtime/sweep-results.tsv; layouts: the DLL's area exports
-(GameFiles/logs/poe-hook/<session>/areas/).
+on the test-run's own login. Results: dumps/0.5.5e/terrain/vectors/sweep-results.tsv; layouts: the DLL's area exports
+(dumps/0.5.5e/terrain/area-exports/<session>/).
 """
 import re
 import sys

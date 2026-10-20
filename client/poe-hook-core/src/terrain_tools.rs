@@ -2,7 +2,9 @@
 //! memory, so it also runs on official servers (read-only).
 //!
 //! - **Area export** (`[features] area_export`): when the client's generator driver
-//!   (`0x141ffe940`) returns, the area is written to `<session>/areas/<n>_<hash16>_<seed>/`:
+//!   (`0x141ffe940`) returns, the area is written to
+//!   `<dump_dir>/terrain/area-exports/<session>/<n>_<hash16>_<seed>/` (without `dump_dir`:
+//!   `<session>/areas/<n>_<hash16>_<seed>/`):
 //!   `meta.txt`, `layout.tsv` (every tile record with the fields the tile hash covers, checked
 //!   by recomputing the hash), `grids.bin` (the four cell grids), `entities.tsv` (objects the
 //!   generator created: doodads and tile entities, with path, cell, world position, facing and
@@ -1136,9 +1138,17 @@ fn export_area(
     let hash16 = read::<u16>(area_row + 0x2a).unwrap_or(0);
     let kind = read::<u32>(area_row + 0x1b4).unwrap_or(0);
     let n = AREA_COUNT.fetch_add(1, Ordering::Relaxed);
-    let dir = crate::host::session_dir()
-        .join("areas")
-        .join(format!("{n:02}_{hash16:04x}_{seed}"));
+    let name = format!("{n:02}_{hash16:04x}_{seed}");
+    let session = crate::host::session_dir();
+    let dir = match &crate::config().dump_dir {
+        // dumps/<ver>/terrain/area-exports/<session>/<n>_<hash>_<seed>
+        Some(root) => root
+            .join("terrain")
+            .join("area-exports")
+            .join(session.file_name().unwrap_or_default())
+            .join(name),
+        None => session.join("areas").join(name),
+    };
     if let Err(e) = std::fs::create_dir_all(&dir) {
         log::error!("area export: {e}");
         return;

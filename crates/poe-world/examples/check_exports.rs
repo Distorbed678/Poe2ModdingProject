@@ -1,6 +1,6 @@
 //! Recomputes the tile and doodad hashes of the client DLL's area exports with the server's
 //! code: `cargo run -p poe-world --example check_exports [<session or areas dir>...]`
-//! (default: every session under `GameFiles/logs/poe-hook`).
+//! (default: everything under `dumps/0.5.5e/terrain/area-exports`).
 
 use std::path::{Path, PathBuf};
 
@@ -22,7 +22,7 @@ fn area_dirs(root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let roots: Vec<PathBuf> = match std::env::args().skip(1).collect::<Vec<_>>() {
-        a if a.is_empty() => vec!["GameFiles/logs/poe-hook".into()],
+        a if a.is_empty() => vec!["dumps/0.5.5e/terrain/area-exports".into()],
         a => a.into_iter().map(PathBuf::from).collect(),
     };
     let mut dirs = Vec::new();

@@ -1,6 +1,7 @@
 """Dump a packet factory switch: opcode -> case address, allocation size, vtable, deserializer.
 
 Usage: dump_factory.py <switch_base_opcode hex> <count hex> <table_rva hex> <default_va hex> [out.json]
+Output goes to dumps/0.5.5e/ghidra/ (git-ignored), e.g. instance_factory_s2c.json.
 For the 0.5.5e instance factory (FUN_142170380): dump_factory.py d 35f 217305c 142173040
 The vtable is the first rip-relative LEA into .rdata within the case that is stored as a
 pointer; vtable slot 2 is the deserializer (slot 1 the serializer).

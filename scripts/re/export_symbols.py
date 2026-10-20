@@ -3,7 +3,7 @@
 
 Sources, later ones win:
 1. Ghidra's named functions (MSVC runtime and library names), exported with the Ghidra MCP
-   `search_functions_enhanced(has_custom_name=true)` into runtime/ghidra_named_functions_p*.json.
+   `search_functions_enhanced(has_custom_name=true)` into dumps/0.5.5e/ghidra/ghidra_named_functions_p*.json.
 2. Our documented addresses: the first column of every table row in
    docs/re/addresses-0.5.5e.md (`| `0x14...` | description | ...`); the description
    becomes the name.
@@ -31,7 +31,7 @@ def clean(text: str) -> str:
 
 def main():
     names = {}
-    for path in sorted(glob.glob(str(ROOT / "runtime/ghidra_named_functions_p*.json"))):
+    for path in sorted(glob.glob(str(ROOT / "dumps/0.5.5e/ghidra/ghidra_named_functions_p*.json"))):
         outer = json.loads(Path(path).read_text())
         inner = json.loads(outer["result"]) if isinstance(outer.get("result"), str) else outer
         for f in inner.get("results", []):

@@ -176,6 +176,12 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
         "position_sync_port",
         &config.instance.public_port.to_string(),
     )?;
+    // Generated outputs (terrain grids/layouts, area exports, client tables) go to
+    // dumps/<version>/ in the repo; the client runs under Wine, which maps `/` to `Z:\`.
+    let dumps = root.join("dumps").join(&config.game.version);
+    std::fs::create_dir_all(&dumps)?;
+    set_hook_key(&hook_cfg, None, "dump_dir", &format!("'{}'", wine_path(&dumps)?))?;
+    println!("dump_dir -> {}", wine_path(&dumps)?);
     // Test input comes from POE_HOOK_AUTO_KEYS (scripts/test-run.sh), never from the user's
     // config (an Enter at 20 s opened the chat box in normal play).
     set_hook_key(&hook_cfg, Some("features"), "auto_keys", "[]")?;
@@ -194,6 +200,16 @@ fn deploy_client(root: &Path, config: &Config, build: bool, official: bool) -> R
         }
     );
     Ok(())
+}
+
+/// The Windows path under which the Wine/Proton client sees a host path (`Z:` is `/`).
+fn wine_path(path: &Path) -> Result<String> {
+    let abs = std::fs::canonicalize(path)?;
+    let text = abs.to_string_lossy().into_owned();
+    if text.contains('\'') {
+        bail!("path with a quote cannot go into poe-hook.toml: {text}");
+    }
+    Ok(format!("Z:{}", text.replace('/', "\\")))
 }
 
 /// Name tables for the DLL's Stats and Actions tabs (`GameFiles/poe-hook-data/`), from the

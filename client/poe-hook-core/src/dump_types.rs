@@ -2,7 +2,7 @@
 //!
 //! `0x1416936c0(registry, out, key)` binary-searches a sorted array of 0x30-byte entries
 //! `{u32 key, .., wchar* path at +8}` to resolve the object type key carried by the
-//! server's add-object message (0x2f7). The dump (`object_types.txt` next to the exe, one
+//! server's add-object message (0x2f7). The dump (`object_types.txt` in `<dump_dir>/client-tables/`, else next to the exe, one
 //! `key<TAB>path` per line) gives the key for each metadata path.
 //!
 //! It also traces entity deserialization: the components of each entity read by
@@ -272,7 +272,7 @@ unsafe extern "win64" fn on_load_area(regs: *mut Registers, original: usize, at:
     ret
 }
 
-/// Writes `terrain_layout_<tile hash>.tsv` next to the exe: a `size<TAB>w<TAB>h` line, then one
+/// Writes `terrain_layout_<tile hash>.tsv` to `<dump_dir>/terrain/layouts/` (else next to the exe): a `size<TAB>w<TAB>h` line, then one
 /// `x<TAB>y<TAB>tile path` line per tile. Dev bridge until the server generates terrain (M5).
 /// The game world of the current area (frame-mode world seen by the frame drain).
 static GAME_WORLD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -387,7 +387,7 @@ pub(crate) unsafe fn export_layout(world: usize) {
         }
     }
     unsafe { export_grids(terrain, w as usize, h as usize, tile_hash) };
-    let path = poe_hook_shared::exe_dir().join(format!("terrain_layout_{tile_hash}.tsv"));
+    let path = crate::dump_path("terrain/layouts", &format!("terrain_layout_{tile_hash}.tsv"));
     match std::fs::write(&path, out) {
         Ok(()) => log::info!("exported {w}x{h} layout to {}", path.display()),
         Err(e) => log::error!("layout export: {e}"),
@@ -403,7 +403,7 @@ unsafe fn export_grids(terrain: usize, w: usize, h: usize, tile_hash: u32) {
         return;
     };
     let (cells_x, cells_y) = (w * 23, h * 23);
-    let path = poe_hook_shared::exe_dir().join(format!("terrain_grid_{tile_hash}.bin"));
+    let path = crate::dump_path("terrain/grids", &format!("terrain_grid_{tile_hash}.bin"));
     match std::fs::write(&path, out) {
         Ok(()) => log::info!(
             "exported {cells_x}x{cells_y} cell grids to {}",
@@ -929,7 +929,7 @@ fn dump_tiles(terrain: usize, w: usize, h: usize) {
             out += &format!("{x} {y} [{}] {}\n", raw.join(" "), found.join(" | "));
         }
     }
-    let path = poe_hook_shared::exe_dir().join("terrain_tiles.txt");
+    let path = crate::dump_path("client-tables", "terrain_tiles.txt");
     match std::fs::write(&path, out) {
         Ok(()) => log::info!("    dumped {} tiles to {}", w * h, path.display()),
         Err(e) => log::error!("    tile dump: {e}"),

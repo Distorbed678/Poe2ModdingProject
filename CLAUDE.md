@@ -39,6 +39,7 @@ A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and des
 - `xtask/`: dev automation (`cargo xtask <cmd>`).
 - `scripts/`: shell and Python helpers (`test-run.sh`, `shot.sh`, `re/*.py`).
 - `third_party/`: downloaded tools and reference repos (git-ignored except README and fetch script).
+- `dumps/<version>/`: datamined and generated outputs (terrain grids/layouts, area exports, vectors, client tables, Ghidra exports, packet captures, strings; git-ignored, see `dumps/README.md`; `scripts/dumps/migrate.sh` sorts old files in). The client DLL writes there via `dump_dir`.
 - `runtime/`: server and test output (sqlite, logs, traces, crash dumps; git-ignored).
 - `config/`, `protocol/`, `docs/`.
 

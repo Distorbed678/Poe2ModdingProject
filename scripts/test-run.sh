@@ -1,7 +1,7 @@
 #!/bin/sh
 # Unattended client test (server must already be running; Steam must be running):
 # launches the client, which logs in via poe-hook auto_keys (POE_HOOK_AUTO_KEYS: Enter at 20 s), presses Play and
-# waits. The client window is titled "PoE2 Test Client" (POE_HOOK_WINDOW_TITLE), so a desktop
+# waits. It first deletes the terrain layouts/grids in dumps/<version>/terrain. The client window is titled "PoE2 Test Client" (POE_HOOK_WINDOW_TITLE), so a desktop
 # rule can keep it off the screen (see docs/client-dll.md). SHOT=1 also takes a
 # screenshot of the game monitor.
 # Usage: scripts/test-run.sh <name> [seconds in game before returning]
@@ -10,7 +10,11 @@ cd "$(dirname "$0")/.."
 name=$1; wait=${2:-12}
 log() { sed 's/\x1b\[[0-9;]*m//g' runtime/server-run.log; }
 start=$(log | wc -l)
-rm -f GameFiles/poe-hook.log GameFiles/terrain_layout*.tsv
+# Fresh terrain exports for this run: the server waits for the layout the client writes (by tile
+# hash), so stale layouts and grids from earlier runs would hide a DLL that stopped exporting.
+version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' config/server.toml | head -n1)
+rm -f GameFiles/poe-hook.log GameFiles/terrain_layout*.tsv GameFiles/terrain_grid*.bin \
+    "dumps/$version"/terrain/layouts/terrain_layout_*.tsv "dumps/$version"/terrain/grids/terrain_grid_*.bin
 POE_HOOK_MOVEMENT_LOG=1 POE_HOOK_WINDOW_TITLE="PoE2 Test Client" POE_HOOK_AUTO_KEYS=20000:13 POE_HOOK_FAKE_FOCUS=1 \
     cargo xtask run-client > runtime/client-run.log 2>&1 &
 i=0

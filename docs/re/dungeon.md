@@ -3,7 +3,7 @@
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
 with `.tgr` (see `terrain.md`); after them the client runs a separate dungeon layout. Port: `crates/poe-world/src/dungeon.rs`
-(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_6, G1_7, G1_8 and G1_9 (seeds 1001–1003 each; G1_6 and G1_8 with forced topologies, e.g. G1_8 1:3 / 11:3 / 4:1, G1_6 2:7 / 2:7 / 1:6; `cargo run --release -p poe-world --example area_vectors -- runtime/sweep-vectors.tsv`).
+(layout) and `dungeon_tiles.rs` (tile pass). Tile hashes match for G1_3, G1_6, G1_7, G1_8 and G1_9 (seeds 1001–1003 each; G1_6 and G1_8 with forced topologies, e.g. G1_8 1:3 / 11:3 / 4:1, G1_6 2:7 / 2:7 / 1:6; `cargo run --release -p poe-world --example area_vectors -- dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv`).
 Not ported yet: height-change edge types (G1_11), the height fallback of `0x14209f050`, 3×3
 door spots (`0x14209dc90`; guarded), subgraph file groups and nested
 subgraphs, injector and blank special rooms, and the request-driven extra rooms
@@ -275,7 +275,7 @@ buffer and de-repetition as for `.tgr`.
 
 ## Where the port stands (2026-10-16)
 
-Vectors (`area_vectors -- runtime/sweep-vectors.tsv all`): town 2/2, G1_1/2/3/6/7/8/9 3/3, G1_4 2/3,
+Vectors (`area_vectors -- dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv all`): town 2/2, G1_1/2/3/6/7/8/9 3/3, G1_4 2/3,
 G1_5 0/3, G1_11 0/3, G1_12 0/1, G1_13–15 no traces. Topologies for G1_6/G1_8 are found by the
 forced search (the natural choice needs the world-map pins, not ported).
 

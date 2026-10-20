@@ -131,8 +131,8 @@ Note: the game's own login/instance TCP traffic does not go through these ws2_32
 
 ## Terrain research (`terrain_tools.rs`)
 `[features] area_export` (on by default; read-only safe) writes every generated area to
-`<session>/areas/<n>_<hash16>_<seed>/` (layout, doodads, grids, generator objects, walkability
-probe) and checks the export by recomputing the client's tile and doodad hashes.
+`dumps/<version>/terrain/area-exports/<session>/<n>_<hash16>_<seed>/` (`<dump_dir>/...`; without `dump_dir`:
+`<session>/areas/...`; layout, doodads, grids, generator objects, walkability probe) and checks the export by recomputing the client's tile and doodad hashes.
 `[features] generator_trace` / `POE_HOOK_GEN_TRACE=1` adds `generator_trace.tsv` (every terrain
 RNG draw and generator phase). Details and the seed sweep: [re/terrain.md](re/terrain.md).
 
@@ -159,8 +159,20 @@ It also hooks:
 
 Setting `POE_HOOK_FORCE_SHOW=1` in the client's environment re-applies the player's render visibility (`0x1416a9810`) as an experiment.
 
+### Output folder (`dump_dir`)
+`dump_dir` (top level of `poe-hook.toml`) is where the DLL writes datamined and generated files. `cargo xtask deploy-client` sets it to `<repo>/dumps/<version>` as a Windows path (the client runs under Wine, where `Z:\` is `/`, e.g. `Z:\home\you\Poe2ModdingProject\dumps\0.5.5e`) and creates the folder. The DLL logs `dump_dir <path>` at start. Files go to:
+
+| File | Folder under `dump_dir` |
+|---|---|
+| `terrain_grid_<tile hash>.bin` | `terrain/grids/` |
+| `terrain_layout_<tile hash>.tsv` | `terrain/layouts/` |
+| `<session>/<n>_<hash16>_<seed>/` (area export, `generator_trace.tsv`) | `terrain/area-exports/` |
+| `object_types.txt`, `terrain_tiles.txt` | `client-tables/` |
+
+Unset, the old locations apply (next to the exe; the session folder's `areas/`). The tree is described in [../dumps/README.md](../dumps/README.md).
+
 ### Layout export format
-`terrain_layout_<tile hash>.tsv`: a `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path<TAB>sub` per sub-tile (23×23 cells).
+`terrain_layout_<tile hash>.tsv` (`terrain/layouts/`): a `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path<TAB>sub` per sub-tile (23×23 cells).
 
 `sub` is the sub-tile's index in its tile's own orientation, row-major. It comes from the tile record's +0 pointer, which points into the tile object's sub-tile array (0x38 bytes per entry); the lowest such pointer per tile object is the array start. From `sub` and the map position, the server recovers how the tile was rotated or mirrored (`instance-server::spawn::PlacedTile`).
 

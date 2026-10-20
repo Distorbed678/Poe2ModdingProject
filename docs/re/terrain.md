@@ -89,7 +89,8 @@ objects, not sent by the server.
 
 ## Tools
 - **DLL area export** (`[features] area_export`, on by default, also read-only): every
-  generated area goes to `GameFiles/logs/poe-hook/<session>/areas/<n>_<hash16>_<seed>/`:
+  generated area goes to `dumps/0.5.5e/terrain/area-exports/<session>/<n>_<hash16>_<seed>/`
+  (`dump_dir`; before 2026-10-20 it was `GameFiles/logs/poe-hook/<session>/areas/`):
   `meta.txt` (hashes, size, and the recomputed tile and doodad hashes with match/MISMATCH),
   `layout.tsv`, `doodads.tsv`, `grids.bin` (`PWG1` format), `entities.tsv`, `probe.tsv`
   (walkability probe: per visited cell, each grid layer's value; a walkability layer is never 0
@@ -102,7 +103,7 @@ objects, not sent by the server.
 - **Seed sweep:** the server's `[instance] sweep` (or `POE_SWEEP=<file>`) lists
   `<WorldAreas.Id> <seed> [count]`. Each instance session then generates the next entry instead
   of the character's area, appends `area, seed, tile hash, doodad hash` to `sweep_results`
-  (`runtime/sweep-results.tsv`) and closes. `scripts/re/sweep_drive.py` logs the test client in again
+  (`dumps/0.5.5e/terrain/vectors/sweep-results.tsv`) and closes. `scripts/re/sweep_drive.py` logs the test client in again
   and presses Play for each entry (about 20 s per layout); the DLL exports every layout. A second
   AreaInfo on one connection crashes the client (the old objects sample the regenerated terrain,
   `0x141d04eb0`), hence one layout per session.
@@ -620,7 +621,7 @@ cell is skipped). Map ground checks are off during the pass.
 hash 138293894, all 5382 cells (tile, orientation, sub-tile) equal, 6414 draws in step. The draws
 after that (`0x1415a5005`, …) belong to the doodad/entity stage. With node tiles and inheriting
 tiles, `area::generate` also matches seeds 1001 and 1002 (`intro_4`, current-build sweep vectors
-in `runtime/sweep-results.tsv`).
+in `dumps/0.5.5e/terrain/vectors/sweep-results.tsv`).
 
 **Result (2026-10-15):** `crates/poe-world` generates Clearfell Encampment identically to the
 client (all 990 tiles, orientations and sub-tiles; tile hash equal) for seeds 1 and 2. Not yet

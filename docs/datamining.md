@@ -15,6 +15,9 @@ $T -p 2 --steam GameFiles extract 'metadata/characters/str/*' out/
 $T -p 2 --steam GameFiles dump-tables ...      # tables -> CSV/JSON using the schema
 ```
 
+## Dumps folder
+Everything we extract or generate that is not source (terrain grids and layouts, area exports, test vectors, client tables, Ghidra exports, packet captures, strings) lives in the git-ignored `dumps/<version>/`. The layout, what produces each file and how to regenerate it: [../dumps/README.md](../dumps/README.md). Old files from `GameFiles/` and `runtime/` are sorted in by `scripts/dumps/migrate.sh`. Ghidra exports and factory maps that used to be committed under `docs/re/*.json` are there now (`dumps/<version>/ghidra/`); they are local data, so a fresh clone must regenerate them (`scripts/re/dump_factory.py`, Ghidra `search_functions_enhanced`).
+
 ## Tables in the server
 `poe_data::GameData::open(game_dir, schema)` then `.table("WorldAreas")` returns a `Table` (cached). Rows are read by column name: `row.str("Id")`, `row.int("AreaLevel")`, `row.row_ref("ParentTown")`. Unnamed columns are addressed as `"_<index>"`.
 

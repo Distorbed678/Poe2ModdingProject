@@ -2,14 +2,14 @@
 //!
 //! The server does not generate terrain yet (M5), so it cannot know where an area's start is.
 //! Dev bridge: the client DLL exports the layout it generated
-//! (`<layout_dir>/terrain_layout_<tile hash>.tsv`, matched with TerrainHashes: a
+//! (`<layout_dir>/layouts/terrain_layout_<tile hash>.tsv`, matched with TerrainHashes: a
 //! `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path` per tile) and the server spawns the
 //! player at the configured point of the area's start tile (mapped through the tile's
 //! rotation/mirroring in this layout, from the sub-tile indices the DLL exports), or else near
 //! the playable tile nearest the map centre. Grid cells per (sub-)tile: 23.
 //!
 //! The point is then snapped to the nearest walkable cell, using the client's cell grids
-//! (`terrain_grid_<tile hash>.bin`, layer 0 non-zero = walkable). Standing on a
+//! (`<layout_dir>/grids/terrain_grid_<tile hash>.bin`, layer 0 non-zero = walkable). Standing on a
 //! non-walkable cell inside the playable area leaves the view grey.
 
 use std::{path::Path, time::Duration};
@@ -269,7 +269,9 @@ pub fn client_grid(config: &SpawnConfig, tile_hash: u32) -> Option<Grid> {
     if config.layout_dir.is_empty() {
         return None;
     }
-    let path = Path::new(&config.layout_dir).join(format!("terrain_grid_{tile_hash}.bin"));
+    let path = Path::new(&config.layout_dir)
+        .join("grids")
+        .join(format!("terrain_grid_{tile_hash}.bin"));
     std::fs::read(path).ok().and_then(|d| Grid::parse(&d))
 }
 
@@ -283,13 +285,16 @@ pub async fn from_client_layout(
     if config.layout_dir.is_empty() {
         return None;
     }
-    let path = Path::new(&config.layout_dir).join(format!("terrain_layout_{tile_hash}.tsv"));
+    let path = Path::new(&config.layout_dir)
+        .join("layouts")
+        .join(format!("terrain_layout_{tile_hash}.tsv"));
     for _ in 0..30 {
         if let Ok(text) = std::fs::read_to_string(&path) {
             let layout = Layout::parse(&text)?;
             let target = layout.start(config.start_tiles.get(area), &config.filler)?;
-            let grid_path =
-                Path::new(&config.layout_dir).join(format!("terrain_grid_{tile_hash}.bin"));
+            let grid_path = Path::new(&config.layout_dir)
+                .join("grids")
+                .join(format!("terrain_grid_{tile_hash}.bin"));
             let grid = std::fs::read(&grid_path).ok().and_then(|d| Grid::parse(&d));
             let start = match &grid {
                 Some(g) => g.nearest_walkable(target, 400).or(Some(target)),

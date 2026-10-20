@@ -17,7 +17,7 @@ regardless of our generator. The server's copy is what has to match.
 
 ## Current results
 
-`cargo run --release -p poe-world --example area_vectors -- runtime/sweep-vectors.tsv all [area]`
+`cargo run --release -p poe-world --example area_vectors -- dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv all [area]`
 
 | Area | Matching seeds (1001–1003) | Blocker |
 |---|---|---|
@@ -49,7 +49,7 @@ created with a topology/orientation); the natural choice is still not reproduced
   subgraph's outer fill and margin strips run on its block (`outer_buffer_window`,
   `TileMap::window`).
 
-Command: `cargo run --release -p poe-world --example area_trace -- G1_12 1001 runtime/act1_traces/G1_12_1001 2:7`
+Command: `cargo run --release -p poe-world --example area_trace -- G1_12 1001 dumps/0.5.5e/terrain/traces/act1_traces/G1_12_1001 2:7`
 
 ## To do, in order
 
@@ -68,7 +68,7 @@ Command: `cargo run --release -p poe-world --example area_trace -- G1_12 1001 ru
 ## Tools
 
 - `area_trace <area> <seed> <trace dir> [topo[:o] | all]`: compares draws, layout and tile
-  hash with a client trace in `runtime/act1_traces/<area>_<seed>/`. `all` searches every topology
+  hash with a client trace in `dumps/0.5.5e/terrain/traces/act1_traces/<area>_<seed>/`. `all` searches every topology
   and orientation.
 - `area_vectors <vectors.tsv> all [area]`: regression against client tile hashes. It tries
   forced topologies when the natural choice fails.
