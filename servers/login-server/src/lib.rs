@@ -30,8 +30,8 @@ pub struct LoginServer {
 
 impl LoginServer {
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-        let listener = TcpListener::bind(self.config.login.bind).await?;
-        info!(addr = %self.config.login.bind, "login server listening");
+        let listener = TcpListener::bind(self.config.network.login.bind).await?;
+        info!(addr = %self.config.network.login.bind, "login server listening");
         loop {
             let (stream, peer) = listener.accept().await?;
             let span = tracing::info_span!("login", %peer);

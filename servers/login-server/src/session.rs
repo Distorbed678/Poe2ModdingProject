@@ -522,8 +522,8 @@ async fn send_instance_details(server: &LoginServer, conn: &mut Connection, tick
         anyhow::bail!("ticket area {} not in game data", ticket.area);
     };
     let details = InstanceDetails {
-        host: server.config.instance.public_host.clone(),
-        port: server.config.instance.public_port,
+        host: server.config.network.public_host.clone(),
+        port: server.config.network.instance.public_port,
         unk_30: ticket.id,
         area_hash: area.hash16,
         unk_34: 0,
@@ -535,7 +535,7 @@ async fn send_instance_details(server: &LoginServer, conn: &mut Connection, tick
     // Official servers follow InstanceDetails with 0x0017 0x0014, which makes the client shut
     // its login connection down (handler `0x1420e7140` -> `0x1420e71d0`: `shutdown()`). We keep
     // the connection: in-game transfers arrive on it (`[login] close_after_handoff`).
-    if server.config.login.close_after_handoff {
+    if server.config.network.login.close_after_handoff {
         out.extend(
             server
                 .protocol

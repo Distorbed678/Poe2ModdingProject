@@ -4,7 +4,7 @@
 
 | Crate | Role |
 |---|---|
-| `crates/poe-config` | Typed `config/server.toml`: ports, hosts, leagues, paths, logging, terrain toggle, admins, commands, instances. |
+| `crates/poe-config` | Typed `config/server.toml`: ports, hosts, leagues, paths, logging, terrain toggle, admins, commands, instances, movement tuning, dev bridges (`config/server.example.toml` lists every key). |
 | `modules/protocol/poe-net` | Transport (Poe2Protocol submodule): `StreamCipher` trait (Salsa20 for login and instance streams), big-endian `Reader`/`Writer` with PoE string and varint encodings, hexdump; the buffered TCP `Connection` is behind the `tokio` cargo feature (the servers enable it, the client DLL does not). |
 | `modules/protocol/poe-proto` | Message definitions (Poe2Protocol submodule); opcodes come from `modules/protocol/opcodes/<version>/{login,instance,hnc}.toml`. `describe` decodes captured messages for the DLL. |
 | `crates/poe-data` | Game data: `GameFiles` (Bundles2 through `poe_data_tools`, with override directories in front) and `GameData::table("WorldAreas")` (`.datc64` decoded with the community schema, columns accessed by name). |

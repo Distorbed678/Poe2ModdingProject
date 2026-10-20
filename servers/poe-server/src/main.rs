@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         stats: Arc::new(poe_game::stats::StatRegistry::load(&data)?),
         store: store.clone(),
         seeds: Arc::new(instance_server::seeds::KnownSeeds::load(
-            &config.instance.known_seeds,
+            &config.dev.known_seeds,
         )),
         reports: Default::default(),
         sessions,

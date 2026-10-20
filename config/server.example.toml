@@ -1,0 +1,186 @@
+# Example server configuration: every key with its default (or a safe starting value), fully
+# commented. Copy to config/server.toml (or point POE_CONFIG at a copy) and edit.
+# config/server.toml is the working dev config; a test (poe-config) parses both files.
+# Paths are relative to the working directory (the repo root when started with `cargo run`).
+# Keys marked "required" have no default and must be present; everything else may be left out.
+# Old key names (pre-2026-10) are listed in docs/guides/server-admin.md "Config migration".
+
+[game]
+# All keys in [game] are required.
+version = "0.5.5e"
+# Provided copy of the client install; game data is read from <game_dir>/Bundles2.
+game_dir = "GameFiles"
+# Community .datc64 schema (third_party/fetch-tools.sh downloads it).
+schema = "third_party/dat-schema/schema-poe2.min.json"
+# Opcode tables for this client version.
+protocol_dir = "modules/protocol/opcodes/0.5.5e"
+
+[network]
+# [network] is required (no default addresses).
+# Host the clients are sent to: written into gateway_list.txt by `cargo xtask deploy-client`
+# (login server) and sent in InstanceDetails (instance server). Use the machine's LAN/public
+# address for remote clients (docs/guides/hosting.md).
+public_host = "127.0.0.1"
+
+[network.login]
+bind = "0.0.0.0:20481"
+# Official servers send 0x0017 0x0014 after InstanceDetails, which makes the client close its
+# login connection. Our in-game transfers go through that connection, so keep this off.
+close_after_handoff = false
+
+[network.instance]
+bind = "0.0.0.0:6112"
+# Port the login server tells the client to connect to; also where the DLL sends position
+# reports (`cargo xtask deploy-client` writes it into the DLL config).
+public_port = 6112
+
+[instance]
+# Empty instances close after this many minutes (towns and hideouts stay open); 0 = never.
+idle_minutes = 15
+# Simulation frame interval in ms (one 0x2f4 tick marker per frame; also sent in
+# InitialState as the frame length).
+tick_ms = 33
+
+[movement]
+# Movement tuning, kept until the movement rewrite (docs/protocol/movement.md).
+# Cell sent with a turn: "natural" (the cell the client reaches in that frame; it is put on
+# its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
+# See docs/protocol/movement.md#lag.
+turn_cell = "natural"
+# Hold a turn back by up to one frame when that lands it nearer a cell centre (smaller
+# snaps at turns, some turns 33 ms later).
+turn_timing = true
+# Turn the player toward the cursor, except while walking by click-to-move or rolling (the
+# client reports the cursor with its position; mapped to grid cells by cursor_to_grid).
+face_cursor = true
+# Cursor offset (client pixels from the window centre, scaled to a 1440-pixel-high window) to
+# grid offset: gx = a*sx + b*sy + c, gy = d*sx + e*sy + f as [a, b, c, d, e, f].
+# Calibrated from dodge-roll targets (2026-10-15).
+cursor_to_grid = [0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]
+
+[dev]
+# Development and research bridges; none are needed for normal play.
+# Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
+# seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
+known_seeds = ""   # default: empty (off); the dev config uses dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv
+# Accept the client DLL's per-frame position reports (UDP on the instance port) and follow
+# them (movement dev bridge until the server simulates movement exactly).
+position_sync = true
+# Movement trace: client position reports, inputs and movement replies as TSV
+# (docs/protocol/movement.md#movement-trace). Empty to turn it off.
+movement_trace = ""   # default: empty (off); the dev config writes runtime/movement-trace.tsv
+# Debug link for the client DLL overlay (state view, command registry, instance list, server
+# commands from the overlay); loopback only.
+debug_link = true
+# Terrain seed sweep (research): `<WorldAreas.Id> <seed> [count]` per line; empty = off
+# (env POE_SWEEP overrides). Each session generates the next listed layout and ends
+# (scripts/re/sweep_drive.py logs the client in again).
+sweep = ""
+sweep_results = "dumps/0.5.5e/terrain/vectors/sweep-results.tsv"
+
+[terrain]
+# Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
+# with the one the client reports. The client always generates the terrain itself; leave this
+# off until the generator covers every area (docs/status/terrain.md).
+generate = false
+
+[admin]
+# Accounts allowed to use admin commands (chat `!` commands and the overlay's server tools).
+accounts = []   # default: no admins; the dev config lists "Exile1"
+
+[commands]
+# Prefix for server commands typed in chat (`/` stays with the client's own commands).
+prefix = "!"
+# Every admin command is appended here (time, account, command, result). Empty = off.
+audit_log = ""   # default: empty (off); the dev config writes runtime/admin-audit.log
+
+[database]
+# required
+path = "runtime/server.sqlite"
+
+[accounts]
+# name_prefix and max_characters are required; the rest default as noted.
+# Accounts are created automatically on first login, keyed by the client's machine hash,
+# and named <name_prefix><id>.
+name_prefix = "Exile"
+# Character slots per account (sent to the client and enforced on creation).
+max_characters = 24
+# Two account flag bytes sent with the authentication result; the client splits them into
+# bits (docs/protocol/login.md). Byte 0 bits 2/3/4/7 open the terms-of-use window,
+# the cheating warning, the RMT warning and "update required" respectively: keep them clear.
+flags = [0x63, 0x03]   # default [0, 0]; these are the values the client needs for a normal session
+# Full game access (in game: no "Get Full Access" button in the escape menu).
+full_access = true
+# Stash tabs every account has (until stashes are stored): official new accounts get "1".."4".
+stash_tabs = ["1", "2", "3", "4"]
+
+[gateway]
+# required
+# Entry written into GameFiles/gateway_list.txt (replaces the official list while deployed).
+region = "Local"
+display_name = "Local Server"
+
+[logging]
+# tracing EnvFilter syntax; RUST_LOG overrides it.
+filter = "info,poe_net=debug"
+
+[[leagues]]
+id = "Standard"
+hardcore = false
+permanent = true
+flag = "StandardFlag"
+
+[[leagues]]
+id = "Hardcore"
+hardcore = true
+permanent = true
+variant_of = "Standard"
+flag = "HardcoreFlag"
+
+# Player inventories sent on instance entry (one per Inventories.dat row; the client's UI
+# looks each slot up and fails on a missing one). Sizes are [width, height].
+[inventories]
+default_size = [1, 1]
+# Row 26 is excluded by the client's inventory registry.
+skip = ["StashInventoryId"]
+
+[inventories.sizes]
+MainInventory1 = [12, 5]
+BodyArmour1 = [2, 3]
+Weapon1 = [2, 4]
+Offhand1 = [2, 4]
+Weapon2 = [2, 4]
+Offhand2 = [2, 4]
+Helm1 = [2, 2]
+Gloves1 = [2, 2]
+Boots1 = [2, 2]
+Belt1 = [2, 1]
+Flask1 = [5, 1]
+
+# Player start position. Dev bridge until server-side terrain generation (M5): the client DLL
+# exports the generated layout and the player starts on the area's start tile, or else on
+# the playable tile nearest the map centre.
+[spawn]
+layout_dir = "dumps/0.5.5e/terrain"
+filler = ["fill", "blank"]
+
+# First visit plays the washed-up opening (new characters on the Riverbank).
+intro_areas = ["G1_1"]
+
+# Start tile per area, and the start point inside it in the tile's own orientation (grid cells
+# from its corner); the spawn is then snapped to the nearest walkable cell.
+# The Riverbank: washed up on the shore beside the intro tree.
+[spawn.start_tiles.G1_1]
+tile = "Intro_Tree"
+point = [9, 33]
+
+# Chat: the channel given to "join any" requests (global/trade); lines are routed by channel.
+[chat]
+default_channel = 1
+
+# Player characters: skills every character has (GrantedEffects ids, level 1). Basic actions
+# such as Move come from the class template and are not listed here.
+# New characters start in start_area (WorldAreas id) unless their start state has a hub area.
+[player]
+innate_skills = ["DodgeRollPlayer"]
+start_area = "G1_1"

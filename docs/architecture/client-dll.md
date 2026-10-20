@@ -88,7 +88,7 @@ The steps (`deploy-client --official`, `run-client`, switching back) are in [../
 Risk: the DLL is a third-party module inside the official client, even if it only observes. It can be detected (the client can also load server-delivered code modules, see [../re/crypto.md](../re/crypto.md#other-crypto-in-the-binary)), and it is against the game's terms; there is some risk to the account.
 
 ## Debug link with our server (`devlink.rs`)
-The DLL's position-report UDP socket also receives `PDB1` datagrams from the instance server (`key\tvalue` lines; `ack\t<command>\t<result>` for commands, shown as notices) and sends `PDC1` commands (`u16 our TCP port of the session`, then text). Server side: `[instance] debug_link` (default on), `sync.rs` remembers each client's UDP address and queues its commands, the session tick applies them (`dev_command`) and sends `Player::debug_state`. Never while read-only.
+The DLL's position-report UDP socket also receives `PDB1` datagrams from the instance server (`key\tvalue` lines; `ack\t<command>\t<result>` for commands, shown as notices) and sends `PDC1` commands (`u16 our TCP port of the session`, then text). Server side: `[dev] debug_link` (default on), `sync.rs` remembers each client's UDP address and queues its commands, the session tick applies them (`dev_command`) and sends `Player::debug_state`. Never while read-only.
 - Teleport sends two direction updates in one frame: a minimal direction with the target cell, then a stop. The client checks the cell of `0x64` only when the direction is not zero (`0x142149640`); in lockstep it then always places the player on the cell's centre (the 46-cell rule applies only outside lockstep).
 
 ## Modes and the read-only latch

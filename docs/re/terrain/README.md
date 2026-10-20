@@ -154,7 +154,7 @@ objects, not sent by the server.
   `generator_trace.tsv` in the area export, every seed, raw MT draw, bounded draw (with the
   calling functions) and phase in order. Diff it against the server port to find the first
   divergence. A Riverbank layout is ~23,000 lines.
-- **Seed sweep:** the server's `[instance] sweep` (or `POE_SWEEP=<file>`) lists
+- **Seed sweep:** the server's `[dev] sweep` (or `POE_SWEEP=<file>`) lists
   `<WorldAreas.Id> <seed> [count]`. Each instance session then generates the next entry instead
   of the character's area, appends `area, seed, tile hash, doodad hash` to `sweep_results`
   (`dumps/0.5.5e/terrain/vectors/sweep-results.tsv`) and closes. `scripts/re/sweep_drive.py` logs the test client in again

@@ -10,28 +10,33 @@ schema = "third_party/dat-schema/schema-poe2.min.json"
 # Opcode tables for this client version.
 protocol_dir = "modules/protocol/opcodes/0.5.5e"
 
-[login]
-bind = "0.0.0.0:20481"
-# Host written into gateway_list.txt by `cargo xtask deploy-client`.
+[network]
+# Host the clients are sent to: written into gateway_list.txt by `cargo xtask deploy-client`
+# (login server) and sent in InstanceDetails (instance server). Use the machine's LAN/public
+# address for remote clients (docs/guides/hosting.md).
 public_host = "127.0.0.1"
+
+[network.login]
+bind = "0.0.0.0:20481"
 # Official servers send 0x0017 0x0014 after InstanceDetails, which makes the client close its
 # login connection. Our in-game transfers go through that connection, so keep this off.
 close_after_handoff = false
 
-[instance]
+[network.instance]
 bind = "0.0.0.0:6112"
-# Host/port the login server tells the client to connect to.
-public_host = "127.0.0.1"
+# Port the login server tells the client to connect to; also where the DLL sends position
+# reports (`cargo xtask deploy-client` writes it into the DLL config).
 public_port = 6112
+
+[instance]
+# Empty instances close after this many minutes (towns and hideouts stay open); 0 = never.
+idle_minutes = 15
 # Simulation frame interval in ms (one 0x2f4 tick marker per frame; also sent in
 # InitialState as the frame length).
 tick_ms = 33
-# Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
-# seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
-known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
-# Movement trace (dev): client position reports, inputs and movement replies as TSV
-# (docs/protocol/movement.md#movement-trace). Empty to turn it off.
-movement_trace = "runtime/movement-trace.tsv"
+
+[movement]
+# Movement tuning, kept until the movement rewrite (docs/protocol/movement.md).
 # Cell sent with a turn: "natural" (the cell the client reaches in that frame; it is put on
 # its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
 # See docs/protocol/movement.md#lag.
@@ -42,6 +47,22 @@ turn_timing = true
 # Turn the player toward the cursor, except while walking by click-to-move or rolling (the
 # client reports the cursor with its position; mapped to grid cells by cursor_to_grid).
 face_cursor = true
+# Cursor offset (client pixels from the window centre, scaled to a 1440-pixel-high window) to
+# grid offset: gx = a*sx + b*sy + c, gy = d*sx + e*sy + f as [a, b, c, d, e, f].
+# Calibrated from dodge-roll targets (2026-10-15).
+cursor_to_grid = [0.0497, -0.0660, -3.30, -0.0540, -0.0667, -3.20]
+
+[dev]
+# Development and research bridges; none are needed for normal play.
+# Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
+# seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
+known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
+# Accept the client DLL's per-frame position reports (UDP on the instance port) and follow
+# them (movement dev bridge until the server simulates movement exactly).
+position_sync = true
+# Movement trace: client position reports, inputs and movement replies as TSV
+# (docs/protocol/movement.md#movement-trace). Empty to turn it off.
+movement_trace = "runtime/movement-trace.tsv"
 # Debug link for the client DLL overlay (state view, command registry, instance list, server
 # commands from the overlay); loopback only.
 debug_link = true
@@ -56,10 +77,6 @@ sweep_results = "dumps/0.5.5e/terrain/vectors/sweep-results.tsv"
 # with the one the client reports. The client always generates the terrain itself; leave this
 # off until the generator covers every area (docs/status/terrain.md).
 generate = false
-
-[instances]
-# Empty instances close after this many minutes (towns and hideouts stay open); 0 = never.
-idle_minutes = 15
 
 [admin]
 # Accounts allowed to use admin commands (chat `!` commands and the overlay's server tools).

@@ -48,20 +48,44 @@ cargo xtask deploy-core     # rebuilds and installs only the debug core; a runni
 cargo xtask dll-data        # rewrites only GameFiles/poe-hook-data/ (stats, action types, areas)
 cargo xtask run-client      # launches the client through Proton (Steam must be running)
 cargo xtask revert-client   # restores GameFiles/ to the original state
+cargo xtask tracker         # renders docs/status/tracker.toml into the README.md status tables (--check: fail if README.md is stale)
 ```
 
 `deploy-client` does the following (the logic is `poe-hook-deploy` in `modules/client-hook`; xtask passes the paths):
 - Backs up `GameFiles/gateway_list.txt` to `gateway_list.txt.orig` (only once).
-- Writes a single UTF-16LE gateway entry, built from `[gateway]`/`[login]` in `config/server.toml`.
+- Writes a single UTF-16LE gateway entry, built from `[gateway]`, `[network] public_host` and `[network.login] bind` (its port) in `config/server.toml`.
 - Copies the loader to `GameFiles/version.dll` and the debug core next to it.
 - Writes `dump_dir` (`<repo>/dumps/<version>` as a `Z:\` path) into `GameFiles/poe-hook.toml`; the DLL writes terrain grids and layouts, area exports and client tables there ([../../dumps/README.md](../../dumps/README.md)).
 - Writes the DLL's name tables to `GameFiles/poe-hook-data/` (`stats.tsv`, `action_types.tsv`, `areas.tsv` for the area picker).
 - Copies `modules/client-hook/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
-- Sets `position_sync_port` in that file's `[features]` to `[instance] public_port`, so position reports go to the instance server.
+- Sets `position_sync_port` in that file's `[features]` to `[network.instance] public_port`, so position reports go to the instance server.
 - Resets `auto_keys` to `[]`, and the client's remembered gateway (`gateway_id` in the test prefix's `poe2_production_Config.ini`) to ours for private deploys (after an official session it stays on an official realm and the client never contacts our server).
 - Writes `steam_appid.txt`.
 
 `run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
+
+## Config
+
+`config/server.toml` is the working dev config; `config/server.example.toml` is a fully commented copy with every key and its default (a `poe-config` test parses both). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]`, `[admin]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
+
+### Config migration (2026-10)
+
+The server no longer reads the old layout (a config with `[login]`/`[instances]` fails to parse because `[network]` is missing). Old key to new key:
+
+| Old | New |
+|---|---|
+| `[login] bind` | `[network.login] bind` |
+| `[login] public_host`, `[instance] public_host` | `[network] public_host` (one value for both) |
+| `[login] close_after_handoff` | `[network.login] close_after_handoff` |
+| `[instance] bind` | `[network.instance] bind` |
+| `[instance] public_port` | `[network.instance] public_port` |
+| `[instances] idle_minutes` | `[instance] idle_minutes` |
+| `[instance] tick_ms` | `[instance] tick_ms` (unchanged; `[instance]` and `[instances]` are merged) |
+| `[instance] turn_cell`, `turn_timing`, `face_cursor`, `cursor_to_grid` | `[movement]` (same names) |
+| `[instance] known_seeds`, `position_sync`, `movement_trace`, `debug_link`, `sweep`, `sweep_results` | `[dev]` (same names) |
+| `[accounts]` (`name_prefix`, `max_characters`, `flags`, `full_access`, `stash_tabs`) | unchanged |
+
+Defaults changed: `[movement] turn_timing` and `face_cursor` now default to `true` (they were `false` when the key was missing; `config/server.toml` already set them to `true`).
 
 ## Playing from Steam (non-Steam game shortcut)
 One-time setup, after `cargo xtask deploy-client`:

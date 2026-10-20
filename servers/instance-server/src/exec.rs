@@ -180,7 +180,7 @@ impl InstanceServer {
                 Outcome::ok(player.turn_timing.to_string())
             }
             "face_cursor" => {
-                player.face_cursor = p.bool("on").then_some(self.config.instance.cursor_to_grid);
+                player.face_cursor = p.bool("on").then_some(self.config.movement.cursor_to_grid);
                 Outcome::ok(player.face_cursor.is_some().to_string())
             }
             "terrain" => {

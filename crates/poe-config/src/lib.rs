@@ -31,7 +31,10 @@ pub enum ConfigError {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub game: GameConfig,
-    pub login: LoginConfig,
+    /// Listen addresses and advertised host/port of the login and instance servers.
+    pub network: NetworkConfig,
+    /// Instances of areas and the simulation frame clock.
+    #[serde(default)]
     pub instance: InstanceConfig,
     pub database: DatabaseConfig,
     pub accounts: AccountsConfig,
@@ -54,26 +57,12 @@ pub struct Config {
     pub admin: AdminConfig,
     #[serde(default)]
     pub commands: CommandsConfig,
+    /// Movement tuning (kept until the movement rewrite, phase 2).
     #[serde(default)]
-    pub instances: InstancesConfig,
-}
-
-/// Instances of areas.
-#[derive(Debug, Clone, Deserialize)]
-pub struct InstancesConfig {
-    /// Close instances that have been empty this long (towns and hideouts stay); 0 = never.
-    #[serde(default = "default_idle_minutes")]
-    pub idle_minutes: u64,
-}
-
-impl Default for InstancesConfig {
-    fn default() -> Self {
-        Self { idle_minutes: default_idle_minutes() }
-    }
-}
-
-fn default_idle_minutes() -> u64 {
-    15
+    pub movement: MovementConfig,
+    /// Development and research bridges (debug link, position sync, traces, seed sweep).
+    #[serde(default)]
+    pub dev: DevConfig,
 }
 
 /// Server-side terrain generation (`poe-world`). The client always builds the terrain itself
@@ -226,36 +215,66 @@ pub struct GameConfig {
     pub protocol_dir: PathBuf,
 }
 
+/// `[network]`: where the servers listen and what the client is told to connect to.
 #[derive(Debug, Clone, Deserialize)]
-pub struct LoginConfig {
-    pub bind: SocketAddr,
+pub struct NetworkConfig {
+    /// Host written into `gateway_list.txt` (login server) and sent to the client in
+    /// InstanceDetails (instance server). One value for both.
     pub public_host: String,
+    pub login: NetworkLoginConfig,
+    pub instance: NetworkInstanceConfig,
+}
+
+/// `[network.login]`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkLoginConfig {
+    pub bind: SocketAddr,
     /// Send `0x0017 0x0014` after InstanceDetails as official servers do: the client then closes
     /// its login connection, so in-game transfers (which go through it) stop working.
     #[serde(default)]
     pub close_after_handoff: bool,
 }
 
+/// `[network.instance]`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkInstanceConfig {
+    pub bind: SocketAddr,
+    /// Port the login server tells the client to connect to (and where the DLL sends position
+    /// reports); differs from `bind` behind port forwarding.
+    pub public_port: u16,
+}
+
+/// `[instance]`: instances of areas and their simulation clock.
 #[derive(Debug, Clone, Deserialize)]
 pub struct InstanceConfig {
-    pub bind: SocketAddr,
-    pub public_host: String,
-    pub public_port: u16,
+    /// Close instances that have been empty this long (towns and hideouts stay); 0 = never.
+    #[serde(default = "default_idle_minutes")]
+    pub idle_minutes: u64,
     /// Simulation frame interval: a tick marker (0x2f4) is sent this often.
     #[serde(default = "default_tick_ms")]
     pub tick_ms: u64,
-    /// Optional TSV of terrain seeds known to generate (`area, level, seed, ...`); the server
-    /// picks one for areas listed there, since some random seeds fail to generate.
-    #[serde(default)]
-    pub known_seeds: PathBuf,
-    /// Accept the client DLL's per-frame position reports (UDP on the instance port) and
-    /// follow them (movement dev bridge until the server simulates movement exactly, M5).
-    #[serde(default = "default_true")]
-    pub position_sync: bool,
-    /// Movement trace (dev): every client position report, movement input and movement reply
-    /// is appended to this TSV file, for analysing a play session. Empty: off.
-    #[serde(default)]
-    pub movement_trace: PathBuf,
+}
+
+impl Default for InstanceConfig {
+    fn default() -> Self {
+        Self {
+            idle_minutes: default_idle_minutes(),
+            tick_ms: default_tick_ms(),
+        }
+    }
+}
+
+fn default_idle_minutes() -> u64 {
+    15
+}
+
+fn default_tick_ms() -> u64 {
+    33
+}
+
+/// `[movement]`: how the server answers client movement (until the movement rewrite).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MovementConfig {
     /// Which cell a turn (`0x64`/`0x1c8`) is sent with: "own" (the client's cell when the
     /// turn applies: the client only re-aims its walk, as with a server that simulates it
     /// exactly), "heading" (a cell one step along the new heading: the client is put on its
@@ -264,19 +283,47 @@ pub struct InstanceConfig {
     pub turn_cell: String,
     /// Hold a turn back by up to one frame when that puts the player nearer its path (the
     /// client puts it on a cell centre at every turn).
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub turn_timing: bool,
     /// Turn the player toward the cursor (except while it walks by click-to-move or rolls),
     /// from the cursor position in the client's position reports (dev bridge, see
     /// `cursor_to_grid`).
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub face_cursor: bool,
     /// Cursor (client pixels from the window centre, scaled to a 1440-pixel-high window) to
     /// grid offset from the player: `gx = a·sx + b·sy + c`, `gy = d·sx + e·sy + f` as
     /// `[a, b, c, d, e, f]` (calibrated from dodge-roll targets, 2026-10-15).
     #[serde(default = "default_cursor_to_grid")]
     pub cursor_to_grid: [f32; 6],
-    /// Debug link for the client DLL's overlay (dev): send each session's simulation state to
+}
+
+impl Default for MovementConfig {
+    fn default() -> Self {
+        Self {
+            turn_cell: default_turn_cell(),
+            turn_timing: true,
+            face_cursor: true,
+            cursor_to_grid: default_cursor_to_grid(),
+        }
+    }
+}
+
+/// `[dev]`: development and research bridges. None of these are needed for normal play.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DevConfig {
+    /// Optional TSV of terrain seeds known to generate (`area, level, seed, ...`); the server
+    /// picks one for areas listed there, since some random seeds fail to generate.
+    #[serde(default)]
+    pub known_seeds: PathBuf,
+    /// Accept the client DLL's per-frame position reports (UDP on the instance port) and
+    /// follow them (movement dev bridge until the server simulates movement exactly, M5).
+    #[serde(default = "default_true")]
+    pub position_sync: bool,
+    /// Movement trace: every client position report, movement input and movement reply
+    /// is appended to this TSV file, for analysing a play session. Empty: off.
+    #[serde(default)]
+    pub movement_trace: PathBuf,
+    /// Debug link for the client DLL's overlay: send each session's simulation state to
     /// the DLL (UDP, where its position reports come from), the command registry and instance
     /// list, and accept server commands from its overlay (`commands.rs`). Loopback only.
     #[serde(default = "default_true")]
@@ -294,6 +341,19 @@ pub struct InstanceConfig {
     pub sweep_results: PathBuf,
 }
 
+impl Default for DevConfig {
+    fn default() -> Self {
+        Self {
+            known_seeds: PathBuf::new(),
+            position_sync: true,
+            movement_trace: PathBuf::new(),
+            debug_link: true,
+            sweep: PathBuf::new(),
+            sweep_results: default_sweep_results(),
+        }
+    }
+}
+
 fn default_sweep_results() -> PathBuf {
     "dumps/0.5.5e/terrain/vectors/sweep-results.tsv".into()
 }
@@ -308,10 +368,6 @@ fn default_turn_cell() -> String {
 
 fn default_true() -> bool {
     true
-}
-
-fn default_tick_ms() -> u64 {
-    33
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -413,5 +469,47 @@ mod tests {
         let text = include_str!("../../../config/server.toml");
         let cfg = Config::parse(text).expect("config/server.toml must parse");
         assert!(!cfg.leagues.is_empty());
+    }
+
+    #[test]
+    fn example_config_parses() {
+        let text = include_str!("../../../config/server.example.toml");
+        let cfg = Config::parse(text).expect("config/server.example.toml must parse");
+        assert!(!cfg.leagues.is_empty());
+    }
+
+    /// The example documents the defaults: a config with only the required keys must equal it
+    /// for every defaulted section.
+    #[test]
+    fn example_matches_defaults() {
+        let example = Config::parse(include_str!("../../../config/server.example.toml")).unwrap();
+        let minimal = Config::parse(
+            r#"
+            [game]
+            version = "x"
+            game_dir = "g"
+            schema = "s"
+            protocol_dir = "p"
+            [network]
+            public_host = "h"
+            [network.login]
+            bind = "0.0.0.0:1"
+            [network.instance]
+            bind = "0.0.0.0:2"
+            public_port = 2
+            [database]
+            path = "d"
+            [accounts]
+            name_prefix = "Exile"
+            max_characters = 1
+            [gateway]
+            region = "r"
+            display_name = "n"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(format!("{:?}", example.instance), format!("{:?}", minimal.instance));
+        assert_eq!(format!("{:?}", example.movement), format!("{:?}", minimal.movement));
+        assert_eq!(format!("{:?}", example.chat), format!("{:?}", minimal.chat));
     }
 }

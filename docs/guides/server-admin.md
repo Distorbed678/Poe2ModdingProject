@@ -31,7 +31,7 @@ Execution is in `exec.rs` (`InstanceServer::run_command`). Admin commands are ch
 | `join <instance>` | yes | moves you into an existing instance |
 | `close <instance>` | yes | closes an instance; its players are disconnected |
 | `teleport <x> <y>` | yes | moves you to a grid cell |
-| `turn_cell`, `turn_timing`, `face_cursor` | yes | movement switches (see `[instance]`) |
+| `turn_cell`, `turn_timing`, `face_cursor` | yes | movement switches (see `[movement]`) |
 | `terrain` | yes | generates this instance's terrain on the server and logs the comparison |
 | `area_info <area> <seed>` | yes | research: a second AreaInfo on the connection (the client may crash) |
 
@@ -49,7 +49,7 @@ seed, forced topology and orientation, the players in it and since when it is em
   areas join the area's newest open instance, else get a new one.
 - The first player decides an instance's seed (spec seed, else saved location, known seeds,
   random); later players get the same one.
-- Empty instances close after `[instances] idle_minutes` (towns and hideouts stay).
+- Empty instances close after `[instance] idle_minutes` (towns and hideouts stay).
 - A closed instance disconnects its players.
 
 ## Transfers
@@ -66,7 +66,7 @@ tile hash 1655364279 equals the server's forced generation):
 
 What does not work: `InstanceDetails` while the client is in an instance (received, ignored),
 and a second AreaInfo on one connection (crash). The login connection must stay open, so the
-server does not send login `0x0017` after the hand-off (`[login] close_after_handoff = false`;
+server does not send login `0x0017` after the hand-off (`[network.login] close_after_handoff = false`;
 why: [../protocol/login.md](../protocol/login.md#hand-off-to-the-instance-server)). How official
 servers reconnect for later transfers is still to be captured.
 

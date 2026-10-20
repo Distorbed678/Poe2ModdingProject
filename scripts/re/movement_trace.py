@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Finds movement hitches in a server movement trace (`[instance] movement_trace`).
+"""Finds movement hitches in a server movement trace (`[dev] movement_trace`).
 
 For every client position report (one per client frame) it computes the step since the
 previous frame. A frame that moves backwards (against the previous step) or nearly stalls

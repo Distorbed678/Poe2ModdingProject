@@ -51,7 +51,7 @@ pub struct InstanceServer {
     /// Stat ids -> network keys (built once from Stats.dat).
     pub stats: Arc<StatRegistry>,
     pub store: Arc<dyn Store>,
-    /// Seeds the client is known to generate (`instance.known_seeds`).
+    /// Seeds the client is known to generate (`dev.known_seeds`).
     pub seeds: Arc<seeds::KnownSeeds>,
     /// Client position reports (movement dev bridge, see [`sync`]).
     pub reports: Arc<sync::ClientReports>,
@@ -65,9 +65,9 @@ pub struct InstanceServer {
 
 impl InstanceServer {
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-        let listener = TcpListener::bind(self.config.instance.bind).await?;
-        info!(addr = %self.config.instance.bind, "instance server listening");
-        let trace_path = &self.config.instance.movement_trace;
+        let listener = TcpListener::bind(self.config.network.instance.bind).await?;
+        info!(addr = %self.config.network.instance.bind, "instance server listening");
+        let trace_path = &self.config.dev.movement_trace;
         if !trace_path.as_os_str().is_empty() {
             match sync::MovementTrace::open(trace_path) {
                 Ok(t) => {
@@ -77,17 +77,17 @@ impl InstanceServer {
                 Err(e) => warn!(path = %trace_path.display(), "movement trace: {e}"),
             }
         }
-        if self.config.instance.position_sync {
+        if self.config.dev.position_sync {
             let reports = self.reports.clone();
-            let addr = self.config.instance.bind;
+            let addr = self.config.network.instance.bind;
             tokio::spawn(async move {
                 if let Err(e) = reports.listen(addr).await {
                     warn!("client position reports: {e:#}");
                 }
             });
         }
-        // Idle instances close after `[instances] idle_minutes` (towns and hideouts stay).
-        let idle = self.config.instances.idle_minutes;
+        // Idle instances close after `[instance] idle_minutes` (towns and hideouts stay).
+        let idle = self.config.instance.idle_minutes;
         if idle > 0 {
             let instances = self.instances.clone();
             tokio::spawn(async move {
@@ -166,7 +166,7 @@ impl InstanceServer {
         let mut hnc = KeyMaterial(self.protocol.hnc.derive(&ticket.keys)).server_to_client();
 
         // Terrain seed sweep: this session generates the next listed layout only.
-        let sweep = sweep_list(&self.config.instance.sweep).and_then(|list| {
+        let sweep = sweep_list(&self.config.dev.sweep).and_then(|list| {
             let i = SWEEP_NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let entry = list.get(i).cloned()?;
             Some((i, list.len(), entry))
@@ -244,13 +244,13 @@ impl InstanceServer {
         let mut player = self.new_player(&ticket, spawn)?;
         player.walkable = spawn::client_grid(&self.config.spawn, hashes.hash_a);
         player.frame_seconds = self.config.instance.tick_ms as f32 / 1000.0;
-        player.turn_cell = player::TurnCell::parse(&self.config.instance.turn_cell);
-        player.turn_timing = self.config.instance.turn_timing;
+        player.turn_cell = player::TurnCell::parse(&self.config.movement.turn_cell);
+        player.turn_timing = self.config.movement.turn_timing;
         player.face_cursor = self
             .config
-            .instance
+            .movement
             .face_cursor
-            .then_some(self.config.instance.cursor_to_grid);
+            .then_some(self.config.movement.cursor_to_grid);
         if saved.is_some() {
             // Same layout, so the saved cell is normally walkable; otherwise use the nearest
             // open spot.
@@ -335,7 +335,7 @@ impl InstanceServer {
         // Without position reports the server only has its own simulation, which has no
         // terrain yet: positions drift and the client snaps when they are 46+ cells apart.
         let report_deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let mut warned = !self.config.instance.position_sync;
+        let mut warned = !self.config.dev.position_sync;
         let mut ticks: u64 = 0;
         // Not decoded yet: log the client's decrypted messages (heartbeat 0x1c is skipped).
         loop {
@@ -404,7 +404,7 @@ impl InstanceServer {
                     let mut replies = player.tick(self.config.instance.tick_ms as f32 / 1000.0);
                     let mut leave = false;
                     let mut extra = Vec::new();
-                    if self.config.instance.debug_link {
+                    if self.config.dev.debug_link {
                         // Overlay commands: the same registry as chat commands.
                         for command in self.reports.take_commands(client_port) {
                             if command == "registry" {
@@ -500,7 +500,7 @@ impl InstanceServer {
     /// Appends a sweep result line (`area, seed, tile hash, doodad hash`).
     fn record_sweep(&self, area: &str, seed: u32, hashes: Option<&TerrainHashes>) {
         use std::io::Write;
-        let path = &self.config.instance.sweep_results;
+        let path = &self.config.dev.sweep_results;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).ok();
         }
@@ -622,7 +622,7 @@ impl InstanceServer {
     /// The command registry for the overlay (debug link): `cmds` datagrams of `cmd` lines
     /// (`commands::wire`), then whether this account is an admin.
     fn send_registry(&self, ctx: &exec::SessionCtx<'_>) {
-        if !self.config.instance.debug_link {
+        if !self.config.dev.debug_link {
             return;
         }
         let mut chunk = String::from("cmds\tbegin\n");
@@ -664,7 +664,7 @@ impl InstanceServer {
             }
             chunk.push_str(&line);
         }
-        chunk.push_str(&format!("idle\t{}\n", self.config.instances.idle_minutes));
+        chunk.push_str(&format!("idle\t{}\n", self.config.instance.idle_minutes));
         self.reports.send_debug(ctx.port, &chunk);
     }
 }
