@@ -1671,6 +1671,7 @@ name = "poe-game"
 version = "0.1.0"
 dependencies = [
  "poe-data",
+ "serde_json",
  "tracing",
 ]
 

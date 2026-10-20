@@ -11,7 +11,7 @@
 | `crates/poe-store` | `Store` trait plus SQLite: accounts, characters, saved positions. |
 | `crates/poe-cluster` | Coordination between servers: tickets (`TicketRegistry`), login sessions (logout, transfers), the instance directory (`InstanceDirectory`). In-process implementations now; traits for a split deployment later. |
 | `crates/poe-world` | Terrain generation (the client's generator, ported; see [../status/terrain.md](../status/terrain.md)). |
-| `crates/poe-game` | Simulation pieces: movement, stats. |
+| `crates/poe-game` | Simulation: the instance `World` (entities, frame clock), `GridSource` terrain grids (client dump `Grid`, `VecGrid`), the server-authoritative movement component `Locomotion` (typed inputs and events, no opcodes; built from [../protocol/movement.md](../protocol/movement.md)), `Mover` and A* pathfinding, character stats. Design: [instance-world.md](instance-world.md). Replay tests use fixtures under `tests/fixtures/` derived by `scripts/re/movement_fixtures.py`. |
 | `servers/login-server` | Login protocol: auth, leagues, characters, hand-off and transfers to instances. |
 | `servers/instance-server` | Instance protocol: areas, player, movement, chat, server commands (`commands.rs`, `exec.rs`), live sessions. |
 | `servers/poe-server` | Development launcher that runs both servers in one process. |

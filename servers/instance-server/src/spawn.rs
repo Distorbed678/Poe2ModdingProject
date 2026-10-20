@@ -184,85 +184,8 @@ impl PlacedTile {
     }
 }
 
-/// Cell grids exported by the DLL: `b"PWG1"`, u32 cells_x, cells_y, bytes_per_row, layers,
-/// then each layer (4 bits per cell, low nibble first).
-pub struct Grid {
-    pub cells_x: i32,
-    pub cells_y: i32,
-    bytes_per_row: usize,
-    layers: Vec<Vec<u8>>,
-}
-
-impl Grid {
-    pub fn parse(data: &[u8]) -> Option<Self> {
-        if data.get(..4)? != b"PWG1" {
-            return None;
-        }
-        let word = |i: usize| -> Option<u32> {
-            Some(u32::from_le_bytes(
-                data.get(4 + i * 4..8 + i * 4)?.try_into().ok()?,
-            ))
-        };
-        let (cells_x, cells_y, bytes_per_row, count) = (word(0)?, word(1)?, word(2)?, word(3)?);
-        let size = bytes_per_row as usize * cells_y as usize;
-        let layers = (0..count as usize)
-            .map(|i| Some(data.get(20 + i * size..20 + (i + 1) * size)?.to_vec()))
-            .collect::<Option<_>>()?;
-        Some(Self {
-            cells_x: cells_x as i32,
-            cells_y: cells_y as i32,
-            bytes_per_row: bytes_per_row as usize,
-            layers,
-        })
-    }
-
-    pub fn cell(&self, layer: usize, x: i32, y: i32) -> u8 {
-        if x < 0 || y < 0 || x >= self.cells_x || y >= self.cells_y {
-            return 0;
-        }
-        let b = self.layers[layer][y as usize * self.bytes_per_row + x as usize / 2];
-        if x & 1 == 1 { b >> 4 } else { b & 0xf }
-    }
-
-    /// Walkable: layer 0 non-zero on the cell and its 8 neighbours at distance 2.
-    pub fn walkable(&self, x: i32, y: i32) -> bool {
-        (-2..=2).step_by(2).all(|dy| {
-            (-2..=2)
-                .step_by(2)
-                .all(|dx| self.cell(0, x + dx, y + dy) != 0)
-        })
-    }
-
-    /// Nearest walkable cell to `(x, y)` within `radius` cells (square rings outward).
-    pub fn nearest_walkable(&self, (x, y): (i32, i32), radius: i32) -> Option<(i32, i32)> {
-        for r in 0..=radius {
-            let mut best: Option<((i32, i32), i32)> = None;
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs() != r && dy.abs() != r {
-                        continue;
-                    }
-                    let p = (x + dx, y + dy);
-                    let d = dx * dx + dy * dy;
-                    if self.walkable(p.0, p.1) && best.is_none_or(|(_, bd)| d < bd) {
-                        best = Some((p, d));
-                    }
-                }
-            }
-            if let Some((p, _)) = best {
-                return Some(p);
-            }
-        }
-        None
-    }
-}
-
-/// Movement uses layer 0 of the client's grid directly (non-zero = walkable).
-impl poe_game::movement::Walkable for Grid {
-    fn walkable(&self, x: i32, y: i32) -> bool {
-        self.cell(0, x, y) != 0
-    }
-}
+/// The client's cell grid (exported by the DLL); lives in `poe-game` so the simulation can use it.
+pub use poe_game::grid::Grid;
 
 /// What the server knows about the client's terrain: the walkability grid, if exported.
 pub fn client_grid(config: &SpawnConfig, tile_hash: u32) -> Option<Grid> {

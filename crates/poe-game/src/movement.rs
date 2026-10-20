@@ -118,6 +118,11 @@ impl Mover {
         self.replan_in = 0;
     }
 
+    /// Waypoints (cells) left of the current walk.
+    pub fn path(&self) -> &[(i32, i32)] {
+        &self.path
+    }
+
     /// Moves the entity to a cell centre and stops it.
     pub fn place(&mut self, (x, y): (i32, i32)) {
         self.x = x as f32 + 0.5;

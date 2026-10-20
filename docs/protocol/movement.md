@@ -1,6 +1,6 @@
 # Movement
 
-Specification of how the client moves the player and what an **official** server sends back, from six read-only official capture sessions (`dumps/0.5.5e/captures/official/`, 2026-10-14..17) and the client's code (Ghidra). The tool that produced every sequence below is `scripts/re/movement_sequences.py` (`list`, `events`, `scen`, `never`; see [Reproducing](#reproducing)). Code: `servers/instance-server/src/player.rs` (session state, replies), `crates/poe-game/src/movement.rs` and `pathfinding.rs` (the simulation), messages in `modules/protocol/poe-proto/src/instance.rs` and `skill.rs`.
+Specification of how the client moves the player and what an **official** server sends back, from six read-only official capture sessions (`dumps/0.5.5e/captures/official/`, 2026-10-14..17) and the client's code (Ghidra). The tool that produced every sequence below is `scripts/re/movement_sequences.py` (`list`, `events`, `scen`, `never`; see [Reproducing](#reproducing)). Code: `servers/instance-server/src/player.rs` (session state, replies), `crates/poe-game/src/locomotion.rs` (the movement component built from this spec, [instance-world.md](../architecture/instance-world.md)), `movement.rs` and `pathfinding.rs` (the simulation), messages in `modules/protocol/poe-proto/src/instance.rs` and `skill.rs`.
 
 Captures are from **WASD input mode** only. Real click-to-move, held clicks, standing rolls, chained rolls and stance changes are **not** in them; see the [gap list](#gap-list).
 
@@ -98,7 +98,7 @@ States of the local player's movement on the server: `Idle`, `Walking(v)`, `Roll
 | Idle / Walking | `0x2e6 held=1` + `0x1a5 roll` | Rolling | `r+0`: roll batch (below) |
 | Rolling | `0x1a8` (every 2 frames) | Rolling | `r+0`: `0x1af`, once per `0x1a8` |
 | Rolling | `0x63 v` | Rolling | `r+0`: `0x64 v, cell` (the client acts on it when the roll ends) |
-| Rolling, key released before `t0+15` | `0x1ac` + `0x2e6 held=0` | Rolling → Walking/Idle at `t0+16` | `r+0`: `0x1b1`, `0x2e7 held=0`; `t0+16`: roll-end stats |
+| Rolling, key released before `t0+15` | `0x1ac` + `0x2e6 held=0` | Rolling → Walking/Idle at `t0+30` (see [roll action](#roll-action-length)) | `r+0`: `0x1b1`, `0x2e7 held=0`; `t0+16`: roll-end stats |
 | Rolling, key still down at `t0+15` | (nothing) | Sprinting | `t0+15`: sprint start; `t0+30`: roll end; `t0+35`: `must_sprint=0` |
 | Sprinting | `0x63 v` | Sprinting(v) | from the first `0x63` after sprint start: a `0x64` **every frame**, direction ×550/180 |
 | Sprinting | `0x1ac` + `0x2e6 held=0` | Walking(v) | `r+0`: `0x1b1`, `0x2e7 held=0`, `0x64`, sprint-off buffs/stats; `r+1`: `0x64 v` unscaled |
@@ -128,7 +128,18 @@ Measured in all 15 rolls; the offsets are constant (server logic, not latency):
 | `t0+30` | – | `0x1d3` stun thresholds 0 + `is_dodge_rolling=0`; `0x1d3` `base_move_speed_+%_from_sprint=50, movement_velocity_+permyriad=5000`; `0x1eb` ×2 (buff index n+1 `0xab1` again and n `0xac6` with flags `0x02` = f32 `0.1`) |
 | `t0+35` | – | `0x1ec` buff index n; `0x1d3` `must_sprint=0`, header `(player,player,3,0)` |
 
-So **a roll is 16 frames (533 ms) on a tap and 30 frames (1 s) when Space is still down at frame 15**, and the sprint begins at frame 15 while the roll is still running.
+So **`is_dodge_rolling` is cleared 16 frames (533 ms) after the roll on a tap and 30 frames (1 s) when Space is still down at frame 15**, and the sprint begins at frame 15 while the roll is still running.
+
+### Roll action length
+Found while replaying the captures (WP2.2, `crates/poe-game/tests/replay.rs`): the roll *action* lasts **30 frames in both cases**. After a tap roll's stats at `t0+16` the server still treats the player as rolling until `t0+30`:
+- **Aim is not echoed** (`0x62` → `0x1dc`) for aims up to `t0+26` at least; the `0x1a8`/`0x1af` pairs go on.
+- **A new roll waits.** The one chained roll asked for 27 frames after the first one started got its `0x2e7` and `0x1ae` at `r+0` and its `0x1c8`, `0x1ca` and stats exactly at the first roll's `t0+30` (the "2 batches later" case above, 36 − 6 = 30). The three chained rolls asked for 31+ frames after the first one started began at `r+0`. The server code assumes every new roll press during a roll behaves like this (UNVERIFIED, [gap #4](#gap-list)).
+- Our roll speed profile covers its 46 cells in about 28 frames, which fits an action of ~30 frames.
+
+### Reply details found by replay
+- **Direction scaling truncates**: `dir × 550 / 180` with integer division toward zero (`(-53, 172)` → `(-161, 525)`, not `-162, 526`).
+- **`0x64` comes after the other replies of its frame** (input replies, timeline events); in the key-release case the sprint-off events follow it, in the roll/sprint timeline frames (`t0+30`, `t0+35`) the timeline events come first and the stream message last.
+- **Attack ends the sprint** (key release and attack in one frame): `0x1a8` ack, `0x1b1`, `0x2e7 held=0`, attack `0x1c8`, `0x1ec n+1`, sprint-off stats, `0x1ca`, attack `0x1ae`, **`0x64` unscaled** at `r+0`, `0x1ec n+2`, `all_hits_stun_you=0`.
 
 ### End of sprint (all 10, key up `k` frames after the roll)
 `r+0` batch: `0x1b1`, `0x2e7 held=0`, `0x64` (still scaled), then `0x1ec` (index n+1), `0x1d3` `base_move_speed_+%_from_sprint=0, movement_velocity_+permyriad=0, sprint_blend_time_override_ms=0, is_sprinting=0, virtual_skill_ignore_namelocking_dynamically=0`, `0x1ec` (index n+2), `0x1d3` `all_hits_stun_you=0` (headers `(player,player,9,7)`); `r+1`: `0x64` with the **unscaled** vector. If the player used an attack (`0x1a5` `0x80400040`) while sprinting, the sprint is ended by it instead: `0x1ec`, `0x1d3 must_sprint=0`, the attack's `0x1c8`, `0x1ec`, `0x1d3` sprint stats 0, `0x1ca`, `0x1ec`, `0x1d3 all_hits_stun_you=0`; the key release (`0x1ac`+`0x2e6 held=0`) then gets `0x1b1`/`0x2e7 held=0` with no stats. Sprint end causes over the 10 sprints: key up 6, an attack skill 4.
