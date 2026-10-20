@@ -7,7 +7,7 @@
 //! entity: [`MoveInput`] in, [`MoveEvent`] out, one [`Locomotion::tick`] per frame. The
 //! sequences, frame offsets and counts are the official ones of
 //! `docs/protocol/movement.md`; scenarios the captures
-//! do not cover are marked `UNVERIFIED (gap #n)` after the gap list there.
+//! do not cover are marked `UNVERIFIED (gap #n)`, numbered as in the gap list there.
 //!
 //! No wire formats here: [`MoveEvent`] is semantic (the instance server maps it to packets),
 //! and skill ids and buff rows come in through [`MovementConfig`].
@@ -26,6 +26,9 @@ use crate::movement::{Motion, Mover, Walkable};
 
 pub type Cell = (i32, i32);
 
+/// Bit the server adds to the flags of a `StartAction` that an input started.
+pub const ACTION_INPUT_FLAG: u16 = 0x10;
+
 /// Skill ids the component recognises (from game data; everything else is a generic action).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SkillIds {
@@ -43,11 +46,25 @@ pub struct RollConfig {
     /// Frames the roll action lasts (aim is not echoed, a new roll waits, WASD is acted on
     /// afterwards). Also the frame a roll that became a sprint ends.
     pub action_frames: u32,
+    /// Frames after the roll start at which a queued attack cuts the roll short and starts
+    /// (2026-10-20 capture: 24 in all 3 cases; the client's roll action ends then too).
+    pub attack_cancel_frames: u32,
     /// Frames after the roll start at which a tap roll (key up before the sprint starts)
     /// clears `is_dodge_rolling`; the action itself goes on until `action_frames`.
     pub tap_end_frames: u32,
     /// Value of the three stun threshold stats while rolling.
     pub stun_threshold: i32,
+}
+
+/// Click-to-move tuning (official values as defaults).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClickConfig {
+    /// While the click is held the server re-issues the Move `StartAction` towards the current
+    /// target every this many frames (2026-10-20 capture: 15, sometimes 13).
+    pub restart_frames: u32,
+    /// Frames after the press' answer at which the first restart comes (hold 1: 2; hold 2: 6,
+    /// so UNVERIFIED what triggers them).
+    pub first_restart_frames: u32,
 }
 
 /// Sprint tuning (official values as defaults).
@@ -63,8 +80,9 @@ pub struct SprintConfig {
     pub must_sprint_end_frames: u32,
     /// Walking speed multiplier while sprinting.
     pub speed_scale: f32,
-    /// Direction vectors in sprint replies are the input times `.0 / .1` (integer division).
-    pub dir_scale: (i32, i32),
+    /// Direction vectors in sprint replies are the input scaled to this length and truncated
+    /// toward zero (official: 550; measured on 294 of 309 replies, the rest lag one input).
+    pub dir_length: i32,
     /// `base_move_speed_+%_from_sprint`.
     pub move_speed_percent: i32,
     /// `movement_velocity_+permyriad`.
@@ -79,10 +97,16 @@ pub struct MovementConfig {
     pub skills: SkillIds,
     pub roll: RollConfig,
     pub sprint: SprintConfig,
+    pub click: ClickConfig,
     /// Characters' walking speed, cells per second.
     pub walk_speed: f32,
-    /// Frames between the client entering aim mode (`AimMode(1)`) and the stance change.
+    /// Frames between the client entering aim mode (`AimMode(1)`) at entry and the stance
+    /// change.
     pub stance_delay_frames: u32,
+    /// Frames between a later input-mode toggle (`AimMode(0|1)` with the stance request
+    /// `0x200`, mouse mode and back) and the stance change, counted from the batch that
+    /// answers the input (2026-10-20 capture: 0, the same batch).
+    pub stance_toggle_frames: u32,
 }
 
 impl MovementConfig {
@@ -94,8 +118,13 @@ impl MovementConfig {
             roll: RollConfig {
                 travel_distance: 46.0,
                 action_frames: 30,
+                attack_cancel_frames: 24,
                 tap_end_frames: 16,
                 stun_threshold: 100,
+            },
+            click: ClickConfig {
+                restart_frames: 15,
+                first_restart_frames: 2,
             },
             sprint: SprintConfig {
                 buff_rows,
@@ -103,13 +132,14 @@ impl MovementConfig {
                 start_frames: 15,
                 must_sprint_end_frames: 35,
                 speed_scale: 1.5,
-                dir_scale: (550, 180),
+                dir_length: 550,
                 move_speed_percent: 50,
                 velocity_permyriad: 5000,
                 blend_time_override_ms: 1,
             },
             walk_speed: 37.0,
             stance_delay_frames: 9,
+            stance_toggle_frames: 0,
         }
     }
 }
@@ -215,6 +245,10 @@ pub enum MoveEvent {
     ActionStart {
         kind: ActionKind,
         skill: u32,
+        /// The request's flags plus [`ACTION_INPUT_FLAG`] for a start driven by the player's
+        /// input (`0x410`, `0x450` in mouse mode, `0x10` for a held repeat); a restart the
+        /// server issues by itself carries the last request's flags without it.
+        flags: u16,
         action: u16,
         cell: Cell,
         target: Cell,
@@ -270,6 +304,25 @@ pub enum Walk {
     Target { goal: Cell },
 }
 
+/// A click that is being held (between the press and `SkillReleased` of the Move skill).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoveHold {
+    /// Absolute cell of the latest press or repeat.
+    pub goal: Cell,
+    /// Flags of the latest request (press `0x400`, repeats `0`): restarts carry them.
+    pub flags: u16,
+    /// Press counter; stale restarts of an earlier hold are ignored.
+    seq: u64,
+    /// Frame of the latest press or repeat. Repeats come every 2 frames; a hold that is
+    /// quiet for longer than [`MoveHold::STALE_FRAMES`] is over (5 of 12 holds in the
+    /// 2026-10-20 capture ended without a `SkillReleased`).
+    last_input: u64,
+}
+
+impl MoveHold {
+    pub const STALE_FRAMES: u64 = 6;
+}
+
 /// A running sprint (the buffs are added at roll start + 15 frames).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SprintRun {
@@ -287,8 +340,13 @@ pub struct Rolling {
     pub start_frame: u64,
     /// The sprint key is down.
     pub held: bool,
-    /// Cursor offset the roll runs towards (relative to the cell it started from).
+    /// Cursor offset the roll runs towards when no WASD key is held (relative to the cell it
+    /// started from); steered by `UpdateSkillTarget`.
     pub offset: Cell,
+    /// A WASD key was held when the roll was asked for: the roll runs along the WASD vector
+    /// (the client ignores the cursor then) and follows its changes (2026-10-20 capture:
+    /// 14 of 14 rolls with WASD held, direction changes 2 frames after the `0x63`).
+    pub wasd_driven: bool,
     pub action: u16,
     /// The roll turned into a sprint (the key was held at `start_frame + 15`).
     pub sprint: Option<SprintRun>,
@@ -324,7 +382,18 @@ enum Due {
     MustSprintOff,
     /// The reply of the frame after a sprint ended: the unscaled direction.
     UnscaledAck,
-    Stance,
+    Stance(bool),
+    /// Starts [`Locomotion::deferred_roll`].
+    StartDeferredRoll,
+    /// The roll `roll` lets go of the player: a queued attack starts (a roll that is held into
+    /// a sprint waits for the sprint's end).
+    AttackWindow {
+        roll: u64,
+    },
+    /// Re-issues the Move `StartAction` of a held click.
+    MoveRestart {
+        seq: u64,
+    },
 }
 
 /// Per-frame facts the component gets from the world.
@@ -355,11 +424,28 @@ pub struct Locomotion {
     must_sprint_off: Option<u16>,
     combat_stance: bool,
     stance_scheduled: bool,
+    /// The stance at entry has been set; later `AimMode` inputs are input-mode toggles.
+    stance_entered: bool,
     teleport: Option<Cell>,
     /// A roll asked for while the previous roll's action still runs: it starts when that ends.
     queued_roll: Option<(UseSkill, Cell)>,
     /// Events that follow this frame's `MoveAck`.
     deferred: Vec<MoveEvent>,
+    /// The sprint key is released in the batch being handled (set by `tick`).
+    batch_release: bool,
+    /// A roll whose key was already up when it was handled: acked now, started next frame.
+    deferred_roll: Option<(UseSkill, Cell)>,
+    /// The last attack asked for during a roll (acked already).
+    queued_attack: Option<(UseSkill, Cell)>,
+    /// The Move click being held.
+    move_hold: Option<MoveHold>,
+    hold_seq: u64,
+    /// The sprint key was released before `must_sprint` went off: the sprint ends then.
+    release_pending: bool,
+    /// ... and it is `t0 + 35` now: end it after this frame's `MoveAck`.
+    release_due: bool,
+    /// An attack that starts after this frame's `MoveAck` (see `MustSprintOff`).
+    attack_after_ack: Option<(UseSkill, Cell)>,
 }
 
 impl Locomotion {
@@ -376,9 +462,18 @@ impl Locomotion {
             must_sprint_off: None,
             combat_stance: false,
             stance_scheduled: false,
+            stance_entered: false,
             teleport: None,
             queued_roll: None,
             deferred: Vec::new(),
+            batch_release: false,
+            deferred_roll: None,
+            queued_attack: None,
+            move_hold: None,
+            hold_seq: 0,
+            attack_after_ack: None,
+            release_pending: false,
+            release_due: false,
         }
     }
 
@@ -414,6 +509,13 @@ impl Locomotion {
     /// The sprint key is down.
     pub fn sprint_held(&self) -> bool {
         self.held
+    }
+
+    /// Sets the stance directly (a player whose entry stance is already done, e.g. restored
+    /// or in tests); later `AimMode` inputs are then input-mode toggles.
+    pub fn set_stance(&mut self, combat: bool) {
+        self.combat_stance = combat;
+        self.stance_entered = true;
     }
 
     pub fn in_combat_stance(&self) -> bool {
@@ -463,7 +565,11 @@ impl Locomotion {
         }
         // 2. Inputs.
         let mut end_sprint = false;
-        for input in std::mem::take(&mut self.inbox) {
+        let inbox = std::mem::take(&mut self.inbox);
+        self.batch_release = inbox
+            .iter()
+            .any(|i| matches!(i, MoveInput::SprintInput { held: false }));
+        for input in inbox {
             self.handle(input, ctx, &mut out, &mut end_sprint);
         }
         // 3. Timeline.
@@ -478,9 +584,14 @@ impl Locomotion {
         // 4. MoveAck, then what follows it.
         self.move_ack(unscaled_ack, ctx, &mut out);
         out.append(&mut self.deferred);
+        if let Some((req, target)) = self.attack_after_ack.take() {
+            self.start_attack(req, target, false, ctx, &mut out);
+            out.append(&mut self.deferred);
+        }
         // 5. Sprint end.
+        end_sprint |= std::mem::take(&mut self.release_due);
         if end_sprint {
-            self.end_sprint(ctx.frame, &mut out);
+            self.end_sprint(ctx, &mut out);
         }
         out
     }
@@ -509,6 +620,14 @@ impl Locomotion {
             }
             MoveInput::SkillInputEnd => out.push(MoveEvent::InputEndAck),
             MoveInput::SkillReleased { skill, flag } => {
+                if skill == ctx.config.skills.move_skill {
+                    self.move_hold = None;
+                }
+                // In click-to-move mode the roll key is released with `SkillReleased` (no
+                // `SkillInputEnd`), which is answered with both acks (2026-10-20 capture).
+                if skill == ctx.config.skills.roll_skill {
+                    out.push(MoveEvent::InputEndAck);
+                }
                 out.push(MoveEvent::ReleasedAck { skill, flag });
             }
             MoveInput::SprintInput { held } => {
@@ -517,25 +636,45 @@ impl Locomotion {
                     r.held = held;
                 }
                 out.push(MoveEvent::SprintState { held });
-                if !held && self.sprint().is_some() {
-                    *end_sprint = true;
+                if !held && let Some(run) = self.sprint().copied() {
+                    // A sprint cannot end before `must_sprint` goes off at t0 + 35: a key
+                    // released earlier (2026-10-20 capture: at t0 + 19) is answered at once
+                    // (`1b1`, `2e7`) and the sprint ends at t0 + 35.
+                    let end = run.start_frame + ctx.config.sprint.must_sprint_end_frames as u64;
+                    if ctx.frame < end {
+                        self.release_pending = true;
+                    } else {
+                        *end_sprint = true;
+                    }
                 }
             }
             MoveInput::Aim { x, y } => {
                 // Never echoed while rolling or sprinting (all sessions).
-                if !self.is_rolling() && self.sprint().is_none() {
+                if !self.is_rolling() && self.sprint().is_none() && self.deferred_roll.is_none() {
                     out.push(MoveEvent::AimEcho { cell: (x, y) });
                 }
             }
             MoveInput::AimEntity { .. } => {}
             MoveInput::AimMode { mode } => {
-                // UNVERIFIED (gap #8): the captures show the stance change once at entry, 9
-                // frames after the first mode 1; nothing about stance changes while moving.
-                if mode == 1 && !self.combat_stance && !self.stance_scheduled {
-                    self.stance_scheduled = true;
+                let combat = mode == 1;
+                if !self.stance_entered {
+                    // At entry the stance follows the first mode 1 after 9 frames (14 in the
+                    // 2026-10-20 session: it depends on the area load).
+                    if combat && !self.stance_scheduled {
+                        self.stance_scheduled = true;
+                        self.due.push((
+                            ctx.frame + ctx.config.stance_delay_frames as u64,
+                            Due::Stance(true),
+                        ));
+                    }
+                } else if combat != self.combat_stance {
+                    // Input mode toggled (with the stance request `0x200`): 2 of 2 in the
+                    // 2026-10-20 capture, in the batch answering the input, in both directions,
+                    // while standing.
+                    // UNVERIFIED (gap #7): while walking or rolling.
                     self.due.push((
-                        ctx.frame + ctx.config.stance_delay_frames as u64,
-                        Due::Stance,
+                        ctx.frame + ctx.config.stance_toggle_frames as u64,
+                        Due::Stance(combat),
                     ));
                 }
             }
@@ -548,13 +687,23 @@ impl Locomotion {
         let moving = dir != (0, 0);
         if let Some(run) = self.sprint_mut() {
             // The stream starts with the first vector after the sprint started. A zero vector
-            // is answered once. UNVERIFIED (gap #5): what the stream does when the direction
-            // goes to zero during a sprint.
+            // is answered once. The official client never sends one while a sprint runs (it
+            // sends the cursor direction); UNVERIFIED (gap #4) what the stream does if it did.
             run.streaming = moving;
         }
         match self.state {
-            // Acted on when the roll ends.
-            MoveState::Rolling(_) => {}
+            // A roll along the WASD keys turns with them; the walk after it is picked up when
+            // the roll ends. A roll towards the cursor keeps steering by the cursor
+            // (UNVERIFIED: WASD pressed during a roll that started standing).
+            MoveState::Rolling(r) => {
+                if r.wasd_driven
+                    && moving
+                    && let Motion::Roll { x, y, .. } = &mut self.mover.motion
+                {
+                    *x = dir.0 as f32;
+                    *y = dir.1 as f32;
+                }
+            }
             MoveState::Sprinting(_) => self.mover.start(if moving {
                 Motion::Sprint {
                     x: dir.0 as f32,
@@ -577,7 +726,7 @@ impl Locomotion {
                 }
             }
             MoveState::Walking(Walk::Target { .. }) => {
-                // UNVERIFIED (gap #1): WASD takes over a click walk; a stop leaves it running.
+                // UNVERIFIED (gap #2): WASD takes over a click walk; a stop leaves it running.
                 if moving {
                     self.state = MoveState::Walking(Walk::Direction(dir));
                     self.mover.start(Motion::Direction {
@@ -613,24 +762,35 @@ impl Locomotion {
         let busy = matches!(self.state, MoveState::Rolling(_) | MoveState::Sprinting(_));
         if req.skill == ctx.config.skills.roll_skill {
             match self.state {
-                // One capture (28 frames after the previous roll started, while its action
-                // still ran): acked at once, the roll itself starts when the previous action
-                // ends. UNVERIFIED (gap #4): the rule is generalised to any new press during
-                // a roll; the other three chained rolls (31+ frames) started at once.
+                // Chained rolls (2026-10-20: presses 28 and 29 frames after the previous start,
+                // plus the 2026-10-14 case at 27): acked at once, the roll itself starts when
+                // the previous action ends (`max(r+1, P+30)`). A press 9 frames in that was
+                // released again was dropped: this keeps the last press (single slot);
+                // UNVERIFIED (gap #3) whether a released key drops it.
                 MoveState::Rolling(_) if req.target_flags & UseSkill::HELD_REPEAT == 0 => {
                     out.push(Self::skill_ack(&req, target));
                     self.queued_roll = Some((req, target));
                 }
                 // Held-key repeats of the roll skill (target flags 0x13) are acked and nothing
-                // else happens. UNVERIFIED (gap #4): a roll while sprinting is treated alike.
+                // else happens. UNVERIFIED (gap #3): a roll while sprinting is treated alike.
                 MoveState::Rolling(_) | MoveState::Sprinting(_) => {
                     out.push(Self::skill_ack(&req, target));
+                }
+                // Press and release handled together (inputs queued while paused): the
+                // answers come in input order and the roll itself one batch later (2026-10-20
+                // capture, scheduled headers `(5, 8)`, `(5, 17)`, `(5, 25)`).
+                _ if self.batch_release && self.held => {
+                    out.push(Self::skill_ack(&req, target));
+                    self.deferred_roll = Some((req, target));
+                    self.due.push((ctx.frame + 1, Due::StartDeferredRoll));
                 }
                 _ => self.start_roll(req, target, true, ctx, out),
             }
         } else if req.skill == ctx.config.skills.move_skill {
             if busy {
-                // UNVERIFIED (gap #7): Move input while rolling or sprinting is ignored.
+                // Verified (2026-10-20, 1 roll and 3 sprints): acked at once, nothing moves;
+                // the held click's walk resumes with a `StartAction` when the roll ends.
+                self.note_hold(&req, target, ctx);
                 out.push(Self::skill_ack(&req, target));
             } else {
                 self.start_walk(req, target, ctx, out);
@@ -660,14 +820,17 @@ impl Locomotion {
         let offset = (target.0 - cell.0, target.1 - cell.1);
         let action = Self::alloc_action(ctx);
         let cfg = ctx.config;
-        // UNVERIFIED (gap #2): a standing roll (no WASD held) is assumed to get the same batch
-        // and to end in Idle with no `MoveAck`.
-        self.mover.start(if offset == (0, 0) {
+        // Verified (2026-10-20): a standing roll gets the same batch and ends in Idle with no
+        // `MoveAck`. The client rolls along the WASD vector when a key is held, else towards
+        // the cursor (`target`, steered every 2 frames); `target` is the cursor either way.
+        let wasd_driven = self.wasd != (0, 0);
+        let heading = if wasd_driven { self.wasd } else { offset };
+        self.mover.start(if heading == (0, 0) {
             Motion::Idle
         } else {
             Motion::Roll {
-                x: offset.0 as f32,
-                y: offset.1 as f32,
+                x: heading.0 as f32,
+                y: heading.1 as f32,
                 remaining: cfg.roll.travel_distance,
                 elapsed: 0.0,
             }
@@ -677,6 +840,7 @@ impl Locomotion {
             start_frame: t0,
             held: self.held,
             offset,
+            wasd_driven,
             action,
             sprint: None,
             sprinted: false,
@@ -684,6 +848,7 @@ impl Locomotion {
         out.push(MoveEvent::ActionStart {
             kind: ActionKind::Roll,
             skill: req.skill,
+            flags: req.flags | ACTION_INPUT_FLAG,
             action,
             cell,
             target,
@@ -705,6 +870,10 @@ impl Locomotion {
             .push((at(cfg.roll.action_frames), Due::RollEnd { roll: t0 }));
     }
 
+    /// Click-to-move, verified on 2026-10-20 (6 single clicks, 4 holds): the press is answered
+    /// with `StartAction` Move (request flags + 0x10, start = the server's cell, target =
+    /// cell + offset) and a `UseSkillAck`; every held repeat (target flags 0x10) the same with
+    /// flags 0x10, so a repeat re-aims the walk; the release with a `SkillReleasedAck`.
     fn start_walk(
         &mut self,
         req: UseSkill,
@@ -712,29 +881,55 @@ impl Locomotion {
         ctx: &mut StepCtx,
         out: &mut Vec<MoveEvent>,
     ) {
-        // UNVERIFIED (gap #1): click-to-move replies are derived from the client code (lockstep
-        // design): `StartAction` Move with the absolute target and a `UseSkillAck`; held-click
-        // repeats are acked and re-aim the walk.
-        let repeat = req.target_flags & UseSkill::HELD_REPEAT != 0
-            && matches!(self.state, MoveState::Walking(Walk::Target { .. }));
         let cell = self.mover.cell();
         self.state = MoveState::Walking(Walk::Target { goal: target });
         self.mover.start(Motion::MoveTo {
             x: target.0 as f32 + 0.5,
             y: target.1 as f32 + 0.5,
         });
-        if !repeat {
-            out.push(MoveEvent::ActionStart {
-                kind: ActionKind::Move,
-                skill: req.skill,
-                action: Self::alloc_action(ctx),
-                cell,
-                target,
-                entity: req.entity,
-                unk: req.unk,
-            });
-        }
+        self.note_hold(&req, target, ctx);
+        out.push(MoveEvent::ActionStart {
+            kind: ActionKind::Move,
+            skill: req.skill,
+            flags: req.flags | ACTION_INPUT_FLAG,
+            action: Self::alloc_action(ctx),
+            cell,
+            target,
+            entity: req.entity,
+            unk: req.unk,
+        });
         out.push(Self::skill_ack(&req, target));
+    }
+
+    /// The held click, if its input is recent.
+    fn live_hold(&self, frame: u64) -> Option<MoveHold> {
+        self.move_hold
+            .filter(|h| frame - h.last_input <= MoveHold::STALE_FRAMES)
+    }
+
+    /// Remembers the click as held until its release; a press starts the restart timer.
+    fn note_hold(&mut self, req: &UseSkill, target: Cell, ctx: &StepCtx) {
+        let repeat = req.target_flags & UseSkill::HELD_REPEAT != 0;
+        match &mut self.move_hold {
+            Some(h) if repeat => {
+                h.goal = target;
+                h.flags = req.flags;
+                h.last_input = ctx.frame;
+            }
+            _ => {
+                self.hold_seq += 1;
+                self.move_hold = Some(MoveHold {
+                    goal: target,
+                    flags: req.flags,
+                    seq: self.hold_seq,
+                    last_input: ctx.frame,
+                });
+                self.due.push((
+                    ctx.frame + ctx.config.click.first_restart_frames as u64,
+                    Due::MoveRestart { seq: self.hold_seq },
+                ));
+            }
+        }
     }
 
     fn start_other(
@@ -744,16 +939,46 @@ impl Locomotion {
         ctx: &mut StepCtx,
         out: &mut Vec<MoveEvent>,
     ) {
-        // UNVERIFIED (gap #6): attacks only end a running sprint (the one sequence in the
-        // captures); they do not stop walking, and an attack during a roll is just acked.
-        if self.is_rolling() {
+        // An attack during a roll is acked at once and the last one asked for starts when the
+        // roll lets go: `attack_cancel_frames` after the roll started (the roll is cut short
+        // there), or, when Space was held past +15, with the end of the sprint at +35 (2026-10-20
+        // capture: 3 of 3 and 1 of 1). Attacks end a running sprint; they do not stop walking
+        // (UNVERIFIED (gap #6): attacks while walking, in click-to-move mode).
+        if let MoveState::Rolling(r) = self.state {
             out.push(Self::skill_ack(&req, target));
+            // A held repeat does not replace the request (the attack on a hovered monster
+            // kept its entity target in the capture).
+            if req.target_flags & UseSkill::HELD_REPEAT == 0 || self.queued_attack.is_none() {
+                self.queued_attack = Some((req, target));
+            }
+            let at =
+                (r.start_frame + ctx.config.roll.attack_cancel_frames as u64).max(ctx.frame + 1);
+            self.due.push((
+                at,
+                Due::AttackWindow {
+                    roll: r.start_frame,
+                },
+            ));
             return;
         }
+        self.start_attack(req, target, true, ctx, out);
+    }
+
+    /// Starts an attack now; `ack` is false for a queued one, whose ack went out when it was
+    /// asked for.
+    fn start_attack(
+        &mut self,
+        req: UseSkill,
+        target: Cell,
+        ack: bool,
+        ctx: &mut StepCtx,
+        out: &mut Vec<MoveEvent>,
+    ) {
         let cell = self.mover.cell();
         out.push(MoveEvent::ActionStart {
             kind: ActionKind::Other,
             skill: req.skill,
+            flags: req.flags | ACTION_INPUT_FLAG,
             action: Self::alloc_action(ctx),
             cell,
             target,
@@ -761,7 +986,11 @@ impl Locomotion {
             unk: req.unk,
         });
         let Some(run) = self.sprint().copied() else {
-            out.push(Self::skill_ack(&req, target));
+            if ack {
+                out.push(Self::skill_ack(&req, target));
+            } else {
+                out.push(MoveEvent::ActionEvent);
+            }
             return;
         };
         // The attack ends the sprint: (`must_sprint` off, if it still runs,) `0x1c8`, the first
@@ -778,7 +1007,9 @@ impl Locomotion {
         });
         out.push(MoveEvent::Stats(sprint_off_stats()));
         out.push(MoveEvent::ActionEvent);
-        out.push(Self::skill_ack(&req, target));
+        if ack {
+            out.push(Self::skill_ack(&req, target));
+        }
         self.deferred.push(MoveEvent::BuffRemoved {
             index: run.buff_base + 2,
         });
@@ -792,7 +1023,7 @@ impl Locomotion {
     fn steer(&mut self, skill: u32, offset: Cell, abs: Cell, ctx: &StepCtx) {
         match &mut self.state {
             MoveState::Rolling(r) if skill == ctx.config.skills.roll_skill => {
-                if offset != (0, 0) {
+                if offset != (0, 0) && !r.wasd_driven {
                     r.offset = offset;
                     if let Motion::Roll { x, y, .. } = &mut self.mover.motion {
                         *x = offset.0 as f32;
@@ -897,10 +1128,26 @@ impl Locomotion {
                     });
                     self.state = MoveState::Sprinting(run);
                     self.start_sprint_motion(ctx);
+                } else if let Some(h) = self.live_hold(ctx.frame) {
+                    // A held click: the walk resumes with a `StartAction` towards the latest
+                    // target (2026-10-20 capture, scheduled header `(0, 8)`).
+                    self.state = MoveState::Walking(Walk::Target { goal: h.goal });
+                    self.mover.start(Motion::MoveTo {
+                        x: h.goal.0 as f32 + 0.5,
+                        y: h.goal.1 as f32 + 0.5,
+                    });
+                    out.push(MoveEvent::ActionStart {
+                        kind: ActionKind::Move,
+                        skill: cfg.skills.move_skill,
+                        flags: h.flags & !ACTION_INPUT_FLAG,
+                        action: Self::alloc_action(ctx),
+                        cell: self.mover.cell(),
+                        target: h.goal,
+                        entity: None,
+                        unk: 0xff,
+                    });
                 } else {
                     // The client resumes walking by itself after a roll; no message.
-                    // (UNVERIFIED (gap #3) if the sprint was cut short by the key going up
-                    // between +15 and +30.)
                     self.resume_walking();
                 }
                 if let Some((req, target)) = self.queued_roll.take() {
@@ -912,11 +1159,76 @@ impl Locomotion {
                     out.push(MoveEvent::BuffRemoved { index: n });
                     out.push(MoveEvent::Stats(vec![(MoveStat::MustSprint, 0)]));
                 }
+                // An attack asked for during the roll ends the sprint now, after this frame's
+                // `MoveAck` (official order: `must_sprint` off, `MoveAck`, `StartAction`, ...).
+                if self.sprint().is_some() {
+                    self.attack_after_ack = self.queued_attack.take();
+                    if self.release_pending {
+                        self.release_pending = false;
+                        self.release_due = true;
+                    }
+                }
+            }
+            Due::AttackWindow { roll } => {
+                let MoveState::Rolling(r) = self.state else {
+                    return;
+                };
+                // A roll that sprinted hands the attack to the sprint's end (see
+                // `MustSprintOff`) or to its own end.
+                if r.start_frame != roll || r.sprinted {
+                    return;
+                }
+                if let Some((req, target)) = self.queued_attack.take() {
+                    self.resume_walking();
+                    self.start_attack(req, target, false, ctx, out);
+                }
+            }
+            Due::MoveRestart { seq } => {
+                let Some(h) = self.move_hold else {
+                    return;
+                };
+                if h.seq != seq {
+                    return;
+                }
+                if ctx.frame - h.last_input > MoveHold::STALE_FRAMES {
+                    self.move_hold = None;
+                    return;
+                }
+                self.due.push((
+                    ctx.frame + cfg.click.restart_frames as u64,
+                    Due::MoveRestart { seq },
+                ));
+                // Only while the walk runs: a roll or sprint holds the restart back, and the
+                // roll's end issues one.
+                if matches!(self.state, MoveState::Walking(Walk::Target { .. })) {
+                    out.push(MoveEvent::ActionStart {
+                        kind: ActionKind::Move,
+                        skill: cfg.skills.move_skill,
+                        flags: h.flags & !ACTION_INPUT_FLAG,
+                        action: Self::alloc_action(ctx),
+                        cell: self.mover.cell(),
+                        target: h.goal,
+                        entity: None,
+                        unk: 0xff,
+                    });
+                }
+            }
+            Due::StartDeferredRoll => {
+                if let Some((req, target)) = self.deferred_roll.take() {
+                    if self.is_rolling() {
+                        self.queued_roll = Some((req, target));
+                    } else {
+                        self.start_roll(req, target, false, ctx, out);
+                    }
+                }
             }
             Due::UnscaledAck => *unscaled = true,
-            Due::Stance => {
-                self.combat_stance = true;
-                out.push(MoveEvent::StanceChanged { combat: true });
+            Due::Stance(combat) => {
+                self.stance_entered = true;
+                if self.combat_stance != combat {
+                    self.combat_stance = combat;
+                    out.push(MoveEvent::StanceChanged { combat });
+                }
             }
         }
     }
@@ -953,8 +1265,7 @@ impl Locomotion {
     fn move_ack(&mut self, unscaled_due: bool, ctx: &StepCtx, out: &mut Vec<MoveEvent>) {
         let cell = self.mover.cell();
         let wasd = self.wasd;
-        let (num, den) = ctx.config.sprint.dir_scale;
-        let scaled = (wasd.0 * num / den, wasd.1 * num / den);
+        let scaled = scale_to(wasd, ctx.config.sprint.dir_length);
         match self.sprint() {
             Some(run) if run.streaming => out.push(MoveEvent::MoveAck { dir: scaled, cell }),
             _ if self.ack_wanted || unscaled_due => {
@@ -968,10 +1279,33 @@ impl Locomotion {
     /// The sprint key went up: sprint-off buffs and stats after this frame's `MoveAck`, then
     /// back to walking. The stream's last message was scaled and the next frame sends the
     /// unscaled direction.
-    fn end_sprint(&mut self, frame: u64, out: &mut Vec<MoveEvent>) {
+    fn end_sprint(&mut self, ctx: &mut StepCtx, out: &mut Vec<MoveEvent>) {
+        let frame = ctx.frame;
         let Some(run) = self.sprint().copied() else {
             return;
         };
+        self.release_pending = false;
+        if let Some(h) = self.live_hold(ctx.frame)
+            && matches!(self.state, MoveState::Sprinting(_))
+        {
+            // A held click: the walk goes on with a `StartAction` (2026-10-20 capture, before
+            // the sprint-off buffs).
+            self.state = MoveState::Walking(Walk::Target { goal: h.goal });
+            self.mover.start(Motion::MoveTo {
+                x: h.goal.0 as f32 + 0.5,
+                y: h.goal.1 as f32 + 0.5,
+            });
+            out.push(MoveEvent::ActionStart {
+                kind: ActionKind::Move,
+                skill: ctx.config.skills.move_skill,
+                flags: h.flags & !ACTION_INPUT_FLAG,
+                action: Self::alloc_action(ctx),
+                cell: self.mover.cell(),
+                target: h.goal,
+                entity: None,
+                unk: 0xff,
+            });
+        }
         out.push(MoveEvent::BuffRemoved {
             index: run.buff_base + 1,
         });
@@ -994,6 +1328,16 @@ impl Locomotion {
             _ => {}
         }
     }
+}
+
+/// `v` scaled to length `len` and truncated toward zero (`(0, 0)` stays).
+fn scale_to(v: Cell, len: i32) -> Cell {
+    let l = ((v.0 as f64).powi(2) + (v.1 as f64).powi(2)).sqrt();
+    if l == 0.0 {
+        return (0, 0);
+    }
+    let k = len as f64 / l;
+    ((v.0 as f64 * k) as i32, (v.1 as f64 * k) as i32)
 }
 
 fn stun_stats(value: i32) -> Vec<(MoveStat, i32)> {
@@ -1176,6 +1520,268 @@ mod tests {
         assert_eq!(r.loco.cell().1, 1);
     }
 
+    // ---- 2026-10-20 capture (WP2.1b)
+
+    #[test]
+    fn a_roll_runs_along_the_wasd_keys_not_towards_the_cursor() {
+        // 14 of 14 rolls with WASD held went along the key vector while the cursor offset
+        // (and so the StartAction target) pointed elsewhere.
+        let mut r = Rig::new((100, 100));
+        r.tick(&[dir(180, 0)]);
+        r.run(3);
+        let start = r.loco.position();
+        let ev = r.tick(&[roll(0, 30)]);
+        assert!(
+            matches!(&ev[0], MoveEvent::ActionStart { target, .. } if target.1 > r.loco.cell().1 + 20),
+            "the target stays the cursor"
+        );
+        r.run(31);
+        let end = r.loco.position();
+        assert!(end.0 - start.0 > 40.0, "{start:?} -> {end:?}");
+        assert!((end.1 - start.1).abs() < 2.0, "{start:?} -> {end:?}");
+    }
+
+    #[test]
+    fn a_standing_roll_runs_towards_the_cursor_and_steers() {
+        let mut r = Rig::new((100, 100));
+        let start = r.loco.position();
+        r.tick(&[roll(30, 0)]);
+        r.run(8);
+        r.tick(&[MoveInput::UpdateSkillTarget {
+            x: 0,
+            y: 30,
+            skill: ROLL,
+        }]);
+        r.run(30);
+        let end = r.loco.position();
+        assert!(
+            end.0 - start.0 > 5.0 && end.1 - start.1 > 5.0,
+            "{start:?} -> {end:?}"
+        );
+        assert!(dist(start, end) > 28.0, "a bent path of 46 cells");
+    }
+
+    #[test]
+    fn a_roll_along_the_keys_turns_with_them() {
+        // Official: a WASD change during the roll turns the roll (2 frames later on the client).
+        let mut r = Rig::new((100, 100));
+        r.tick(&[dir(180, 0)]);
+        r.run(2);
+        r.tick(&[roll(0, 30)]);
+        r.run(5);
+        let mid = r.loco.position();
+        r.tick(&[dir(0, 180)]);
+        r.run(30);
+        let end = r.loco.position();
+        assert!(end.1 - mid.1 > 10.0, "{mid:?} -> {end:?}");
+    }
+
+    #[test]
+    fn sprint_directions_are_scaled_to_length_550_and_truncated() {
+        let mut r = sprinting((94, -153));
+        let ev = r.tick(&[dir(94, -153)]);
+        assert!(
+            matches!(
+                &ev[..],
+                [MoveEvent::MoveAck {
+                    dir: (287, -468),
+                    ..
+                }]
+            ),
+            "{ev:?}"
+        );
+        let ev = r.tick(&[dir(93, -154)]);
+        assert!(
+            matches!(
+                &ev[..],
+                [MoveEvent::MoveAck {
+                    dir: (284, -470),
+                    ..
+                }]
+            ),
+            "{ev:?}"
+        );
+    }
+
+    #[test]
+    fn the_input_mode_toggle_changes_the_stance_in_the_same_batch() {
+        let mut r = Rig::new((50, 50));
+        r.loco.set_stance(true);
+        assert_eq!(
+            r.tick(&[MoveInput::AimMode { mode: 0 }]),
+            vec![MoveEvent::StanceChanged { combat: false }]
+        );
+        assert!(!r.loco.in_combat_stance());
+        assert_eq!(
+            r.tick(&[MoveInput::AimMode { mode: 1 }]),
+            vec![MoveEvent::StanceChanged { combat: true }]
+        );
+        // No change: no event.
+        assert!(r.tick(&[MoveInput::AimMode { mode: 1 }]).is_empty());
+    }
+
+    #[test]
+    fn a_roll_pressed_and_released_in_one_batch_starts_one_batch_later() {
+        let mut r = Rig::new((50, 50));
+        let ev = r.tick(&[
+            space(true),
+            roll(10, 0),
+            MoveInput::SkillInputEnd,
+            space(false),
+        ]);
+        assert!(matches!(
+            &ev[..],
+            [
+                MoveEvent::SprintState { held: true },
+                MoveEvent::SkillAck { .. },
+                MoveEvent::InputEndAck,
+                MoveEvent::SprintState { held: false }
+            ]
+        ));
+        let ev = r.tick(&[]);
+        assert!(matches!(
+            &ev[..],
+            [
+                MoveEvent::ActionStart { .. },
+                MoveEvent::ActionEvent,
+                MoveEvent::Stats(_),
+                MoveEvent::Stats(_)
+            ]
+        ));
+        assert!(r.loco.is_rolling());
+    }
+
+    #[test]
+    fn an_attack_during_a_tap_roll_starts_at_t0_24() {
+        let mut r = Rig::new((50, 50));
+        r.tick(&[space(true), roll(10, 0)]);
+        r.run(5);
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]);
+        let mut atk = skill(ATTACK, 20, 0);
+        atk.flags = 0x400;
+        let ev = r.tick(&[MoveInput::UseSkill(atk)]);
+        assert!(matches!(
+            &ev[..],
+            [MoveEvent::SkillAck { skill: ATTACK, .. }]
+        ));
+        // t0 = frame 1: the attack starts in frame 25, without a second ack.
+        let ev = r.run(30);
+        let start = ev
+            .iter()
+            .find(|(_, e)| matches!(e, MoveEvent::ActionStart { skill: ATTACK, .. }))
+            .expect("attack start");
+        assert_eq!(start.0, 25);
+        assert!(
+            !ev.iter()
+                .any(|(_, e)| matches!(e, MoveEvent::SkillAck { .. }))
+        );
+        assert!(
+            ev.iter()
+                .any(|(f, e)| *f == 25 && matches!(e, MoveEvent::ActionEvent))
+        );
+        assert!(!r.loco.is_rolling());
+    }
+
+    #[test]
+    fn a_key_released_before_must_sprint_ends_the_sprint_at_t0_35() {
+        // Official (Space up at t0 + 19): `1b1`/`2e7` at once, the stream goes on scaled, the
+        // sprint-off events come with `must_sprint` off at t0 + 35.
+        let mut r = Rig::new((50, 50));
+        r.tick(&[space(true), roll(10, 0)]);
+        r.run(18);
+        r.tick(&[dir(0, -180)]);
+        let ev = r.tick(&[MoveInput::SkillInputEnd, space(false)]);
+        assert!(ev.iter().any(|e| matches!(e, MoveEvent::InputEndAck)));
+        assert!(!ev.iter().any(|e| matches!(e, MoveEvent::Stats(s) if s.iter().any(|(k, _)| *k == MoveStat::IsSprinting))));
+        assert!(r.loco.sprint().is_some());
+        let ev = r.run(20);
+        let off = ev
+            .iter()
+            .find(|(_, e)| matches!(e, MoveEvent::Stats(s) if s.iter().any(|(k, v)| *k == MoveStat::IsSprinting && *v == 0)))
+            .expect("sprint off");
+        assert_eq!(off.0, 36, "t0 + 35 with t0 = frame 1");
+        assert!(r.loco.sprint().is_none());
+    }
+
+    #[test]
+    fn a_held_click_restarts_its_move_every_15_frames() {
+        let mut r = Rig::new((10, 10));
+        r.tick(&[MoveInput::UseSkill(skill(MOVE, 60, 0))]);
+        let mut held = skill(MOVE, 60, 0);
+        held.flags = 0;
+        held.target_flags = UseSkill::HELD_REPEAT;
+        let mut frames = Vec::new();
+        for i in 0..40 {
+            // The client repeats every 2 frames while the button is down.
+            let inputs = if i % 2 == 1 {
+                vec![MoveInput::UseSkill(held)]
+            } else {
+                vec![]
+            };
+            for e in r.tick(&inputs) {
+                // The restarts carry the latest request's flags without 0x10.
+                if matches!(e, MoveEvent::ActionStart { flags, .. } if flags & ACTION_INPUT_FLAG == 0)
+                {
+                    frames.push(r.frame);
+                }
+            }
+        }
+        assert_eq!(frames, [3, 18, 33]);
+        // Released: no more restarts.
+        r.tick(&[MoveInput::SkillReleased {
+            skill: MOVE,
+            flag: 0,
+        }]);
+        assert!(
+            !r.run(40)
+                .iter()
+                .any(|(_, e)| matches!(e, MoveEvent::ActionStart { .. }))
+        );
+    }
+
+    #[test]
+    fn a_hold_without_repeats_expires_without_a_release() {
+        let mut r = Rig::new((10, 10));
+        r.tick(&[MoveInput::UseSkill(skill(MOVE, 200, 0))]);
+        // Nothing follows (the capture's holds that ended with a roll or attack): the
+        // restarts stop and a later roll does not resume the walk.
+        let ev = r.run(40);
+        assert!(
+            ev.iter()
+                .filter(|(_, e)| matches!(e, MoveEvent::ActionStart { .. }))
+                .count()
+                <= 1
+        );
+        r.tick(&[roll(0, 30)]);
+        let ev = r.run(31);
+        assert!(!ev.iter().any(|(_, e)| matches!(
+            e,
+            MoveEvent::ActionStart {
+                kind: ActionKind::Move,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn releasing_the_roll_key_with_skill_released_answers_both_acks() {
+        let mut r = Rig::new((50, 50));
+        let ev = r.tick(&[MoveInput::SkillReleased {
+            skill: ROLL,
+            flag: 0,
+        }]);
+        assert_eq!(
+            ev,
+            vec![
+                MoveEvent::InputEndAck,
+                MoveEvent::ReleasedAck {
+                    skill: ROLL,
+                    flag: 0
+                }
+            ]
+        );
+    }
+
     #[test]
     fn standing_roll_batch_and_timeline() {
         let mut r = Rig::new((50, 50));
@@ -1316,8 +1922,9 @@ mod tests {
         assert!(r.tick(&[AimEntityInput()]).is_empty());
         r.tick(&[space(true), roll(10, 0)]);
         assert!(r.tick(&[aim]).is_empty());
-        // Sprint, after the roll action: still no echo.
-        r.run(30);
+        // Sprint, after the roll action and `must_sprint` (a key released earlier ends the
+        // sprint at t0 + 35): still no echo.
+        r.run(36);
         assert!(r.loco.sprint().is_some());
         assert!(r.tick(&[aim]).is_empty());
         r.tick(&[MoveInput::SkillInputEnd, space(false)]);
@@ -1479,7 +2086,8 @@ mod tests {
 
     #[test]
     fn a_zero_vector_during_the_sprint_stops_the_stream() {
-        // UNVERIFIED (gap #5).
+        // UNVERIFIED (gap #4): the official client never sends a zero vector in a sprint (it
+        // sends the cursor direction), so this is only a guard.
         let mut r = sprinting((0, -180));
         let ev = r.tick(&[dir(0, 0)]);
         assert!(matches!(&ev[..], [MoveEvent::MoveAck { dir: (0, 0), .. }]));
@@ -1562,7 +2170,7 @@ mod tests {
 
     #[test]
     fn a_roll_asked_for_during_a_roll_waits_for_its_end() {
-        // UNVERIFIED (gap #4): one capture (second roll 27 frames after the first started).
+        // Verified 2026-10-14 (27 frames) and 2026-10-20 (28, 29 frames).
         let mut r = Rig::new((50, 50));
         r.tick(&[roll(30, 0)]);
         r.run(26);
@@ -1611,7 +2219,7 @@ mod tests {
 
     #[test]
     fn click_to_move_walks_around_a_wall_and_stops() {
-        // UNVERIFIED (gap #1) for the replies; the walk itself uses the A*.
+        // Verified replies (2026-10-20); the walk itself uses the A* (gap #2: clicks on walls).
         let grid = VecGrid::from_rows(&[
             "....#....",
             "....#....",
@@ -1655,9 +2263,20 @@ mod tests {
         let mut held = skill(MOVE, 0, 20);
         held.target_flags = UseSkill::HELD_REPEAT;
         let ev = r.tick(&[MoveInput::UseSkill(held)]);
-        // No second StartAction, only the ack with the new absolute target.
+        // A repeat is answered like the press: a StartAction (request flags + 0x10) and the ack with
+        // the new absolute target (2026-10-20 capture).
         assert!(
-            matches!(&ev[..], [MoveEvent::SkillAck { y: 30, .. }]),
+            matches!(
+                &ev[..],
+                [
+                    MoveEvent::ActionStart {
+                        kind: ActionKind::Move,
+                        flags: 0x410,
+                        ..
+                    },
+                    MoveEvent::SkillAck { y: 30, .. }
+                ]
+            ),
             "{ev:?}"
         );
         let ev = r.tick(&[MoveInput::UpdateSkillTarget {
@@ -1665,6 +2284,11 @@ mod tests {
             y: 5,
             skill: MOVE,
         }]);
+        // (The held click's periodic restart comes in the same frame.)
+        let ev: Vec<_> = ev
+            .into_iter()
+            .filter(|e| !matches!(e, MoveEvent::ActionStart { .. }))
+            .collect();
         let cell = r.loco.cell();
         assert_eq!(
             ev,

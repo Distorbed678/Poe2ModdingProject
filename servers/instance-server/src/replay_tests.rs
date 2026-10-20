@@ -568,7 +568,7 @@ fn combat_stance_goes_out_after_the_first_aim_mode() {
 
 #[test]
 fn a_move_click_starts_the_move_action_and_acks_the_request() {
-    // UNVERIFIED (gap #1): the reply set of a real click-to-move is derived from the client code.
+    // Verified on the 2026-10-20 official capture (docs/protocol/movement.md#click-to-move).
     let mut s = Session::new((100, 100));
     s.use_skill(MOVE_SKILL, 0x66, 10, -5);
     let batch = s.tick();
@@ -582,7 +582,8 @@ fn a_move_click_starts_the_move_action_and_acks_the_request() {
         .find(|b| b.is::<StartAction>())
         .unwrap()
         .decode::<StartAction>();
-    assert_eq!((start.skill, start.flags), (MOVE_SKILL, 0));
+    // The StartAction carries the request's flags plus 0x10 (official: 0x410 for a 0x400 press).
+    assert_eq!((start.skill, start.flags), (MOVE_SKILL, 0x66 | 0x10));
     assert_eq!((start.target_x, start.target_y), (110, 95));
     // The player walks there on the server.
     for _ in 0..200 {

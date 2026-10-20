@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use poe_game::locomotion::{ActionKind, MoveEvent, MoveInput, UseSkill as SimUseSkill};
+use poe_game::locomotion::{MoveEvent, MoveInput, UseSkill as SimUseSkill};
 use poe_net::{DecodeError, Reader, Writer};
 use poe_proto::{
     Direction, Message, Protocol,
@@ -34,8 +34,6 @@ use tracing::{debug, warn};
 const ACTOR_COMPONENT: u8 = 9;
 /// Last byte of `0x64` on official servers (unread by the client).
 const MOVE_UPDATE_TRAILER: u8 = 0xf1;
-/// `StartAction` flags of rolls and attacks (`0x410`); Move uses 0.
-const ACTION_FLAGS: u16 = 0x410;
 
 /// Maps a stat id (`Stats.Id`) to its network key (`Stats.dat` row + 1).
 pub type StatKeys = Arc<dyn Fn(&str) -> Option<u32> + Send + Sync>;
@@ -169,8 +167,9 @@ impl Codec {
                 format!("{}\t{}\t{}\t{}", dir.0, dir.1, cell.0, cell.1),
             )?),
             MoveEvent::ActionStart {
-                kind,
+                kind: _,
                 skill,
+                flags,
                 action,
                 cell,
                 target,
@@ -179,11 +178,7 @@ impl Codec {
             } => out.push(self.pack(
                 &StartAction {
                     header: plain,
-                    flags: if *kind == ActionKind::Move {
-                        0
-                    } else {
-                        ACTION_FLAGS
-                    },
+                    flags: *flags,
                     target_entity: *target_entity,
                     grid_x: cell.0,
                     grid_y: cell.1,

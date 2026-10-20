@@ -22,7 +22,7 @@ Analysis only: nothing here connects to anything.
 
 Scenarios (detected from the C->S inputs; see docs/protocol/movement.md):
   wasd        0x63 runs: start, turn, stop
-  click       0x1a5 Move (skill 0x20002909): single click and held click (repeats with bit 4)
+  click       0x1a5 Move (skill 0x20002909): single click and held click (repeats with target flags 0x10)
   roll        0x1a5 with a roll skill (small id or 0x80000040...): standing, moving, chained
   sprint      0x2e6 held=1 ... held=0 and what follows
   stance      0x2f9 ComponentDelta on the player (combat stance)
@@ -46,7 +46,7 @@ MOVE_SKILL = 0x20002909
 C2S_NAMES = {
     0x0062: "AimTarget", 0x0063: "MoveDirection", 0x01A5: "UseSkill", 0x01A8: "UpdateSkillTarget",
     0x01AA: "UpdateSkillTargetEntity", 0x01AC: "SkillInputEnd", 0x01AD: "SkillReleased",
-    0x02E6: "SprintInput",
+    0x02E6: "SprintInput", 0x0200: "StanceRequest", 0x0063: "MoveDirection",
 }
 S2C_NAMES = {
     0x0064: "MoveDirectionUpdate", 0x01C8: "StartAction", 0x01CB: "UpdateActionTarget",
@@ -55,6 +55,7 @@ S2C_NAMES = {
     0x01B2: "SkillReleasedAck", 0x01CA: "ActionEvent1ca", 0x01EB: "BuffAdded", 0x01EC: "BuffRemoved",
     0x02E7: "SprintState",
     0x01D3: "StatsUpdate", 0x01D8: "SkillStatsUpdate", 0x02F9: "ComponentDelta",
+    0x02A6: "OrientationLerp",
 }
 
 
@@ -139,6 +140,8 @@ def decode(m):
                 return dict(player=r.u8(), skill=r.u32(), u=r.u8())
             if op == 0x2E6:
                 return dict(player=r.u8(), held=r.u8())
+            if op == 0x200:
+                return dict(player=r.u8(), value=r.u8())
             if op == 0x62:
                 d = dict(player=r.u8(), mode=r.u8())
                 if d["mode"] == 2:
@@ -202,6 +205,9 @@ def decode(m):
             d["container"] = r.u8()
             n = r.varuint()
             d["stats"] = [(r.varuint(), r.varint()) for _ in range(n)]
+        elif op == 0x2A6:
+            d["f32"] = struct.unpack(">f", r.take(4))[0]
+            d["u8"] = r.u8()
         elif op == 0x2F9:
             n = r.varuint()
             blob = r.take(n)
@@ -308,9 +314,9 @@ def fmt(m):
     return f"{arrow} {m.op:#06x} {nm:<20} {body}"
 
 
-MOVE_OPS_OUT = {0x63, 0x1A5, 0x1A8, 0x1AA, 0x1AC, 0x1AD, 0x2E6}
+MOVE_OPS_OUT = {0x63, 0x1A5, 0x1A8, 0x1AA, 0x1AC, 0x1AD, 0x2E6, 0x200}
 MOVE_OPS_IN = {0x64, 0x1C8, 0x1CB, 0x1DF, 0x1AE, 0x1AF, 0x1B0, 0x1B1, 0x1B2, 0x1CA, 0x1EB, 0x1EC,
-               0x2E7, 0x1D3, 0x1D8, 0x2F9}
+               0x2E7, 0x1D3, 0x1D8, 0x2F9, 0x2A6}
 AIM_OPS = {0x62, 0x1DC}
 
 
@@ -458,9 +464,14 @@ def scen_click(msgs, a):
         if rel:
             print(f"    in f{rel.frame} {fmt(rel)}")
             show_replies(msgs, rel.i, 4, 6, "        ")
-    if clicks:
+    real = [m for m in clicks if not m.d["tf"] & 0x10 and any(x.dir == "in" and x.op == 0x1C8 and x.d["skill"] == MOVE_SKILL
+                                      for x in msgs[m.i:m.i + 60])]
+    if clicks and not real:
         print("  NOTE: this click is the intro wake-up (reply StartAction skill 0x2000b7d9, not a walk); "
-              "there is no real click-to-move in these captures (gap).")
+              "this session has no real click-to-move.")
+    elif real:
+        print(f"  {len(real)} presses are real click-to-move (reply StartAction Move 0x20002909), plus "
+              f"{len(held)} held repeats. Use `events <session> --from F --to F` for a window.")
 
 
 def scen_roll(msgs, a):

@@ -107,11 +107,11 @@ Docs: [docs/protocol/movement.md](docs/protocol/movement.md)
 
 | | Item | Note |
 |---|---|---|
-| 🟡 | [WASD and click-to-move (held click, turns)](docs/protocol/movement.md) | server-authoritative World/Locomotion with the official reply sequences (WASD verified against captures by replay tests); click-to-move and held click are derived from client code (gap #1), in-game check pending |
+| 🟡 | [WASD and click-to-move (held click, turns)](docs/protocol/movement.md) | server-authoritative World/Locomotion with the official reply sequences, verified against captures by replay tests: WASD, rolls (standing, chained, along the keys), sprint, click-to-move and held click (2026-10-20 capture); gaps in the movement spec's gap list, in-game check pending |
 | 🟡 | [Dodge roll](docs/protocol/movement.md) | official reply batch (stats, 0x1ae, 0x1af steering, 0x1ca not yet in instance.toml); standing roll and roll edge cases unverified (gaps #2-#4) |
 | 🟡 | [Facing the cursor](docs/protocol/movement.md) | 0x62 aim echoed as 0x1dc like official servers (replay-tested); the cursor/0x1df workarounds are gone; in-game check pending (WP2.4) |
 | 🟡 | [Sprint](docs/protocol/movement.md) | official sequence (3 buffs, stats, 0x64 stream, end); sprint into roll and zero WASD during a sprint unverified (gaps #4, #5) |
-| 🟡 | [Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences](docs/protocol/movement.md) | decoded; click-to-move, standing/chained rolls and stance changes wait for a capture (gap list) |
+| 🟡 | [Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences](docs/protocol/movement.md) | decoded; 2026-10-20 capture covers click-to-move, standing/chained rolls, roll direction and speed profile, input-mode stance; remaining items in the gap list |
 | 🟡 | [Server-authoritative movement on the walkability grid (official packets only)](docs/plans/orchestration-2026-10.md) | built (WP2.3): one World per session, thin packet glue, PSY2 is a drift checker only; in-game verification is WP2.4 |
 | ❌ | [Server collision](docs/status/terrain.md) | needs the terrain generator to cover more areas |
 

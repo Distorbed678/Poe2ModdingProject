@@ -5,13 +5,14 @@
 //! A fixture holds the inputs with the frame the server handles them in (`f`; the replay
 //! submits them before tick `f + 1`, so the first reply lands at `f + 1`) and the expected
 //! events with the batch they were sent in. Cells are compared with a tolerance: the official
-//! server's cell during rolls is not reproducible from the captures (gap #10), and walking
-//! differs by a fraction of a cell per frame.
+//! server's cell during a roll follows the client's roll path (docs/protocol/movement.md, "Roll
+//! path and speed profile"), which the server's roll speed profile approximates within a few
+//! cells, and walking differs by a fraction of a cell per frame.
 
 use std::{collections::BTreeMap, sync::Arc};
 
 use poe_game::{
-    locomotion::{ActionKind, MoveEvent, MoveInput, MovementConfig, SkillIds, UseSkill},
+    locomotion::{MoveEvent, MoveInput, MovementConfig, SkillIds, UseSkill},
     world::{World, WorldConfig},
 };
 use serde_json::{Value, json};
@@ -69,6 +70,13 @@ fn input(v: &Value) -> MoveInput {
             x: i(v, "x"),
             y: i(v, "y"),
         },
+        "released" => MoveInput::SkillReleased {
+            skill: i(v, "skill") as u32,
+            flag: i(v, "flag") as u8,
+        },
+        "aim_mode" => MoveInput::AimMode {
+            mode: i(v, "mode") as u8,
+        },
         op => panic!("fixture input {op}"),
     }
 }
@@ -81,12 +89,11 @@ fn to_json(e: &MoveEvent) -> Value {
         }
         MoveEvent::ActionStart {
             skill,
+            flags,
             cell,
             target,
-            kind,
             ..
         } => {
-            let flags = if *kind == ActionKind::Move { 0 } else { 0x410 };
             json!({"ev": "action_start", "skill": skill, "flags": flags,
                    "cell": [cell.0, cell.1], "target": [target.0, target.1]})
         }
@@ -100,15 +107,25 @@ fn to_json(e: &MoveEvent) -> Value {
             flags,
             unk,
             target_flags,
+            entity,
             x,
             y,
-            ..
-        } => json!({"ev": "skill_ack", "skill": skill, "flags": flags, "unk": unk,
-                    "target_flags": target_flags, "x": x, "y": y}),
+        } => {
+            let mut v = json!({"ev": "skill_ack", "skill": skill, "flags": flags, "unk": unk,
+                               "target_flags": target_flags, "x": x, "y": y});
+            if let Some(e) = entity {
+                v["entity"] = json!(e);
+            }
+            v
+        }
         MoveEvent::TargetAck { skill, x, y } => {
             json!({"ev": "target_ack", "skill": skill, "x": x, "y": y})
         }
         MoveEvent::InputEndAck => json!({"ev": "input_end_ack"}),
+        MoveEvent::ReleasedAck { skill, flag } => {
+            json!({"ev": "released_ack", "skill": skill, "flag": flag})
+        }
+        MoveEvent::StanceChanged { combat } => json!({"ev": "stance", "combat": combat}),
         MoveEvent::SprintState { held } => json!({"ev": "sprint", "held": held}),
         MoveEvent::BuffAdded { index, row, fade } => {
             let mut v = json!({"ev": "buff_added", "index": index, "row": row});
@@ -127,10 +144,10 @@ fn to_json(e: &MoveEvent) -> Value {
 
 /// Position fields and how far they may differ (cells).
 ///
-/// The official server's cell while a roll runs does not follow a straight roll (gap #10: the
-/// captures hold no client positions to compare with), so `walk` and `steer` are wide in
-/// roll fixtures; `start` (the cell a roll starts from) stays tight where the walk before it
-/// is part of the fixture.
+/// The official server's cell while a roll runs follows the client's path (steered by the
+/// cursor), which the server's roll simulation only approximates, so `walk` and `steer` are
+/// wide in roll fixtures; `start` (the cell a roll starts from) stays tight where the walk
+/// before it is part of the fixture.
 #[derive(Clone, Copy)]
 struct Tol {
     /// `move_ack` cells.
@@ -199,6 +216,14 @@ fn replay(name: &str, tol: Tol) {
         Arc::new(poe_game::movement::Open),
     );
     let player = world.spawn_player(start);
+    // Fixtures that start after the entry stance say which one it was.
+    if let Some(combat) = fx["combat_stance"].as_bool() {
+        world
+            .entity_mut(player)
+            .unwrap()
+            .movement
+            .set_stance(combat);
+    }
     let inputs = fx["inputs"].as_array().unwrap();
     let expect = fx["expect"].as_array().unwrap();
     let last = expect
@@ -318,6 +343,177 @@ fn sprint_ended_by_an_attack() {
         Tol {
             walk: ANY,
             start: 10,
+            steer: ANY,
+        },
+    );
+}
+
+// ---- 2026-10-20 session (gap-targeted capture, WP2.1b) ------------------------------------
+// Fixtures `standing_*`, `chained_*`, `click_*`, `stance_*` ...: `movement_fixtures.py` PRESETS.
+
+/// Roll with no WASD held: the same batch as when walking, steering acks, `is_dodge_rolling`
+/// cleared at t0 + 16, no `MoveAck` at any time.
+#[test]
+fn standing_tap_roll() {
+    replay(
+        "standing_tap_roll",
+        Tol {
+            walk: ANY,
+            start: 3,
+            steer: ANY,
+        },
+    );
+}
+
+/// Standing roll with Space held: sprint at t0 + 15, then the client's cursor-direction `0x63`
+/// per frame is answered by a stream scaled to length 550 (normalised, truncated).
+#[test]
+fn standing_hold_sprint_cursor_follow() {
+    replay(
+        "standing_hold_sprint_cursor_follow",
+        Tol {
+            walk: ANY,
+            start: 3,
+            steer: ANY,
+        },
+    );
+}
+
+/// A roll asked for while another runs: acked at once, the start waits for t0 + 30; a tap
+/// pressed 9 frames in (released again before the end) is dropped; one 31 frames in starts
+/// at once.
+#[test]
+fn chained_rolls_during_a_roll() {
+    replay(
+        "chained_rolls_during_a_roll",
+        Tol {
+            walk: ANY,
+            start: ANY,
+            steer: ANY,
+        },
+    );
+}
+
+/// WASD walk, tap roll (7 frames), a WASD turn at t0 + 15, stop.
+#[test]
+fn walk_tap_roll_then_turn() {
+    replay(
+        "walk_tap_roll_then_turn",
+        Tol {
+            walk: ANY,
+            start: 6,
+            steer: ANY,
+        },
+    );
+}
+
+/// Roll with Space held while walking, WASD keys released with Space still down (the client
+/// sends the cursor direction, not zero), Space released.
+#[test]
+fn sprint_wasd_released_then_space_up() {
+    replay(
+        "sprint_wasd_released_then_space_up",
+        Tol {
+            walk: ANY,
+            start: 6,
+            steer: ANY,
+        },
+    );
+}
+
+/// Attacks asked for during a tap roll are acked at once; the last one starts at t0 + 24.
+#[test]
+fn attack_during_a_tap_roll() {
+    replay(
+        "attack_during_a_tap_roll",
+        Tol {
+            walk: ANY,
+            start: 6,
+            steer: ANY,
+        },
+    );
+}
+
+/// An attack asked for during a roll that turns into a sprint waits for the end of the
+/// sprint at t0 + 35.
+#[test]
+#[ignore = "needs locomotion fix: gap #10 (the 1c8 target of an attack on a hovered monster is the monster's current cell: no entity positions in the world yet); the event order matches"]
+fn attack_waits_for_sprint_end() {
+    replay(
+        "attack_waits_for_sprint_end",
+        Tol {
+            walk: ANY,
+            start: 12,
+            steer: ANY,
+        },
+    );
+}
+
+/// Click-to-move: `StartAction` Move + `UseSkillAck` in the next batch, `SkillReleasedAck` one
+/// batch after the release.
+#[test]
+fn click_single() {
+    replay(
+        "click_single",
+        Tol {
+            walk: 3,
+            start: 3,
+            steer: ANY,
+        },
+    );
+}
+
+/// Held click with the cursor sweeping: every repeat is acked and answered with a `StartAction`
+/// Move, plus a periodic one every 15 frames.
+#[test]
+fn click_held_reaim() {
+    replay(
+        "click_held_reaim",
+        Tol {
+            walk: 4,
+            start: 6,
+            steer: ANY,
+        },
+    );
+}
+
+/// Mouse mode: a long held click with two rolls (the first with Space held for 19 frames, a
+/// sprint cut short); repeats are acked during the rolls, the walk resumes with a
+/// `StartAction` at their end.
+#[test]
+#[ignore = "needs locomotion fix: gap #2 (what triggers the held click's 15-frame restarts: the first comes 2 frames after the press in hold 1, 6 in hold 2; and a repeat just after a sprint's end gets an ack without a StartAction)"]
+fn held_click_with_rolls() {
+    replay(
+        "held_click_with_rolls",
+        Tol {
+            walk: ANY,
+            start: 12,
+            steer: ANY,
+        },
+    );
+}
+
+/// Input mode to click-to-move: stance 0 one frame after `AimMode(0)`.
+#[test]
+fn stance_to_mouse_mode() {
+    replay(
+        "stance_to_mouse_mode",
+        Tol {
+            walk: ANY,
+            start: ANY,
+            steer: ANY,
+        },
+    );
+}
+
+/// Input mode back to WASD: stance 1 one frame after `AimMode(1)`, the aim echoes follow.
+#[test]
+fn stance_to_combat_mode() {
+    replay(
+        "stance_to_combat_mode",
+        Tol {
+            walk: ANY,
+            start: ANY,
             steer: ANY,
         },
     );

@@ -133,7 +133,7 @@ link = "docs/protocol/movement.md"
 [[subsystem.item]]
 name = "WASD and click-to-move (held click, turns)"
 status = "partial"
-note = "server-authoritative World/Locomotion with the official reply sequences (WASD verified against captures by replay tests); click-to-move and held click are derived from client code (gap #1), in-game check pending"
+note = "server-authoritative World/Locomotion with the official reply sequences, verified against captures by replay tests: WASD, rolls (standing, chained, along the keys), sprint, click-to-move and held click (2026-10-20 capture); gaps in the movement spec's gap list, in-game check pending"
 link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
@@ -157,7 +157,7 @@ link = "docs/protocol/movement.md"
 [[subsystem.item]]
 name = "Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences"
 status = "partial"
-note = "decoded; click-to-move, standing/chained rolls and stance changes wait for a capture (gap list)"
+note = "decoded; 2026-10-20 capture covers click-to-move, standing/chained rolls, roll direction and speed profile, input-mode stance; remaining items in the gap list"
 link = "docs/protocol/movement.md"
 
 [[subsystem.item]]

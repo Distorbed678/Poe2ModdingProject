@@ -16,6 +16,9 @@ Every official message we have a decoder for decodes without errors or leftover 
 two whose richer forms we do not support (our server sends the simple forms): `AreaInfo`
 optional blocks and `AddInventory` items.
 
+## Movement capture 2026-10-20
+`dumps/0.5.5e/captures/official/2026-10-20_18-41-14_336/`: a read-only official session that followed a checklist for the movement gaps (standing and chained rolls, taps around the sprint threshold, stops during a sprint, attacks during rolls, sprints into walls, click-to-move and held clicks with rolls, an input-mode toggle). The DLL's movement log was on, so `poe-hook.log` has the client's position per frame (`frame #n ... world ... step ... grid`, same frame numbers as the capture) and the client's action starts/ends (`action start slot 0: DodgeRoll`). `check_capture` decodes every movement message with 0 errors and 0 leftover bytes (only `AddInventory` items mismatch, as before). Results: [../protocol/movement.md](../protocol/movement.md) (index at "Session 2026-10-20"), fixtures `crates/poe-game/tests/fixtures/` (`scripts/re/movement_fixtures.py`).
+
 ## Fixed (2026-10-14/15)
 | What | Official | Ours before | Now |
 |---|---|---|---|
