@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let id = std::env::args().nth(1).ok_or("usage: area_info <WorldAreas.Id>")?;
     let data = GameData::open(
         Path::new("GameFiles"),
-        Path::new("Tools/dat-schema/schema-poe2.min.json"),
+        Path::new("third_party/dat-schema/schema-poe2.min.json"),
     )?;
     let areas = data.table("WorldAreas")?;
     let area = areas.find_by_str("Id", &id)?.ok_or("no such area")?;

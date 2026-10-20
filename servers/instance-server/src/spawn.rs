@@ -338,7 +338,7 @@ mod tests {
     }
 
     /// The Riverbank intro tree (6 x 6 sub-tiles) as placed for seed 3357350429: rows of
-    /// canonical indices run bottom-up (vertical mirror), see Documentation.
+    /// canonical indices run bottom-up (vertical mirror), see docs/re/terrain.md.
     #[test]
     fn fits_mirrored_tile() {
         let tiles: Vec<Tile> = (0..6)

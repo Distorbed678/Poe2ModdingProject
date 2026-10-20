@@ -1,5 +1,5 @@
 //! The client DLL's area exports (`<session>/areas/<n>_<hash16>_<seed>/`, see
-//! `Documentation/re/terrain.md`): the reference the server's generator is compared with.
+//! `docs/re/terrain.md`): the reference the server's generator is compared with.
 
 use std::path::Path;
 

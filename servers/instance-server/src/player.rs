@@ -1,7 +1,7 @@
 //! The player's simulated state in an instance: movement (WASD, click-to-move, dodge roll,
 //! sprint) and the skills the server gave the character.
 //!
-//! The client runs in lockstep (Documentation/protocol/movement.md): it starts a movement only
+//! The client runs in lockstep (docs/protocol/movement.md): it starts a movement only
 //! when the server says so, then moves the entity itself every frame. The server answers each
 //! input with the message that starts the movement on the client and simulates the same
 //! movement here, frame by frame, so it knows where the player is.

@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let data = poe_data::GameData::open(
         Path::new("GameFiles"),
-        Path::new("Tools/dat-schema/schema-poe2.min.json"),
+        Path::new("third_party/dat-schema/schema-poe2.min.json"),
     )?;
     let table = data.table(&table_name)?;
     if columns.is_empty() {

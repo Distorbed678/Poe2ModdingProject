@@ -5,8 +5,8 @@
 version = "0.5.5e"
 # Provided copy of the client install; game data is read from <game_dir>/Bundles2.
 game_dir = "GameFiles"
-# Community .datc64 schema (Tools/fetch-tools.sh downloads it).
-schema = "Tools/dat-schema/schema-poe2.min.json"
+# Community .datc64 schema (third_party/fetch-tools.sh downloads it).
+schema = "third_party/dat-schema/schema-poe2.min.json"
 # Opcode tables for this client version.
 protocol_dir = "protocol/0.5.5e"
 
@@ -27,14 +27,14 @@ public_port = 6112
 # InitialState as the frame length).
 tick_ms = 33
 # Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
-# seeds fail in the client. Extracted from a live Client.txt by tools/re/clientlog_terrain.py.
-known_seeds = "data/terrain-vectors.tsv"
+# seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
+known_seeds = "runtime/terrain-vectors.tsv"
 # Movement trace (dev): client position reports, inputs and movement replies as TSV
-# (Documentation/protocol/movement.md#movement-trace). Empty to turn it off.
-movement_trace = "data/movement-trace.tsv"
+# (docs/protocol/movement.md#movement-trace). Empty to turn it off.
+movement_trace = "runtime/movement-trace.tsv"
 # Cell sent with a turn: "natural" (the cell the client reaches in that frame; it is put on
 # its centre), "own" (re-aim only) or "heading" (a cell one step along the new heading).
-# See Documentation/protocol/movement.md#lag-m35.
+# See docs/protocol/movement.md#lag-m35.
 turn_cell = "natural"
 # Hold a turn back by up to one frame when that lands it nearer a cell centre (smaller
 # snaps at turns, some turns 33 ms later).
@@ -47,14 +47,14 @@ face_cursor = true
 debug_link = true
 # Terrain seed sweep (research): `<WorldAreas.Id> <seed> [count]` per line; empty = off
 # (env POE_SWEEP overrides). Each session generates the next listed layout and ends
-# (tools/re/sweep_drive.py logs the client in again).
+# (scripts/re/sweep_drive.py logs the client in again).
 sweep = ""
-sweep_results = "data/sweep-results.tsv"
+sweep_results = "runtime/sweep-results.tsv"
 
 [terrain]
 # Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
 # with the one the client reports. The client always generates the terrain itself; leave this
-# off until the generator covers every area (Documentation/terrain-status.md).
+# off until the generator covers every area (docs/terrain-status.md).
 generate = false
 
 [instances]
@@ -69,10 +69,10 @@ accounts = ["Exile1"]
 # Prefix for server commands typed in chat (`/` stays with the client's own commands).
 prefix = "!"
 # Every admin command is appended here (time, account, command, result). Empty = off.
-audit_log = "data/admin-audit.log"
+audit_log = "runtime/admin-audit.log"
 
 [database]
-path = "data/server.sqlite"
+path = "runtime/server.sqlite"
 
 [accounts]
 # Accounts are created automatically on first login, keyed by the client's machine hash,
@@ -81,7 +81,7 @@ name_prefix = "Exile"
 # Character slots per account (sent to the client and enforced on creation).
 max_characters = 24
 # Two account flag bytes sent with the authentication result; the client splits them into
-# bits (Documentation/protocol/login.md). Byte 0 bits 2/3/4/7 open the terms-of-use window,
+# bits (docs/protocol/login.md). Byte 0 bits 2/3/4/7 open the terms-of-use window,
 # the cheating warning, the RMT warning and "update required" respectively: keep them clear.
 flags = [0x63, 0x03]
 # Full game access (in game: no "Get Full Access" button in the escape menu).

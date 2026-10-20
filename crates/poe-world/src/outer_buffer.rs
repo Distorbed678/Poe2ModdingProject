@@ -2,7 +2,7 @@
 //! `OuterBufferSize` margins; corner grounds and heights are carried out into the margins, then
 //! each margin strip is tiled from the region's border outward: an edge tile where a border
 //! tile's edge crosses the border (picked from the tile set), otherwise the ground's first fill
-//! tile. Findings: `Documentation/re/terrain.md`, "Outer buffer".
+//! tile. Findings: `docs/re/terrain.md`, "Outer buffer".
 
 use std::collections::HashMap;
 

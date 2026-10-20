@@ -1,6 +1,6 @@
 //! The fill pass (`0x141f93060`): every cell still empty after rooms and edge tiles gets a fill
 //! tile or a fill room from the `.gft` group of the ground at its top-left corner. Findings:
-//! `Documentation/re/terrain.md`, "Fill".
+//! `docs/re/terrain.md`, "Fill".
 
 use std::collections::HashMap;
 

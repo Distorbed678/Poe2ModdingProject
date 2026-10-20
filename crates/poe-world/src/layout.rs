@@ -1,5 +1,5 @@
 //! Graph layout before tile placement (`0x1420bec40` and what it calls): node jitter inside
-//! Voronoi cells (`0x141ef4720` → `0x141ef3bb0`). See `Documentation/re/terrain.md`,
+//! Voronoi cells (`0x141ef4720` → `0x141ef3bb0`). See `docs/re/terrain.md`,
 //! "Graph layout".
 //!
 //! The sites are the graph's nodes and then its edges' internal points. Their Voronoi diagram

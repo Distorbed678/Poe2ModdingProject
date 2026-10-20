@@ -10,7 +10,7 @@
 //! This feature replaces the routine: the key buffer becomes `SHA-512(server public key
 //! bytes as received)`, which the private server can compute too, so no signature or
 //! agreement is needed and every session still gets its own keys.
-//! See Documentation/re/crypto.md.
+//! See docs/re/crypto.md.
 
 use std::sync::OnceLock;
 

@@ -1,4 +1,4 @@
-//! Instance channel messages (client 0.5.5e). See `Documentation/protocol/instance.md`.
+//! Instance channel messages (client 0.5.5e). See `docs/protocol/instance.md`.
 
 use poe_net::{DecodeError, Reader, Writer};
 
@@ -1438,7 +1438,7 @@ impl Message for SimulationTick {
 }
 
 /// Spawns an entity: object type key (MurmurHash2 of its metadata path) and its initial
-/// state blob (read by `0x141e71120`; layout in `Documentation/protocol/entities.md`).
+/// state blob (read by `0x141e71120`; layout in `docs/protocol/entities.md`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AddObject {
     pub header: SimulationHeader,

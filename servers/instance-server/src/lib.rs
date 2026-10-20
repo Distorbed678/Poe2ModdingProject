@@ -1,7 +1,7 @@
 //! Instance server: hosts areas. The login server hands clients over with a ticket;
 //! the instance server validates it, sends the area and runs the simulation.
 //!
-//! Connection opening (Documentation/protocol/instance.md):
+//! Connection opening (docs/protocol/instance.md):
 //! 1. client `Hello` (plaintext) carrying the hand-off ticket,
 //! 2. server `EnableEncryption` (plaintext), then both directions switch to Salsa20 with the
 //!    ticket's key material,
@@ -691,7 +691,7 @@ const PLAYER_ENTITY: u32 = 1;
 
 /// RE experiment: `POE_NPC=<metadata path>` adds that object as entity 2 next to the player
 /// with a zero blob (Positioned first). Objects with a StateMachine need their shared states
-/// (see Documentation/protocol/entities.md), so this suits simple types such as
+/// (see docs/protocol/entities.md), so this suits simple types such as
 /// `Metadata/MiscellaneousObjects/Waypoint`.
 fn npc_experiment(
     table: &poe_proto::OpcodeTable,
@@ -1072,7 +1072,7 @@ impl InstanceServer {
     }
 
     /// After the client generated the area: local player, inventories, the player entity,
-    /// then InitialState (see Documentation/protocol/instance.md).
+    /// then InitialState (see docs/protocol/instance.md).
     async fn enter_world(
         &self,
         conn: &mut Connection,

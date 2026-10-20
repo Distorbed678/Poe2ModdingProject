@@ -8,7 +8,7 @@ use poe_data::GameData;
 fn open() -> Option<GameData> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let game = root.join("GameFiles");
-    let schema = root.join("Tools/dat-schema/schema-poe2.min.json");
+    let schema = root.join("third_party/dat-schema/schema-poe2.min.json");
     if !game.join("Bundles2/_.index.bin").exists() || !schema.exists() {
         eprintln!("skipping: GameFiles or schema not present");
         return None;

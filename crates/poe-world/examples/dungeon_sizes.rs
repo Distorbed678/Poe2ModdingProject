@@ -5,7 +5,7 @@ use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rs = std::env::args().nth(1).ok_or("usage: dungeon_sizes <.rs>")?;
-    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("Tools/dat-schema/schema-poe2.min.json"))?;
+    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("third_party/dat-schema/schema-poe2.min.json"))?;
     let set = poe_world::rooms::RoomSet::load(gd.files(), &rs)?;
     for r in &set.rooms {
         let a = &r.room.arm;

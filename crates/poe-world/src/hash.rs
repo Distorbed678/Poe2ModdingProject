@@ -1,4 +1,4 @@
-//! The client's terrain hashes (`Documentation/re/terrain.md`): the tile hash
+//! The client's terrain hashes (`docs/re/terrain.md`): the tile hash
 //! (`0x141d141d0`) and the doodad hash, which the client sends in TerrainHashes. A generated
 //! layout is right when both match.
 

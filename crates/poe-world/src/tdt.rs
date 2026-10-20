@@ -1,6 +1,6 @@
 //! Tile definitions (`.tdt`, binary, versions 14/15): a tile's geometry (`.tgt`), its size in
 //! tiles, the edge type on each side and the ground type at each corner, which is what the
-//! generator matches when it places tiles. Layout after `Tools/reference/poeformats/Tdt.cs`:
+//! generator matches when it places tiles. Layout after `third_party/reference/poeformats/Tdt.cs`:
 //!
 //! `u32 version, u32 string-table chars, UTF-16 strings (NUL-separated)`, then string
 //! references (`i32` char offsets into the table, -1 = none): `inherits`; when empty: `tgt`,

@@ -238,8 +238,8 @@ fn pending() -> &'static Mutex<HashMap<usize, Raw>> {
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Window title for test clients (`POE_HOOK_WINDOW_TITLE`, set by `tools/test-run.sh`), so a
-/// desktop rule can keep them off the user's screen (see Documentation/client-dll.md).
+/// Window title for test clients (`POE_HOOK_WINDOW_TITLE`, set by `scripts/test-run.sh`), so a
+/// desktop rule can keep them off the user's screen (see docs/client-dll.md).
 static WINDOW_TITLE: OnceLock<Vec<u16>> = OnceLock::new();
 
 type CreateWindowExWFn = unsafe extern "system" fn(
@@ -351,7 +351,7 @@ fn hook_input() -> Result<(), String> {
     if user32.is_null() {
         return Err("user32.dll not loaded".into());
     }
-    // Test runs (`POE_HOOK_FAKE_FOCUS`, set by tools/test-run.sh): the game believes its window
+    // Test runs (`POE_HOOK_FAKE_FOCUS`, set by scripts/test-run.sh): the game believes its window
     // is in the foreground. Some of its input runs only then, e.g. the cursor (aim) reports
     // `0x0062` (`0x14016ba40` checks GetForegroundWindow). The real focus does not change.
     FAKE_FOCUS.store(

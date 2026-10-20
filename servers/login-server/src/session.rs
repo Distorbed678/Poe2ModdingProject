@@ -344,7 +344,7 @@ async fn send_character_list(
 }
 
 /// Maps a stored character onto the list entry. Field placement is provisional
-/// (Documentation/protocol/login.md): +0x4e is the class (used for the 3D preview),
+/// (docs/protocol/login.md): +0x4e is the class (used for the 3D preview),
 /// +0x4c is assumed to be the level, +0x4a is the current area and +0x48 a fallback area
 /// (both WorldAreas.HASH16; select screen code at `0x140f02cef`).
 fn character_entry(server: &LoginServer, c: &Character) -> anyhow::Result<CharacterEntry> {

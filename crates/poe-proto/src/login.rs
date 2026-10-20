@@ -1,5 +1,5 @@
 //! Login channel messages (client 0.5.5e). Layouts were taken from the client's packet
-//! (de)serializers; see `Documentation/protocol/login.md`.
+//! (de)serializers; see `docs/protocol/login.md`.
 
 use poe_net::{DecodeError, Reader, Writer};
 

@@ -1,5 +1,5 @@
 //! Edge routing (`0x1420cdc30`): graph edges (rivers, paths) are routed tile by tile between
-//! the rooms' exits over a random cost grid. See `Documentation/re/terrain.md`, "Edge
+//! the rooms' exits over a random cost grid. See `docs/re/terrain.md`, "Edge
 //! routing".
 //!
 //! 1. After each room pass (`0x1420c9970`) the room's edges end at its exits

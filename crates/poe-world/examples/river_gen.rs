@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trace = trace_draws(&Path::new(&export_dir).join("generator_trace.tsv"))?;
     let data = GameData::open(
         Path::new("GameFiles"),
-        Path::new("Tools/dat-schema/schema-poe2.min.json"),
+        Path::new("third_party/dat-schema/schema-poe2.min.json"),
     )?;
     let area = data.table("WorldAreas")?;
     let area = area.find_by_str("Id", "G1_1")?.ok_or("no G1_1")?;

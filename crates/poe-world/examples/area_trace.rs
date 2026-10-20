@@ -185,7 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seed: u32 = args.next().ok_or(usage)?.parse()?;
     let dir = args.next().ok_or(usage)?;
     let force = args.next();
-    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("Tools/dat-schema/schema-poe2.min.json"))?;
+    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("third_party/dat-schema/schema-poe2.min.json"))?;
     let text = std::fs::read_to_string(Path::new(&dir).join("generator_trace.tsv"))?;
     let lines: Vec<Vec<String>> = text.lines().filter(|l| !l.starts_with('#')).map(|l| l.split('\t').map(String::from).collect()).collect();
     let trace = trace_draws(&lines);

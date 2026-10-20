@@ -1,6 +1,6 @@
 # Login protocol opcodes for client 0.5.5e (u16, big-endian on the wire).
 # [client] = messages the client sends, [server] = messages the server sends.
-# Layouts: Documentation/protocol/login.md, Rust types: crates/poe-proto/src/login.rs
+# Layouts: docs/protocol/login.md, Rust types: crates/poe-proto/src/login.rs
 # The client's incoming-packet factory is at 0x14214fa60 (opcode -> class).
 
 [client]

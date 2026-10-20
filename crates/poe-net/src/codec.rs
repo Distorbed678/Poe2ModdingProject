@@ -1,6 +1,6 @@
 //! Byte codec for PoE messages.
 //!
-//! Conventions (see `Documentation/protocol/framing.md`):
+//! Conventions (see `docs/protocol/framing.md`):
 //! - integers are big-endian (confirmed: the client byte-swaps with htons/htonl),
 //! - `wstring` (0.5.5e, client reader `0x141cfb3c0`): u16 character count, then per
 //!   character either one byte `< 0x80` (ASCII), `0x80` + u16 LE (BMP code unit) or `0xc0` +

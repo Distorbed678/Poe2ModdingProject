@@ -7,7 +7,7 @@
 //! the compact varints use the same prefix coding as packets.
 //!
 //! Section sizes were measured with the DLL's reader trace (all flags and counts zero); see
-//! `Documentation/protocol/entities.md`. Field meanings marked `unk` are not known yet.
+//! `docs/protocol/entities.md`. Field meanings marked `unk` are not known yet.
 
 use poe_net::Writer;
 

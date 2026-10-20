@@ -6,15 +6,18 @@
 /target/
 **/target/
 
-# Downloaded / generated tools (see Tools/README.md and Tools/fetch-tools.sh)
-/Tools/*
-!/Tools/README.md
-!/Tools/fetch-tools.sh
+# Downloaded / generated tools (see third_party/README.md and third_party/fetch-tools.sh)
+/third_party/*
+!/third_party/README.md
+!/third_party/fetch-tools.sh
 
 # Runtime data
-/data/
+/runtime/
 /captures/
 *.log
 *.sqlite
 *.sqlite-*
 *.db
+
+# Python bytecode
+__pycache__/

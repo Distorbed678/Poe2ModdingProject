@@ -1,5 +1,5 @@
 //! Tile matching: the key a tile or a room slot is matched by, its eight orientations, and the
-//! tile-set index the generator looks keys up in (`Documentation/re/terrain.md`).
+//! tile-set index the generator looks keys up in (`docs/re/terrain.md`).
 //!
 //! A key (`0x141d09900` from a tile, `0x141d08a40` oriented, 0x4e bytes compared) holds the
 //! edge type of each side with its exit and virtual-exit positions, the size, and the ground

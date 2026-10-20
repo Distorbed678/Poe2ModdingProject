@@ -1,6 +1,6 @@
 //! The corner lattice passes between edge tiles and the fill pass (`0x1420bec40`): grounds
 //! flood out from tile borders into empty space, stopped by tile edges. Findings:
-//! `Documentation/re/terrain.md`, "Corner lattice".
+//! `docs/re/terrain.md`, "Corner lattice".
 
 use std::collections::VecDeque;
 

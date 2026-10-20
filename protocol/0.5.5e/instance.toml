@@ -1,6 +1,6 @@
 # Instance protocol opcodes for client 0.5.5e (u16, big-endian on the wire).
 # Client incoming factory: 0x142170380 (switch on opcode - 0x0d); full opcode -> class
-# table: Documentation/re/instance_factory_s2c.json. Game-session handler: 0x142121f70.
+# table: docs/re/instance_factory_s2c.json. Game-session handler: 0x142121f70.
 
 [client]
 Hello = 0x000f

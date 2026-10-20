@@ -8,7 +8,7 @@ use std::path::Path;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let area = args.next().ok_or("usage: area_gen <area id> <seed>...")?;
-    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("Tools/dat-schema/schema-poe2.min.json"))?;
+    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("third_party/dat-schema/schema-poe2.min.json"))?;
     for seed in args {
         let seed: u32 = seed.parse()?;
         let forced = std::env::var("POE_FORCE").ok().map(|v| {

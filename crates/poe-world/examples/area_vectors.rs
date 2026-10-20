@@ -1,5 +1,5 @@
 //! Checks the generator against tile-hash vectors (`area level seed tile_hash doodad_hash build`,
-//! from `tools/re/clientlog_terrain.py`): `cargo run --release -p poe-world --example
+//! from `scripts/re/clientlog_terrain.py`): `cargo run --release -p poe-world --example
 //! area_vectors -- <vectors.tsv> [build] [area filter]`. Prints one line per vector and a summary
 //! per area. When the natural topology choice (world-map pins, not ported) does not match, every
 //! forced topology and orientation is tried: a match there is what the server reproduces by
@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = args.next().ok_or("usage: area_vectors <vectors.tsv> [build] [area]")?;
     let build = args.next();
     let area_filter = args.next();
-    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("Tools/dat-schema/schema-poe2.min.json"))?;
+    let gd = poe_data::GameData::open(Path::new("GameFiles"), Path::new("third_party/dat-schema/schema-poe2.min.json"))?;
     let mut per_area: BTreeMap<String, (u32, u32, u32, String)> = BTreeMap::new();
     for line in std::fs::read_to_string(&path)?.lines() {
         let f: Vec<&str> = line.split('\t').collect();

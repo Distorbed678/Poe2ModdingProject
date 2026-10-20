@@ -1,6 +1,6 @@
 //! Read-only views of game objects for the inspector tabs (guarded reads only).
 //!
-//! Offsets (0.5.5e, see Documentation/re/addresses-0.5.5e.md): entity +0x10 components
+//! Offsets (0.5.5e, see docs/re/addresses-0.5.5e.md): entity +0x10 components
 //! (0 = Positioned, 9 = Actor), +0x88 id. Positioned +0x444/+0x448 grid cell, +0x44c facing,
 //! +0x1e5 bit 1 facing locked, +0x490/+0x494 world position. Actor +0x238/+0x240 current
 //! actions (type at +0x120), +0x400/+0x404 WASD direction, +0x2a2 bit 5 sprint held.

@@ -2,7 +2,7 @@
 //!
 //! The client encrypts each direction with Salsa20 (Crypto++, 20 rounds). Both directions use
 //! the same 32-byte key and differ only in the 8-byte IV. Key and IVs come from 64 bytes of key
-//! material (see [`KeyMaterial`]); `Documentation/re/crypto.md` has the details.
+//! material (see [`KeyMaterial`]); `docs/re/crypto.md` has the details.
 
 use salsa20::{
     Salsa20,
