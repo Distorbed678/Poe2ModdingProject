@@ -33,6 +33,7 @@ Run them with the project's Python environment, which `third_party/fetch-tools.s
 |---|---|
 | Function and struct addresses (Ghidra) | [addresses-0.5.5e.md](addresses-0.5.5e.md) |
 | Login key exchange, Salsa20, the HNC side channel, the DLL bypass | [crypto.md](crypto.md) |
+| Steam vs email/password login, the `0x0003` credentials packet, Remember Me tokens, forcing the standalone screen | [standalone-login.md](standalone-login.md) |
 | Terrain generator (`.tgr`, `.dgr`, RNG, hashes) | [terrain/](terrain/README.md) |
 | Official sessions vs ours, the live client log | [captures.md](captures.md) |
 | Game files, `.datc64` tables, the dumps folder | [datamining.md](datamining.md) |

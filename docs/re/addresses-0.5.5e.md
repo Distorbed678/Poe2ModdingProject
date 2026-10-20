@@ -186,3 +186,27 @@ Layouts and sequences: [../protocol/movement.md](../protocol/movement.md). Struc
 | `0x141f6c1a0` | `BuffRemoved_1ec_Read` | S→C `0x1ec`: header, `u16 index`; the Actor-side opcodes `0x1eb`..`0x1ed` share the handler at `0x142135bf8` |
 | `0x14214a13e` | | Actor case `0x1ca` (header only): decrements `Actor +0x348`; in predictive mode also restarts the action; seen with every roll start and sprint end by an attack |
 | `0x141b76c20` | | end of a roll: whether it becomes a sprint (already listed above); official servers decide server-side: `is_sprinting` is set 15 frames into a held roll |
+
+## Client platform and standalone login (2026-10-20)
+Details and the patch: [standalone-login.md](standalone-login.md).
+
+| Address | Name | What |
+|---|---|---|
+| `0x142196ec0` | `ClientPlatform_Detect` | platform enum from the exe file name and command line: 0 standalone, 1 Steam (`Steam` in the name or `--steam`), 2 Hotcool, 3 Hotcool+Steam, 4 Kakao (`KG` / `--kakao`), 5 Epic (`EGS` / `--epic`). Patch `40 55 53` → `31 C0 C3` forces 0 |
+| `0x144717118` / `0x144717114` | | cached platform value / its thread-safe-static guard |
+| `0x140109b20` / `0x140109be0` / `0x1401af120` / `0x142197330` | `ClientPlatform_IsSteam` / `_IsHotcool` / `_IsTokenLogin7or8` / `_Equals` | cached-value getters (about 90 callers) |
+| `0x140ee8cb0` | `LoginState_BuildUi_SelectLoginScreen` | picks `LoginScreen.ui` / `SteamLoginScreen.ui` / Hotcool / Epic / Kakao by platform (branches `0x140ee9228`..`0x140ee9357`) |
+| `0x140ef4c90` | `LoginState_StartAuthentication` | after the key exchange: Steam → ticket request, 5 → `0x140ef3a10`, 4 → `0x140ef4050`, else `0x140ef4410` |
+| `0x140ef4410` | `LoginState_StandaloneLogin` | email/password or saved-token login; sends `0x0003` |
+| `0x140ef9ec0` | `LoginState_OnSteamEncryptedAppTicket` | Steam callback: ticket (≤1024 bytes) → `0x0005` |
+| `0x140ef3530` | `LoginState_TokenLogin7or8` | platform 7/8 only: `0x0032` / `0x0033` (`0x1420e7620`, `0x1420e7800`), dead on PC |
+| `0x1420e7af0` | `ClientLoginSession_SendCredentials_0003` | builds and sends `0x0003` (class vtable `0x1435063b8`, serializer `0x1420e3b60` `Packet0003_Credentials_Serialize`) |
+| `0x1420e7e00` | `ClientLoginSession_SendSteamTicket_0005` | builds and sends `0x0005` (serializer `0x1420e34f0`) |
+| `0x1421bbd70` | `Sha256_Bytes32` | SHA-256 (IV at `0x143a0c198`) used for the password hash: UTF-16LE bytes, no salt |
+| `0x1420e7580` | `LoginClientHash_Get32` | the 32-byte client hash (global `0x1445d5f50`) |
+| `0x140ef07d0` | `LoginState_SaveLoginAfterAuth` | after success: ini `[LOGIN]`, writes or deletes the credentials file with the `0x0004` `session_token` |
+| `0x1423d0210` / `0x1423d03a0` / `0x1423d0490` | `LoginCredentials_GetFilePath` / `_Load32` / `_Save32` | `Documents\My Games\Path of Exile 2\<name>_login.credentials`, exactly 32 raw bytes |
+| `0x140ef63a0` | | non-zero `0x0004` result handler: notice text if present, special codes `0x62` `0x1cf` `0x0f` `0x08` `0x54` |
+| `0x141018170` | | `config.json` loader (`GGG_*`, `STEAM_APP_ID`, `GGG_CREDENTIAL_FILE_NAME`, `GGG_LOGIN_SERVER_PORT`, ...); defaults at `0x1446fc340` |
+| `0x140110960` | | Steam API init, returns 1 without touching Steam when the platform is not Steam |
+| `0x1421ee510` | | localized auth/error message table by result code (5 account missing, 6 wrong password, ...) |

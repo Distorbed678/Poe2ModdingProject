@@ -12,7 +12,7 @@ Connection: client to the login host from `gateway_list.txt` (ours: `127.0.0.1:2
    ```
    This is identical to PoE1 3.x `LOGIN_EPHEMERAL_PUBKEY`.
 2. **S→C `0x0002`** with the same layout: the server's public value and a DSA signature. Our server sends 128 random bytes and an empty signature; the DLL's `crypto_bypass` derives the keys. **From here on, both directions are Salsa20-encrypted** (see [../re/crypto.md](../re/crypto.md)).
-3. **C→S `0x0005` authentication** (229 bytes in the first capture). It contains a protobuf-like blob starting at +0x45 (`08 02 10 … 2a 90 01 …`), probably the Steam encrypted app ticket. Layout to be decoded.
+3. **C→S authentication.** On the Steam platform (the exe file name contains `Steam`): `0x0005` (229 bytes in the first capture, a protobuf-like blob from +0x45 = the Steam encrypted app ticket). On the standalone platform: `0x0003` with account name and password hash, see [below](#cs-0x0003-credentials-standalone-platform). Which one the client uses is decided by the platform getter and can be forced with a DLL patch: [../re/standalone-login.md](../re/standalone-login.md).
 4. **C→S `0x0001`** every ~10 s: keep-alive (opcode only).
 
 Verified 2026-10-12: the server decrypts the client stream correctly (clean `00 01` keep-alives).
@@ -30,6 +30,22 @@ Encodings: integers big-endian. `wstring` uses the compact per-character encodin
 | machine_hash | 32 bytes | from `0x1421c1340`; stable per machine; the server uses it as the account key |
 | flags_hi | u8 | |
 | ticket | bytes[ticket_len] | Steam encrypted app ticket (from `GetEncryptedAppTicket`). Encrypted for GGG, so the server cannot read it |
+
+### C→S `0x0003` Credentials (standalone platform)
+Sent instead of `0x0005` when the client platform is 0 (email/password screen). Serializer `0x1420e3b60`, builder `0x1420e7af0`; analysis and the patch that forces this path on the Steam exe: [../re/standalone-login.md](../re/standalone-login.md). Not yet in `login.toml` / `poe-proto`.
+| Field | Type | Notes |
+|---|---|---|
+| mode | u32 | constant `2` |
+| account_name | u16 length + UTF-8 bytes | not a wstring |
+| client_hash | 32 bytes | as in `0x0005` |
+| password_hash | 32 bytes | SHA-256 of the UTF-16LE password; with `token_login = 1` the saved 32-byte token that an earlier `0x0004` `session_token` handed out |
+| machine_hash | 32 bytes | as in `0x0005` |
+| save_login | u8 | the Remember Me checkbox (1 on the token path) |
+| token_login | u8 | 1 = `password_hash` is a saved login token |
+| flags_lo | u8 | UI language id `\| 0x40` (same as `0x0005`) |
+| flags_hi | u8 | optional login-state byte, 0 when unset |
+
+Answer with the same `0x0004`. Unknown account / wrong password: result `5` / `6` plus a `notice` text (a present notice is shown as the error; inferred from the client's message table). Codes `0x62` and `0x0f` tell the client that a saved token is no longer valid.
 
 ### S→C `0x0004` AuthenticationResult (deserializer `0x14214da60`, handler `0x1420e829d`)
 | Field | Type | Notes |
