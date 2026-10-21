@@ -57,5 +57,6 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [research/poe1-prior-art.md](research/poe1-prior-art.md) | What public PoE1 research says about the protocol |
 | [research/tools.md](research/tools.md) | Survey of datamining and RE tools |
 | [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
+| [plans/orchestration-2026-10b.md](plans/orchestration-2026-10b.md) | Orchestration plan 2 (2026-10-21): game-update resilience, login/accounts completion, public release, launcher releases with auto-update, server setup in the launcher, plan-1 leftovers |
 | [plans/terrain-all-areas.md](plans/terrain-all-areas.md) | Terrain port to all areas (2026-10-21): scope matrix (`cargo xtask terrain-matrix`), verification at scale, blockers, unported systems ranked, work packages |
 | [../modules/client-hook/docs/mod-manifest.md](../modules/client-hook/docs/mod-manifest.md) | `mod.toml` spec for client mods (Poe2ClientHook submodule; spec only) |
