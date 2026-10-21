@@ -550,7 +550,7 @@ mod tests {
         let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
         assert!(cfg.web.enabled);
         assert_eq!(cfg.web.bind.to_string(), "127.0.0.1:8080");
-        assert!(cfg.web.static_dir.as_os_str().is_empty());
+        assert_eq!(cfg.web.static_dir, std::path::Path::new("modules/web-admin/dist"));
         assert!(cfg.web.cors_origins.is_empty());
         assert_eq!(cfg.web.log_buffer, 2000);
     }
