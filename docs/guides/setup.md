@@ -166,7 +166,7 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | `[instance] public_port` | `[network.instance] public_port` |
 | `[instances] idle_minutes` | `[instance] idle_minutes` |
 | `[instance] tick_ms` | `[instance] tick_ms` (unchanged; `[instance]` and `[instances]` are merged) |
-| the four movement-workaround keys of the old `[instance]` (turn cell, turn timing, face cursor, cursor projection) | removed with WP2.3 (the server simulates movement itself, no workarounds); `[movement]` now holds `sprint_buff_rows` only |
+| the four movement-workaround keys of the old `[instance]` (turn cell, turn timing, face cursor, cursor projection) | removed with WP2.3 (the server simulates movement itself, no workarounds); `[movement]` holds `sprint_buff_rows` and, since WP C1, the five `sprint_*` coasting keys (movement.md, "Coasting after a sprint") |
 | (new) | `[dev] drift_check` (default `false`) and `drift_interval_ms` (default 1000): the drift checker |
 | `[instance] known_seeds`, `position_sync`, `movement_trace`, `debug_link`, `sweep`, `sweep_results` | `[dev]` (same names) |
 | `[accounts]` (`name_prefix`, `max_characters`, `flags`, `full_access`, `stash_tabs`) | unchanged (`flags` now defaults to `[0x23, 0x03]`) |

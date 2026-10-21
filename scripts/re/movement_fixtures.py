@@ -13,7 +13,8 @@ The server processes an input in the tick that emits the batch with the first re
 previous input. The replay submits inputs at `arrive` and expects each reply at its own frame.
 
 Usage:
-  movement_fixtures.py show  <session> --from F --to F      print the window as fixture JSON
+  movement_fixtures.py show  <session> --from F --to F [--track] [--drop-aim]
+                                                            print the window as fixture JSON
   movement_fixtures.py build [--out DIR]                    write all PRESETS (needs the dumps)
 
 Needs `GameFiles/poe-hook-data/stats.tsv` (cargo xtask dll-data) to name stats; analysis only.
@@ -28,6 +29,7 @@ import argparse
 import json
 import math
 import os
+import re
 import struct
 import sys
 
@@ -63,7 +65,8 @@ PRESETS = {
     "standing_tap_roll": (
         NEW, 510, 550,
         "roll from standing (no WASD), Space released 7 frames after the press: the roll batch "
-        "is the same as when walking, steering by 0x1a8, end at t0+16, no 0x64 at any time"),
+        "is the same as when walking, steering by 0x1a8, end at t0+16, no 0x64 at any time",
+        False, {"track": True}),
     "standing_hold_sprint_cursor_follow": (
         NEW, 1128, 1175,
         "roll from standing with Space held: sprint at t0+15, then the client sends a 0x63 per "
@@ -78,10 +81,13 @@ PRESETS = {
         "WASD walk, tap roll (7 frames), WASD turn at t0+15 answered at once, stop; the 0x64 "
         "after the roll"),
     "sprint_wasd_released_then_space_up": (
-        NEW, 1720, 1800,
+        NEW, 1720, 1832,
         "roll with Space held while walking; WASD vectors during and after the roll; WASD keys "
         "released while Space is still down (the client then sends the cursor direction, not "
-        "(0, 0)); Space released, 0x64 scaled then unscaled, (0, 0) after"),
+        "(0, 0)); Space released, 0x64 scaled then unscaled, (0, 0) after; the client's walk "
+        "has ended with the sprint and it coasts 30 frames, about 18 cells, along the last "
+        "direction ('track', compared from the sprint-off frame on)",
+        False, {"track": True, "track_from": 73}),
     "attack_during_a_tap_roll": (
         NEW, 1930, 1998,
         "tap roll followed by an attack asked for 11 frames in: acked at once, the attack "
@@ -93,6 +99,22 @@ PRESETS = {
         "with the end of the sprint at t0+35 (must_sprint off, MoveAck, StartAction, sprint "
         "off); cursor-follow 0x63 vectors in between",
         True),
+    # ---- click-to-move mode standing rolls (WP C1, gap #12): 'track' is the client's own path ----
+    "click_mode_roll_south": (
+        NEW, 3644, 3678,
+        "click-to-move mode, standing tap roll (Space 3 frames) with the cursor to the south: the "
+        "roll heads where the cursor is at the roll and follows its offsets with the usual lag; "
+        "the client's positions ('track') stay within 3 cells of ours",
+        True, {"track": True}),
+    "click_mode_roll_east": (
+        NEW, 3678, 3711,
+        "click-to-move mode, standing tap roll (Space 3 frames) with the cursor to the east",
+        True, {"track": True}),
+    "click_mode_roll_west": (
+        NEW, 4177, 4212,
+        "click-to-move mode, standing roll (Space 14 frames) with the cursor to the west-north-west "
+        "and moving further round",
+        True, {"track": True}),
     "click_single": (
         NEW, 3372, 3382,
         "click-to-move: press and release 2 frames later: StartAction Move + UseSkillAck in the "
@@ -205,6 +227,27 @@ REPLY_OPS = (0x64, 0x1C8, 0x1AE, 0x1AF, 0x1B1, 0x1B2, 0x1CA, 0x1D3, 0x1EB, 0x1EC
              0x2F9)
 
 
+# Cells per world unit of the client's position log (a cell is 250 / 23 world units).
+WORLD_PER_CELL = 250 / 23
+
+
+def client_track(session, base, lo, hi):
+    """The client's own position per frame from the session's `poe-hook.log` (`movement_log`):
+    `[frame relative to the first input, x, y]` in cells (cell centre = integer + 0.5), for the
+    capture frames `lo..hi` the log has. Frames in which the entity did not move are not logged."""
+    path = os.path.join(os.path.dirname(ms.resolve(session)), "poe-hook.log")
+    pat = re.compile(r"frame #(\d+) dt=[\d.]+ world \((-?[\d.]+), (-?[\d.]+)\)")
+    out = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            m = pat.search(line)
+            if m and lo <= int(m[1]) <= hi:
+                out.append([int(m[1]) - base,
+                            round(float(m[2]) / WORLD_PER_CELL, 2),
+                            round(float(m[3]) / WORLD_PER_CELL, 2)])
+    return out
+
+
 def window(session, lo, hi, name="", desc="", drop_aim=False, opts=None):
     opts = opts or {}
     shift = opts.get("shift", {})
@@ -257,6 +300,14 @@ def window(session, lo, hi, name="", desc="", drop_aim=False, opts=None):
         if first_cell is None and "cell" in e:
             first_cell = e["cell"]
     extra = {"combat_stance": opts["stance"]} if "stance" in opts else {}
+    if opts.get("track"):
+        # `base` is the capture frame of fixture frame 0 (the frame the first input arrived in).
+        extra["track"] = client_track(session, base, lo, hi)
+        if "track_from" in opts:
+            # Compare from this fixture frame on, relative to the position there (the terrain
+            # of the capture is not in the fixture: a walk that bent around an obstacle before
+            # that frame is not part of the check).
+            extra["track_from"] = opts["track_from"]
     return {
         **extra,
         "name": name,
@@ -270,7 +321,8 @@ def window(session, lo, hi, name="", desc="", drop_aim=False, opts=None):
 
 
 def cmd_show(a):
-    print(json.dumps(window(a.session, a.start, a.end), indent=None, separators=(",", ":")).replace("},{", "},\n{"))
+    print(json.dumps(window(a.session, a.start, a.end, drop_aim=a.drop_aim,
+                            opts={"track": a.track}), indent=None, separators=(",", ":")).replace("},{", "},\n{"))
 
 
 def cmd_build(a):
@@ -292,6 +344,8 @@ def main():
     p.add_argument("session")
     p.add_argument("--from", dest="start", type=int, required=True)
     p.add_argument("--to", dest="end", type=int, required=True)
+    p.add_argument("--track", action="store_true", help="add the client's positions (poe-hook.log)")
+    p.add_argument("--drop-aim", action="store_true", help="leave out the aim inputs and echoes")
     p.set_defaults(fn=cmd_show)
     p = sub.add_parser("build")
     p.add_argument("--out", default=OUT_DEFAULT)

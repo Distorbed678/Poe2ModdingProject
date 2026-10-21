@@ -204,8 +204,36 @@ fn close(exp: &Value, act: &Value, tol: Tol, dev: &mut BTreeMap<String, i64>) ->
     true
 }
 
-/// Replays a fixture, asserts every frame's events and returns the largest cell deviation.
+/// Replays a fixture and asserts every frame's events.
 fn replay(name: &str, tol: Tol) {
+    run(name, tol, None, true);
+}
+
+/// Like [`replay`], and the positions are checked too, see [`run`].
+fn replay_tracked(name: &str, tol: Tol, max_err: Option<f64>) {
+    run(name, tol, max_err, true);
+}
+
+/// Only the positions: windows of click-to-move mode carry unrelated messages (held click
+/// restarts, energy shield stats) that the events would have to match too.
+fn track_only(name: &str, max_err: f64) {
+    run(
+        name,
+        Tol {
+            walk: ANY,
+            start: ANY,
+            steer: ANY,
+        },
+        Some(max_err),
+        false,
+    );
+}
+
+/// The server's position (cells, cell centre = integer + 0.5) after each tick of `frames`, for
+/// the fixtures that carry the client's own positions (`track`, from `poe-hook.log`): every
+/// tracked frame must be within `max_err` cells of the client's. With `track_from` in the
+/// fixture the comparison starts at that frame and is relative to the position there.
+fn run(name: &str, tol: Tol, max_err: Option<f64>, check_events: bool) {
     let fx = fixture(name);
     let start = (
         fx["start_cell"][0].as_i64().unwrap() as i32,
@@ -233,6 +261,13 @@ fn replay(name: &str, tol: Tol) {
         .unwrap();
     let mut dev = BTreeMap::new();
     let mut problems = Vec::new();
+    let mut positions: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
+    let last = last.max(fx["track"].as_array().map_or(0, |t| {
+        t.iter()
+            .map(|p| p[0].as_u64().unwrap_or(0))
+            .max()
+            .unwrap_or(0)
+    }));
     for frame in 1..=last {
         for inp in inputs
             .iter()
@@ -242,6 +277,8 @@ fn replay(name: &str, tol: Tol) {
         }
         let events = world.tick();
         assert_eq!(world.frame(), frame);
+        let (px, py) = world.entity(player).unwrap().movement.position();
+        positions.insert(frame, (px as f64, py as f64));
         let act: Vec<Value> = events
             .iter()
             .map(|e| {
@@ -254,13 +291,15 @@ fn replay(name: &str, tol: Tol) {
             .iter()
             .filter(|e| e["f"].as_u64().unwrap() == frame)
             .collect();
+        // Frames after the last expected event (the track runs on): nothing is expected, and
+        // nothing may come (a coasting or walking player sends no message).
         let same = exp.len() == act.len()
             && exp.iter().zip(&act).all(|(e, a)| {
                 let mut e = (*e).clone();
                 e.as_object_mut().unwrap().remove("f");
                 close(&e, a, tol, &mut dev)
             });
-        if !same {
+        if check_events && !same {
             problems.push(format!(
                 "frame {frame}:\n  official {}\n  ours     {}",
                 exp.iter()
@@ -275,6 +314,43 @@ fn replay(name: &str, tol: Tol) {
         }
     }
     println!("{name}: largest cell deviations {dev:?}");
+    if let (Some(max_err), Some(track)) = (max_err, fx["track"].as_array()) {
+        let from = fx["track_from"].as_u64();
+        let pts: Vec<(u64, f64, f64)> = track
+            .iter()
+            .map(|p| {
+                (
+                    p[0].as_i64().unwrap().max(0) as u64,
+                    p[1].as_f64().unwrap(),
+                    p[2].as_f64().unwrap(),
+                )
+            })
+            .collect();
+        // Relative comparison: the offset between the two positions at the anchor frame.
+        let (ox, oy) = from.map_or((0.0, 0.0), |a| {
+            let (_, cx, cy) = pts.iter().rfind(|p| p.0 <= a).expect("track at the anchor");
+            let (sx, sy) = positions[&pts.iter().rfind(|p| p.0 <= a).unwrap().0];
+            (cx - sx, cy - sy)
+        });
+        let mut worst = (0.0f64, 0u64);
+        for (f, cx, cy) in pts.iter().filter(|p| p.0 >= from.unwrap_or(1) && p.0 >= 1) {
+            let (sx, sy) = positions[f];
+            let e = ((sx + ox - cx).powi(2) + (sy + oy - cy).powi(2)).sqrt();
+            if e > worst.0 {
+                worst = (e, *f);
+            }
+        }
+        println!(
+            "{name}: server against client track, worst {:.1} cells at frame {}",
+            worst.0, worst.1
+        );
+        if worst.0 > max_err {
+            problems.push(format!(
+                "server position {:.1} cells from the client's at frame {} (limit {max_err})",
+                worst.0, worst.1
+            ));
+        }
+    }
     assert!(problems.is_empty(), "{name}:\n{}", problems.join("\n"));
 }
 
@@ -352,16 +428,19 @@ fn sprint_ended_by_an_attack() {
 // Fixtures `standing_*`, `chained_*`, `click_*`, `stance_*` ...: `movement_fixtures.py` PRESETS.
 
 /// Roll with no WASD held: the same batch as when walking, steering acks, `is_dodge_rolling`
-/// cleared at t0 + 16, no `MoveAck` at any time.
+/// cleared at t0 + 16, no `MoveAck` at any time. The roll runs towards the cursor and follows
+/// its offsets: 3.5 cells from the client's own path over the whole roll (the client's first
+/// frames deviate by up to 11 degrees from the cursor, its path planning).
 #[test]
 fn standing_tap_roll() {
-    replay(
+    replay_tracked(
         "standing_tap_roll",
         Tol {
             walk: ANY,
             start: 3,
             steer: ANY,
         },
+        Some(3.5),
     );
 }
 
@@ -408,16 +487,21 @@ fn walk_tap_roll_then_turn() {
 }
 
 /// Roll with Space held while walking, WASD keys released with Space still down (the client
-/// sends the cursor direction, not zero), Space released.
+/// sends the cursor direction, not zero), Space released. The client's walk ends with the sprint
+/// and it coasts 30 frames (about 18 cells) along the cursor direction before it stops
+/// (gap #11): from the sprint-off frame on the server stays within 3 cells of the client's own
+/// positions (2.6 at worst: the client's frame times jitter), against 18 for a server that
+/// stops at the `(0, 0)`.
 #[test]
 fn sprint_wasd_released_then_space_up() {
-    replay(
+    replay_tracked(
         "sprint_wasd_released_then_space_up",
         Tol {
             walk: ANY,
             start: 6,
             steer: ANY,
         },
+        Some(3.0),
     );
 }
 
@@ -517,4 +601,26 @@ fn stance_to_combat_mode() {
             steer: ANY,
         },
     );
+}
+
+// ---- roll heading in click-to-move mode (WP C1, gap #12) ------------------------------------
+
+/// Click-to-move mode: a standing tap roll heads where the cursor is (no WASD, the Move click
+/// is not part of the roll) and follows the `UpdateSkillTarget` offsets; 3.5 cells from the
+/// client's path.
+#[test]
+fn click_mode_roll_south() {
+    track_only("click_mode_roll_south", 3.5);
+}
+
+#[test]
+fn click_mode_roll_east() {
+    track_only("click_mode_roll_east", 3.5);
+}
+
+/// A longer roll (Space 14 frames) whose cursor keeps turning from west towards north-west and
+/// then south-west: the heading follows the offsets with the client's two-frame lag.
+#[test]
+fn click_mode_roll_west() {
+    track_only("click_mode_roll_west", 3.5);
 }

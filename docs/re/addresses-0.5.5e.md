@@ -190,6 +190,24 @@ Layouts and sequences: [../protocol/movement.md](../protocol/movement.md). Struc
 | `0x14214a13e` | | Actor case `0x1ca` (header only): decrements `Actor +0x348`; in predictive mode also restarts the action; seen with every roll start and sprint end by an attack |
 | `0x141b76c20` | | end of a roll: whether it becomes a sprint (already listed above); official servers decide server-side: `is_sprinting` is set 15 frames into a held roll |
 
+## Walk speed factor, roll heading, sprint end (WP C1, 2026-10-21)
+Names set in Ghidra on 2026-10-21. Findings and evidence: [../protocol/movement.md](../protocol/movement.md#coasting-after-a-sprint).
+
+| Address | Ghidra name | What |
+|---|---|---|
+| `0x141dcce20` | `Pathfinding_GetSpeed` | already listed above: `base_speed` (+0x550) x (1 + stat `0xec` / 10000) x (1 + stat `0xc39` / 100) x multiplier (+0x55c), capped by stat `0x44a`; +0x554 < 0 means "computed" |
+| `0x141dccfb0` | `Pathfinding_SetSpeedMultiplier` | writes the multiplier +0x55c (clamped at 0) and re-issues the running step (`0x141dcbf90`) |
+| `0x141e41ec0` | `Actor_ApplyActionSpeedFactor` | from the running action: vfunc +0xe8 = 0 sets the factor at once (non-Move actions: Actor +0x440 = vfunc +0xe0), else Actor +0x444 = rate and +0x448 = target (vfunc +0xe0 clamped 0..1); the Actor tick (inside `0x141e42880`, the multiplier written at `0x141e44123`) moves +0x440 to the target at that rate per second and multiplies it by Actor +0x438 into Pathfinding +0x55c |
+| `0x14197e990` | `Action_GetSpeedAccelerationPerSecond` | action vfunc +0xe8: stat `0x4777` (`movement_speed_acceleration_+%_per_second_while_performing_action`) / 100 when the action is a performing one (vfunc +0x58); `0x1419b0bd0`, `0x1419b7390` are variants |
+| `0x141e4f9c0` | `Actor_StartWasdWalk` | start of a WASD walk: creates the Move action (skill `0x20002909`) towards cell + input vector; returns without starting when Actor +0x400 and +0x404 (the held input axes) are both 0, or while Actor +0x2a1 bits 1/2 or +0x2a0 bit 6 say no |
+| `0x141dcbdb0` / `0x141dcc520` / `0x141dcbf90` | `Pathfinding_FollowPath` / (path request) / `Pathfinding_StepAlongPath` | the path request clamps the first leg to 126 cells (`0x42fc0000`), step issues the waypoint move with the speed getter |
+| `0x141de3020` | `Positioned_MoveToWaypoint` | the entity's own move towards a waypoint cell with a speed (`"Tried to issue a MoveTo with infinite speed"`) |
+| `0x141aa8380` | `DodgeRoll_OnStart` | the roll action's start: stats `0x5121`, `0x478c`, travel distance (`0x141aa90d0`), builds the movement helper and calls `0x141b8bc20` |
+| `0x141b8bc20` | `DodgeRoll_InitHeading` | roll heading (action +0x40, radians, `atan2 + pi/2` wrapped to 0..2pi): the held input vector when Actor +0x400/+0x404 are not both 0 and the action's flag +0x5e is set; else the direction from the entity's position (Positioned +0x444/+0x448) to the action's target (+0x150/+0x154); the entity's facing (+0x44c) when target = position; action +0x3f = 1 when the heading differs from the facing by 90 degrees or more (Actor +0x8fa) |
+| `0x141e4de20` | | (already listed) reset of the Actor's walk on stat changes: ends the Move action; the coasting after a sprint's end was not found in code, only measured |
+| `0x141e4d9e0`, `0x1416e1f70` | | sprint animation transition: `sprint_blend_time_override_ms` (`0x5735`) / 1000 as the blend time (-1 = default), `virtual_sprint_timeline_variation` (`0x6996`) |
+| client log `action start/end slot N: <Action>` (`poe-hook.log`, `poe_hook_core::actions`) | | slot 0 = the performing action (DodgeRoll, Melee), slot 1 = Move; the end of the Move at a sprint's end and its restart by a `0x64` are read from it |
+
 ## Client platform and standalone login (2026-10-20)
 Details and the patch: [standalone-login.md](standalone-login.md).
 

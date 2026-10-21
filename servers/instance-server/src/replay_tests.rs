@@ -427,6 +427,14 @@ fn sprint_hold_with_release() {
     replay("sprint_hold_release");
 }
 
+/// The sprint of the 2026-10-20 capture ended by the key release with the cursor direction in
+/// flight: the packets of the end and the stop (the coasting itself is checked against the
+/// client's own positions in `poe-game`'s replay test).
+#[test]
+fn sprint_wasd_released_then_space_up() {
+    replay("sprint_wasd_released_then_space_up");
+}
+
 #[test]
 fn sprint_ended_by_an_attack() {
     replay("sprint_ended_by_attack");
@@ -621,6 +629,44 @@ fn action_event_is_skipped_while_instance_toml_lacks_it() {
     assert_eq!(sent.len(), usize::from(listed));
 }
 
+/// WASD held since before the roll: the sprint has no `MoveDirectionUpdate` stream, and its end
+/// still sends the unscaled direction one tick after the sprint-off batch (it restarts the
+/// client's walk; without it the client coasts to a stop while the server walks on, gap #11).
+#[test]
+fn a_sprint_without_a_stream_ends_with_the_unscaled_direction() {
+    let mut s = Session::new((100, 100));
+    s.walk(180, 0);
+    s.tick();
+    s.send(&SprintInput {
+        player: 1,
+        held: true,
+    });
+    s.use_skill(ROLL_SKILL, 0x400, 10, 0);
+    for _ in 0..40 {
+        let batch = s.tick();
+        assert!(
+            !batch.iter().any(|b| b.is::<MoveDirectionUpdate>()),
+            "no stream without a vector after the sprint started"
+        );
+    }
+    s.send(&SkillInputEnd { player: 1 });
+    s.send(&SprintInput {
+        player: 1,
+        held: false,
+    });
+    let batch = s.tick();
+    assert!(batch.iter().any(|b| b.is::<SprintState>()));
+    assert!(!batch.iter().any(|b| b.is::<MoveDirectionUpdate>()));
+    let m = s.tick()[0].decode::<MoveDirectionUpdate>();
+    assert_eq!((m.dir_x, m.dir_y), (180, 0));
+    // The walk goes on: the server's cell advances at walking speed after the restart gap.
+    let x = s.cell().0;
+    for _ in 0..10 {
+        s.tick();
+    }
+    assert!(s.cell().0 >= x + 10, "{} -> {}", x, s.cell().0);
+}
+
 #[test]
 fn sim_config_comes_from_game_data_and_config() {
     let skills = vec![roll_skill(Some(52))];
@@ -639,6 +685,17 @@ fn sim_config_comes_from_game_data_and_config() {
     assert_eq!(cfg.roll.travel_distance, 52.0);
     assert_eq!(cfg.walk_speed, 41.5);
     assert_eq!(cfg.sprint.buff_rows, [2758, 2737, 2853]);
+    // The coasting after a sprint comes from `[movement]` (capture values by default).
+    assert_eq!(
+        (
+            cfg.sprint.coast_start_scale,
+            cfg.sprint.coast_frames,
+            cfg.sprint.coast_delay_frames,
+            cfg.sprint.restart_delay_frames,
+            cfg.sprint.release_window_frames
+        ),
+        (1.0614, 29.5, 1, 2, 3)
+    );
     assert_eq!(
         (
             cfg.sprint.speed_scale,

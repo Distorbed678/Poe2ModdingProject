@@ -55,6 +55,17 @@ pub enum Motion {
         x: f32,
         y: f32,
     },
+    /// The entity keeps moving after a sprint ended without a new walk: the client's Move action
+    /// is over, but its position still advances along the last direction, `step` cells in the
+    /// first frame and `decay` less in each next one until it stops (docs/protocol/movement.md,
+    /// "Coasting after a sprint"). Per frame like [`ROLL_STEPS`]: `frame` frames made so far.
+    Coast {
+        x: f32,
+        y: f32,
+        step: f32,
+        decay: f32,
+        frame: u32,
+    },
     /// Dodge roll: `remaining` cells towards a direction, along a path, with the roll's speed
     /// profile ([`roll_speed`]); `elapsed` seconds since it started.
     Roll {
@@ -123,6 +134,9 @@ pub struct Mover {
     path: Vec<(i32, i32)>,
     /// Frames until the WASD path is planned again.
     replan_in: u32,
+    /// Frames the entity stands still before the motion starts (the client's gap between a
+    /// message that ends or restarts its walk and the first step).
+    delay: u32,
 }
 
 /// Cells the pathfinder may expand per plan.
@@ -143,6 +157,7 @@ impl Mover {
             motion: Motion::Idle,
             path: Vec::new(),
             replan_in: 0,
+            delay: 0,
         }
     }
 
@@ -151,6 +166,13 @@ impl Mover {
         self.motion = motion;
         self.path.clear();
         self.replan_in = 0;
+        self.delay = 0;
+    }
+
+    /// Starts a motion that first stands still for `frames` frames.
+    pub fn start_after(&mut self, motion: Motion, frames: u32) {
+        self.start(motion);
+        self.delay = frames;
     }
 
     /// The running roll turns into a sprint roll (the key was still down at `t0 + 15`): the
@@ -188,8 +210,34 @@ impl Mover {
 
     /// Advances one frame of `dt` seconds.
     pub fn advance(&mut self, dt: f32, terrain: &dyn Walkable) {
+        if self.delay > 0 && self.motion != Motion::Idle {
+            self.delay -= 1;
+            return;
+        }
         match self.motion {
             Motion::Idle => {}
+            Motion::Coast {
+                x,
+                y,
+                step,
+                decay,
+                frame,
+            } => {
+                let len = step - decay * frame as f32;
+                match unit(x, y) {
+                    Some((ux, uy)) if len > 0.0 => {
+                        self.slide(ux, uy, len, terrain);
+                        self.motion = Motion::Coast {
+                            x,
+                            y,
+                            step,
+                            decay,
+                            frame: frame + 1,
+                        };
+                    }
+                    _ => self.motion = Motion::Idle,
+                }
+            }
             Motion::Direction { x, y } => self.walk_towards(x, y, 1.0, dt, terrain),
             Motion::Sprint { x, y, scale } => self.walk_towards(x, y, scale, dt, terrain),
             Motion::MoveTo { x, y } => {

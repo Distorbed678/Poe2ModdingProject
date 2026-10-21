@@ -26,6 +26,10 @@ use crate::movement::{Motion, Mover, Walkable};
 
 pub type Cell = (i32, i32);
 
+/// The client's time per simulation frame: its steps are `speed / 30` (1.233 cells at 37 cells
+/// per second, measured), whatever `tick_ms` says.
+pub const CLIENT_FRAME_SECS: f32 = 1.0 / 30.0;
+
 /// Bit the server adds to the flags of a `StartAction` that an input started.
 pub const ACTION_INPUT_FLAG: u16 = 0x10;
 
@@ -89,6 +93,25 @@ pub struct SprintConfig {
     pub velocity_permyriad: i32,
     /// `sprint_blend_time_override_ms`.
     pub blend_time_override_ms: i32,
+    /// After a sprint ends the client's Move action is over, and without a new walk the entity
+    /// coasts along its last direction: the first step is `coast_start_scale` x the walking
+    /// step of a client frame (`walk_speed` / 30), falling linearly to zero over `coast_frames`
+    /// frames (2026-10-20 official sprint ends at f1795 and f4585 and six sessions of ours:
+    /// steps 1.309 - 0.0444 n cells per frame, n = 0..29, 19.95 cells in all; walking is 1.233
+    /// per frame).
+    pub coast_start_scale: f32,
+    pub coast_frames: f32,
+    /// Frames between the sprint-off batch and the first coasting step (the batch's own frame
+    /// still has the sprint step, the next one none).
+    pub coast_delay_frames: u32,
+    /// Frames between the sprint-off batch and the first step of a walk the unscaled `MoveAck`
+    /// restarts (client: new Move action 2 frames after the batch, first step 1 later).
+    pub restart_delay_frames: u32,
+    /// A zero WASD vector this many frames after the sprint-off batch, after a sprint that
+    /// followed the cursor (Space held, no key), means the keys were already up when the
+    /// unscaled `MoveAck` reached the client, which then coasted instead of walking on (the
+    /// client sends the zero vector 2 frames after the Space release).
+    pub release_window_frames: u32,
 }
 
 /// Everything the component needs to know about the game (shared by all entities of a world).
@@ -136,6 +159,11 @@ impl MovementConfig {
                 move_speed_percent: 50,
                 velocity_permyriad: 5000,
                 blend_time_override_ms: 1,
+                coast_start_scale: 1.0614,
+                coast_frames: 29.5,
+                coast_delay_frames: 1,
+                restart_delay_frames: 2,
+                release_window_frames: 3,
             },
             walk_speed: 37.0,
             stance_delay_frames: 9,
@@ -363,6 +391,14 @@ pub enum MoveState {
     Sprinting(SprintRun),
 }
 
+/// The frame a sprint ended by the key release (or the roll's end after an earlier release) and
+/// the direction it ran in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SprintEnd {
+    frame: u64,
+    dir: Cell,
+}
+
 /// Scheduled timeline events.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Due {
@@ -446,6 +482,11 @@ pub struct Locomotion {
     release_due: bool,
     /// An attack that starts after this frame's `MoveAck` (see `MustSprintOff`).
     attack_after_ack: Option<(UseSkill, Cell)>,
+    /// The sprint that just ended by key release, see [`SprintEnd`].
+    sprint_end: Option<SprintEnd>,
+    /// The direction the entity last moved or aimed in: the client rolls along it when the
+    /// roll has no target (cursor on the player) and no key is held.
+    facing: Cell,
 }
 
 impl Locomotion {
@@ -474,6 +515,8 @@ impl Locomotion {
             attack_after_ack: None,
             release_pending: false,
             release_due: false,
+            sprint_end: None,
+            facing: (0, 0),
         }
     }
 
@@ -685,6 +728,34 @@ impl Locomotion {
         self.wasd = dir;
         self.ack_wanted = true;
         let moving = dir != (0, 0);
+        if moving {
+            self.facing = dir;
+            // Cursor vectors still in flight when the sprint ended keep its direction up to
+            // date; a key vector is a real new walk.
+            match &mut self.sprint_end {
+                Some(end) if !is_key_vector(dir) => end.dir = dir,
+                _ => self.sprint_end = None,
+            }
+        } else if let Some(end) = self.sprint_end.take()
+            && ctx.frame <= end.frame + ctx.config.sprint.release_window_frames as u64
+            && !is_key_vector(end.dir)
+            && matches!(self.state, MoveState::Walking(Walk::Direction(_)))
+        {
+            // The sprint followed the cursor and the keys were already up when the unscaled
+            // `MoveAck` of its end reached the client: that never restarted its walk, it
+            // coasts (see `end_sprint`). Carry on from the step the client is at.
+            self.state = MoveState::Idle;
+            self.start_coast(
+                end.dir,
+                end.frame + 1 + ctx.config.sprint.coast_delay_frames as u64,
+                ctx,
+            );
+            return;
+        }
+        if !moving && matches!(self.mover.motion, Motion::Coast { .. }) {
+            // The client's walk is over already; a stop does not cut the coasting short.
+            return;
+        }
         if let Some(run) = self.sprint_mut() {
             // The stream starts with the first vector after the sprint started. A zero vector
             // is answered once. The official client never sends one while a sprint runs (it
@@ -823,8 +894,21 @@ impl Locomotion {
         // Verified (2026-10-20): a standing roll gets the same batch and ends in Idle with no
         // `MoveAck`. The client rolls along the WASD vector when a key is held, else towards
         // the cursor (`target`, steered every 2 frames); `target` is the cursor either way.
+        // The client's roll heading (`0x141b76c20` neighbourhood, `0x141b8bc20`): the held input
+        // vector, else the direction to the action's target, and the entity's facing when the
+        // target is the player's own cell.
         let wasd_driven = self.wasd != (0, 0);
-        let heading = if wasd_driven { self.wasd } else { offset };
+        let heading = if wasd_driven {
+            self.wasd
+        } else if offset != (0, 0) {
+            offset
+        } else {
+            self.facing
+        };
+        if heading != (0, 0) {
+            self.facing = heading;
+        }
+        self.sprint_end = None;
         self.mover.start(if heading == (0, 0) {
             Motion::Idle
         } else {
@@ -883,6 +967,10 @@ impl Locomotion {
         out: &mut Vec<MoveEvent>,
     ) {
         let cell = self.mover.cell();
+        if target != cell {
+            self.facing = (target.0 - cell.0, target.1 - cell.1);
+        }
+        self.sprint_end = None;
         self.state = MoveState::Walking(Walk::Target { goal: target });
         self.mover.start(Motion::MoveTo {
             x: target.0 as f32 + 0.5,
@@ -1316,10 +1404,71 @@ impl Locomotion {
             index: run.buff_base + 2,
         });
         out.push(MoveEvent::Stats(vec![(MoveStat::AllHitsStunYou, 0)]));
-        if run.streaming && self.wasd != (0, 0) {
+        // The client's Move action ends with the sprint, whether or not a `MoveAck` stream ran;
+        // a key still held restarts it with the unscaled direction of the next frame. (Official
+        // sprints with a stream, 6 of 6: `0x64` unscaled at r+1. WASD held since before the
+        // roll has no stream and no capture: the client coasts to a stop without it, 2 runs of
+        // ours.)
+        if self.wasd != (0, 0) {
             self.due.push((frame + 1, Due::UnscaledAck));
         }
-        self.finish_sprint();
+        self.finish_sprint_by_release(ctx);
+    }
+
+    /// The sprint ended by the key release: walks on, or coasts.
+    fn finish_sprint_by_release(&mut self, ctx: &StepCtx) {
+        if !matches!(self.state, MoveState::Sprinting(_)) {
+            self.finish_sprint();
+            return;
+        }
+        let cfg = &ctx.config.sprint;
+        if self.wasd != (0, 0) {
+            // The restart: the unscaled `MoveAck` of the next frame starts a new Move action
+            // on the client, which steps `restart_delay_frames` after this batch.
+            let dir = self.wasd;
+            self.state = MoveState::Walking(Walk::Direction(dir));
+            self.mover.start_after(
+                Motion::Direction {
+                    x: dir.0 as f32,
+                    y: dir.1 as f32,
+                },
+                cfg.restart_delay_frames,
+            );
+            self.sprint_end = Some(SprintEnd {
+                frame: ctx.frame,
+                dir,
+            });
+        } else if self.facing != (0, 0) {
+            self.state = MoveState::Idle;
+            let first = ctx.frame + 1 + cfg.coast_delay_frames as u64;
+            self.start_coast(self.facing, first, ctx);
+        } else {
+            self.finish_sprint();
+        }
+    }
+
+    /// Coasts along `dir`; the client's first coasting step is in frame `first_step`. Steps of
+    /// frames before the next advance (`ctx.frame + 1`) that the entity has not made yet (it
+    /// was waiting for a restart that never came) are made now.
+    fn start_coast(&mut self, dir: Cell, first_step: u64, ctx: &StepCtx) {
+        let cfg = &ctx.config.sprint;
+        let step = self.mover.speed * CLIENT_FRAME_SECS * cfg.coast_start_scale;
+        let decay = step / cfg.coast_frames;
+        let next = ctx.frame + 1;
+        let delay = first_step.saturating_sub(next) as u32;
+        self.mover.start_after(
+            Motion::Coast {
+                x: dir.0 as f32,
+                y: dir.1 as f32,
+                step,
+                decay,
+                frame: 0,
+            },
+            delay,
+        );
+        for _ in first_step..next {
+            self.mover.advance(ctx.dt, ctx.terrain);
+        }
     }
 
     /// Leaves the sprint: a sprinting entity walks on; a rolling one finishes its roll.
@@ -1330,6 +1479,12 @@ impl Locomotion {
             _ => {}
         }
     }
+}
+
+/// A vector the keyboard can make (one axis, or both with the same magnitude), as opposed to
+/// the free angle of the cursor direction the client sends with Space held and no key.
+fn is_key_vector(v: Cell) -> bool {
+    v.0 == 0 || v.1 == 0 || v.0.abs() == v.1.abs()
 }
 
 /// `v` scaled to length `len` and truncated toward zero (`(0, 0)` stays).
@@ -1423,6 +1578,10 @@ mod tests {
                 next_buff: &mut self.next_buff,
             };
             self.loco.tick(&mut ctx)
+        }
+
+        fn mover_motion(&self) -> Motion {
+            self.loco.mover.motion
         }
 
         /// Ticks `n` frames without input, collecting `(frame, event)`.
@@ -2399,5 +2558,180 @@ mod tests {
             .collect();
         assert_eq!(rows, [(4, 7), (5, 8), (6, 9)]);
         assert_eq!(r.next_buff, 7);
+    }
+
+    // ---- gap #11: after a sprint ends the client's walk is over (2026-10-20 captures) ----------
+
+    /// Ticks once with `inputs` and returns the distance the entity moved in that frame.
+    fn step(r: &mut Rig, inputs: &[MoveInput]) -> f32 {
+        let before = r.loco.position();
+        r.tick(inputs);
+        dist(before, r.loco.position())
+    }
+
+    /// WASD held since before the roll (no `0x63` after the sprint started: no `MoveAck`
+    /// stream), then Space released: tick `F`. Returns the rig after that tick.
+    fn sprinting_with_a_key_held(key: Cell) -> Rig {
+        let mut r = Rig::new((50, 50));
+        r.tick(&[dir(key.0, key.1)]);
+        r.run(2);
+        r.tick(&[space(true), roll(10, 0)]);
+        r.run(36);
+        assert!(matches!(r.loco.state(), MoveState::Sprinting(s) if !s.streaming));
+        r
+    }
+
+    #[test]
+    fn a_sprint_ended_with_a_key_held_is_restarted_by_the_unscaled_ack() {
+        let mut r = sprinting_with_a_key_held((180, 0));
+        // F: the sprint-off batch; the client's Move action ends with it, so there is no
+        // `MoveAck` stream to stop, but the unscaled direction follows in F + 1 (a stream-less
+        // sprint used to end silently and the client walked on by itself at a crawl).
+        let ev = r.tick(&[MoveInput::SkillInputEnd, space(false)]);
+        assert!(!ev.iter().any(|e| matches!(e, MoveEvent::MoveAck { .. })));
+        let ev = r.tick(&[]);
+        assert!(
+            ev.iter()
+                .any(|e| matches!(e, MoveEvent::MoveAck { dir: (180, 0), .. })),
+            "{ev:?}"
+        );
+        // The client's new Move action steps from F + 3 on, at walking speed.
+        let walk = r.cfg.walk_speed * 0.033;
+        assert_eq!(step(&mut r, &[]), 0.0);
+        assert!((step(&mut r, &[]) - walk).abs() < 1e-3);
+        assert!((step(&mut r, &[]) - walk).abs() < 1e-3);
+        assert_eq!(
+            r.loco.state(),
+            &MoveState::Walking(Walk::Direction((180, 0)))
+        );
+    }
+
+    /// The cursor-direction sprint of the official capture (Space only): the keys are up when
+    /// the unscaled `MoveAck` reaches the client, which coasts instead of walking on.
+    fn sprint_following_the_cursor_then_released() -> Rig {
+        let mut r = sprinting((100, -150));
+        r.run(3);
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]); // F
+        r.tick(&[dir(101, -149)]); // F + 1: a cursor vector still in flight
+        r
+    }
+
+    #[test]
+    fn a_sprint_ended_after_the_cursor_direction_coasts_to_a_stop() {
+        let mut r = sprinting_with_cursor_release_at_f2();
+        let start = r.loco.position();
+        // The client's steps: 1.309 falling by 0.0444 per frame, 30 of them, about 20 cells
+        // (own sessions, f1795 and f4585 of the capture); the first one is made by the tick
+        // that saw the zero vector.
+        let mut steps = Vec::new();
+        for _ in 0..40 {
+            steps.push(step(&mut r, &[]));
+        }
+        assert!(
+            (steps[0] - 1.265).abs() < 0.01 && (steps[1] - 1.221).abs() < 0.01,
+            "{steps:?}"
+        );
+        assert!(steps.windows(2).take(28).all(|w| w[1] < w[0]), "{steps:?}");
+        assert!(steps[28] < 0.1 && steps[29] == 0.0, "{steps:?}");
+        let total = dist(start, r.loco.position());
+        assert!((total + 1.309 - 19.95).abs() < 0.5, "{total}");
+        // Along the cursor direction, and over: no message, idle.
+        let d = (r.loco.position().0 - start.0, r.loco.position().1 - start.1);
+        assert!((d.0 / total - 100.0 / 180.03).abs() < 0.01);
+        assert_eq!(r.loco.state(), &MoveState::Idle);
+        assert!(r.run(5).is_empty());
+    }
+
+    /// F + 2: the zero vector the client sends 2 frames after the Space release.
+    fn sprinting_with_cursor_release_at_f2() -> Rig {
+        let mut r = sprint_following_the_cursor_then_released();
+        let ev = r.tick(&[dir(0, 0)]);
+        assert!(matches!(&ev[..], [MoveEvent::MoveAck { dir: (0, 0), .. }]));
+        r
+    }
+
+    #[test]
+    fn a_zero_vector_while_coasting_does_not_cut_it_short() {
+        let mut r = sprinting_with_cursor_release_at_f2();
+        r.run(8);
+        let before = r.loco.position();
+        r.tick(&[dir(0, 0)]);
+        r.run(3);
+        assert!(dist(before, r.loco.position()) > 3.0);
+        assert!(matches!(r.mover_motion(), Motion::Coast { .. }));
+    }
+
+    #[test]
+    fn a_new_direction_during_the_coast_walks_on_at_walking_speed() {
+        let mut r = sprinting_with_cursor_release_at_f2();
+        r.run(8);
+        r.tick(&[dir(180, 0)]);
+        let walk = r.cfg.walk_speed * 0.033;
+        assert!((step(&mut r, &[]) - walk).abs() < 1e-3);
+        assert_eq!(
+            r.loco.state(),
+            &MoveState::Walking(Walk::Direction((180, 0)))
+        );
+    }
+
+    #[test]
+    fn a_key_released_just_after_the_sprint_stops_at_once() {
+        // The vector is a key vector: the client restarted its walk with the unscaled `MoveAck`
+        // and a key release is the usual immediate stop.
+        let mut r = sprinting((0, -180));
+        r.run(3);
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]);
+        r.tick(&[]);
+        r.tick(&[dir(0, 0)]);
+        let here = r.loco.position();
+        r.run(10);
+        assert_eq!(r.loco.position(), here);
+    }
+
+    #[test]
+    fn a_sprint_ended_by_the_key_with_no_direction_stays_put() {
+        let mut r = Rig::new((50, 50));
+        r.tick(&[space(true), roll(0, 0)]);
+        r.run(40);
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]);
+        let here = r.loco.position();
+        r.run(40);
+        assert_eq!(r.loco.position(), here);
+    }
+
+    // ---- gap #12: the roll heading ---------------------------------------------------------
+
+    #[test]
+    fn a_roll_with_the_cursor_on_the_player_goes_along_the_facing() {
+        // The client takes the entity's facing when the target is its own cell
+        // (`0x141b8bc20`); the roll used to be dropped.
+        let mut r = Rig::new((50, 50));
+        r.tick(&[dir(0, -180)]);
+        r.run(5);
+        r.tick(&[dir(0, 0)]);
+        r.tick(&[space(true), roll(0, 0)]);
+        r.run(10);
+        let (x, y) = r.loco.position();
+        assert!((x - 50.5).abs() < 0.01 && y < 50.5 - 20.0, "{x},{y}");
+    }
+
+    #[test]
+    fn a_roll_in_click_mode_follows_the_cursor_not_the_click_walk() {
+        // A click walk towards the south-west, then a roll with the cursor to the north: the
+        // roll runs along the cursor offset (the Move target is not its heading).
+        let mut r = Rig::new((50, 50));
+        r.tick(&[MoveInput::UseSkill(UseSkill {
+            target_flags: 0,
+            ..skill(MOVE, -40, 40)
+        })]);
+        r.run(4);
+        let (x0, y0) = r.loco.position();
+        r.tick(&[space(true), roll(0, -30)]);
+        r.run(10);
+        let (x, y) = r.loco.position();
+        assert!(
+            (x - x0).abs() < 2.0 && y0 - y > 20.0,
+            "{x0},{y0} -> {x},{y}"
+        );
     }
 }

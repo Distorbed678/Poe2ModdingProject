@@ -49,6 +49,19 @@ first_entity_id = 12000
 # walking speed and roll distance come from game data; these are the official 0.5.5e values.
 # BuffDefinitions rows of the three buffs a sprint adds.
 sprint_buff_rows = [2758, 2737, 2853]
+# After a sprint ends the client's walk is over and it coasts to a stop along its last direction
+# (docs/protocol/movement.md, "Coasting after a sprint"); official 2026-10-20 captures.
+# First coasting step as a multiple of the walking step of a client frame (1.309 cells against 1.233).
+sprint_coast_start_scale = 1.0614
+# Frames over which the coasting step falls linearly to zero (30 steps, about 20 cells).
+sprint_coast_frames = 29.5
+# Frames between the sprint-off batch and the first coasting step.
+sprint_coast_delay_frames = 1
+# Frames between the sprint-off batch and the first step of a walk that a held key restarts.
+sprint_restart_delay_frames = 2
+# A zero direction within this many frames after a cursor sprint's end means the keys were already
+# up when the restart arrived (the client coasts instead of walking on).
+sprint_release_window_frames = 3
 
 [dev]
 # Development and research tools; none are needed for normal play.

@@ -554,18 +554,67 @@ pub struct MovementConfig {
     /// 2853).
     #[serde(default = "default_sprint_buff_rows")]
     pub sprint_buff_rows: [u16; 3],
+    /// After a sprint ends the client's walk is over and it coasts to a stop along its last
+    /// direction. First step as a multiple of the walking step of a client frame (default 1.0614:
+    /// 1.309 cells against 1.233; measured on the official 2026-10-20 sprint ends and six sessions
+    /// of ours, docs/protocol/movement.md "Coasting after a sprint").
+    #[serde(default = "default_sprint_coast_start_scale")]
+    pub sprint_coast_start_scale: f32,
+    /// Frames over which the coasting step falls linearly to zero (default 29.5: 30 steps, about
+    /// 20 cells; same source).
+    #[serde(default = "default_sprint_coast_frames")]
+    pub sprint_coast_frames: f32,
+    /// Frames between the sprint-off batch and the first coasting step (default 1).
+    #[serde(default = "default_sprint_coast_delay_frames")]
+    pub sprint_coast_delay_frames: u32,
+    /// Frames between the sprint-off batch and the first step of a walk the unscaled direction
+    /// ack restarts, when a key is still held (default 2: new Move action 2 frames after the
+    /// batch, first step one later; official `f2394` -> Move at `f2395`, step `f2396`).
+    #[serde(default = "default_sprint_restart_delay_frames")]
+    pub sprint_restart_delay_frames: u32,
+    /// A zero direction this many frames after the sprint-off batch, after a sprint that
+    /// followed the cursor (Space only), means the keys were already up when the restart reached
+    /// the client, which coasts (default 3: the client sends the zero 2 frames after the Space
+    /// release, official `f4584` -> `f4586`).
+    #[serde(default = "default_sprint_release_window_frames")]
+    pub sprint_release_window_frames: u32,
 }
 
 impl Default for MovementConfig {
     fn default() -> Self {
         Self {
             sprint_buff_rows: default_sprint_buff_rows(),
+            sprint_coast_start_scale: default_sprint_coast_start_scale(),
+            sprint_coast_frames: default_sprint_coast_frames(),
+            sprint_coast_delay_frames: default_sprint_coast_delay_frames(),
+            sprint_restart_delay_frames: default_sprint_restart_delay_frames(),
+            sprint_release_window_frames: default_sprint_release_window_frames(),
         }
     }
 }
 
 fn default_sprint_buff_rows() -> [u16; 3] {
     [2758, 2737, 2853]
+}
+
+fn default_sprint_coast_start_scale() -> f32 {
+    1.0614
+}
+
+fn default_sprint_coast_frames() -> f32 {
+    29.5
+}
+
+fn default_sprint_coast_delay_frames() -> u32 {
+    1
+}
+
+fn default_sprint_restart_delay_frames() -> u32 {
+    2
+}
+
+fn default_sprint_release_window_frames() -> u32 {
+    3
 }
 
 /// `[dev]`: development and research tools. None of these are needed for normal play.
