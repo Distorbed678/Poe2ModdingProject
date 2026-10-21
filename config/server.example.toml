@@ -122,11 +122,15 @@ audit_log = ""   # default: empty (off); the dev config writes runtime/admin-aud
 enabled = true   # default true
 bind = "127.0.0.1:8080"   # default
 # Directory with the built web admin (served at / with an index.html fallback). Empty = none.
+# A server release (docs/guides/hosting.md) ships it next to the binary: set "web-admin".
 static_dir = ""   # default: none
 # Browser origins allowed to call the API, e.g. ["http://localhost:5173"] for the Vite dev server.
 cors_origins = []   # default: none
 # Recent log events kept for the live log viewer.
 log_buffer = 2000   # default
+# Lifetime (seconds) of the single-use token the launcher's "Open web admin" button hands the
+# browser (POST /api/v1/web-token); it is redeemed at once, so keep it short.
+web_token_ttl_secs = 60   # default
 
 [database]
 # required

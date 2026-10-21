@@ -15,6 +15,7 @@ Related: accounts, tokens and hashing in [accounts.md](accounts.md); the command
 | `[web] static_dir` | empty | directory with the built web admin; served at `/` with an `index.html` fallback for client-side routes. A set but missing directory logs a warning and serves nothing |
 | `[web] cors_origins` | `[]` | browser origins allowed to call the API (for example `["http://localhost:5173"]` for the Vite dev server). Empty: no CORS headers |
 | `[web] log_buffer` | `2000` | recent log events kept for the live log viewer |
+| `[web] web_token_ttl_secs` | `60` | lifetime of the single-use web sign-in token ([below](#opening-the-web-admin-from-the-launcher)) |
 | `[accounts] open_registration` | `false` | whether `POST /register` works |
 
 Start the server and make an admin as described in [../guides/setup.md](../guides/setup.md#web-api) (`curl localhost:8080/api/v1/server`, `POST /api/v1/login` with `{"username", "password"}`, then `Authorization: Bearer <token>` on `/api/v1/admin/...`).
@@ -33,6 +34,23 @@ Start the server and make an admin as described in [../guides/setup.md](../guide
 - Wrong username and wrong password give the same `401` (names cannot be probed); a disabled account with the right password gets `403`.
 - **Rate limiting:** `POST /login` and the old-password check of `POST /password` count failures per account name and per client IP (`[security]`, shared with the game login; see [accounts.md](accounts.md#password-attempt-limits)). A locked name or IP gets `429` with a `Retry-After` header (seconds) before the password is checked, also for the right password. The client IP is the socket address; with `[security] trust_forwarded_for = true` (behind your own TLS proxy) the first `X-Forwarded-For` entry.
 
+### Opening the web admin from the launcher
+
+The launcher's "Open web admin" button (WP F3) opens the browser already signed in, without a second password prompt. It uses three endpoints:
+
+1. `GET /me` with the launcher token: the account and its `role`. The launcher shows the button only for `admin`. (`POST /login` returns the same `account` object, so a launcher that keeps the role from its login does not need this call; `/me` is for a launcher that restarts with only a stored token, and it reflects role changes at once.)
+2. `POST /web-token` with the launcher token: returns `{token, expires_in_secs, login_path}`. The token is 32 random bytes as 64 hex characters, valid for `[web] web_token_ttl_secs` (60 by default) and usable **once**. `login_path` is `/#/token-login?t=<token>`: the launcher opens `<server web address>` + `login_path` in the system browser.
+3. The web admin's `#/token-login` page reads the token and removes it from the address bar and history right away (`history.replaceState`), then calls `POST /web-token/redeem` `{token}`, which returns the same response as `POST /login` with `kind: "web"` (a 12 hour session). The SPA keeps it in `sessionStorage` like a password login and shows the dashboard. A link that is expired, used, malformed or for a non-admin leads to the login page with a notice.
+
+Security properties:
+
+- **Single use and short-lived.** Redeeming removes the token whatever the outcome; an expired token is refused. Asking for a new one replaces the account's older unused token. At most 1024 unused tokens exist at once (`503` beyond that).
+- **Bound to the account.** The token maps to one account id, fixed when it is minted from a launcher token of that account. Only a launcher token of an admin may mint one (a web token, a game token or a player's token gets `403`/`401`). A disabled account's token is refused (`403`) at redemption.
+- **Not stored raw, not logged.** The server keeps only the SHA-256 of the token, in memory (a restart drops pending tokens). Lookup is by that hash of a random 256-bit value, so there is no comparison to time. Neither the token nor the web session token it yields appears in a log line (the log says `web sign-in token issued` / `redeemed` with the account name).
+- **Kept out of requests and logs on the way.** The token travels in the URL *fragment*, which the browser never sends to the server, a proxy or a `Referer` header. The mint and redeem responses carry `Cache-Control: no-store`.
+- **Rate limited like login.** Failed redemptions (unknown, used, expired or malformed token) are counted per client IP in the `[security]` limiter shared with the password logins, under a per-IP pseudo name, so one client cannot lock the others out; at the limit `429` with `Retry-After`. The token itself is a 256-bit random value and cannot be guessed; the limiter only bounds the noise.
+- **No effect on other tokens.** Redeeming issues a new `web` token; the launcher token is untouched.
+
 Errors are JSON, `{"error": "..."}`, with `400` bad input, `401` no or bad token, `403` not an admin (or registration closed), `404` unknown player, instance, account or character, `409` name taken, `429` too many failed password attempts (with `Retry-After`).
 
 ## Endpoints
@@ -47,6 +65,9 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 | `POST /logout` | any token | revokes the token used (`204`) |
 | `POST /password` `{old_password, new_password}` | any token | changes the password, revokes every token of the account (game Remember Me included) and returns a fresh token of the same kind |
 | `POST /game-token` | launcher token | exchanges it for a fresh `game_remember` token (same response as `/login`, `kind: "game_remember"`) for the client's credentials file; web tokens get `403`. The launcher uses it for auto-login: the game's token login retires the token it uses, so the launcher token itself must never be handed to the game |
+| `GET /me` | any token | the calling account (`username`, `role` `player`/`admin`, state); for the launcher to decide whether to offer "Open web admin" |
+| `POST /web-token` | launcher token of an admin | `{token, expires_in_secs, login_path}`: a single-use web sign-in token (`[web] web_token_ttl_secs`), see [Opening the web admin from the launcher](#opening-the-web-admin-from-the-launcher). `403` for web or non-admin tokens, `503` when too many unused tokens wait |
+| `POST /web-token/redeem` `{token}` | none (the token is the credential) | the same response as `POST /login` (`kind: "web"`); `401` unknown, used or expired (all alike), `403` disabled account, `429` too many failures from this IP |
 | `GET /openapi.json` | none | the OpenAPI document |
 | `GET /admin/sessions` | admin | players in game: character, account, instance, area |
 | `GET /admin/instances` | admin | every instance (area, seed, forced layout, players, age, persistent) |
@@ -98,6 +119,7 @@ Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the
 | Page (hash route) | Uses |
 |---|---|
 | Login | `POST /login` with `kind: "web"`; accounts that are not admins are refused and their token revoked |
+| `#/token-login?t=<token>` | the launcher's one-time sign-in link: strips the token from the URL, redeems it with `POST /web-token/redeem`, then behaves like a login (same admin check); failures land on the login page with a notice |
 | `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s |
 | `#/logs` | `GET /admin/logs/ws?token=...`: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
 | `#/sessions` | `GET /admin/sessions`; kick, mute (minutes or until unmuted), unmute, transfer (instance id or area/seed/topology/orientation) |
@@ -115,13 +137,14 @@ Close, kick, disable and role changes ask for confirmation. The bearer token is 
 |---|---|
 | `crates/poe-web-api/src/lib.rs` | `WebState` (including the shared `LoginLimiter`), `router`, `serve` |
 | `auth.rs` | bearer extractors (`Auth`, `AdminAuth`, `WsAdminAuth`) |
+| `webtoken.rs` | `WebTokens`: the in-memory store of single-use sign-in tokens |
 | `public.rs`, `admin.rs` | handlers (each carries its `utoipa` description) |
 | `dto.rs`, `error.rs` | request/response types, error body |
 | `logs.rs` | `LogBuffer`, `LogLayer`, `LogFilter` |
 | `openapi.rs` | the OpenAPI document |
 | `tests.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test) |
 
-Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, accounts, commands reaching the registry, instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
+Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, `/me`, web token mint/redeem (single use, lifetime from the config, launcher-admin only, replacement, disabled account, `no-store`, rate limit per IP), accounts, commands reaching the registry, instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
 
 ## Not done
 

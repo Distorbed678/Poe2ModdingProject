@@ -35,7 +35,7 @@ impl Modify for BearerAuth {
     ),
     paths(
         public::server, public::register, public::login, public::logout, public::password,
-        public::game_token,
+        public::game_token, public::me, public::web_token, public::redeem_web_token,
         admin::sessions, admin::instances, admin::create_instance, admin::close_instance,
         admin::kick, admin::mute, admin::unmute, admin::transfer, admin::announce,
         admin::accounts, admin::disable_account, admin::enable_account, admin::set_role,
@@ -43,7 +43,7 @@ impl Modify for BearerAuth {
     ),
     components(schemas(
         error::ErrorBody, dto::ServerInfo, dto::AccountInfo, dto::RegisterRequest, dto::LoginRequest,
-        dto::LoginResponse, dto::PasswordRequest, dto::OnlinePlayerInfo, dto::InstanceView,
+        dto::LoginResponse, dto::WebTokenResponse, dto::WebTokenRedeemRequest, dto::PasswordRequest, dto::OnlinePlayerInfo, dto::InstanceView,
         dto::NewInstanceRequest, dto::CreatedInstance, dto::TransferRequest, dto::MuteRequest,
         dto::AnnounceRequest, dto::RoleRequest, dto::CommandResult, dto::LocationInfo,
         dto::CharacterInfo, logs::LogEvent, logs::LogFilter, logs::LogLevel,

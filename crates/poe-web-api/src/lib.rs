@@ -13,6 +13,7 @@ mod error;
 pub mod logs;
 mod openapi;
 mod public;
+mod webtoken;
 
 use std::{sync::Arc, time::Instant};
 
@@ -34,6 +35,7 @@ use tracing::{info, warn};
 pub use error::{ApiError, ErrorBody};
 pub use logs::{LogBuffer, LogEvent, LogFilter, LogLayer, LogLevel};
 pub use openapi::{openapi, openapi_json};
+pub use webtoken::WebTokens;
 
 /// Lifetime of a web token (the browser session).
 pub const WEB_TOKEN_TTL_SECS: i64 = 12 * 3600;
@@ -49,6 +51,8 @@ pub struct WebState {
     pub instances: Arc<dyn InstanceDirectory>,
     pub admin: Arc<dyn AdminControl>,
     pub logs: Arc<LogBuffer>,
+    /// Single-use sign-in tokens handed from the launcher to the browser.
+    pub web_tokens: Arc<WebTokens>,
     pub started: Instant,
 }
 
@@ -63,6 +67,9 @@ pub fn router(state: WebState) -> Router {
         .route("/logout", post(public::logout))
         .route("/password", post(public::password))
         .route("/game-token", post(public::game_token))
+        .route("/me", get(public::me))
+        .route("/web-token", post(public::web_token))
+        .route("/web-token/redeem", post(public::redeem_web_token))
         .route("/admin/sessions", get(admin::sessions))
         .route(
             "/admin/instances",

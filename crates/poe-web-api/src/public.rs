@@ -5,14 +5,22 @@
 //! (`poe_accounts::password_digest`, SHA-256 of the UTF-16LE text) and then handled by
 //! `AccountStore` exactly like the game login, so a password works on the web and in game.
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderName, StatusCode, header},
+};
 use poe_accounts::{AccountError, MIN_PASSWORD_LEN, Role, TokenKind, password_digest};
 
 use crate::{
     ApiError, WEB_TOKEN_TTL_SECS, WebState,
     auth::{Auth, ClientIp},
-    dto::{AccountInfo, LoginRequest, LoginResponse, PasswordRequest, RegisterRequest, ServerInfo},
+    dto::{
+        AccountInfo, LoginRequest, LoginResponse, PasswordRequest, RegisterRequest, ServerInfo,
+        WebTokenRedeemRequest, WebTokenResponse,
+    },
     error::ApiJson,
+    webtoken::MintError,
 };
 
 /// Longest accepted password (guards the hashing cost).
@@ -232,4 +240,98 @@ pub async fn game_token(
         expires_at: issued.expires_at,
         account: who.account.into(),
     }))
+}
+
+/// The calling account: name, role (`player` or `admin`) and state. For the launcher, to decide
+/// whether to offer "Open web admin" without logging in again. Works with a web or launcher token.
+#[utoipa::path(get, path = "/api/v1/me", tag = "account", security(("bearer" = [])),
+    responses((status = 200, body = AccountInfo), (status = 401, body = crate::ErrorBody)))]
+pub async fn me(Auth(who): Auth) -> Json<AccountInfo> {
+    Json(who.account.into())
+}
+
+/// Never cache a response that carries a credential.
+const NO_STORE: (HeaderName, &str) = (header::CACHE_CONTROL, "no-store");
+
+/// Exchanges a launcher token for a single-use web sign-in token, so "Open web admin" can open
+/// the browser already logged in. The token lasts `[web] web_token_ttl_secs` (default 60) and
+/// can be redeemed once with `POST /web-token/redeem`; asking again replaces the account's
+/// earlier unused token. Only admins' launcher tokens may call this.
+#[utoipa::path(post, path = "/api/v1/web-token", tag = "account", security(("bearer" = [])),
+    responses((status = 200, body = WebTokenResponse),
+        (status = 401, body = crate::ErrorBody),
+        (status = 403, description = "not a launcher token, or not an admin", body = crate::ErrorBody),
+        (status = 503, description = "too many unused tokens are waiting", body = crate::ErrorBody)))]
+pub async fn web_token(
+    State(s): State<WebState>,
+    Auth(who): Auth,
+) -> Result<([(HeaderName, &'static str); 1], Json<WebTokenResponse>), ApiError> {
+    if who.kind != TokenKind::Launcher {
+        return Err(ApiError::forbidden("a launcher token is required"));
+    }
+    if who.account.role != Role::Admin {
+        return Err(ApiError::forbidden("admin role required"));
+    }
+    // 0 would make a token that is dead on arrival.
+    let ttl = s.config.web.web_token_ttl_secs.max(1);
+    let token = s
+        .web_tokens
+        .mint(
+            who.account.id,
+            std::time::Duration::from_secs(ttl),
+            std::time::Instant::now(),
+        )
+        .map_err(|MintError::Full| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "too many unused web tokens, try again shortly",
+            )
+        })?;
+    // The token itself is never logged.
+    tracing::info!(account = %who.account.username, ttl_secs = ttl, "web sign-in token issued");
+    let token = hex::encode(token);
+    Ok((
+        [NO_STORE],
+        Json(WebTokenResponse {
+            login_path: format!("/#/token-login?t={token}"),
+            token,
+            expires_in_secs: ttl,
+        }),
+    ))
+}
+
+/// Redeems a web sign-in token for a normal `web` session (12 hours), once. The web admin calls
+/// this from its `#/token-login` page. An unknown, used or expired token gets `401`, all alike.
+/// Failures count against the caller's IP like failed logins (`[security]`): `429` when locked.
+#[utoipa::path(post, path = "/api/v1/web-token/redeem", tag = "public", request_body = WebTokenRedeemRequest,
+    responses((status = 200, body = LoginResponse),
+        (status = 401, description = "unknown, already used or expired token", body = crate::ErrorBody),
+        (status = 403, description = "the account is disabled", body = crate::ErrorBody),
+        (status = 429, description = "too many failed redeem attempts from this IP; see the Retry-After header", body = crate::ErrorBody)))]
+pub async fn redeem_web_token(
+    State(s): State<WebState>,
+    ClientIp(ip): ClientIp,
+    ApiJson(req): ApiJson<WebTokenRedeemRequest>,
+) -> Result<([(HeaderName, &'static str); 1], Json<LoginResponse>), ApiError> {
+    // The limiter keys failures by account name and IP; no account is known yet, so the name
+    // part is a per-IP pseudo name (one client cannot lock the key for the others).
+    let key = format!("web-token@{ip}");
+    check_limit(&s, &key, ip)?;
+    let invalid = || ApiError::unauthorized("invalid or expired web token");
+    let redeemed = crate::auth::parse_token(&req.token)
+        .ok()
+        .and_then(|t| s.web_tokens.redeem(&t, std::time::Instant::now()));
+    let Some(account_id) = redeemed else {
+        s.limiter.failure(&key, ip);
+        return Err(invalid());
+    };
+    let accounts = s.accounts.clone();
+    let account = blocking(move || accounts.find_by_id(account_id))
+        .await??
+        .ok_or_else(invalid)?;
+    if account.disabled {
+        return Err(AccountError::Disabled.into());
+    }
+    tracing::info!(account = %account.username, "web sign-in token redeemed");
+    Ok(([NO_STORE], Json(issue(&s, account, TokenKind::Web).await?)))
 }

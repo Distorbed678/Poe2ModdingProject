@@ -108,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
         instances: instances.clone(),
         admin: instance.clone(),
         logs: logs.clone(),
+        web_tokens: Default::default(),
         started: std::time::Instant::now(),
     };
     let web = async move {

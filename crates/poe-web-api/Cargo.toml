@@ -14,6 +14,7 @@ poe-accounts.workspace = true
 poe-cluster.workspace = true
 poe-config.workspace = true
 poe-store.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

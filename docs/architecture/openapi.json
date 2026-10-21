@@ -1218,6 +1218,42 @@
         ]
       }
     },
+    "/api/v1/me": {
+      "get": {
+        "tags": [
+          "account"
+        ],
+        "summary": "The calling account: name, role (`player` or `admin`) and state. For the launcher, to decide\nwhether to offer \"Open web admin\" without logging in again. Works with a web or launcher token.",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/password": {
       "post": {
         "tags": [
@@ -1369,6 +1405,123 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/web-token": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Exchanges a launcher token for a single-use web sign-in token, so \"Open web admin\" can open\nthe browser already logged in. The token lasts `[web] web_token_ttl_secs` (default 60) and\ncan be redeemed once with `POST /web-token/redeem`; asking again replaces the account's\nearlier unused token. Only admins' launcher tokens may call this.",
+        "operationId": "web_token",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not a launcher token, or not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "too many unused tokens are waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/web-token/redeem": {
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Redeems a web sign-in token for a normal `web` session (12 hours), once. The web admin calls\nthis from its `#/token-login` page. An unknown, used or expired token gets `401`, all alike.\nFailures count against the caller's IP like failed logins (`[security]`): `429` when locked.",
+        "operationId": "redeem_web_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebTokenRedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unknown, already used or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "the account is disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many failed redeem attempts from this IP; see the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -2022,6 +2175,44 @@
             ],
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "WebTokenRedeemRequest": {
+        "type": "object",
+        "description": "`POST /web-token/redeem`.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The `token` from `POST /web-token`."
+          }
+        }
+      },
+      "WebTokenResponse": {
+        "type": "object",
+        "description": "`POST /web-token`.",
+        "required": [
+          "token",
+          "expires_in_secs",
+          "login_path"
+        ],
+        "properties": {
+          "expires_in_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds from now until it expires (`[web] web_token_ttl_secs`).",
+            "minimum": 0
+          },
+          "login_path": {
+            "type": "string",
+            "description": "Where to open the web admin so it signs in with this token: append it to the server's\nweb address, e.g. `http://host:8080` + `login_path`. The token is in the URL fragment,\nso it is not sent to the server, not logged by proxies and not sent as a referrer; the\nweb admin removes it from the address bar and the history at once."
+          },
+          "token": {
+            "type": "string",
+            "description": "64 hex characters. Single use: redeem it with `POST /web-token/redeem` (the web admin\ndoes this itself when opened through `login_path`). Shown only once; never log it."
           }
         }
       }

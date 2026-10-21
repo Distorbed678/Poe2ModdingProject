@@ -88,6 +88,28 @@ pub struct LoginResponse {
     pub account: AccountInfo,
 }
 
+/// `POST /web-token`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WebTokenResponse {
+    /// 64 hex characters. Single use: redeem it with `POST /web-token/redeem` (the web admin
+    /// does this itself when opened through `login_path`). Shown only once; never log it.
+    pub token: String,
+    /// Seconds from now until it expires (`[web] web_token_ttl_secs`).
+    pub expires_in_secs: u64,
+    /// Where to open the web admin so it signs in with this token: append it to the server's
+    /// web address, e.g. `http://host:8080` + `login_path`. The token is in the URL fragment,
+    /// so it is not sent to the server, not logged by proxies and not sent as a referrer; the
+    /// web admin removes it from the address bar and the history at once.
+    pub login_path: String,
+}
+
+/// `POST /web-token/redeem`.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct WebTokenRedeemRequest {
+    /// The `token` from `POST /web-token`.
+    pub token: String,
+}
+
 /// `POST /password`.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PasswordRequest {

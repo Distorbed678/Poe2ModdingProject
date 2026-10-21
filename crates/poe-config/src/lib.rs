@@ -169,6 +169,10 @@ pub struct WebConfig {
     /// How many recent log events the live log viewer keeps.
     #[serde(default = "default_log_buffer")]
     pub log_buffer: usize,
+    /// How long a single-use web sign-in token (`POST /api/v1/web-token`, the launcher's "Open
+    /// web admin") can be redeemed, in seconds. Must be at least 1.
+    #[serde(default = "default_web_token_ttl")]
+    pub web_token_ttl_secs: u64,
 }
 
 impl Default for WebConfig {
@@ -179,6 +183,7 @@ impl Default for WebConfig {
             static_dir: PathBuf::new(),
             cors_origins: Vec::new(),
             log_buffer: default_log_buffer(),
+            web_token_ttl_secs: default_web_token_ttl(),
         }
     }
 }
@@ -189,6 +194,10 @@ fn default_web_bind() -> std::net::SocketAddr {
 
 fn default_log_buffer() -> usize {
     2000
+}
+
+fn default_web_token_ttl() -> u64 {
+    60
 }
 
 /// Server-side terrain generation (`poe-world`). The client always builds the terrain itself
@@ -967,6 +976,7 @@ mod tests {
         );
         assert!(cfg.web.cors_origins.is_empty());
         assert_eq!(cfg.web.log_buffer, 2000);
+        assert_eq!(cfg.web.web_token_ttl_secs, 60);
     }
 
     /// The example documents the defaults: a config with only the required keys must equal it

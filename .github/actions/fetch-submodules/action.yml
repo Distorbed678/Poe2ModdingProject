@@ -1,0 +1,57 @@
+name: Fetch submodules
+description: >
+  Checks out some of the repository's submodules. While the submodule repositories are private,
+  each one is read with its own read-only deploy key (a deploy key belongs to one repository
+  only). A repository whose key input is empty is fetched over plain https, which is how it
+  works once that repository is public (WP D3), so the keys can then be dropped from the
+  workflows without touching this action.
+inputs:
+  paths:
+    description: Space-separated submodule paths, e.g. "modules/protocol modules/client-hook".
+    required: true
+  protocol-key:
+    description: Private key of the Poe2Protocol deploy key (modules/protocol).
+    default: ''
+  hook-key:
+    description: Private key of the Poe2ClientHook deploy key (modules/client-hook).
+    default: ''
+  web-admin-key:
+    description: Private key of the Poe2WebAdmin deploy key (modules/web-admin).
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Fetch submodules
+      shell: bash
+      env:
+        PATHS: ${{ inputs.paths }}
+        PROTOCOL_KEY: ${{ inputs.protocol-key }}
+        HOOK_KEY: ${{ inputs.hook-key }}
+        WEB_ADMIN_KEY: ${{ inputs.web-admin-key }}
+      run: |
+        set -euo pipefail
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+        # use_key <ssh alias> <repository> <private key>: reads the repository over ssh with the key.
+        use_key() {
+          local alias=$1 repo=$2 key=$3
+          [ -n "$key" ] || return 0
+          printf '%s\n' "$key" > ~/.ssh/"${alias}_key"
+          chmod 600 ~/.ssh/"${alias}_key"
+          {
+            echo "Host gh-${alias}"
+            echo "  HostName github.com"
+            echo "  User git"
+            echo "  IdentityFile ~/.ssh/${alias}_key"
+            echo "  IdentitiesOnly yes"
+          } >> ~/.ssh/config
+          git config --global url."git@gh-${alias}:Distorbed678/${repo}".insteadOf "https://github.com/Distorbed678/${repo}"
+        }
+        use_key protocol Poe2Protocol "$PROTOCOL_KEY"
+        use_key hook Poe2ClientHook "$HOOK_KEY"
+        use_key webadmin Poe2WebAdmin "$WEB_ADMIN_KEY"
+        # Not recursive: the server build needs modules/protocol, modules/client-hook (workspace
+        # path dependencies) and modules/web-admin, but not client-hook's own protocol copy.
+        # shellcheck disable=SC2086
+        git submodule update --init $PATHS

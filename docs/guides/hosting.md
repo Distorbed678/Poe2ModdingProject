@@ -2,6 +2,22 @@
 
 How to run the server so people on other machines can play on it, and what each of them needs. Status: a remote client can log in with an account and password (or a launcher token), needs no shared disk (terrain upload), its side channels are authenticated, and all players in an instance share one world and see each other (verified with two real clients on a LAN, [below](#local-two-client-test)). What is still rough is listed under [Not done yet](#not-done-yet). The related designs: [../architecture/accounts.md](../architecture/accounts.md) (who is logging in), [../architecture/instance-world.md](../architecture/instance-world.md) (the shared world), [../protocol/side-channel.md](../protocol/side-channel.md) (the DLL's side channel).
 
+## Getting a server release
+Instead of building from source, take a ready package from the repository's GitHub releases (tags `server-v<version>`, built by CI; how they are made: [releasing-server.md](releasing-server.md)). Each release has, per platform, `poe-server-v<version>-game-<game version>-<linux|windows>-x86_64.tar.gz` (Linux) or `.zip` (Windows), a `.sha256` file next to it and a combined `SHA256SUMS`. The game version in the name must be the client build your players have. Until the repositories are public the releases are visible only to people with access to the repository.
+
+```sh
+sha256sum -c poe-server-v0.1.0-game-0.5.5e-linux-x86_64.sha256    # Windows: certutil -hashfile <zip> SHA256
+tar xzf poe-server-v0.1.0-game-0.5.5e-linux-x86_64.tar.gz && cd poe-server-v0.1.0-game-0.5.5e-linux-x86_64
+cp config/server.example.toml config/server.toml
+# edit config/server.toml: game_dir (your own game install, the folder with Bundles2), [network] public_host,
+# and static_dir = "web-admin" to serve the web admin
+./poe-server account create <name> <password>     # poe-server.exe on Windows
+./poe-server account role <name> admin
+./poe-server
+```
+
+The package mirrors the repository layout, because every path in `config/server.toml` is relative to the folder you start `poe-server` from: the binary, `config/server.example.toml`, `versions/` (the supported client build), `modules/protocol/opcodes/` (the message tables), `third_party/dat-schema/` (the community data schema, the exact file the build is checked against), `web-admin/` (the web admin site, served on `[web] bind`), `README.md`, `HOSTING.md` (this guide) and `release.json` (server version, game version, commit). **No game files are included**: `game_dir` must point at a legal install of the client (`Bundles2` is read from it). The default config puts the database at `runtime/server.sqlite` (the server creates the folder). From here the rest of this guide applies (ports, `public_host`, firewall, accounts). The launcher will download and run this package for you ("Host a server"); this guide is being reworked for that.
+
 ## Ports
 
 | What | Default | Protocol | Who connects | Forward it? |

@@ -154,6 +154,7 @@ fn fixture_with(config: &str) -> Fixture {
         instances,
         admin: mock.clone(),
         logs: LogBuffer::new(50),
+        web_tokens: Default::default(),
         started: Instant::now(),
     };
     Fixture {
@@ -1060,6 +1061,9 @@ async fn openapi_lists_every_endpoint() {
         "/api/v1/logout",
         "/api/v1/password",
         "/api/v1/game-token",
+        "/api/v1/me",
+        "/api/v1/web-token",
+        "/api/v1/web-token/redeem",
         "/api/v1/admin/sessions",
         "/api/v1/admin/instances",
         "/api/v1/admin/instances/{id}/close",
@@ -1391,4 +1395,186 @@ async fn login_is_rate_limited_per_ip_and_honours_forwarded_for() {
     // Same proxy socket, a different forwarded client: allowed; the locked client is not.
     assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7")).await.0, StatusCode::OK);
     assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.1")).await.0, StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// A launcher token for the account (the launcher's login).
+async fn launcher_login(f: &Fixture, name: &str, password: &str) -> String {
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/login",
+            None,
+            Some(json!({"username": name, "password": password, "kind": "launcher"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["token"].as_str().unwrap().to_owned()
+}
+
+async fn mint_web_token(f: &Fixture, launcher: &str) -> (StatusCode, Value) {
+    f.call("POST", "/api/v1/web-token", Some(launcher), None).await
+}
+
+async fn redeem(f: &Fixture, token: &str) -> (StatusCode, Value) {
+    f.call(
+        "POST",
+        "/api/v1/web-token/redeem",
+        None,
+        Some(json!({"token": token})),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn me_returns_the_callers_account_for_both_token_kinds() {
+    let f = fixture();
+    f.account("alice", "correct horse", Role::Admin);
+    f.account("bobby", "correct horse", Role::Player);
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    let (status, body) = f.call("GET", "/api/v1/me", Some(&launcher), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!((body["username"].as_str(), body["role"].as_str()), (Some("alice"), Some("admin")));
+    assert!(body.get("password_hash").is_none());
+    let web = f.login("bobby", "correct horse").await;
+    let (status, body) = f.call("GET", "/api/v1/me", Some(&web), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["role"], "player");
+    assert_eq!(f.call("GET", "/api/v1/me", None, None).await.0, StatusCode::UNAUTHORIZED);
+    // A role change shows at once.
+    f.state.accounts.set_role("bobby", Role::Admin).unwrap();
+    assert_eq!(f.call("GET", "/api/v1/me", Some(&web), None).await.1["role"], "admin");
+}
+
+#[tokio::test]
+async fn web_token_is_single_use_and_gives_a_web_session() {
+    let f = fixture();
+    f.account("alice", "correct horse", Role::Admin);
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    let (status, body) = mint_web_token(&f, &launcher).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let token = body["token"].as_str().unwrap().to_owned();
+    assert_eq!(token.len(), 64);
+    assert_eq!(body["expires_in_secs"], 60, "the [web] default");
+    assert_eq!(body["login_path"], format!("/#/token-login?t={token}"));
+
+    let (status, session) = redeem(&f, &token).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(session["kind"], "web");
+    assert_eq!(session["account"]["username"], "alice");
+    assert_ne!(session["token"], body["token"], "a new token, not the hand-off one");
+    // The session works on the admin API; the hand-off token and the launcher token do not.
+    let web = session["token"].as_str().unwrap();
+    assert_eq!(
+        f.call("GET", "/api/v1/admin/accounts", Some(web), None).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.call("GET", "/api/v1/admin/accounts", Some(&token), None).await.0,
+        StatusCode::UNAUTHORIZED,
+        "the hand-off token is not a bearer token"
+    );
+    // Second use: refused, same answer as an unknown token.
+    let (status, again) = redeem(&f, &token).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(redeem(&f, &"0".repeat(64)).await.1, again);
+    // The launcher token is untouched.
+    assert_eq!(f.call("GET", "/api/v1/me", Some(&launcher), None).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn web_token_follows_the_configured_lifetime() {
+    let f = fixture_with(&format!("{CONFIG}\n[web]\nweb_token_ttl_secs = 5\n"));
+    f.account("alice", "correct horse", Role::Admin);
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    assert_eq!(mint_web_token(&f, &launcher).await.1["expires_in_secs"], 5);
+    // Expiry itself is covered by the WebTokens unit tests (synthetic clock).
+}
+
+#[tokio::test]
+async fn web_token_needs_an_admins_launcher_token() {
+    let f = fixture();
+    f.account("alice", "correct horse", Role::Admin);
+    f.account("bobby", "correct horse", Role::Player);
+    // No token, a web token (even an admin's), a player's launcher token.
+    assert_eq!(f.call("POST", "/api/v1/web-token", None, None).await.0, StatusCode::UNAUTHORIZED);
+    let web = f.login("alice", "correct horse").await;
+    assert_eq!(mint_web_token(&f, &web).await.0, StatusCode::FORBIDDEN);
+    let player = launcher_login(&f, "bobby", "correct horse").await;
+    assert_eq!(mint_web_token(&f, &player).await.0, StatusCode::FORBIDDEN);
+    assert!(f.state.web_tokens.is_empty(), "nothing was minted");
+    // A game token is not a launcher token.
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    let game = f.call("POST", "/api/v1/game-token", Some(&launcher), None).await.1["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(mint_web_token(&f, &game).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_new_web_token_replaces_the_previous_one() {
+    let f = fixture();
+    f.account("alice", "correct horse", Role::Admin);
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    let first = mint_web_token(&f, &launcher).await.1["token"].as_str().unwrap().to_owned();
+    let second = mint_web_token(&f, &launcher).await.1["token"].as_str().unwrap().to_owned();
+    assert_eq!(redeem(&f, &first).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(redeem(&f, &second).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_web_token_for_a_disabled_account_is_refused() {
+    let f = fixture();
+    f.account("alice", "correct horse", Role::Admin);
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    let token = mint_web_token(&f, &launcher).await.1["token"].as_str().unwrap().to_owned();
+    f.state.accounts.set_disabled("alice", true).unwrap();
+    assert_eq!(redeem(&f, &token).await.0, StatusCode::FORBIDDEN);
+    // It was consumed by the attempt.
+    f.state.accounts.set_disabled("alice", false).unwrap();
+    assert_eq!(redeem(&f, &token).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn web_token_responses_are_not_cacheable_and_bad_redeems_are_rate_limited() {
+    let f = fixture_with(&format!("{CONFIG}\n[security]\nlogin_max_failures_per_account = 3\nlogin_lockout_secs = 600\n"));
+    f.account("alice", "correct horse", Role::Admin);
+    let launcher = launcher_login(&f, "alice", "correct horse").await;
+    let res = f
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/web-token")
+                .header(header::AUTHORIZATION, format!("Bearer {launcher}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let good = serde_json::from_slice::<Value>(&bytes).unwrap()["token"].as_str().unwrap().to_owned();
+
+    // Malformed and unknown tokens count; after 3 the client is locked, even for the real token.
+    for bad in ["nothex", &"ab".repeat(32), &"cd".repeat(32)] {
+        assert_eq!(redeem(&f, bad).await.0, StatusCode::UNAUTHORIZED);
+    }
+    let (status, _) = redeem(&f, &good).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    // The lock is for the failing client only (here 0.0.0.0, the test default); a client with
+    // another address can still redeem, and a normal login is not affected by the pseudo name.
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/web-token/redeem")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"token": good}).to_string()))
+        .unwrap();
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo("10.0.0.9:5555".parse::<std::net::SocketAddr>().unwrap()));
+    let res = f.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+    assert_eq!(login_from(&f, "10.0.0.1", "alice", "correct horse", None).await.0, StatusCode::OK);
 }

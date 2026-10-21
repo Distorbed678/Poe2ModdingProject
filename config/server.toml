@@ -121,6 +121,9 @@ static_dir = "modules/web-admin/dist"
 cors_origins = []
 # Recent log events kept for the live log viewer.
 log_buffer = 2000
+# Lifetime (seconds) of the single-use token the launcher's "Open web admin" button hands the
+# browser (POST /api/v1/web-token); it is redeemed at once, so keep it short.
+web_token_ttl_secs = 60
 
 [database]
 path = "runtime/server.sqlite"
