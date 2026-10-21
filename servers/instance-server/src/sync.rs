@@ -1,9 +1,13 @@
-//! Client position reports and the drift checker (dev bridge).
+//! Client position reports, the debug link and the drift checker (dev bridge).
 //!
 //! The client DLL (`poe-hook` `position_sync`) sends one UDP datagram per simulation frame
-//! to the instance port with the player's position and current action. The server keys the
-//! reports by the client's TCP port. Since the movement rewrite (WP2.3) the server simulation
-//! is authoritative and **reports never feed it**: they are only compared with the server's
+//! to the instance port with the player's position and current action. Since WP3.4 every
+//! datagram is a sealed side-channel frame (`poe_hook_shared::sidechannel`,
+//! docs/protocol/side-channel.md): it names the session, carries a counter and an HMAC-SHA256
+//! tag made with a key derived from the session's ticket keys. Reports are keyed by session,
+//! not by the client's TCP port; datagrams without a valid tag, from an unknown session or with
+//! a replayed counter are dropped. Since the movement rewrite (WP2.3) the server simulation is
+//! authoritative and **reports never feed it**: they are only compared with the server's
 //! position by [`DriftCheck`] (`[dev] drift_check`), which logs the distance in cells.
 //! The same UDP socket carries the debug link (overlay commands, state for the overlay).
 
@@ -14,10 +18,16 @@ use std::{
     io::{BufWriter, Write},
     net::SocketAddr,
     path::Path,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
+use poe_hook_shared::sidechannel::{
+    self as sc, Dir, Kind, Reject, ReplayWindow, ReportPayload, SessionKeys,
+};
 use tokio::net::UdpSocket;
 use tracing::{info, warn};
 
@@ -49,36 +59,24 @@ pub struct Cursor {
 }
 
 impl ClientReport {
-    /// Parses a datagram: `b"PSY1", u16 tcp port, u16 flags, u32 frame, f32 x, f32 y,
-    /// u16 action, u16 action2` (little-endian); `b"PSY2"` adds `i16 cursor x, i16 cursor y,
-    /// u16 window width, u16 window height`. Returns the TCP port and the report.
-    pub fn parse(data: &[u8]) -> Option<(u16, Self)> {
-        let v2 = data.len() >= 32 && &data[..4] == b"PSY2";
-        if !v2 && (data.len() < 24 || &data[..4] != b"PSY1") {
-            return None;
+    /// The report of a `Kind::Report` payload.
+    pub fn from_payload(p: &ReportPayload) -> Self {
+        Self {
+            flags: p.flags,
+            frame: p.frame,
+            x: p.x,
+            y: p.y,
+            action: p.action,
+            action2: p.action2,
+            cursor: Some(Cursor {
+                x: p.cursor.0,
+                y: p.cursor.1,
+                width: p.window.0,
+                height: p.window.1,
+            })
+            .filter(|c| c.width > 0 && c.height > 0),
+            at: Instant::now(),
         }
-        let u16_at = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
-        let u32_at = |i: usize| u32::from_le_bytes(data[i..i + 4].try_into().unwrap());
-        Some((
-            u16_at(4),
-            Self {
-                flags: u16_at(6),
-                frame: u32_at(8),
-                x: f32::from_bits(u32_at(12)),
-                y: f32::from_bits(u32_at(16)),
-                action: u16_at(20),
-                action2: u16_at(22),
-                cursor: v2
-                    .then(|| Cursor {
-                        x: u16_at(24) as i16,
-                        y: u16_at(26) as i16,
-                        width: u16_at(28),
-                        height: u16_at(30),
-                    })
-                    .filter(|c| c.width > 0 && c.height > 0),
-                at: Instant::now(),
-            },
-        ))
     }
 
     pub fn cell(&self) -> (i32, i32) {
@@ -156,16 +154,31 @@ pub struct DriftLine {
     pub state: String,
 }
 
-/// Latest report per client TCP port, plus the client DLL's debug link: the UDP address its
-/// reports come from (state goes back there as `PDB1` datagrams) and the commands it sent
-/// (`PDC1`).
+/// One client's side-channel session (registered when its ticket is redeemed).
+struct SideSession {
+    keys: SessionKeys,
+    /// The client's TCP port (trace column, log lines; not an identity).
+    port: u16,
+    /// Replay windows of the UDP stream (reports, commands) and the upload stream.
+    udp: ReplayWindow,
+    upload: ReplayWindow,
+    /// Counter of the server's debug frames.
+    out: u64,
+    /// Where the client's authenticated datagrams come from (debug frames go back there).
+    peer: Option<SocketAddr>,
+    latest: Option<ClientReport>,
+    commands: Vec<String>,
+}
+
+/// The side-channel sessions of the instance server: the latest position report, the debug
+/// link's peer address and commands of each, keyed by session id (`SessionKeys::id`).
 #[derive(Default)]
 pub struct ClientReports {
-    latest: Mutex<HashMap<u16, ClientReport>>,
+    sessions: Mutex<HashMap<u64, SideSession>>,
     trace: OnceLock<Arc<MovementTrace>>,
     socket: OnceLock<Arc<UdpSocket>>,
-    peers: Mutex<HashMap<u16, SocketAddr>>,
-    commands: Mutex<HashMap<u16, Vec<String>>>,
+    /// Datagrams dropped for failing authentication (for the log's rate limit).
+    rejected: AtomicU64,
 }
 
 /// Movement trace (dev, `[instance] movement_trace`): one TSV line per client position
@@ -214,92 +227,178 @@ impl ClientReports {
         self.trace.get().map(|t| &**t)
     }
 
-    pub fn insert(&self, port: u16, report: ClientReport) {
-        if let Some(t) = self.trace() {
-            t.line(
+    /// Registers a session from its ticket keys (the key material the client got in
+    /// `InstanceDetails`); returns the session id the client's datagrams carry.
+    pub fn register(&self, material: &[u8; 64], port: u16) -> u64 {
+        let keys = SessionKeys::derive(material);
+        let id = keys.id;
+        self.sessions.lock().unwrap().insert(
+            id,
+            SideSession {
+                keys,
                 port,
-                "report",
-                format_args!(
-                    "{}\t{:.3}\t{:.3}\t{:#06x}\t{:#06x}\t{:#x}",
-                    report.frame, report.x, report.y, report.action, report.action2, report.flags
-                ),
-            );
-        }
-        if self.latest.lock().unwrap().insert(port, report).is_none() {
-            info!(port, "client position reports started");
-        }
+                udp: ReplayWindow::default(),
+                upload: ReplayWindow::default(),
+                out: 0,
+                peer: None,
+                latest: None,
+                commands: Vec::new(),
+            },
+        );
+        id
     }
 
-    /// The latest report from the client on `port`, if recent.
-    pub fn fresh(&self, port: u16) -> Option<ClientReport> {
-        self.latest
+    pub fn forget(&self, id: u64) {
+        self.sessions.lock().unwrap().remove(&id);
+    }
+
+    /// Whether `id` is a registered session.
+    pub fn knows(&self, id: u64) -> bool {
+        self.sessions.lock().unwrap().contains_key(&id)
+    }
+
+    /// The latest report of session `id`, if recent.
+    pub fn fresh(&self, id: u64) -> Option<ClientReport> {
+        self.sessions
             .lock()
             .unwrap()
-            .get(&port)
-            .copied()
+            .get(&id)?
+            .latest
             .filter(|r| r.at.elapsed() < FRESH)
     }
 
-    pub fn forget(&self, port: u16) {
-        self.latest.lock().unwrap().remove(&port);
-    }
-
-    /// Commands the client DLL sent for the session of `port` since the last call.
-    pub fn take_commands(&self, port: u16) -> Vec<String> {
-        self.commands
+    /// Commands the client DLL sent for session `id` since the last call.
+    pub fn take_commands(&self, id: u64) -> Vec<String> {
+        self.sessions
             .lock()
             .unwrap()
-            .remove(&port)
+            .get_mut(&id)
+            .map(|s| std::mem::take(&mut s.commands))
             .unwrap_or_default()
     }
 
-    /// Sends the debug state (`key\tvalue` lines) to the client DLL of `port`, if it reports.
-    pub fn send_debug(&self, port: u16, text: &str) {
-        let (Some(socket), Some(peer)) = (
-            self.socket.get(),
-            self.peers.lock().unwrap().get(&port).copied(),
-        ) else {
+    /// Sends the debug state (`key\tvalue` lines) to the client DLL of session `id`, if it
+    /// reports: a sealed `Kind::Debug` frame to the address its last authentic datagram came from.
+    pub fn send_debug(&self, id: u64, text: &str) {
+        let Some(socket) = self.socket.get() else {
             return;
         };
-        let mut msg = b"PDB1".to_vec();
-        msg.extend_from_slice(text.as_bytes());
-        let _ = socket.try_send_to(&msg, peer);
+        let (frame, peer) = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let Some(s) = sessions.get_mut(&id) else {
+                return;
+            };
+            let Some(peer) = s.peer else {
+                return;
+            };
+            s.out += 1;
+            (sc::seal(&s.keys, Kind::Debug, s.out, text.as_bytes()), peer)
+        };
+        let _ = socket.try_send_to(&frame, peer);
     }
 
-    /// Receives reports on the instance address (UDP, same port as the TCP listener). Only
-    /// loopback senders are accepted. `PDC1` datagrams (`u16 client port`, then a text
-    /// command) are server commands from the client DLL's overlay (`commands.rs`).
+    /// Authenticates and applies one UDP datagram (`Report` or `Command`). The session is found
+    /// by the id in the frame; the tag, the direction and the counter must all check out.
+    pub fn handle_datagram(&self, data: &[u8], from: SocketAddr) -> Result<Kind, Reject> {
+        let id = sc::peek_session(data).ok_or(Reject::Malformed)?;
+        let keys = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|s| s.keys.clone())
+            .ok_or(Reject::WrongSession)?;
+        let frame = sc::open(&keys, Dir::ClientToServer, data)?;
+        if !matches!(frame.kind, Kind::Report | Kind::Command) {
+            // Uploads travel over TCP; nothing else is valid here.
+            return Err(Reject::UnknownKind(frame.kind as u8));
+        }
+        let mut sessions = self.sessions.lock().unwrap();
+        let s = sessions.get_mut(&id).ok_or(Reject::WrongSession)?;
+        if !s.udp.accept(frame.counter) {
+            return Err(Reject::Replay);
+        }
+        s.peer = Some(from);
+        match frame.kind {
+            Kind::Report => {
+                let p = ReportPayload::decode(frame.payload).ok_or(Reject::Malformed)?;
+                let report = ClientReport::from_payload(&p);
+                if let Some(t) = self.trace() {
+                    t.line(
+                        s.port,
+                        "report",
+                        format_args!(
+                            "{}\t{:.3}\t{:.3}\t{:#06x}\t{:#06x}\t{:#x}",
+                            report.frame,
+                            report.x,
+                            report.y,
+                            report.action,
+                            report.action2,
+                            report.flags
+                        ),
+                    );
+                }
+                if s.latest.replace(report).is_none() {
+                    info!(
+                        port = s.port,
+                        session = format_args!("{id:016x}"),
+                        "client position reports started"
+                    );
+                }
+            }
+            _ => {
+                let text = String::from_utf8_lossy(frame.payload).trim().to_owned();
+                info!(port = s.port, command = %text, "dev command from the client DLL");
+                s.commands.push(text);
+            }
+        }
+        Ok(frame.kind)
+    }
+
+    /// Opens a frame of the upload stream (TCP): the session by its id, tag and direction, and
+    /// the upload counter (which must rise). Returns the session id, the kind and the payload.
+    pub fn open_upload(&self, data: &[u8]) -> Result<(u64, Kind, Vec<u8>), Reject> {
+        let id = sc::peek_session(data).ok_or(Reject::Malformed)?;
+        let keys = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|s| s.keys.clone())
+            .ok_or(Reject::WrongSession)?;
+        let frame = sc::open(&keys, Dir::ClientToServer, data)?;
+        if !matches!(frame.kind, Kind::Upload | Kind::UploadOffer) {
+            return Err(Reject::UnknownKind(frame.kind as u8));
+        }
+        let mut sessions = self.sessions.lock().unwrap();
+        let s = sessions.get_mut(&id).ok_or(Reject::WrongSession)?;
+        if !s.upload.accept(frame.counter) {
+            return Err(Reject::Replay);
+        }
+        Ok((id, frame.kind, frame.payload.to_vec()))
+    }
+
+    /// Receives side-channel datagrams on the instance address (UDP, same port as the TCP
+    /// listener). Anything that is not an authentic frame of a registered session is dropped
+    /// (the first rejection and every thousandth are logged).
     pub async fn listen(&self, addr: SocketAddr) -> anyhow::Result<()> {
         let socket = Arc::new(UdpSocket::bind(addr).await?);
         let _ = self.socket.set(socket.clone());
-        info!(%addr, "client position reports (UDP) listening");
-        let mut buf = [0u8; 512];
+        info!(%addr, "side channel (UDP) listening");
+        let mut buf = [0u8; 4096];
         loop {
             let (n, from) = match socket.recv_from(&mut buf).await {
                 Ok(v) => v,
                 Err(e) => {
-                    warn!("position report: {e}");
+                    warn!("side channel: {e}");
                     continue;
                 }
             };
-            if !from.ip().is_loopback() {
-                continue;
-            }
-            if n >= 6 && &buf[..4] == b"PDC1" {
-                let port = u16::from_le_bytes([buf[4], buf[5]]);
-                let text = String::from_utf8_lossy(&buf[6..n]).trim().to_owned();
-                info!(port, command = %text, "dev command from the client DLL");
-                self.commands
-                    .lock()
-                    .unwrap()
-                    .entry(port)
-                    .or_default()
-                    .push(text);
-                continue;
-            }
-            if let Some((port, report)) = ClientReport::parse(&buf[..n]) {
-                self.peers.lock().unwrap().insert(port, from);
-                self.insert(port, report);
+            if let Err(reject) = self.handle_datagram(&buf[..n], from) {
+                let total = self.rejected.fetch_add(1, Ordering::Relaxed) + 1;
+                if total == 1 || total.is_multiple_of(1000) {
+                    warn!(%from, ?reject, total, "side-channel datagram rejected");
+                }
             }
         }
     }
@@ -309,36 +408,169 @@ impl ClientReports {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_reports() {
-        let mut d = b"PSY1".to_vec();
-        d.extend(6112u16.to_le_bytes());
-        d.extend(0x20u16.to_le_bytes());
-        d.extend(7u32.to_le_bytes());
-        d.extend(12.5f32.to_le_bytes());
-        d.extend(300.25f32.to_le_bytes());
-        d.extend(0xed4cu16.to_le_bytes());
-        d.extend(0u16.to_le_bytes());
-        let (port, r) = ClientReport::parse(&d).unwrap();
-        assert_eq!(
-            (port, r.frame, r.cell(), r.action, r.flags),
-            (6112, 7, (12, 300), 0xed4c, 0x20)
-        );
-        assert_eq!(r.cursor, None);
-        assert!(ClientReport::parse(&d[..20]).is_none());
-        // PSY2: with the cursor.
-        d[3] = b'2';
-        for v in [1500u16, 300, 2560, 1440] {
-            d.extend(v.to_le_bytes());
+    fn peer() -> SocketAddr {
+        "203.0.113.5:50000".parse().unwrap()
+    }
+
+    fn report_payload(frame: u32, x: f32) -> Vec<u8> {
+        ReportPayload {
+            flags: 0x20,
+            frame,
+            x,
+            y: 300.25,
+            action: 0xed4c,
+            action2: 0,
+            cursor: (1500, 300),
+            window: (2560, 1440),
         }
-        let (_, r) = ClientReport::parse(&d).unwrap();
-        let cursor = Cursor {
-            x: 1500,
-            y: 300,
-            width: 2560,
-            height: 1440,
+        .encode()
+    }
+
+    #[test]
+    fn authentic_reports_are_applied_per_session() {
+        let reports = ClientReports::default();
+        let (a, b) = ([1u8; 64], [2u8; 64]);
+        let (ida, idb) = (reports.register(&a, 50000), reports.register(&b, 50000));
+        // Same TCP port, different remote hosts: the sessions stay apart.
+        let ka = SessionKeys::derive(&a);
+        let f = sc::seal(&ka, Kind::Report, 1, &report_payload(7, 12.5));
+        assert_eq!(reports.handle_datagram(&f, peer()), Ok(Kind::Report));
+        let r = reports.fresh(ida).unwrap();
+        assert_eq!(
+            (r.frame, r.cell(), r.action, r.flags),
+            (7, (12, 300), 0xed4c, 0x20)
+        );
+        assert_eq!(
+            r.cursor,
+            Some(Cursor {
+                x: 1500,
+                y: 300,
+                width: 2560,
+                height: 1440
+            })
+        );
+        assert!(reports.fresh(idb).is_none());
+        // A command from the same session queues for it only.
+        let c = sc::seal(&ka, Kind::Command, 2, b"area G1_1 5\n");
+        assert_eq!(reports.handle_datagram(&c, peer()), Ok(Kind::Command));
+        assert_eq!(reports.take_commands(ida), vec!["area G1_1 5".to_owned()]);
+        assert!(reports.take_commands(idb).is_empty());
+        reports.forget(ida);
+        assert!(reports.fresh(ida).is_none());
+    }
+
+    #[test]
+    fn unauthenticated_datagrams_are_rejected() {
+        let reports = ClientReports::default();
+        let material = [9u8; 64];
+        let id = reports.register(&material, 50000);
+        let keys = SessionKeys::derive(&material);
+        let good = sc::seal(&keys, Kind::Report, 1, &report_payload(1, 1.0));
+        // Unknown session (a client whose ticket was never redeemed).
+        let stranger = SessionKeys::derive(&[3u8; 64]);
+        let f = sc::seal(&stranger, Kind::Report, 1, &report_payload(1, 1.0));
+        assert_eq!(
+            reports.handle_datagram(&f, peer()),
+            Err(Reject::WrongSession)
+        );
+        // Right session, a flipped bit in the tag.
+        let mut bad = good.clone();
+        *bad.last_mut().unwrap() ^= 1;
+        assert_eq!(reports.handle_datagram(&bad, peer()), Err(Reject::BadTag));
+        // A modified payload (moves the player somewhere else) breaks the tag.
+        let mut moved = good.clone();
+        moved[HEADER_END] ^= 0xff;
+        assert_eq!(reports.handle_datagram(&moved, peer()), Err(Reject::BadTag));
+        // The old unauthenticated formats are gone.
+        let mut old = b"PSY2".to_vec();
+        old.extend([0u8; 28]);
+        assert_eq!(
+            reports.handle_datagram(&old, peer()),
+            Err(Reject::Malformed)
+        );
+        let mut pdc = b"PDC1".to_vec();
+        pdc.extend(50000u16.to_le_bytes());
+        pdc.extend(b"teleport 1 1");
+        assert_eq!(
+            reports.handle_datagram(&pdc, peer()),
+            Err(Reject::Malformed)
+        );
+        // Another version byte.
+        let mut v2 = good.clone();
+        v2[3] = 2;
+        assert_eq!(
+            reports.handle_datagram(&v2, peer()),
+            Err(Reject::Version(2))
+        );
+        // A server frame reflected back at the server.
+        let reflected = sc::seal(&keys, Kind::Debug, 1, b"x\ty");
+        assert_eq!(
+            reports.handle_datagram(&reflected, peer()),
+            Err(Reject::WrongDirection)
+        );
+        // Nothing of the above got through; the real one still does.
+        assert!(reports.fresh(id).is_none());
+        assert_eq!(reports.handle_datagram(&good, peer()), Ok(Kind::Report));
+    }
+
+    const HEADER_END: usize = sc::HEADER_LEN;
+
+    #[test]
+    fn replayed_datagrams_are_rejected_and_reordering_is_tolerated() {
+        let reports = ClientReports::default();
+        let material = [5u8; 64];
+        let id = reports.register(&material, 1);
+        let keys = SessionKeys::derive(&material);
+        let frame = |counter, x| {
+            sc::seal(
+                &keys,
+                Kind::Report,
+                counter,
+                &report_payload(counter as u32, x),
+            )
         };
-        assert_eq!(r.cursor, Some(cursor));
+        let (f1, f2, f3) = (frame(1, 1.0), frame(2, 2.0), frame(3, 3.0));
+        assert!(reports.handle_datagram(&f1, peer()).is_ok());
+        assert!(reports.handle_datagram(&f3, peer()).is_ok());
+        // Reordered but new: accepted. Captured and replayed: not.
+        assert!(reports.handle_datagram(&f2, peer()).is_ok());
+        for f in [&f1, &f2, &f3] {
+            assert_eq!(reports.handle_datagram(f, peer()), Err(Reject::Replay));
+        }
+        assert_eq!(
+            reports.fresh(id).unwrap().frame,
+            2,
+            "the replay did not roll the state back"
+        );
+    }
+
+    #[test]
+    fn upload_frames_have_their_own_counter() {
+        let reports = ClientReports::default();
+        let material = [6u8; 64];
+        let id = reports.register(&material, 1);
+        let keys = SessionKeys::derive(&material);
+        // Plenty of UDP traffic first: far beyond a 64-wide window.
+        for c in 1..=500 {
+            let f = sc::seal(&keys, Kind::Report, c, &report_payload(c as u32, 1.0));
+            reports.handle_datagram(&f, peer()).unwrap();
+        }
+        let offer = sc::seal(&keys, Kind::UploadOffer, 1, &7u32.to_le_bytes());
+        let (sid, kind, payload) = reports.open_upload(&offer).unwrap();
+        assert_eq!(
+            (sid, kind, payload.as_slice()),
+            (id, Kind::UploadOffer, &7u32.to_le_bytes()[..])
+        );
+        assert_eq!(reports.open_upload(&offer), Err(Reject::Replay));
+        let up = sc::seal(&keys, Kind::Upload, 2, b"data");
+        assert!(reports.open_upload(&up).is_ok());
+        // Uploads are not accepted over UDP, reports not over the upload stream.
+        assert_eq!(
+            reports.handle_datagram(&up, peer()),
+            Err(Reject::UnknownKind(4))
+        );
+        let report = sc::seal(&keys, Kind::Report, 501, &report_payload(1, 1.0));
+        assert_eq!(reports.open_upload(&report), Err(Reject::UnknownKind(1)));
     }
 
     #[test]

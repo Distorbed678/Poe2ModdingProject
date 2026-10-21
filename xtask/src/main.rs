@@ -232,9 +232,10 @@ fn deploy_client(
             region: config.gateway.region.clone(),
             display_name: config.gateway.display_name.clone(),
             host: config.network.public_host.clone(),
-            port: config.network.login.bind.port(),
+            port: config.network.login.public_port(),
         }),
-        // Position reports go to the instance server's port only.
+        // The side channel (position reports, debug link, terrain upload) goes to the instance
+        // server's port only.
         position_sync_port: Some(config.network.instance.public_port),
         // Generated outputs (terrain grids/layouts, area exports, client tables) go to
         // dumps/<version>/ in the repo.
@@ -293,7 +294,7 @@ fn deploy_client(
 fn trusted_servers(config: &Config) -> Vec<String> {
     let host = &config.network.public_host;
     vec![
-        format!("{host}:{}", config.network.login.bind.port()),
+        format!("{host}:{}", config.network.login.public_port()),
         format!("{host}:{}", config.network.instance.public_port),
     ]
 }

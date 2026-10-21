@@ -37,6 +37,8 @@ poe-net = { path = "modules/protocol/poe-net", features = ["tokio"] }
 poe-proto = { path = "modules/protocol/poe-proto" }
 # Poe2ClientHook submodule: host-side deploy library used by xtask.
 poe-hook-deploy = { path = "modules/client-hook/poe-hook-deploy" }
+# Side-channel framing (HMAC, upload payload) shared with the client DLL.
+poe-hook-shared = { path = "modules/client-hook/poe-hook-shared" }
 poe-store = { path = "crates/poe-store" }
 poe-accounts = { path = "crates/poe-accounts" }
 poe-cluster = { path = "crates/poe-cluster" }

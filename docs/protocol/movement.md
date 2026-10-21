@@ -289,7 +289,7 @@ Since WP2.3 the instance server does not compute movement itself. It is thin glu
 - **Removed.** The earlier workarounds (turn-cell choice, turn timing, cursor facing with its projection, the use of `0x1cb` and `0x1df`, held-click-as-WASD, the roll `Pending` queue) are gone together with their three server commands. Details of what they measured stay in git history (`docs/protocol/movement.md` before 2026-10-20).
 
 ### Drift checker (PSY2)
-The DLL's per-frame position report (`servers/instance-server/src/sync.rs`, DLL side `position_sync.rs`) no longer touches the simulation. With `[dev] drift_check = true` (default off; needs `[dev] position_sync` and the DLL) the session logs, every `[dev] drift_interval_ms` (default 1000 ms), one `drift` line at info level:
+(The report is a sealed side-channel `Kind::Report` frame since WP3.4, [side-channel.md](side-channel.md); the section keeps its anchor.) The DLL's per-frame position report (`servers/instance-server/src/sync.rs`, DLL side `position_sync.rs`) no longer touches the simulation. With `[dev] drift_check = true` (default off; needs `[dev] position_sync` and the DLL) the session logs, every `[dev] drift_interval_ms` (default 1000 ms), one `drift` line at info level:
 
 `drift server=x,y client=x,y cells=<now> max_cells=<largest since the last line> samples=<n> state=<server movement state>`
 

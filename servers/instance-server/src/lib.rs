@@ -24,6 +24,7 @@ mod player;
 pub mod seeds;
 mod spawn;
 pub mod sync;
+pub mod terrain_store;
 #[cfg(test)]
 mod replay_tests;
 use poe_data::{
@@ -66,6 +67,8 @@ pub struct InstanceServer {
     pub instances: Arc<dyn poe_cluster::InstanceDirectory>,
     /// Sessions in game (who, kick, chat delivery, mutes).
     pub live: Arc<live::Live>,
+    /// Terrain layouts and grids: the cache in `[spawn] layout_dir`, fed by client uploads.
+    pub terrain: Arc<terrain_store::TerrainStore>,
 }
 
 impl InstanceServer {
@@ -111,6 +114,14 @@ impl InstanceServer {
             let server = self.clone();
             tokio::spawn(
                 async move {
+                    // A terrain upload (side channel) shares the port: its first bytes are
+                    // not a game opcode.
+                    if is_upload(&stream).await {
+                        if let Err(e) = terrain_store::serve_upload(stream, &server.reports, &server.terrain).await {
+                            warn!("terrain upload: {e}");
+                        }
+                        return;
+                    }
                     if let Err(e) = server.handle(stream).await {
                         warn!("connection error: {e:#}");
                     }
@@ -155,6 +166,14 @@ impl InstanceServer {
             "ticket redeemed"
         );
 
+        // Side channel (position reports, debug link, terrain upload): the DLL derives the same
+        // keys from the key material it gets in InstanceDetails (docs/protocol/side-channel.md).
+        let side = SideSession {
+            id: self.reports.register(&ticket.keys, client_port),
+            reports: &self.reports,
+            terrain: &self.terrain,
+        };
+        info!(session = format_args!("{:016x}", side.id), "side-channel session");
         conn.send(
             &self
                 .protocol
@@ -239,10 +258,19 @@ impl InstanceServer {
             .location
             .filter(|&(s, _, _)| s == seed)
             .map(|(_, x, y)| (x, y));
+        // The client's tile hash authorises its terrain upload for that hash only.
+        self.terrain.reported(side.id, hashes.hash_a);
         let spawn = match spawn_override().or(saved) {
             Some(p) => Some(p),
             None => {
-                spawn::from_client_layout(&self.config.spawn, &ticket.area, hashes.hash_a).await
+                spawn::from_client_layout(
+                    &self.terrain,
+                    &self.config.spawn,
+                    &ticket.area,
+                    hashes.hash_a,
+                    side.id,
+                )
+                .await
             }
         }
         .unwrap_or((0, 0));
@@ -281,6 +309,7 @@ impl InstanceServer {
             seed,
             tile_hash: hashes.hash_a,
             port: client_port,
+            side: side.id,
         };
         // Another login of the account (or disabling it) ends this session.
         let superseded = self.sessions.subscribe_superseded(ticket.account_id);
@@ -294,7 +323,6 @@ impl InstanceServer {
         if let Some(id) = instance {
             self.instances.leave(id, &name);
         }
-        self.reports.forget(client_port);
         if let Some(t) = self.reports.trace() {
             t.flush();
         }
@@ -389,7 +417,7 @@ impl InstanceServer {
                     // The simulation answers the inputs received since the last tick.
                     let sim_out = player.tick()?;
                     if let Some(check) = drift.as_mut() {
-                        let report = self.reports.fresh(client_port);
+                        let report = self.reports.fresh(ctx.side);
                         report_seen |= report.is_some();
                         if !report_seen && drift_started.elapsed() > Duration::from_secs(5) {
                             report_seen = true;
@@ -415,7 +443,7 @@ impl InstanceServer {
                     let mut extra = Vec::new();
                     if self.config.dev.debug_link {
                         // Overlay commands: the same registry as chat commands.
-                        for command in self.reports.take_commands(client_port) {
+                        for command in self.reports.take_commands(ctx.side) {
                             if command == "registry" {
                                 self.send_registry(ctx);
                                 continue;
@@ -425,7 +453,7 @@ impl InstanceServer {
                             leave |= out.leave;
                             let status = if out.ok { "ok" } else { "error" };
                             self.reports.send_debug(
-                                client_port,
+                                ctx.side,
                                 &format!("ack\t{command}\t{status}: {}\n", out.text.replace(['\t', '\n'], " ")),
                             );
                         }
@@ -434,10 +462,10 @@ impl InstanceServer {
                         }
                         if ticks.is_multiple_of(2) {
                             self.reports.send_debug(
-                                client_port,
+                                ctx.side,
                                 &format!(
                                     "tick\t{ticks}\n{}",
-                                    player.debug_state(self.reports.fresh(client_port).as_ref())
+                                    player.debug_state(self.reports.fresh(ctx.side).as_ref())
                                 ),
                             );
                         }
@@ -641,14 +669,14 @@ impl InstanceServer {
         for spec in commands::COMMANDS {
             let line = commands::wire(spec);
             if chunk.len() + line.len() > 3000 {
-                self.reports.send_debug(ctx.port, &chunk);
+                self.reports.send_debug(ctx.side, &chunk);
                 chunk = String::from("cmds\tmore\n");
             }
             chunk.push_str(&line.replace('\n', " "));
             chunk.push('\n');
         }
         chunk.push_str(&format!("you\t{}\t{}\t{}\n", ctx.account, ctx.admin as u8, self.config.commands.prefix));
-        self.reports.send_debug(ctx.port, &chunk);
+        self.reports.send_debug(ctx.side, &chunk);
     }
 
     /// The instance list for the overlay's Instances tab: `instances` datagrams of `inst`
@@ -671,13 +699,13 @@ impl InstanceServer {
                 i.players.join(",")
             );
             if chunk.len() + line.len() > 3000 {
-                self.reports.send_debug(ctx.port, &chunk);
+                self.reports.send_debug(ctx.side, &chunk);
                 chunk = String::from("instances\tmore\n");
             }
             chunk.push_str(&line);
         }
         chunk.push_str(&format!("idle\t{}\n", self.config.instance.idle_minutes));
-        self.reports.send_debug(ctx.port, &chunk);
+        self.reports.send_debug(ctx.side, &chunk);
     }
 }
 
@@ -738,6 +766,39 @@ impl InstanceServer {
             t.line(port, kind, fields);
         }
     }
+}
+
+/// A registered side-channel session; dropped (however the connection ends) it removes the
+/// session from the report registry and the terrain store.
+struct SideSession<'a> {
+    id: u64,
+    reports: &'a sync::ClientReports,
+    terrain: &'a terrain_store::TerrainStore,
+}
+
+impl Drop for SideSession<'_> {
+    fn drop(&mut self) {
+        self.reports.forget(self.id);
+        self.terrain.forget(self.id);
+    }
+}
+
+/// Whether a new connection starts with the terrain upload magic (peeked, nothing consumed).
+pub(crate) async fn is_upload(stream: &TcpStream) -> bool {
+    let mut magic = [0u8; 4];
+    let peeking = async {
+        loop {
+            match stream.peek(&mut magic).await {
+                Ok(n) if n >= magic.len() => return true,
+                Ok(0) | Err(_) => return false,
+                Ok(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), peeking)
+        .await
+        .unwrap_or(false)
+        && magic == poe_hook_shared::sidechannel::UPLOAD_MAGIC
 }
 
 /// Outcome of handling one client message.

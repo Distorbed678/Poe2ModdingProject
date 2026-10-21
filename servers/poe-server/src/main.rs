@@ -21,6 +21,9 @@ async fn main() -> anyhow::Result<()> {
         .with(logs.layer())
         .init();
     tracing::info!(version = %config.game.version, "starting poe-server");
+    for w in config.network.warnings() {
+        tracing::warn!("{w}");
+    }
 
     let protocol = Arc::new(Protocol::load(&config.game.protocol_dir)?);
     let store = Arc::new(SqliteStore::open(&config.database.path)?);
@@ -68,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
             &config.dev.known_seeds,
         )),
         reports: Default::default(),
+        terrain: Arc::new(instance_server::terrain_store::TerrainStore::new(&config.spawn)),
         sessions,
         instances: instances.clone(),
         live: Default::default(),

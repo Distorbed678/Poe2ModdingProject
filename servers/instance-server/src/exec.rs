@@ -21,6 +21,8 @@ pub struct SessionCtx<'a> {
     /// The client's tile hash for this layout.
     pub tile_hash: u32,
     pub port: u16,
+    /// Side-channel session id (position reports, debug link; `sync::ClientReports`).
+    pub side: u64,
 }
 
 /// What a command produced.

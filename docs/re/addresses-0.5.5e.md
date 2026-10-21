@@ -13,6 +13,7 @@ Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.e
 | `0x14219dc40` | crypto session constructor (DH groups, DSA key, "#2") | |
 | `0x14219f3b0` | builds the two-direction Salsa20 cipher from the key material | |
 | `0x142198530` | installs a cipher on a Tcpstream | |
+| `0x14212aa90` | instance packet-cipher builder `(out, InstanceDetails + 0x38, &is_client)`, only caller `0x142122062` in `0x142121f70` | hooked by `side` for the side-channel keys ([crypto.md](crypto.md#side-channel-keys)) |
 | `0x142b030b0` | Crypto++ Salsa20 key setup | |
 | `0x142102c20` | loader for server-delivered encrypted code modules | see [crypto.md](crypto.md) |
 

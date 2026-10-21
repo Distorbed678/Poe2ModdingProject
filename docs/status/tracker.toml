@@ -186,9 +186,9 @@ link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
 name = "Remote readiness: advertised host, layout/grid upload, session-keyed debug link"
-status = "planned"
-note = "WP3.4"
-link = "docs/plans/orchestration-2026-10.md"
+status = "done"
+note = "WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine"
+link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
 name = "Remote-player protocol (add/remove, broadcast actions)"

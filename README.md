@@ -49,7 +49,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Accounts](#accounts) | `██████░░░░ 63%` | 5/8 |
 | [Instances/Transfers](#instancestransfers) | `███████░░░ 67%` | 4/6 |
 | [Movement](#movement) | `████░░░░░░ 43%` | 0/7 |
-| [Multiplayer](#multiplayer) | `█░░░░░░░░░ 8%` | 0/6 |
+| [Multiplayer](#multiplayer) | `███░░░░░░░ 25%` | 1/6 |
 | [Chat/Commands](#chatcommands) | `██████████ 100%` | 4/4 |
 | [Terrain](#terrain) | `██░░░░░░░░ 23%` | 1/11 |
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
@@ -122,7 +122,7 @@ Docs: [docs/guides/hosting.md](docs/guides/hosting.md)
 | | Item | Note |
 |---|---|---|
 | 🟡 | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | WP3.3: DLL side built and unit-tested (trusted servers are not blocked, not latched, get the crypto bypass); not yet tried against a LAN server in game |
-| ⬜ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](docs/plans/orchestration-2026-10.md) | WP3.4 |
+| ✅ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](docs/guides/hosting.md) | WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine |
 | ⬜ | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5; needs an official capture of a town with other players |
 | ⬜ | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6; every connection is a private simulation today |
 | ⬜ | [Two-client local test harness](docs/plans/orchestration-2026-10.md) | WP3.7 |

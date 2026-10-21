@@ -60,7 +60,7 @@ cargo xtask tracker         # renders docs/status/tracker.toml into the README.m
 - Writes the DLL's name tables to `GameFiles/poe-hook-data/` (`stats.tsv`, `action_types.tsv`, `areas.tsv` for the area picker).
 - Copies `modules/client-hook/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
 - Sets `login_mode` (`standalone` by default; `--login-mode steam` keeps the Steam login) and `trusted_servers` (`[network] public_host` with the login and instance ports) at the top of that file. `--official` writes `login_mode = "steam"` and `trusted_servers = []`.
-- Sets `position_sync_port` in that file's `[features]` to `[network.instance] public_port`, so position reports go to the instance server.
+- Sets `position_sync_port` in that file's `[features]` to `[network.instance] public_port`, so the side channel (position reports, debug link, terrain upload) goes to the instance server.
 - Resets `auto_keys` to `[]`, and the client's remembered gateway (`gateway_id` in the test prefix's `poe2_production_Config.ini`) to ours for private deploys (after an official session it stays on an official realm and the client never contacts our server).
 - Writes `steam_appid.txt`.
 
@@ -134,7 +134,7 @@ To play:
 
 Notes:
 - The DLL config `GameFiles/poe-hook.toml` presses Enter 20 s after start (`auto_keys`, used by unattended tests). It just logs in; set `auto_keys = []` to turn it off.
-- Keep `dump_object_types = true`: the spawn position relies on the tile layout and cell grid the DLL exports to `dumps/<version>/terrain/{layouts,grids}/` (the server reads them through `[spawn] layout_dir`; it has no collision of its own yet).
+- Keep `dump_object_types = true`: the spawn position relies on the tile layout and cell grid the DLL exports to `dumps/<version>/terrain/{layouts,grids}/` (the server reads them through `[spawn] layout_dir`, or receives them as an upload from a remote client, [hosting.md](hosting.md); it has no collision of its own yet).
 - Admin commands (`!help`, the overlay's Commands and Instances pages) need an account with the admin role. On the dev machine-hash login the first account `Exile1` is an admin; otherwise `cargo run -p poe-server -- account create <name> <password>` then `account role <name> admin`; see [server-admin.md](server-admin.md).
 - Movement: WASD works in the default input mode. For click-to-move, pick the mouse input method in the game's options (in the config file: `user_input_mode=mouse_and_keyboard`). Space is the dodge roll in both modes.
 - After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
@@ -154,7 +154,7 @@ With Steam running (without it the client logs `Unable to init Steam API` and ex
   - `POE_HOOK_MOVEMENT_LOG=1` (per-frame movement log, `movement_log` in the config);
   - `POE_HOOK_FAKE_FOCUS=1` (the hooked `GetForegroundWindow` returns the game's own window, `*[0x1445d8308]`, so a client on another desktop still sends cursor reports; never while read-only);
   - `POE_HOOK_WINDOW_TITLE="PoE2 Test Client"` (the hooks on `CreateWindowExW`/`SetWindowTextW` give the game's main window (class `POEWindowClass`; message boxes and other windows keep their titles) that title, so a desktop rule can match it, for example a KWin rule that moves the window to another virtual desktop without focus; no rule is installed by the project).
-- `scripts/re/send_dev.py auto <command>` sends a server command over the debug link (like the overlay).
+- `scripts/re/send_dev.py <command>` sends a server command over the debug link (like the overlay). The link is authenticated per session, so the script queues a `cmd:<command>` entry in `GameFiles/poe-hook.keys` and the running client DLL sends it.
 - `scripts/shot.sh <name>` takes a screenshot of the game monitor (Spectacle) into `runtime/shots/`; F8 below takes one inside the game.
 - `echo <entry> > GameFiles/poe-hook.keys` presses keys and moves the mouse in the client; `0x2d` is Insert (the overlay), `0x0d` Enter.
 

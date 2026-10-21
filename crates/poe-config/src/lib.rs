@@ -217,6 +217,44 @@ pub struct SpawnConfig {
     /// intro area stays covered in grey fog.
     #[serde(default)]
     pub intro_areas: Vec<String>,
+    /// Terrain uploads from client DLLs (`layout_dir` is their cache).
+    #[serde(default)]
+    pub upload: UploadConfig,
+}
+
+/// Terrain upload (WP3.4): a client DLL on a trusted server sends the layout and cell grid it
+/// generated, authenticated with the session's side-channel keys (docs/protocol/side-channel.md),
+/// over the instance TCP port. The server validates them and caches them per tile hash in
+/// `[spawn] layout_dir`, which is also where local clients write them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct UploadConfig {
+    /// Accept uploads. Needs `[spawn] layout_dir`.
+    pub enabled: bool,
+    /// Largest upload as sent (zlib-compressed layout and grid), in bytes.
+    pub max_bytes: usize,
+    /// Largest layout after decompression.
+    pub max_layout_bytes: usize,
+    /// Largest grid after decompression.
+    pub max_grid_bytes: usize,
+    /// How long a spawn waits for the layout when no upload is announced (a local DLL writes
+    /// the file within a moment).
+    pub wait_ms: u64,
+    /// How long a spawn waits for the layout once its client announced an upload.
+    pub wait_upload_secs: u64,
+}
+
+impl Default for UploadConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_bytes: 32 << 20,
+            max_layout_bytes: 16 << 20,
+            max_grid_bytes: 128 << 20,
+            wait_ms: 3000,
+            wait_upload_secs: 60,
+        }
+    }
 }
 
 /// Start tile of an area: a substring of the tile's path, and optionally the start point in the
@@ -283,6 +321,32 @@ pub struct NetworkConfig {
     pub instance: NetworkInstanceConfig,
 }
 
+impl NetworkConfig {
+    /// Problems with the advertised address that would send remote clients to the wrong place
+    /// (logged at startup; none of them stops the server).
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let host = self.public_host.trim();
+        let loopback = host == "localhost"
+            || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+        let listens_beyond_loopback = !self.login.bind.ip().is_loopback()
+            || !self.instance.bind.ip().is_loopback();
+        if host.is_empty() {
+            out.push("[network] public_host is empty: clients get no address".into());
+        } else if loopback && listens_beyond_loopback {
+            out.push(format!(
+                "[network] public_host = {host:?} is a loopback address: only clients on this \
+                 machine can connect (set the LAN or public address for other players, \
+                 docs/guides/hosting.md)"
+            ));
+        }
+        if host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_unspecified()) {
+            out.push("[network] public_host = \"0.0.0.0\" is not an address clients can reach".into());
+        }
+        out
+    }
+}
+
 /// `[network.login]`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct NetworkLoginConfig {
@@ -291,6 +355,17 @@ pub struct NetworkLoginConfig {
     /// its login connection, so in-game transfers (which go through it) stop working.
     #[serde(default)]
     pub close_after_handoff: bool,
+    /// Port written into the client's gateway entry and trusted list (`cargo xtask
+    /// deploy-client`); differs from `bind` behind port forwarding. Default: the bind port.
+    #[serde(default)]
+    pub public_port: Option<u16>,
+}
+
+impl NetworkLoginConfig {
+    /// The login port clients connect to.
+    pub fn public_port(&self) -> u16 {
+        self.public_port.unwrap_or(self.bind.port())
+    }
 }
 
 /// `[network.instance]`.
@@ -362,7 +437,8 @@ pub struct DevConfig {
     pub known_seeds: PathBuf,
     /// Listen for the client DLL's UDP datagrams on the instance port: per-frame position
     /// reports (only read by the drift checker, `drift_check`), and the debug link's overlay
-    /// commands. Reports never move the player.
+    /// commands. Reports never move the player. Datagrams carry a per-session HMAC and a
+    /// counter (docs/protocol/side-channel.md); unauthenticated ones are dropped.
     #[serde(default = "default_true")]
     pub position_sync: bool,
     /// Drift checker: log the server's player position against the client's reported one
@@ -379,7 +455,8 @@ pub struct DevConfig {
     pub movement_trace: PathBuf,
     /// Debug link for the client DLL's overlay: send each session's simulation state to
     /// the DLL (UDP, where its position reports come from), the command registry and instance
-    /// list, and accept server commands from its overlay (`commands.rs`). Loopback only.
+    /// list, and accept server commands from its overlay (`commands.rs`). Authenticated per
+    /// session, so remote clients work too.
     #[serde(default = "default_true")]
     pub debug_link: bool,
     /// Terrain seed sweep (research, M5): a file of `<WorldAreas.Id> <seed> [count]` lines.
@@ -543,6 +620,39 @@ mod tests {
         let text = include_str!("../../../config/server.example.toml");
         let cfg = Config::parse(text).expect("config/server.example.toml must parse");
         assert!(!cfg.leagues.is_empty());
+    }
+
+    #[test]
+    fn advertised_host_warnings() {
+        let mut cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
+        // The shipped config listens on 0.0.0.0 and advertises loopback: fine alone, a warning
+        // for remote players.
+        assert_eq!(cfg.network.warnings().len(), 1);
+        cfg.network.public_host = "192.168.1.20".into();
+        assert!(cfg.network.warnings().is_empty());
+        cfg.network.public_host = "play.example.org".into();
+        assert!(cfg.network.warnings().is_empty());
+        cfg.network.public_host = "0.0.0.0".into();
+        assert_eq!(cfg.network.warnings().len(), 1);
+        // Loopback binds make a loopback host correct.
+        cfg.network.public_host = "127.0.0.1".into();
+        cfg.network.login.bind = "127.0.0.1:20481".parse().unwrap();
+        cfg.network.instance.bind = "127.0.0.1:6112".parse().unwrap();
+        assert!(cfg.network.warnings().is_empty());
+        assert_eq!(cfg.network.login.public_port(), 20481);
+        cfg.network.login.public_port = Some(30481);
+        assert_eq!(cfg.network.login.public_port(), 30481);
+    }
+
+    #[test]
+    fn spawn_upload_defaults_match_the_shipped_config() {
+        let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
+        let d = UploadConfig::default();
+        let u = &cfg.spawn.upload;
+        assert_eq!(
+            (u.enabled, u.max_bytes, u.max_layout_bytes, u.max_grid_bytes, u.wait_ms, u.wait_upload_secs),
+            (d.enabled, d.max_bytes, d.max_layout_bytes, d.max_grid_bytes, d.wait_ms, d.wait_upload_secs)
+        );
     }
 
     #[test]

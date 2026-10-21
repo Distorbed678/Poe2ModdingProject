@@ -29,6 +29,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [protocol/instance.md](protocol/instance.md) | Instance messages: opening sequence, area info, inventories, frames, pause, chat, leaving the game |
 | [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components, actor skills, NPCs) |
 | [protocol/movement.md](protocol/movement.md) | Lockstep movement: WASD, click-to-move, skills, dodge roll, facing, lag |
+| [protocol/side-channel.md](protocol/side-channel.md) | DLL to instance server side channel: HMAC-authenticated position reports and debug link (UDP), terrain upload (TCP) |
 
 ## Reverse engineering and data
 | Document | Contents |

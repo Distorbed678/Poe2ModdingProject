@@ -1,39 +1,31 @@
 #!/usr/bin/env python3
-"""Send a dev command to the instance server's debug link (what the DLL overlay does).
+"""Send a server command over the debug link, as the DLL overlay does.
 
-Usage: scripts/re/send_dev.py <client tcp port> <command...>
-       scripts/re/send_dev.py auto <command...>   (port of the last client in runtime/server-run.log)
+The debug link is authenticated per session (HMAC with keys only the client DLL and the server
+know), so a script cannot send datagrams itself: it hands the command to the running client DLL,
+which seals and sends it (`cmd:` entry of GameFiles/poe-hook.keys, see auto_keys.rs).
+
+Usage: scripts/re/send_dev.py [auto] <command...>
 
 Examples: `area G1_1 12345` (new AreaInfo on the live connection), `teleport 1100 300`.
+The leading `auto` is accepted for old habits; the client DLL always answers for its own session.
 """
-import re
-import socket
-import struct
+import os
 import sys
 
-SERVER = ("127.0.0.1", 6112)
-
-
-def last_client_port(log="runtime/server-run.log"):
-    port = None
-    for line in open(log, errors="replace"):
-        line = re.sub(r"\x1b\[[0-9;]*m", "", line)
-        m = re.search(r"instance\{peer=127\.0\.0\.1:(\d+)\}.*client connected", line)
-        if m:
-            port = int(m.group(1))
-    if port is None:
-        sys.exit("no client in " + log)
-    return port
+KEYS = os.path.join(os.path.dirname(__file__), "..", "..", "GameFiles", "poe-hook.keys")
 
 
 def main():
-    if len(sys.argv) < 3:
+    args = sys.argv[1:]
+    if args and args[0] == "auto":
+        args = args[1:]
+    if not args:
         sys.exit(__doc__)
-    port = last_client_port() if sys.argv[1] == "auto" else int(sys.argv[1])
-    text = " ".join(sys.argv[2:]).encode()
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.sendto(b"PDC1" + struct.pack("<H", port) + text, SERVER)
-    print(f"sent to client port {port}: {text.decode()}")
+    text = " ".join(args)
+    with open(KEYS, "a") as f:
+        f.write(f"cmd:{text}\n")
+    print(f"queued for the client DLL: {text}")
 
 
 if __name__ == "__main__":

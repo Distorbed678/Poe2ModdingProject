@@ -3,7 +3,8 @@
 //! The server does not generate terrain yet (M5), so it cannot know where an area's start is.
 //! Dev bridge: the client DLL exports the layout it generated
 //! (`<layout_dir>/layouts/terrain_layout_<tile hash>.tsv`, matched with TerrainHashes: a
-//! `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path` per tile) and the server spawns the
+//! `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path` per tile; a remote client uploads it
+//! instead, see `terrain_store`) and the server spawns the
 //! player at the configured point of the area's start tile (mapped through the tile's
 //! rotation/mirroring in this layout, from the sub-tile indices the DLL exports), or else near
 //! the playable tile nearest the map centre. Grid cells per (sub-)tile: 23.
@@ -12,10 +13,12 @@
 //! (`<layout_dir>/grids/terrain_grid_<tile hash>.bin`, layer 0 non-zero = walkable). Standing on a
 //! non-walkable cell inside the playable area leaves the view grey.
 
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use poe_config::{SpawnConfig, StartTile};
 use tracing::{info, warn};
+
+use crate::terrain_store::TerrainStore;
 
 pub const GRID_PER_TILE: i32 = 23;
 
@@ -198,47 +201,39 @@ pub fn client_grid(config: &SpawnConfig, tile_hash: u32) -> Option<Grid> {
     std::fs::read(path).ok().and_then(|d| Grid::parse(&d))
 }
 
-/// Waits briefly for the layout the client exported for this terrain (by tile hash) and
-/// picks the start position.
+/// Waits for the layout of this terrain (by tile hash) in the store (written by a local DLL
+/// or uploaded by a remote one, [`crate::terrain_store`]) and picks the start position.
 pub async fn from_client_layout(
+    store: &TerrainStore,
     config: &SpawnConfig,
     area: &str,
     tile_hash: u32,
+    session: u64,
 ) -> Option<(i32, i32)> {
-    if config.layout_dir.is_empty() {
+    let path = store.layout_path(tile_hash)?;
+    let Some(text) = store.wait_layout(session, tile_hash).await else {
+        warn!(file = %path.display(), "no client layout; spawning at the origin");
         return None;
-    }
-    let path = Path::new(&config.layout_dir)
-        .join("layouts")
-        .join(format!("terrain_layout_{tile_hash}.tsv"));
-    for _ in 0..30 {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            let layout = Layout::parse(&text)?;
-            let target = layout.start(config.start_tiles.get(area), &config.filler)?;
-            let grid_path = Path::new(&config.layout_dir)
-                .join("grids")
-                .join(format!("terrain_grid_{tile_hash}.bin"));
-            let grid = std::fs::read(&grid_path).ok().and_then(|d| Grid::parse(&d));
-            let start = match &grid {
-                Some(g) => g.nearest_walkable(target, 400).or(Some(target)),
-                None => {
-                    warn!(file = %grid_path.display(), "no cell grid; not snapping to walkable");
-                    Some(target)
-                }
-            };
-            info!(
-                ?target,
-                ?start,
-                width = layout.width,
-                height = layout.height,
-                "spawn from client layout"
-            );
-            return start;
+    };
+    let layout = Layout::parse(&text)?;
+    let target = layout.start(config.start_tiles.get(area), &config.filler)?;
+    let grid_path = store.grid_path(tile_hash)?;
+    let grid = std::fs::read(&grid_path).ok().and_then(|d| Grid::parse(&d));
+    let start = match &grid {
+        Some(g) => g.nearest_walkable(target, 400).or(Some(target)),
+        None => {
+            warn!(file = %grid_path.display(), "no cell grid; not snapping to walkable");
+            Some(target)
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    warn!(file = %path.display(), "no client layout; spawning at the origin");
-    None
+    };
+    info!(
+        ?target,
+        ?start,
+        width = layout.width,
+        height = layout.height,
+        "spawn from client layout"
+    );
+    start
 }
 
 #[cfg(test)]
