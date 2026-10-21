@@ -144,6 +144,11 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::Ip
                     logout = Some(server.sessions.subscribe(a.id));
                     transfers = Some(server.sessions.subscribe_transfers(a.id));
                     account = Some(a);
+                } else {
+                    // Refused: close the connection after the reply. The client only starts a
+                    // new login attempt (Log In button, Enter) once the old connection is gone.
+                    info!("login refused: closing the login connection");
+                    return Ok(());
                 }
             }
             ClientMessage::RequestCharacterList(req) => {
