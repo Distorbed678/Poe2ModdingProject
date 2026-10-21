@@ -1,7 +1,7 @@
 //! Wire glue between a session and the `poe-game` movement simulation.
 //!
-//! Two pure mappings and nothing else, so the `World` can later live in an instance actor and
-//! serve many sessions:
+//! Two pure mappings and nothing else, since the `World` lives in the instance actor and serves
+//! every session of the instance:
 //! - [`client_input`]: a client packet (by its name in the opcode table) to a
 //!   [`MoveInput`];
 //! - [`Codec::encode`]: a [`MoveEvent`] of an entity to the official server messages (opcodes

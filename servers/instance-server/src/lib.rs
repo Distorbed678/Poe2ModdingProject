@@ -63,7 +63,7 @@ pub struct InstanceServer {
     pub accounts: Arc<dyn poe_accounts::AccountStore>,
     /// Seeds the client is known to generate (`dev.known_seeds`).
     pub seeds: Arc<seeds::KnownSeeds>,
-    /// Client position reports (movement dev bridge, see [`sync`]).
+    /// Client position reports (drift checker and debug link, see [`sync`]).
     pub reports: Arc<sync::ClientReports>,
     /// Ends the account's login connection when the client leaves the game.
     pub sessions: Arc<dyn poe_cluster::LoginSessions>,
@@ -1063,8 +1063,8 @@ impl InstanceServer {
                 Some(granted) => {
                     // The stat set's constant stats, and its implicit (flag) stats as 1. The
                     // client reads computed stats (e.g. `dodge_roll_travel_distance`), which
-                    // the server derives from the base ones; until there is a stat calculator
-                    // (M8), each `..._base_...` stat is also sent under its name without
+                    // the server derives from the base ones; until there is a stat calculator,
+                    // each `..._base_...` stat is also sent under its name without
                     // `base_` when that stat exists.
                     let mut named: Vec<(String, i32)> = granted
                         .constant_stats

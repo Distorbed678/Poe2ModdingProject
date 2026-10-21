@@ -1,4 +1,4 @@
-//! Areas and terrain (M5): the client's terrain generator, ported so the server knows every
+//! Areas and terrain: the client's terrain generator, ported so the server knows every
 //! area's layout (collision, pathfinding, spawn points, area entities). Progress and findings:
 //! `docs/re/terrain/README.md`.
 //!

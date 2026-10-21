@@ -2,8 +2,8 @@
 //!
 //! [`GridSource`] is what the [`crate::world::World`] needs from the terrain: walkability per
 //! cell ([`Walkable`]) and the size. Implementations:
-//! - [`Grid`]: the client's cell grid, exported by the debug DLL to
-//!   `terrain_grid_<tile hash>.bin` (the dev bridge until `poe-world` generates collision),
+//! - [`Grid`]: the client's cell grid, exported by the client DLL to
+//!   `terrain_grid_<tile hash>.bin` (what the server uses until `poe-world` generates collision),
 //! - [`VecGrid`]: a plain boolean grid (tests, tools),
 //! - [`Open`](crate::movement::Open): no terrain, everything walkable.
 //!

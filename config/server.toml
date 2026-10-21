@@ -48,9 +48,9 @@ first_entity_id = 12000
 sprint_buff_rows = [2758, 2737, 2853]
 
 [dev]
-# Development and research bridges; none are needed for normal play.
-# Terrain seeds known to generate (dev bridge until server-side generation, M5); some random
-# seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
+# Development and research tools; none are needed for normal play.
+# Terrain seeds known to generate, for picking an area's seed while the server's own generator
+# does not cover every area (poe-world, docs/status/terrain.md); some random seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
 known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
 # Listen for the client DLL's UDP datagrams on the instance port (position reports, overlay
 # commands). Reports are only read by the drift checker; they never move the player.
@@ -168,9 +168,9 @@ Boots1 = [2, 2]
 Belt1 = [2, 1]
 Flask1 = [5, 1]
 
-# Player start position. Dev bridge until server-side terrain generation (M5): the client DLL
-# exports the generated layout and the player starts on the area's start tile, or else on
-# the playable tile nearest the map centre.
+# Player start position. The layout comes from the client DLL, which exports (or, on a trusted
+# server, uploads) the area it generated; the server does not yet use its own generated layout.
+# The player starts on the area's start tile, or else on the playable tile nearest the map centre.
 [spawn]
 layout_dir = "dumps/0.5.5e/terrain"
 filler = ["fill", "blank"]

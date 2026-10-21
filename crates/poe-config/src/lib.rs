@@ -61,7 +61,7 @@ pub struct Config {
     /// Movement simulation tuning.
     #[serde(default)]
     pub movement: MovementConfig,
-    /// Development and research bridges (debug link, position sync, traces, seed sweep).
+    /// Development and research tools (debug link, position sync, traces, seed sweep).
     #[serde(default)]
     pub dev: DevConfig,
     /// HTTP API and web admin (`crates/poe-web-api`).
@@ -219,13 +219,13 @@ fn default_chat_channel() -> u16 {
     1
 }
 
-/// Player start position (see `instance-server::spawn`). Until the server generates terrain
-/// (M5) it relies on the layout exported by the client DLL.
+/// Player start position (see `instance-server::spawn`). The layout comes from the client DLL
+/// (exported or uploaded); the server's own generator (`poe-world`) does not feed spawns yet.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SpawnConfig {
     /// Terrain dump directory (`dumps/<version>/terrain`): the client DLL writes
     /// `layouts/terrain_layout_<tile hash>.tsv` and `grids/terrain_grid_<tile hash>.bin`
-    /// there (poe-hook.toml `dump_dir`); empty disables the bridge.
+    /// there (poe-hook.toml `dump_dir`); empty disables layout-based spawns.
     #[serde(default)]
     pub layout_dir: String,
     /// Substrings of tile paths that are never playable (map filler).
@@ -459,7 +459,7 @@ fn default_sprint_buff_rows() -> [u16; 3] {
     [2758, 2737, 2853]
 }
 
-/// `[dev]`: development and research bridges. None of these are needed for normal play.
+/// `[dev]`: development and research tools. None of these are needed for normal play.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DevConfig {
     /// Optional TSV of terrain seeds known to generate (`area, level, seed, ...`); the server
@@ -484,13 +484,14 @@ pub struct DevConfig {
     /// is appended to this TSV file, for analysing a play session. Empty: off.
     #[serde(default)]
     pub movement_trace: PathBuf,
-    /// Debug link for the client DLL's overlay: send each session's simulation state to
-    /// the DLL (UDP, where its position reports come from), the command registry and instance
+    /// Debug link for the client DLL's overlay: send the player's movement state
+    /// (from the instance's simulation) to the DLL (UDP, where its position reports come from), the command registry and instance
     /// list, and accept server commands from its overlay (`commands.rs`). Authenticated per
     /// session, so remote clients work too.
     #[serde(default = "default_true")]
     pub debug_link: bool,
-    /// Terrain seed sweep (research, M5): a file of `<WorldAreas.Id> <seed> [count]` lines.
+    /// Terrain seed sweep (research, for the `poe-world` generator): a file of
+    /// `<WorldAreas.Id> <seed> [count]` lines.
     /// Each instance session generates the next listed area/seed instead of the character's
     /// area, records the client's hashes in `sweep_results` and ends (the client then logs in
     /// again; `scripts/re/sweep_drive.py`). A second AreaInfo on one connection crashes the

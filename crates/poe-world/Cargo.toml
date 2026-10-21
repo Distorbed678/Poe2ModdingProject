@@ -1,6 +1,6 @@
 [package]
 name = "poe-world"
-description = "Areas and terrain: the client's terrain generator ported to the server (M5)"
+description = "Areas and terrain: the client's terrain generator ported to the server"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

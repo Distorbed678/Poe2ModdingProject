@@ -1,7 +1,8 @@
 //! Player start position.
 //!
-//! The server does not generate terrain yet (M5), so it cannot know where an area's start is.
-//! Dev bridge: the client DLL exports the layout it generated
+//! The server's own generator (`poe-world`) does not cover every area yet and is not used for
+//! spawns, so the server learns where an area's start is from the client: the DLL exports the
+//! layout it generated
 //! (`<layout_dir>/layouts/terrain_layout_<tile hash>.tsv`, matched with TerrainHashes: a
 //! `size<TAB>w<TAB>h` line, then `x<TAB>y<TAB>tile path` per tile; a remote client uploads it
 //! instead, see `terrain_store`) and the server spawns the

@@ -1,4 +1,4 @@
-//! Client position reports, the debug link and the drift checker (dev bridge).
+//! Client position reports, the debug link and the drift checker (research tools).
 //!
 //! The client DLL (`poe-hook` `position_sync`) sends one UDP datagram per simulation frame
 //! to the instance port with the player's position and current action. Since WP3.4 every
@@ -44,7 +44,7 @@ pub struct ClientReport {
     pub action2: u16,
     /// Actor +0x2a2 (bit 5: sprint key held as set by `0x2e7`).
     pub flags: u16,
-    /// The cursor in the game window's client area and the area's size (PSY2 reports).
+    /// The cursor in the game window's client area and the area's size (from `Report` frames).
     pub cursor: Option<Cursor>,
     pub at: Instant,
 }
