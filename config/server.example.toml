@@ -81,8 +81,12 @@ sprint_coast_delay_frames = 1
 # Frames between the sprint-off batch and the first step of a walk that a held key restarts.
 sprint_restart_delay_frames = 2
 # A zero direction within this many frames after a cursor sprint's end means the keys were already
-# up when the restart arrived (the client coasts instead of walking on).
-sprint_release_window_frames = 3
+# up when the restart arrived (the client coasts instead of walking on); measured 1-5 frames.
+# In click-to-move mode (no keys) the sprint coasts at once; this is how long vectors in flight are ignored.
+sprint_release_window_frames = 6
+# A key-shaped direction (axis or exact diagonal) after a sprint is the cursor's when the roll key's cursor
+# offset points within this many degrees of it (an exactly diagonal cursor sends the same vector as W).
+sprint_cursor_match_degrees = 10
 
 [dev]
 # Development and research tools; none are needed for normal play.

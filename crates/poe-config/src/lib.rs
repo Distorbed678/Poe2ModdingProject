@@ -668,10 +668,18 @@ pub struct MovementConfig {
     pub sprint_restart_delay_frames: u32,
     /// A zero direction this many frames after the sprint-off batch, after a sprint that
     /// followed the cursor (Space only), means the keys were already up when the restart reached
-    /// the client, which coasts (default 3: the client sends the zero 2 frames after the Space
-    /// release, official `f4584` -> `f4586`).
+    /// the client, which coasts (default 6: the client sends the zero 1 to 2 frames after the
+    /// Space release with a free-angle cursor, official `f4584` -> `f4586`, and 4 to 5 with an
+    /// exactly diagonal one). In click-to-move mode (no keys) the sprint coasts at once and this
+    /// is how long cursor vectors still in flight are ignored.
     #[serde(default = "default_sprint_release_window_frames")]
     pub sprint_release_window_frames: u32,
+    /// A key-shaped direction (axis or exact diagonal) after a sprint counts as the cursor's when
+    /// the roll key's cursor offset points within this many degrees of it (default 10; the
+    /// client's cursor vector and the roll target differ by up to about 6 degrees). An exactly
+    /// diagonal cursor sends the same vector as W.
+    #[serde(default = "default_sprint_cursor_match_degrees")]
+    pub sprint_cursor_match_degrees: f32,
 }
 
 impl Default for MovementConfig {
@@ -683,6 +691,7 @@ impl Default for MovementConfig {
             sprint_coast_delay_frames: default_sprint_coast_delay_frames(),
             sprint_restart_delay_frames: default_sprint_restart_delay_frames(),
             sprint_release_window_frames: default_sprint_release_window_frames(),
+            sprint_cursor_match_degrees: default_sprint_cursor_match_degrees(),
         }
     }
 }
@@ -708,7 +717,11 @@ fn default_sprint_restart_delay_frames() -> u32 {
 }
 
 fn default_sprint_release_window_frames() -> u32 {
-    3
+    6
+}
+
+fn default_sprint_cursor_match_degrees() -> f32 {
+    10.0
 }
 
 /// `[dev]`: development and research tools. None of these are needed for normal play.

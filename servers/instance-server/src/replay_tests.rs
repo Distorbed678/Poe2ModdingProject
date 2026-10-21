@@ -694,7 +694,7 @@ fn sim_config_comes_from_game_data_and_config() {
             cfg.sprint.restart_delay_frames,
             cfg.sprint.release_window_frames
         ),
-        (1.0614, 29.5, 1, 2, 3)
+        (1.0614, 29.5, 1, 2, 6)
     );
     assert_eq!(
         (

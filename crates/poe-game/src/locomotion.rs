@@ -110,8 +110,14 @@ pub struct SprintConfig {
     /// A zero WASD vector this many frames after the sprint-off batch, after a sprint that
     /// followed the cursor (Space held, no key), means the keys were already up when the
     /// unscaled `MoveAck` reached the client, which then coasted instead of walking on (the
-    /// client sends the zero vector 2 frames after the Space release).
+    /// client sends the zero vector 1 to 5 frames after the Space release, 4 to 5 with an
+    /// exactly diagonal cursor). In click-to-move mode, where there are no keys, the sprint
+    /// coasts at once and this is how long cursor vectors still in flight are ignored.
     pub release_window_frames: u32,
+    /// A key-shaped `0x63` vector (axis or exact diagonal) counts as the cursor direction when
+    /// the roll key's cursor offset points within this many degrees of it (the client's cursor
+    /// vector and the roll target differ by up to about 6 degrees).
+    pub cursor_match_degrees: f32,
 }
 
 /// Everything the component needs to know about the game (shared by all entities of a world).
@@ -163,7 +169,8 @@ impl MovementConfig {
                 coast_frames: 29.5,
                 coast_delay_frames: 1,
                 restart_delay_frames: 2,
-                release_window_frames: 3,
+                release_window_frames: 6,
+                cursor_match_degrees: 10.0,
             },
             walk_speed: 37.0,
             stance_delay_frames: 9,
@@ -196,6 +203,10 @@ impl UseSkill {
 pub enum MoveInput {
     /// `0x63` WASD vector (grid axes, length about 180; `(0, 0)` = stop).
     Direction { x: i32, y: i32 },
+    /// `0x63` sent in click-to-move mode (the packet's third trailer byte is `1`): that client
+    /// has no movement keys, so every vector is the cursor direction, also an exactly diagonal
+    /// or axis-aligned one that [`MoveInput::Direction`] could take for a key.
+    CursorDirection { x: i32, y: i32 },
     /// `0x1a5`.
     UseSkill(UseSkill),
     /// `0x1a8`, `x`, `y` relative to the player's cell.
@@ -397,6 +408,12 @@ pub enum MoveState {
 struct SprintEnd {
     frame: u64,
     dir: Cell,
+    /// The sprint's last vector was the cursor direction, not a key (see
+    /// [`Locomotion::is_cursor_vector`]): the keys are up, so the client coasts.
+    cursor: bool,
+    /// The sprint coasted at once, without waiting for the client's zero vector: click-to-move
+    /// mode, where there are no keys at all.
+    coasting: bool,
 }
 
 /// Scheduled timeline events.
@@ -484,6 +501,14 @@ pub struct Locomotion {
     attack_after_ack: Option<(UseSkill, Cell)>,
     /// The sprint that just ended by key release, see [`SprintEnd`].
     sprint_end: Option<SprintEnd>,
+    /// The latest `0x63` was sent in click-to-move mode ([`MoveInput::CursorDirection`]).
+    cursor_mode: bool,
+    /// The cursor's offset from the player, as the roll key's target last said (`0x1a5`,
+    /// `0x1a8`): the direction the client sends as `0x63` with Space held and no key.
+    roll_cursor: Cell,
+    /// The direction of the unscaled `MoveAck` due in the frame after a sprint ended: it is
+    /// still sent first when the client's zero vector arrives in that very frame.
+    unscaled_dir: Option<Cell>,
     /// The direction the entity last moved or aimed in: the client rolls along it when the
     /// roll has no target (cursor on the player) and no key is held.
     facing: Cell,
@@ -516,6 +541,9 @@ impl Locomotion {
             release_pending: false,
             release_due: false,
             sprint_end: None,
+            cursor_mode: false,
+            roll_cursor: (0, 0),
+            unscaled_dir: None,
             facing: (0, 0),
         }
     }
@@ -649,7 +677,8 @@ impl Locomotion {
         end_sprint: &mut bool,
     ) {
         match input {
-            MoveInput::Direction { x, y } => self.on_direction((x, y), ctx),
+            MoveInput::Direction { x, y } => self.on_direction((x, y), false, ctx),
+            MoveInput::CursorDirection { x, y } => self.on_direction((x, y), true, ctx),
             MoveInput::UseSkill(req) => self.on_use_skill(req, ctx, out),
             MoveInput::UpdateSkillTarget { x, y, skill } => {
                 let (cx, cy) = self.mover.cell();
@@ -724,21 +753,32 @@ impl Locomotion {
         }
     }
 
-    fn on_direction(&mut self, dir: Cell, ctx: &StepCtx) {
+    fn on_direction(&mut self, dir: Cell, cursor: bool, ctx: &StepCtx) {
         self.wasd = dir;
+        self.cursor_mode = cursor;
         self.ack_wanted = true;
         let moving = dir != (0, 0);
         if moving {
             self.facing = dir;
             // Cursor vectors still in flight when the sprint ended keep its direction up to
-            // date; a key vector is a real new walk.
+            // date; a key vector is a real new walk. In click-to-move mode every vector is a
+            // cursor one, for a limited time (a sprint that coasts at once ignores them).
+            let window = ctx.config.sprint.release_window_frames as u64;
+            let cursor_vector = cursor || self.is_cursor_vector(dir, ctx);
             match &mut self.sprint_end {
-                Some(end) if !is_key_vector(dir) => end.dir = dir,
+                Some(end) if end.coasting => {
+                    if cursor && ctx.frame <= end.frame + window {
+                        end.dir = dir;
+                        return;
+                    }
+                    self.sprint_end = None;
+                }
+                Some(end) if cursor_vector => end.dir = dir,
                 _ => self.sprint_end = None,
             }
         } else if let Some(end) = self.sprint_end.take()
             && ctx.frame <= end.frame + ctx.config.sprint.release_window_frames as u64
-            && !is_key_vector(end.dir)
+            && end.cursor
             && matches!(self.state, MoveState::Walking(Walk::Direction(_)))
         {
             // The sprint followed the cursor and the keys were already up when the unscaled
@@ -897,6 +937,7 @@ impl Locomotion {
         // The client's roll heading (`0x141b76c20` neighbourhood, `0x141b8bc20`): the held input
         // vector, else the direction to the action's target, and the entity's facing when the
         // target is the player's own cell.
+        self.roll_cursor = offset;
         let wasd_driven = self.wasd != (0, 0);
         let heading = if wasd_driven {
             self.wasd
@@ -1110,6 +1151,9 @@ impl Locomotion {
 
     /// Re-aims the running action after a `UpdateSkillTarget`.
     fn steer(&mut self, skill: u32, offset: Cell, abs: Cell, ctx: &StepCtx) {
+        if skill == ctx.config.skills.roll_skill {
+            self.roll_cursor = offset;
+        }
         match &mut self.state {
             MoveState::Rolling(r) if skill == ctx.config.skills.roll_skill => {
                 if offset != (0, 0) && !r.wasd_driven {
@@ -1356,6 +1400,18 @@ impl Locomotion {
         let cell = self.mover.cell();
         let wasd = self.wasd;
         let scaled = scale_to(wasd, ctx.config.sprint.dir_length);
+        let unscaled = self.unscaled_dir.take();
+        if unscaled_due
+            && wasd == (0, 0)
+            && let Some(dir) = unscaled
+        {
+            // The client's zero vector arrived in the very frame the unscaled `MoveAck` of the
+            // sprint's end is due. That ack still goes out first, as in every official sprint
+            // (a `(0, 0)` in its place stopped the client's coast in game: 22 cells of drift);
+            // the zero's own ack follows in the next frame.
+            out.push(MoveEvent::MoveAck { dir, cell });
+            return;
+        }
         match self.sprint() {
             Some(run) if run.streaming => out.push(MoveEvent::MoveAck { dir: scaled, cell }),
             _ if self.ack_wanted || unscaled_due => {
@@ -1411,6 +1467,7 @@ impl Locomotion {
         // ours.)
         if self.wasd != (0, 0) {
             self.due.push((frame + 1, Due::UnscaledAck));
+            self.unscaled_dir = Some(self.wasd);
         }
         self.finish_sprint_by_release(ctx);
     }
@@ -1422,7 +1479,23 @@ impl Locomotion {
             return;
         }
         let cfg = &ctx.config.sprint;
-        if self.wasd != (0, 0) {
+        if self.wasd != (0, 0) && self.cursor_mode {
+            // Click-to-move mode has no movement keys: the vector is the cursor direction
+            // whatever its angle (an exactly diagonal one looks like a key's) and the client's
+            // unscaled-ack restart finds no key down. It coasts, without waiting for the
+            // client's zero vector (4 to 5 frames after the batch with an exactly diagonal
+            // cursor, in game 2026-10-21); that and the cursor vectors still in flight are
+            // ignored for the release window.
+            let dir = self.wasd;
+            self.state = MoveState::Idle;
+            self.sprint_end = Some(SprintEnd {
+                frame: ctx.frame,
+                dir,
+                cursor: true,
+                coasting: true,
+            });
+            self.start_coast(dir, ctx.frame + 1 + cfg.coast_delay_frames as u64, ctx);
+        } else if self.wasd != (0, 0) {
             // The restart: the unscaled `MoveAck` of the next frame starts a new Move action
             // on the client, which steps `restart_delay_frames` after this batch.
             let dir = self.wasd;
@@ -1437,6 +1510,8 @@ impl Locomotion {
             self.sprint_end = Some(SprintEnd {
                 frame: ctx.frame,
                 dir,
+                cursor: self.is_cursor_vector(dir, ctx),
+                coasting: false,
             });
         } else if self.facing != (0, 0) {
             self.state = MoveState::Idle;
@@ -1445,6 +1520,28 @@ impl Locomotion {
         } else {
             self.finish_sprint();
         }
+    }
+
+    /// Whether the `0x63` vector `v` is the cursor direction (Space held, no key) and not a
+    /// key: a free angle, or a key's vector that the cursor offset of the roll key points along
+    /// within `cursor_match_degrees` (an exactly diagonal cursor makes the same `(127, 127)` as
+    /// W, in WASD mode and with the same trailer bytes; the cursor offset tells them apart).
+    fn is_cursor_vector(&self, v: Cell, ctx: &StepCtx) -> bool {
+        if !is_key_vector(v) {
+            return true;
+        }
+        let (a, b) = (v, self.roll_cursor);
+        let (la, lb) = (
+            ((a.0 as f64).powi(2) + (a.1 as f64).powi(2)).sqrt(),
+            ((b.0 as f64).powi(2) + (b.1 as f64).powi(2)).sqrt(),
+        );
+        if la == 0.0 || lb == 0.0 {
+            return false;
+        }
+        let cos = (a.0 as f64 * b.0 as f64 + a.1 as f64 * b.1 as f64) / (la * lb);
+        cos >= (ctx.config.sprint.cursor_match_degrees as f64)
+            .to_radians()
+            .cos()
     }
 
     /// Coasts along `dir`; the client's first coasting step is in frame `first_step`. Steps of
@@ -2686,6 +2783,152 @@ mod tests {
         let here = r.loco.position();
         r.run(10);
         assert_eq!(r.loco.position(), here);
+    }
+
+    // ---- problem 1: an exactly diagonal cursor (movement.md, "In-game check, 2026-10-21") ------
+
+    fn cursor(x: i32, y: i32) -> MoveInput {
+        MoveInput::CursorDirection { x, y }
+    }
+
+    /// A click-to-move sprint (Space only) whose cursor is exactly on the diagonal: the vector
+    /// `(127, 127)` looks like a key's, but this client has no keys.
+    fn click_mode_sprint(vector: Cell) -> Rig {
+        let mut r = Rig::new((50, 50));
+        r.tick(&[space(true), roll(10, 0)]);
+        r.run(36);
+        assert!(matches!(r.loco.state(), MoveState::Sprinting(_)));
+        r.tick(&[cursor(vector.0, vector.1)]);
+        r.run(3);
+        r
+    }
+
+    #[test]
+    fn a_click_mode_sprint_on_an_exact_diagonal_coasts_whenever_the_zero_comes() {
+        // In game the client's zero vector came 4 to 5 frames after the sprint-off batch.
+        for zero_at in [None, Some(1), Some(2), Some(5), Some(8)] {
+            let mut r = click_mode_sprint((127, 127));
+            r.tick(&[MoveInput::SkillInputEnd, space(false)]); // F
+            let start = r.loco.position();
+            let mut total = 0.0;
+            for f in 1..=45 {
+                let before = r.loco.position();
+                let inputs = if zero_at == Some(f) {
+                    vec![cursor(0, 0)]
+                } else {
+                    vec![]
+                };
+                r.tick(&inputs);
+                total += dist(before, r.loco.position());
+            }
+            // The coast of the client: 19.95 cells less the step the batch's frame makes.
+            assert!((total - 19.95).abs() < 0.8, "{zero_at:?}: {total}");
+            let d = (r.loco.position().0 - start.0, r.loco.position().1 - start.1);
+            assert!((d.0 - d.1).abs() < 0.05 && d.0 > 10.0, "{zero_at:?}: {d:?}");
+            assert_eq!(r.loco.state(), &MoveState::Idle);
+        }
+    }
+
+    #[test]
+    fn a_click_mode_sprint_ignores_cursor_vectors_in_flight() {
+        let mut r = click_mode_sprint((127, 127));
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]); // F
+        r.tick(&[cursor(127, 127)]); // F + 1
+        r.tick(&[cursor(126, 128)]); // F + 2
+        r.tick(&[cursor(0, 0)]); // F + 3
+        r.run(2);
+        // Still on the coast (not the walk a new direction would start): the steps fall.
+        let a = step(&mut r, &[]);
+        let b = step(&mut r, &[]);
+        assert!(a > 1.1 && b < a, "{a} {b}");
+        assert!(matches!(r.mover_motion(), Motion::Coast { .. }));
+    }
+
+    #[test]
+    fn a_new_click_mode_vector_long_after_the_sprint_walks_on() {
+        let mut r = click_mode_sprint((127, 127));
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]);
+        r.run(10);
+        r.tick(&[cursor(180, 0)]);
+        let walk = r.cfg.walk_speed * 0.033;
+        assert!((step(&mut r, &[]) - walk).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_unscaled_ack_still_comes_first_when_the_zero_arrives_in_the_same_frame() {
+        // The click-mode case and the free-angle one of WASD mode: in game the zero came in
+        // F + 1 about half of the time and was answered with `(0, 0)` instead (22 cells off).
+        for r in [click_mode_sprint((127, 127)), sprinting((100, -150))] {
+            let mut r = r;
+            r.tick(&[MoveInput::SkillInputEnd, space(false)]); // F
+            let zero = if matches!(r.mover_motion(), Motion::Coast { .. }) {
+                cursor(0, 0)
+            } else {
+                dir(0, 0)
+            };
+            let ev = r.tick(&[zero]); // F + 1
+            assert!(
+                matches!(&ev[..], [MoveEvent::MoveAck { dir, .. }] if *dir != (0, 0)),
+                "{ev:?}"
+            );
+            let ev = r.tick(&[]); // F + 2: the zero's own ack
+            assert!(
+                matches!(&ev[..], [MoveEvent::MoveAck { dir: (0, 0), .. }]),
+                "{ev:?}"
+            );
+            let start = r.loco.position();
+            r.run(40);
+            assert!(dist(start, r.loco.position()) > 15.0);
+        }
+    }
+
+    /// WASD mode (`Direction`, trailer byte 0), Space held with the cursor at `cursor` (the
+    /// roll key's target offset) and the `0x63` vector `vector` streaming; Space up (`F`), the
+    /// zero vector in `F + 1`. Returns how far the entity went after the zero.
+    fn wasd_sprint_released_with_zero_in_f1(cursor: Cell, vector: Cell) -> f32 {
+        let mut r = Rig::new((50, 50));
+        r.tick(&[space(true), roll(cursor.0, cursor.1)]);
+        r.run(36);
+        r.tick(&[dir(vector.0, vector.1)]);
+        r.run(3);
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]); // F
+        r.tick(&[dir(0, 0)]); // F + 1
+        let start = r.loco.position();
+        r.run(40);
+        dist(start, r.loco.position())
+    }
+
+    #[test]
+    fn an_exact_diagonal_vector_along_the_cursor_is_a_cursor_sprint_in_wasd_mode_too() {
+        // The vector is W's `(127, 127)`, with the same trailer bytes; the cursor tells them
+        // apart: here it points the same way (in game 2026-10-21: 20 cells of drift when the
+        // server stopped at the zero and the client coasted).
+        assert!(wasd_sprint_released_with_zero_in_f1((30, 30), (127, 127)) > 15.0);
+        // Within `cursor_match_degrees` (10): a cursor 5 degrees off the diagonal.
+        assert!(wasd_sprint_released_with_zero_in_f1((30, 36), (127, 127)) > 15.0);
+        // An axis vector along the cursor as well.
+        assert!(wasd_sprint_released_with_zero_in_f1((40, 2), (180, 0)) > 15.0);
+    }
+
+    #[test]
+    fn the_same_vector_with_the_cursor_elsewhere_is_a_key_and_stops_at_once() {
+        // W pressed while sprinting towards another cursor: its release is the usual stop.
+        assert!(wasd_sprint_released_with_zero_in_f1((-30, 30), (127, 127)) < 0.01);
+        assert!(wasd_sprint_released_with_zero_in_f1((20, 50), (127, 127)) < 0.01);
+        assert!(wasd_sprint_released_with_zero_in_f1((0, 0), (180, 0)) < 0.01);
+    }
+
+    #[test]
+    fn a_free_angle_zero_four_to_five_frames_after_the_sprint_off_still_coasts() {
+        let mut r = sprinting((100, -150));
+        r.run(3);
+        r.tick(&[MoveInput::SkillInputEnd, space(false)]); // F
+        r.tick(&[dir(101, -149)]);
+        r.run(2);
+        r.tick(&[dir(0, 0)]); // F + 4
+        let start = r.loco.position();
+        r.run(40);
+        assert!(dist(start, r.loco.position()) > 15.0);
     }
 
     #[test]

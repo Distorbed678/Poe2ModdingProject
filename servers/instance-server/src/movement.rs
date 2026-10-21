@@ -79,7 +79,13 @@ pub fn client_input(name: &str, r: &mut Reader<'_>) -> Result<Option<MoveInput>,
     Ok(Some(match name {
         MoveDirection::NAME => {
             let m = MoveDirection::decode(r)?;
-            MoveInput::Direction { x: m.x, y: m.y }
+            // The third trailer byte is 1 in click-to-move mode, where the client has no
+            // movement keys: every vector is then the cursor direction (movement.md).
+            if m.unk_tail[2] == 1 {
+                MoveInput::CursorDirection { x: m.x, y: m.y }
+            } else {
+                MoveInput::Direction { x: m.x, y: m.y }
+            }
         }
         UseSkill::NAME => {
             let m = UseSkill::decode(r)?;

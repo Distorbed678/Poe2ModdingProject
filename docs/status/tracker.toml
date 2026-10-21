@@ -150,7 +150,7 @@ link = "docs/protocol/movement.md"
 [[subsystem.item]]
 name = "Sprint"
 status = "partial"
-note = "official sequence (3 buffs, stats, 0x64 stream, end) and the sprint-roll speed profile; the end coasts like the client (gap #11, WP C1, replay-tested): in game with the KWin Agents rules off, Space-only free-angle cursor sprints end 0.1-4.2 cells off in click and WASD mode (11 runs; under the rules 23-28, the hidden desktop is the likely cause, not the 0x1ac timing); open: an exactly diagonal cursor is taken for a key (20 cells, problem 1), and a sprint ended with W held since before the roll (no 0x63 stream) is 14-17 cells off because the client coasts 30 frames and resumes by itself, the unscaled 0x64 does not restart it (problem 5); WASD injection was the input mode, not the focus (problem 4 solved); see movement.md"
+note = "official sequence (3 buffs, stats, 0x64 stream, end) and the sprint-roll speed profile; the end coasts like the client (gap #11, WP C1, replay-tested): in game with the KWin Agents rules off, Space-only free-angle cursor sprints end 0.1-4.2 cells off in click and WASD mode (11 runs; under the rules 23-28, the hidden desktop is the likely cause, not the 0x1ac timing); an exactly diagonal cursor (the vector of W) is told from a key by the click-mode trailer byte or by the roll key's cursor offset and coasts as well (problem 1 fixed: 20 cells -> 0.5, 5 click and 2 WASD runs); open: a sprint ended with W held since before the roll (no 0x63 stream) is 14-17 cells off because the client coasts 30 frames and resumes by itself, the unscaled 0x64 does not restart it (problem 5); WASD injection was the input mode, not the focus (problem 4 solved); see movement.md"
 link = "docs/protocol/movement.md"
 
 [[subsystem.item]]
