@@ -204,7 +204,7 @@ link = "docs/architecture/instance-world.md"
 [[subsystem.item]]
 name = "Party and trade requests (invite, cancel)"
 status = "partial"
-note = "WP C3: party invite and cancel, trade request and cancel between two sessions (invitee/target side derived from the client's handlers, UNVERIFIED in game); accept, decline, timeouts and joined members are not implemented: gate G-PARTY (needs an official capture where a friend answers)"
+note = "WP C3: party invite and cancel, trade request and cancel between two sessions, verified with two real clients 2026-10-21 (invitee popups, cancel, leave; a trade request needs the two slot-0x79 AddInventory first, else both clients crash with \"Invalid inventory id\"); accept, decline, timeouts and joined members are not implemented: gate G-PARTY (needs an official capture where a friend answers)"
 link = "docs/protocol/entities.md#party-and-trade-flows-wp-c3"
 
 [[subsystem.item]]

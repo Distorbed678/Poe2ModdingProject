@@ -9,11 +9,12 @@
 //! cancel (trade). **Not implemented (gate G-PARTY):** accepting and declining a party
 //! invitation or a trade, timeouts, members that joined, leaving a party. What the invitee's
 //! client receives was never captured either: it is derived from the client's handlers
-//! (`0x142106a30` case `0xc8`, `0x1402c3cb0`) and marked UNVERIFIED below.
+//! (`0x142106a30` case `0xc8`, `0x1402c3cb0`) and verified in game with two clients (WP C3, 2026-10-21): the popups appear.
 
 use std::{collections::HashMap, sync::Mutex};
 
 use poe_proto::{
+    instance::{AddInventory, Inventory},
     opcodes::OpcodeTable,
     remote::{
         NoticeMessage, PartyEnded, PartyMember, PartyUpdate, SocialEntry, SocialRemove, TradeAck,
@@ -38,7 +39,19 @@ const TRADE_UNK_A: u32 = 2;
 const TRADE_UNK_B: u32 = 1;
 const TRADE_NO_NPC: u32 = 0xffff_ffff;
 const TRADE_UNK_E: u16 = 0x6a;
-/// `TradeState.unk_c` for the player who asked (capture: `0x31`) and, UNVERIFIED, for the
+/// The two trade-window inventories an official server creates (`AddInventory`) right before
+/// the `TradeState` (capture 2026-10-20: ids 1 and 2, `InventoryIdKey` `0x49`, `Inventories`
+/// slot `0x79`, 12x5, flags `0x40`). Without them the client throws "Invalid inventory id"
+/// while it builds the trade window and crashes (found in the WP C3 in-game check).
+const TRADE_INVENTORY_IDS: [u32; 2] = [1, 2];
+const TRADE_INVENTORY: Inventory = Inventory {
+    id_key: 0x49,
+    slot: 0x79,
+    width: 12,
+    height: 5,
+    flags: 0x40,
+};
+/// `TradeState.unk_c` for the player who asked (capture: `0x31`) and, verified in game, for the
 /// target: bit 1 set and bit 0 clear is what the client's invite popup tests (`0x1402c3cb0`).
 const TRADE_FLAGS_REQUESTER: u8 = 0x31;
 const TRADE_FLAGS_TARGET: u8 = 0x32;
@@ -75,6 +88,7 @@ pub struct Person {
 /// A message for a session to write to its client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SocialOut {
+    AddInventory(AddInventory),
     Entry(SocialEntry),
     Removed(SocialRemove),
     PartyUpdate(PartyUpdate),
@@ -89,6 +103,7 @@ impl SocialOut {
     /// The packet: opcode and body.
     pub fn encode(&self, table: &OpcodeTable) -> Result<Vec<u8>, poe_proto::ProtocolError> {
         match self {
+            Self::AddInventory(m) => table.encode(m),
             Self::Entry(m) => table.encode(m),
             Self::Removed(m) => table.encode(m),
             Self::PartyUpdate(m) => table.encode(m),
@@ -247,7 +262,7 @@ impl Social {
             st.party_update(id, &leader, &everyone, &leader, 0),
         ));
         st.send(&a, to_leader);
-        // The invitee (UNVERIFIED, never captured): the leader's entry, so the client can name
+        // The invitee (never captured, verified in game): the leader's entry, so the client can name
         // the leader, then the party with itself as an invited member.
         st.send(
             &b,
@@ -320,20 +335,33 @@ impl Social {
                 unk_e: TRADE_UNK_E,
             })
         };
-        st.send(&a, vec![state(&requester, &other, TRADE_FLAGS_REQUESTER)]);
-        // The target (UNVERIFIED): the requester's entry (the popup looks the name up in the
-        // social list) and the state with the "incoming" flag.
-        st.send(
-            &b,
-            vec![
-                SocialOut::Entry(entry(&requester, false)),
-                state(&other, &requester, TRADE_FLAGS_TARGET),
-            ],
-        );
+        // The trade-window inventories come first (capture), for both sides.
+        let inventories = |viewer: &Person| {
+            TRADE_INVENTORY_IDS.map(|id| {
+                SocialOut::AddInventory(AddInventory {
+                    unk_10: 1,
+                    local_index: viewer.local_index,
+                    inventory_id: id,
+                    inventory: TRADE_INVENTORY,
+                })
+            })
+        };
+        let mut for_a = inventories(&requester).to_vec();
+        for_a.push(state(&requester, &other, TRADE_FLAGS_REQUESTER));
+        st.send(&a, for_a);
+        // The target (verified in game): the requester's entry (the popup looks the name up in the
+        // social list), the inventories and the state with the "incoming" flag.
+        let mut for_b = vec![SocialOut::Entry(entry(&requester, false))];
+        for_b.extend(inventories(&other));
+        for_b.push(state(&other, &requester, TRADE_FLAGS_TARGET));
+        st.send(&b, for_b);
         Ok(())
     }
 
-    /// `TradeCancel`: either side cancels the trade `trade`.
+    /// `TradeCancel`: either side cancels the trade `trade`. A cancel for a trade that is
+    /// already closed is ignored without a chat line: the invitee's client sends its own
+    /// `TradeCancel` when its popup is closed by the `TradeAck` of the requester's cancel (seen
+    /// in the WP C3 in-game check, 0.25 s later).
     pub fn trade_cancel(&self, from: &str, trade: u32) -> Result<(), String> {
         let mut st = self.state.lock().unwrap();
         let a = from.to_lowercase();
@@ -342,7 +370,7 @@ impl Social {
             .iter()
             .position(|t| t.id == trade && (t.requester == a || t.target == a))
         else {
-            return Err("There is no such trade.".into());
+            return Ok(());
         };
         let t = st.trades.remove(pos);
         let other = if t.requester == a {
@@ -437,7 +465,7 @@ impl State {
                 }));
             }
             self.send(a, out);
-            // The invitee (UNVERIFIED): the party is over for it.
+            // The invitee (verified in game): the party is over for it.
             self.send(
                 b,
                 vec![SocialOut::PartyEnded(PartyEnded {
@@ -755,18 +783,28 @@ mod tests {
         let (social, mut a, mut b) = two();
         // Alice asks the player behind entity 12002 (Bob).
         social.trade_request("Local1", 12002).unwrap();
+        // The two trade-window inventories first (the capture's bytes), then the state.
+        let inv1 = official("AddInventory", "01010000000149790c054000");
+        let inv2 = official("AddInventory", "01010000000249790c054000");
         assert_eq!(
             drain(&mut a),
-            vec![official(
-                "TradeState",
-                "01000000010000000200000001310007506c6179657231ffffffff006a"
-            )]
+            vec![
+                inv1.clone(),
+                inv2.clone(),
+                official(
+                    "TradeState",
+                    "01000000010000000200000001310007506c6179657231ffffffff006a"
+                )
+            ]
         );
-        // Bob: Alice's entry, then the state with the incoming flag (0x32) and Alice's name.
+        // Bob: Alice's entry, the inventories (the client throws "Invalid inventory id" while
+        // it builds the trade window without them), then the state with the incoming flag
+        // (0x32) and Alice's name.
         let sent = drain(&mut b);
-        assert_eq!(sent.len(), 2);
+        assert_eq!(sent.len(), 4);
+        assert_eq!(&sent[1..3], &[inv1, inv2]);
         assert_eq!(
-            sent[1],
+            sent[3],
             official(
                 "TradeState",
                 "010000000100000002000000013200064c6f63616c31ffffffff006a"
@@ -792,7 +830,10 @@ mod tests {
                 official("TradeEvent", "010100000001"),
             ]
         );
-        assert!(social.trade_cancel("Local1", 1).is_err(), "already closed");
+        // A second cancel (the invitee's client answers the closed popup with its own) is
+        // ignored: no error, nothing sent.
+        assert!(social.trade_cancel("Player1", 1).is_ok());
+        assert!(drain(&mut a).is_empty() && drain(&mut b).is_empty());
 
         // The target can cancel as well.
         social.trade_request("Local1", 12002).unwrap();
