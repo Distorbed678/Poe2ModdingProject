@@ -8,7 +8,8 @@
 #
 # The game rule matches every Proton window of app 2694490, including the
 # official game started from Steam. Turn the rules off before playing or
-# recording an official capture.
+# recording an official capture, or to type into a test client yourself (the
+# windows never take focus while the rules are on).
 #
 # Web UI checks in a visible browser use a separate Firefox instance:
 #   firefox --new-instance --name poe-agent-browser --class poe-agent-browser \
@@ -80,6 +81,10 @@ case "${1:-status}" in
       "${w[@]}" --key fsplevelrule 2
       "${w[@]}" --key fpplevel 4            # focus protection: extreme
       "${w[@]}" --key fpplevelrule 2
+      # Never accept focus: a window that activates itself would otherwise make KWin switch
+      # the view to this desktop. Tests drive the client through poe-hook.keys (fake focus).
+      "${w[@]}" --key acceptfocus false
+      "${w[@]}" --key acceptfocusrule 2
       list="${list:+$list,}$key"
     done
     set_rule_list "$list"
