@@ -4,3 +4,6 @@
 [submodule "modules/client-hook"]
 	path = modules/client-hook
 	url = https://github.com/Distorbed678/Poe2ClientHook.git
+[submodule "modules/web-admin"]
+	path = modules/web-admin
+	url = https://github.com/Distorbed678/Poe2WebAdmin.git

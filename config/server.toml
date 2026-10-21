@@ -88,7 +88,7 @@ audit_log = "runtime/admin-audit.log"
 enabled = true
 bind = "127.0.0.1:8080"
 # Directory with the built web admin (served at / with an index.html fallback). Empty = none.
-static_dir = ""
+static_dir = "modules/web-admin/dist"
 # Browser origins allowed to call the API, e.g. ["http://localhost:5173"] for the Vite dev server.
 cors_origins = []
 # Recent log events kept for the live log viewer.

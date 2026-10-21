@@ -1,6 +1,6 @@
 # Web API
 
-The server's HTTP and WebSocket API, for the web admin site (Poe2WebAdmin, WP4.2) and the launcher (WP5.1). It is the crate `crates/poe-web-api` (axum 0.8), started by `poe-server` next to the login and instance servers. The machine-readable description is [openapi.json](openapi.json), generated from the code (`cargo xtask openapi`) and also served live at `GET /api/v1/openapi.json`.
+The server's HTTP and WebSocket API, for the web admin site ([Poe2WebAdmin](#the-web-admin-spa)) and the launcher (WP5.1). It is the crate `crates/poe-web-api` (axum 0.8), started by `poe-server` next to the login and instance servers. The machine-readable description is [openapi.json](openapi.json), generated from the code (`cargo xtask openapi`) and also served live at `GET /api/v1/openapi.json`.
 
 Related: accounts, tokens and hashing in [accounts.md](accounts.md); the commands the admin endpoints run in [../guides/server-admin.md](../guides/server-admin.md); the plan in [../plans/orchestration-2026-10.md](../plans/orchestration-2026-10.md) (phase 4).
 
@@ -95,7 +95,25 @@ Protocol (JSON text frames), after the upgrade:
 
 ## Serving the web admin
 
-With `[web] static_dir` set to the SPA build (`Poe2WebAdmin/dist`), the same port serves it: files as they are, any unknown non-API path as `index.html`. Unknown `/api/v1/...` paths stay JSON `404`s. During SPA development run Vite on its own port and put its origin in `cors_origins`.
+With `[web] static_dir` set to the SPA build (`modules/web-admin/dist`), the same port serves it: files as they are, any unknown non-API path as `index.html`. Unknown `/api/v1/...` paths stay JSON `404`s. During SPA development run Vite on its own port; its dev server proxies `/api` (and the log WebSocket) to `[web] bind`, so `cors_origins` is only needed when the page calls the API cross-origin.
+
+## The web admin SPA
+
+Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the submodule `modules/web-admin`. Svelte 5 + Vite + TypeScript, plain CSS (dark by default, light by `prefers-color-scheme`). Build and run: [../guides/server-admin.md](../guides/server-admin.md#web-admin); the repo's own README covers development.
+
+| Page (hash route) | Uses |
+|---|---|
+| Login | `POST /login` with `kind: "web"`; accounts that are not admins are refused and their token revoked |
+| `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s |
+| `#/logs` | `GET /admin/logs/ws?token=...`: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
+| `#/sessions` | `GET /admin/sessions`; kick, mute (minutes or until unmuted), unmute, transfer (instance id or area/seed/topology/orientation) |
+| `#/instances` | `GET /admin/instances`; close, create |
+| `#/accounts` | `GET /admin/accounts`; role change, disable and enable |
+| `#/characters`, `#/characters/{id}` | `GET /admin/characters[?account=]`, `/admin/characters/{id}` |
+| Announce (top bar dialog) | `POST /admin/announce` |
+| `#/inventory`, `#/passives` | stubs ("waiting for the inventory work"), only when built with `VITE_FEATURE_INVENTORY` / `VITE_FEATURE_PASSIVES` = `true` |
+
+Close, kick, disable and role changes ask for confirmation. The bearer token is kept in `sessionStorage` (tab-lifetime, never `localStorage`); a `401` from any call other than login clears it and shows the login page. The TypeScript types (`src/lib/api/schema.d.ts`) are generated from [openapi.json](openapi.json) with `npm run gen:api` in the SPA repo: after `cargo xtask openapi` changes the spec, regenerate, run `npm run check` and commit the result in Poe2WebAdmin, then bump the submodule here. CI in Poe2WebAdmin runs `npm ci`, `npm run check`, `npm test` and `npm run build`.
 
 ## Code map
 

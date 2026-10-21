@@ -4,7 +4,7 @@ A private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust and de
 
 ## How the repos fit together
 
-This repo holds the server. The shared protocol code and the client hook live in their own repos, included as git submodules. All repos are private, under `Distorbed678`.
+This repo holds the server. The shared protocol code, the client hook and the web admin live in their own repos, included as git submodules. All repos are private, under `Distorbed678`.
 
 | Repo | Where | Role |
 |---|---|---|
@@ -12,7 +12,7 @@ This repo holds the server. The shared protocol code and the client hook live in
 | [Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol) | `modules/protocol` | `poe-proto`, `poe-net` (codec and ciphers) and the opcode tables `opcodes/<version>/*.toml`, used by the server and the client hook |
 | [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) | `modules/client-hook` | The client DLLs (`version.dll` loader, hot-reloadable debug core with the in-game overlay) and `poe-hook-deploy`; carries Poe2Protocol as a nested submodule |
 | Poe2Launcher | planned | Player launcher: installs 0.5.5e, logs in, deploys the hook, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)) |
-| Poe2WebAdmin | planned | Web admin site on top of the server's web API ([docs/architecture/web-api.md](docs/architecture/web-api.md)) |
+| [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API; build it and set `[web] static_dir = "modules/web-admin/dist"` ([docs/guides/server-admin.md](docs/guides/server-admin.md#web-admin)) |
 
 Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (server data and logs, git-ignored), `dumps/` (datamined outputs, git-ignored; [dumps/README.md](dumps/README.md)), `GameFiles/` (your copy of the 0.5.5e client, never in git). Every crate and server: [docs/architecture/crates.md](docs/architecture/crates.md).
 
@@ -56,7 +56,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `█████████░ 90%` | 4/5 |
 | [Launcher](#launcher) | `░░░░░░░░░░ 0%` | 0/5 |
-| [Web Admin](#web-admin) | `███████░░░ 67%` | 4/6 |
+| [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `█████░░░░░ 50%` | 2/5 |
 
 ✅ done · 🟡 partial · ❌ missing · ⬜ planned. Progress counts done as 1 and partial as 0.5.
@@ -211,10 +211,12 @@ Docs: [docs/architecture/web-api.md](docs/architecture/web-api.md)
 |---|---|---|
 | ✅ | [Web API crate (axum, in poe-server)](docs/architecture/web-api.md) | WP4.1; register/login/password, tokens, 20 endpoints; tested with oneshot and a smoke run on shifted ports |
 | ✅ | [OpenAPI spec (utoipa) for the SPA and launcher types](docs/architecture/openapi.json) | docs/architecture/openapi.json, `cargo xtask openapi` |
-| ⬜ | [Poe2WebAdmin SPA (Svelte 5)](docs/plans/orchestration-2026-10.md) | WP4.2 |
-| ✅ | [Live log over WebSocket (ring buffer, level/target/text filter)](docs/architecture/web-api.md) | server side; the viewer page is WP4.2 |
-| ✅ | [Admin endpoints: sessions, instances, kick/mute/transfer/announce, accounts, characters](docs/architecture/web-api.md) | run the command registry via AdminControl; the pages are WP4.2 |
-| ⬜ | Instances, accounts and characters pages | WP4.2 |
+| ✅ | [Poe2WebAdmin SPA (Svelte 5 + Vite, submodule modules/web-admin)](docs/architecture/web-api.md#the-web-admin-spa) | WP4.2; login, dashboard, players, instances, accounts, characters, announce; typed from openapi.json; vitest + CI; served via `[web] static_dir` |
+| ✅ | [Live log over WebSocket (ring buffer, level/target/text filter)](docs/architecture/web-api.md) | server side |
+| ✅ | [Live log viewer page (filters, pause, autoscroll, reconnect)](docs/architecture/web-api.md#the-web-admin-spa) | WP4.2; 3000 lines in the DOM at most |
+| ✅ | [Admin endpoints: sessions, instances, kick/mute/transfer/announce, accounts, characters](docs/architecture/web-api.md) | run the command registry via AdminControl |
+| ✅ | [Players, instances, accounts and characters pages](docs/architecture/web-api.md#the-web-admin-spa) | WP4.2; kick/mute/transfer, close/create, role/disable, character detail, announce dialog; confirmations on destructive actions |
+| ⬜ | [Inventory and passive-tree panels](docs/architecture/web-api.md#the-web-admin-spa) | stubs behind VITE_FEATURE_INVENTORY / VITE_FEATURE_PASSIVES; waiting for the inventory work and server endpoints |
 
 ### Modding
 

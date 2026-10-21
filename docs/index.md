@@ -6,7 +6,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | Document | Contents |
 |---|---|
 | [guides/setup.md](guides/setup.md) | Commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, official read-only sessions, crash dumps |
-| [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat |
+| [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
 | [guides/hosting.md](guides/hosting.md) | What blocks remote players and the same-machine dependencies; suggested order |
 | [guides/launcher.md](guides/launcher.md) | The planned player launcher |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (planned and existing) |
@@ -19,7 +19,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [architecture/client-dll.md](architecture/client-dll.md) | The client DLLs: loader, hot-reloadable core, overlay, packet capture, modes (read-only), features |
 | [architecture/accounts.md](architecture/accounts.md) | Account model today and planned |
 | [architecture/instance-world.md](architecture/instance-world.md) | Instance directory, per-connection simulation today, the shared-world plan |
-| [architecture/web-api.md](architecture/web-api.md) | The web API (accounts, admin endpoints, live log, OpenAPI) and the planned admin site |
+| [architecture/web-api.md](architecture/web-api.md) | The web API (accounts, admin endpoints, live log, OpenAPI) and the web admin SPA (modules/web-admin) |
 
 ## Protocol (client 0.5.5e)
 | Document | Contents |

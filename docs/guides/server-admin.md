@@ -44,6 +44,23 @@ ones.
 
 The same commands are available over HTTP for the web admin site: `kick`, `mute`/`unmute`, `announce`, instance create/close, player transfer and the `account` actions are endpoints of `poe-web-api` that run the registry command as the logged-in web admin (role checked at the time, audit lines tagged `<admin> (web)`, passwords redacted). Endpoints, authentication and the live log: [../architecture/web-api.md](../architecture/web-api.md). Setup in short: make an admin offline (below), start `poe-server`, `POST /api/v1/login` on `[web] bind` (default `127.0.0.1:8080`), and send the token as `Authorization: Bearer`. `[accounts] open_registration = true` lets `POST /api/v1/register` create player accounts; server commands always can.
 
+## Web admin
+
+A browser UI for the same commands: dashboard, live logs, players online (kick, mute, transfer), instances, accounts, characters and an announce dialog. It is the Svelte app in the submodule `modules/web-admin` (repo Poe2WebAdmin); how it is built is in [../architecture/web-api.md](../architecture/web-api.md#the-web-admin-spa).
+
+1. Build it once (Node 22 and npm; `git submodule update --init modules/web-admin` if the folder is empty):
+   ```sh
+   cd modules/web-admin && npm ci && npm run build
+   ```
+2. Point the server at the build in `config/server.toml` and restart `poe-server`:
+   ```toml
+   [web]
+   static_dir = "modules/web-admin/dist"
+   ```
+3. Make an admin offline if you have none (`account create` and `account role <name> admin`, below), then open <http://127.0.0.1:8080> (the `[web] bind` address) and sign in. Only accounts with the `admin` role get in; the session lasts 12 hours.
+
+The log page shows what the server's `[logging] filter` lets through (to see `debug` events, enable them there). For development run `npm run dev` in `modules/web-admin` (port 5173, proxies `/api` to `[web] bind`).
+
 ## Accounts
 
 Admins are accounts with the `admin` role; there is no admin list in the config. Model, hashing and tokens: [../architecture/accounts.md](../architecture/accounts.md).

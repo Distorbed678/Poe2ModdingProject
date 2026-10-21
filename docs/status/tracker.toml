@@ -430,27 +430,40 @@ note = "docs/architecture/openapi.json, `cargo xtask openapi`"
 link = "docs/architecture/openapi.json"
 
 [[subsystem.item]]
-name = "Poe2WebAdmin SPA (Svelte 5)"
-status = "planned"
-note = "WP4.2"
-link = "docs/plans/orchestration-2026-10.md"
+name = "Poe2WebAdmin SPA (Svelte 5 + Vite, submodule modules/web-admin)"
+status = "done"
+note = "WP4.2; login, dashboard, players, instances, accounts, characters, announce; typed from openapi.json; vitest + CI; served via `[web] static_dir`"
+link = "docs/architecture/web-api.md#the-web-admin-spa"
 
 [[subsystem.item]]
 name = "Live log over WebSocket (ring buffer, level/target/text filter)"
 status = "done"
-note = "server side; the viewer page is WP4.2"
+note = "server side"
 link = "docs/architecture/web-api.md"
+
+[[subsystem.item]]
+name = "Live log viewer page (filters, pause, autoscroll, reconnect)"
+status = "done"
+note = "WP4.2; 3000 lines in the DOM at most"
+link = "docs/architecture/web-api.md#the-web-admin-spa"
 
 [[subsystem.item]]
 name = "Admin endpoints: sessions, instances, kick/mute/transfer/announce, accounts, characters"
 status = "done"
-note = "run the command registry via AdminControl; the pages are WP4.2"
+note = "run the command registry via AdminControl"
 link = "docs/architecture/web-api.md"
 
 [[subsystem.item]]
-name = "Instances, accounts and characters pages"
+name = "Players, instances, accounts and characters pages"
+status = "done"
+note = "WP4.2; kick/mute/transfer, close/create, role/disable, character detail, announce dialog; confirmations on destructive actions"
+link = "docs/architecture/web-api.md#the-web-admin-spa"
+
+[[subsystem.item]]
+name = "Inventory and passive-tree panels"
 status = "planned"
-note = "WP4.2"
+note = "stubs behind VITE_FEATURE_INVENTORY / VITE_FEATURE_PASSIVES; waiting for the inventory work and server endpoints"
+link = "docs/architecture/web-api.md#the-web-admin-spa"
 
 # ---------------------------------------------------------------------------------------------
 
