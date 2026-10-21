@@ -196,6 +196,7 @@ A client with `login_mode = "standalone"` must not be pointed at an official ser
 | `position_sync` | on | Reports the player's position and actions to the instance server every frame (see [Side channel](#side-channel)). Never while read-only. |
 | `position_sync_port` | 0 | The instance server's port; only connections to it become the side-channel target (0: the last trusted connection). `deploy-client` sets it from `server.toml`. |
 | `movement_log` | off | Per-frame movement log (see [Movement log](#movement-log)). |
+| `path_log` | off | One `PATHPLAN` line per path the client plans for the local player (goal, start, search parameters, pathing level, waypoints); also `POE_HOOK_PATH_LOG=1`. Hooks the pathfinder (signature `path_plan`, read-only), [../re/pathfinding.md](../re/pathfinding.md). |
 | `trace_addresses` | `[]` | "Logging breakpoints": Ghidra addresses whose calls are logged with the argument registers and the game call stack (`trace_calls`, up to `trace_limit` hits each). The `POE_HOOK_TRACE` environment variable (comma-separated) adds addresses without editing `GameFiles/`. Hook only at function starts or instruction boundaries that `ilhook` can relocate: a bad spot crashes the client (it did at `0x140ece810`). |
 | `auto_keys` | `[]` | Test input timeline `[[ms, vk], ...]`; tests pass `POE_HOOK_AUTO_KEYS="20000:13"` instead (`scripts/test-run.sh`). `deploy-client` resets it to `[]`. Never while read-only. |
 

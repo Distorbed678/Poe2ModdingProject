@@ -22,7 +22,7 @@
 //! 4. the `MoveAck` for a direction change or the sprint stream (one per frame),
 //! 5. the sprint end, if the key was released.
 
-use crate::movement::{Motion, Mover, Walkable};
+use crate::movement::{Motion, Mover, Pathfinder, Walkable};
 
 pub type Cell = (i32, i32);
 
@@ -87,6 +87,11 @@ pub struct SprintConfig {
     /// Direction vectors in sprint replies are the input scaled to this length and truncated
     /// toward zero (official: 550; measured on 294 of 309 replies, the rest lag one input).
     pub dir_length: i32,
+    /// Clearance level of the entity's path searches from the end of the roll until the sprint
+    /// ends: the client sets the entity's size to the class' `Positioned.secondary_object_size`
+    /// (4) then, so cells whose grid value is at most that count as walls and the sprint
+    /// keeps 5 to 10 cells off walls (`docs/re/pathfinding.md`).
+    pub clearance_level: i32,
     /// `base_move_speed_+%_from_sprint`.
     pub move_speed_percent: i32,
     /// `movement_velocity_+permyriad`.
@@ -129,6 +134,8 @@ pub struct MovementConfig {
     pub click: ClickConfig,
     /// Characters' walking speed, cells per second.
     pub walk_speed: f32,
+    /// Which pathfinder plans walks, rolls and sprints.
+    pub pathfinder: Pathfinder,
     /// Frames between the client entering aim mode (`AimMode(1)`) at entry and the stance
     /// change.
     pub stance_delay_frames: u32,
@@ -162,6 +169,7 @@ impl MovementConfig {
                 must_sprint_end_frames: 35,
                 speed_scale: 1.5,
                 dir_length: 550,
+                clearance_level: 4,
                 move_speed_percent: 50,
                 velocity_permyriad: 5000,
                 blend_time_override_ms: 1,
@@ -173,6 +181,7 @@ impl MovementConfig {
                 cursor_match_degrees: 10.0,
             },
             walk_speed: 37.0,
+            pathfinder: Pathfinder::Client,
             stance_delay_frames: 9,
             stance_toggle_frames: 0,
         }
@@ -621,7 +630,13 @@ impl Locomotion {
     /// One server frame; see the module docs for the order.
     pub fn tick(&mut self, ctx: &mut StepCtx) -> Vec<MoveEvent> {
         let mut out = Vec::new();
-        // 1. Move.
+        // 1. Move. The client's pathing size grows while the sprint runs after the roll.
+        self.mover.pathfinder = ctx.config.pathfinder;
+        self.mover.level = if matches!(self.state, MoveState::Sprinting(_)) {
+            ctx.config.sprint.clearance_level
+        } else {
+            0
+        };
         self.mover.advance(ctx.dt, ctx.terrain);
         if matches!(self.state, MoveState::Walking(Walk::Target { .. })) && !self.mover.is_moving()
         {
@@ -2734,7 +2749,9 @@ mod tests {
         assert!((total + 1.309 - 19.95).abs() < 0.5, "{total}");
         // Along the cursor direction, and over: no message, idle.
         let d = (r.loco.position().0 - start.0, r.loco.position().1 - start.1);
-        assert!((d.0 / total - 100.0 / 180.03).abs() < 0.01);
+        // The client's line goes to a whole goal cell (floor(vector * 0.092) away), so the coast is
+        // up to two degrees off the cursor direction.
+        assert!((d.0 / total - 100.0 / 180.03).abs() < 0.03, "{}", d.0 / total);
         assert_eq!(r.loco.state(), &MoveState::Idle);
         assert!(r.run(5).is_empty());
     }
@@ -2824,7 +2841,9 @@ mod tests {
             // The coast of the client: 19.95 cells less the step the batch's frame makes.
             assert!((total - 19.95).abs() < 0.8, "{zero_at:?}: {total}");
             let d = (r.loco.position().0 - start.0, r.loco.position().1 - start.1);
-            assert!((d.0 - d.1).abs() < 0.05 && d.0 > 10.0, "{zero_at:?}: {d:?}");
+            // The coast runs on towards the plan's goal cell, so it can be a degree or two off the
+            // exact diagonal.
+            assert!((d.0 - d.1).abs() < 0.6 && d.0 > 10.0, "{zero_at:?}: {d:?}");
             assert_eq!(r.loco.state(), &MoveState::Idle);
         }
     }

@@ -58,6 +58,8 @@ SIGS = [
     dict(name="object_type_lookup", addr=0x1416936C0, kind="ref", anchor="sim_frame_processor",
          features=DUMP, expect_fn=True, note="a clone-like function: found by its unique caller"),
     dict(name="read_initial_state", addr=0x141E71120, features=DUMP),
+    dict(name="path_plan", addr=0x141ED0390, features=["path_log"],
+         note="grid pathfinder (JPS-style search, A* fallback): (goal*, entity, params*, ..., out path*, out count*, ...); hooked by path_log to log the player's plans"),
     dict(name="entity_destroy", addr=0x141E71620, features=DUMP),
     dict(name="actor_sim_handler", addr=0x142149640, features=["position_sync", "inspect"],
          note="Actor component simulation handler (0x64 WASD, 0x1c8 start action, ...)"),

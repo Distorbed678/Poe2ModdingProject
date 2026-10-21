@@ -1218,7 +1218,19 @@ impl InstanceServer {
             .find(|(k, _)| k == "sprint_movement_speed_+%")
             .and_then(|(_, v)| v.parse::<f32>().ok());
         let roll_action = poe_data::views::action_type_key(&self.data, "DodgeRoll")?;
-        let movement = player::sim_config(
+        // The client grows the entity's pathing size to the larger of `object_size` and
+        // `secondary_object_size` (4) from the end of a roll until the sprint ends.
+        let size = |key: &str| {
+            template
+                .component("Positioned")
+                .iter()
+                .find(|(k, _)| k == key)
+                .and_then(|(_, v)| v.parse::<i32>().ok())
+        };
+        let sprint_clearance = size("object_size")
+            .unwrap_or(0)
+            .max(size("secondary_object_size").unwrap_or(0));
+        let mut movement = player::sim_config(
             &self.config.movement,
             &skills,
             move_skill,
@@ -1226,6 +1238,7 @@ impl InstanceServer {
             speed,
             sprint_bonus,
         );
+        movement.sprint.clearance_level = sprint_clearance;
         Ok(PlayerSetup { skills, speed, movement })
     }
 

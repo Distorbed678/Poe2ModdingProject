@@ -7,11 +7,13 @@
 //! client's, the client snaps to it. So the server has to simulate the same movement: same
 //! speed, same frames, same obstacles.
 //!
-//! The client walks along paths from its pathfinder, for clicks and for WASD (whose target is
-//! the position plus the input vector, in cells). This follows paths from
-//! [`crate::pathfinding`], an approximation: it matches the client in the open and can drift
-//! near walls until the server has an exact port of the client's pathfinder.
+//! The client walks along paths from its pathfinder, for clicks, WASD (whose target is the
+//! position plus `floor(input vector * 0.092)` cells), rolls and sprints, and plans again every
+//! couple of frames. [`Pathfinder::Client`] follows paths from [`crate::clientpath`], a port of
+//! that search; [`Pathfinder::Approx`] keeps the older approximation of [`crate::pathfinding`]
+//! (A* plus wall sliding), which matches the client in the open and drifts near walls.
 
+use crate::clientpath::{self, Params};
 use crate::pathfinding::find_path;
 
 /// Which grid cells an entity can stand on.
@@ -22,6 +24,18 @@ pub trait Walkable {
     /// find which way a wall runs.
     fn clearance(&self, x: i32, y: i32) -> u8 {
         self.walkable(x, y) as u8
+    }
+
+    /// The client's 4-bit cell value of layer 0 (0 wall, 1..4 near a wall, 5 clear), which the
+    /// client's pathfinder compares with the entity's clearance level. Terrain without such
+    /// values has walls (0) and clear cells (5).
+    fn nibble(&self, x: i32, y: i32) -> u8 {
+        if self.walkable(x, y) { 5 } else { 0 }
+    }
+
+    /// Size of the terrain in cells, if it has one (cells outside are walls).
+    fn bounds(&self) -> Option<(i32, i32)> {
+        None
     }
 }
 
@@ -122,6 +136,28 @@ pub fn roll_speed(t: f32, sprint: bool) -> f32 {
     roll_step(roll_frame(t), sprint) / ROLL_FRAME
 }
 
+/// Which pathfinder plans the walks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pathfinder {
+    /// The port of the client's own search ([`crate::clientpath`]).
+    #[default]
+    Client,
+    /// A* with line-of-sight smoothing and wall sliding ([`crate::pathfinding`]).
+    Approx,
+}
+
+/// The client re-aims a WASD walk every 0.05 s while a key is held (player entities; `0.25` for
+/// others): with 33 ms frames that is every second frame.
+const AIM_PERIOD: f32 = 0.05;
+/// A WASD or sprint vector turns into a goal this many cells per input unit away
+/// (`floor(v * 0.092)`).
+const GOAL_PER_UNIT: f32 = 0.092;
+/// Length of the sprint stream's direction (the `0x64` the client plans from).
+const SPRINT_VECTOR_LENGTH: f32 = 550.0;
+/// The search window reaches 136 cells; farther goals are pulled in to this length.
+const GOAL_LIMIT_SQ: i32 = 0x4840;
+const GOAL_CLAMP: f32 = 126.0;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mover {
     /// Position in grid cells (cell centre = integer + 0.5).
@@ -137,6 +173,21 @@ pub struct Mover {
     /// Frames the entity stands still before the motion starts (the client's gap between a
     /// message that ends or restarts its walk and the first step).
     delay: u32,
+    /// Which pathfinder plans the walks.
+    pub pathfinder: Pathfinder,
+    /// Clearance level of the entity's path searches: cells with a grid value up to this are
+    /// walls (0: only the walls themselves; 4 while it sprints after a roll).
+    pub level: i32,
+    /// Seconds until a held WASD walk is aimed again.
+    aim_timer: f32,
+    /// The cell the client's current line started from: the client's own cell (the one its plans
+    /// start from) steps along its line a whole cell behind the position, see
+    /// [`Mover::planning_cell`].
+    line_start: (i32, i32),
+    /// Direction of the last step along a plan: the client's entity carries on in it when its
+    /// walk ends (the coast after a sprint) and stops at the first wall.
+    last_dir: Option<(f32, f32)>,
+    coast_dir: Option<(f32, f32)>,
 }
 
 /// Cells the pathfinder may expand per plan.
@@ -158,15 +209,28 @@ impl Mover {
             path: Vec::new(),
             replan_in: 0,
             delay: 0,
+            pathfinder: Pathfinder::Client,
+            level: 0,
+            aim_timer: 0.0,
+            line_start: (x, y),
+            last_dir: None,
+            coast_dir: None,
         }
     }
 
     /// Starts a motion (plans walks on the next frame).
     pub fn start(&mut self, motion: Motion) {
+        // A coast carries on in the direction of the last step of the walk it follows.
+        self.coast_dir = if matches!(motion, Motion::Coast { .. }) {
+            self.last_dir
+        } else {
+            None
+        };
         self.motion = motion;
         self.path.clear();
         self.replan_in = 0;
         self.delay = 0;
+        self.aim_timer = 0.0;
     }
 
     /// Starts a motion that first stands still for `frames` frames.
@@ -196,6 +260,7 @@ impl Mover {
     pub fn place(&mut self, (x, y): (i32, i32)) {
         self.x = x as f32 + 0.5;
         self.y = y as f32 + 0.5;
+        self.line_start = (x, y);
         self.start(Motion::Idle);
     }
 
@@ -225,6 +290,23 @@ impl Mover {
             } => {
                 let len = step - decay * frame as f32;
                 match unit(x, y) {
+                    Some(_) if len > 0.0 && self.coast_dir.is_some() => {
+                        let (ux, uy) = self.coast_dir.unwrap();
+                        let (nx, ny) = (self.x + ux * len, self.y + uy * len);
+                        self.motion = if terrain.walkable(nx.floor() as i32, ny.floor() as i32) {
+                            self.x = nx;
+                            self.y = ny;
+                            Motion::Coast {
+                                x,
+                                y,
+                                step,
+                                decay,
+                                frame: frame + 1,
+                            }
+                        } else {
+                            Motion::Idle
+                        };
+                    }
                     Some((ux, uy)) if len > 0.0 => {
                         self.slide(ux, uy, len, terrain);
                         self.motion = Motion::Coast {
@@ -238,16 +320,42 @@ impl Mover {
                     _ => self.motion = Motion::Idle,
                 }
             }
-            Motion::Direction { x, y } => self.walk_towards(x, y, 1.0, dt, terrain),
-            Motion::Sprint { x, y, scale } => self.walk_towards(x, y, scale, dt, terrain),
+            Motion::Direction { x, y } => {
+                if self.pathfinder == Pathfinder::Client {
+                    self.walk_aimed(x, y, 1.0, dt, terrain, false);
+                } else {
+                    self.walk_towards(x, y, 1.0, dt, terrain);
+                }
+            }
+            Motion::Sprint { x, y, scale } => {
+                if self.pathfinder == Pathfinder::Client {
+                    self.walk_aimed(x, y, scale, dt, terrain, true);
+                } else {
+                    self.walk_towards(x, y, scale, dt, terrain);
+                }
+            }
             Motion::MoveTo { x, y } => {
                 if self.path.is_empty() && self.replan_in == 0 {
                     let goal = (x.floor() as i32, y.floor() as i32);
-                    self.path = find_path(terrain, self.cell(), goal, PATH_BUDGET);
+                    self.path = if self.pathfinder == Pathfinder::Client {
+                        self.waypoints_to(terrain, goal)
+                    } else {
+                        find_path(terrain, self.cell(), goal, PATH_BUDGET)
+                    };
                     // Plan once per click.
                     self.replan_in = u32::MAX;
                 }
                 if !self.follow(self.speed * dt) {
+                    // The client plans again where a plan ended short of the goal (a goal
+                    // beyond the search window, or inside a wall) and stops when that plan
+                    // has nowhere to go.
+                    let goal = (x.floor() as i32, y.floor() as i32);
+                    if self.pathfinder == Pathfinder::Client && self.cell() != goal {
+                        self.path = self.waypoints_to(terrain, goal);
+                        if !self.path.is_empty() {
+                            return;
+                        }
+                    }
                     self.start(Motion::Idle);
                 }
             }
@@ -260,6 +368,9 @@ impl Mover {
             } => {
                 let step = (roll_speed(elapsed, sprint) * dt).min(remaining);
                 let moved = match unit(x, y) {
+                    Some((ux, uy)) if self.pathfinder == Pathfinder::Client => {
+                        self.roll_planned(ux, uy, remaining, step, terrain)
+                    }
                     Some((ux, uy)) => self.slide(ux, uy, step, terrain),
                     None => 0.0,
                 };
@@ -347,6 +458,126 @@ impl Mover {
         self.follow(self.speed * scale * dt);
     }
 
+    /// The cell the client plans from. The client moves its cell along a digital line that
+    /// starts in the cell it was in when it last planned and advances a whole cell once the
+    /// position is a whole cell away from the line's start (the entity trails the cell of its
+    /// position by up to half a cell in the direction it moves; 66 % of 643 logged plans start
+    /// in exactly this cell against 45 % for the cell of the position). Where that cell is a
+    /// wall, the cell of the position or its free neighbour is used.
+    fn planning_cell(&self, terrain: &dyn Walkable) -> (i32, i32) {
+        let along = |p: f32, c0: i32| c0 + (p - 0.5 - c0 as f32).trunc() as i32;
+        let lagging = (along(self.x, self.line_start.0), along(self.y, self.line_start.1));
+        let blocked = |c: (i32, i32)| terrain.nibble(c.0, c.1) == 0;
+        if !blocked(lagging) {
+            return lagging;
+        }
+        let here = self.cell();
+        if !blocked(here) {
+            return here;
+        }
+        (-1..=1)
+            .flat_map(|dy| (-1..=1).map(move |dx| (here.0 + dx, here.1 + dy)))
+            .filter(|&c| !blocked(c))
+            .min_by(|a, b| {
+                let d = |c: (i32, i32)| (c.0 as f32 + 0.5 - self.x).powi(2) + (c.1 as f32 + 0.5 - self.y).powi(2);
+                d(*a).total_cmp(&d(*b))
+            })
+            .unwrap_or(here)
+    }
+
+    /// The client's plan from the entity's cell to `goal`.
+    fn plan_client(&mut self, terrain: &dyn Walkable, goal: (i32, i32)) -> clientpath::Plan {
+        let start = self.planning_cell(terrain);
+        // The next line starts from the cell of the position.
+        self.line_start = self.cell();
+        let (dx, dy) = (goal.0 as i64 - start.0 as i64, goal.1 as i64 - start.1 as i64);
+        // A goal beyond the search window is pulled in to 126 cells along the same line.
+        let goal = if dx * dx + dy * dy < GOAL_LIMIT_SQ as i64 {
+            goal
+        } else {
+            let k = GOAL_CLAMP / ((dx * dx + dy * dy) as f32).sqrt();
+            (
+                (start.0 as i64 + (dx as f32 * k + 0.5).floor() as i64) as i32,
+                (start.1 as i64 + (dy as f32 * k + 0.5).floor() as i64) as i32,
+            )
+        };
+        clientpath::plan(terrain, start, goal, self.level, &Params::default())
+    }
+
+    /// Waypoints of the client's plan from the entity's cell to `goal`, in walking order.
+    fn waypoints_to(&mut self, terrain: &dyn Walkable, goal: (i32, i32)) -> Vec<(i32, i32)> {
+        self.plan_client(terrain, goal).waypoints().collect()
+    }
+
+    /// WASD and sprint like the client: the goal is the cell plus `floor(vector * 0.092)`, planned
+    /// again every [`AIM_PERIOD`] (every frame while a sprint's `0x64` stream runs, and whenever
+    /// the walk has ended), and the entity walks the first legs of the plan.
+    fn walk_aimed(
+        &mut self,
+        x: f32,
+        y: f32,
+        scale: f32,
+        dt: f32,
+        terrain: &dyn Walkable,
+        sprint: bool,
+    ) {
+        if x == 0.0 && y == 0.0 {
+            self.motion = Motion::Idle;
+            return;
+        }
+        self.aim_timer -= dt;
+        if sprint || self.path.is_empty() || self.aim_timer <= 0.0 {
+            // The stream's direction has length 550, truncated toward zero.
+            let (vx, vy) = if sprint {
+                let len = ((x as f64).powi(2) + (y as f64).powi(2)).sqrt();
+                let k = SPRINT_VECTOR_LENGTH as f64 / len;
+                ((x as f64 * k) as i32 as f32, (y as f64 * k) as i32 as f32)
+            } else {
+                (x, y)
+            };
+            let cell = self.planning_cell(terrain);
+            let goal = (
+                cell.0 + (vx * GOAL_PER_UNIT).floor() as i32,
+                cell.1 + (vy * GOAL_PER_UNIT).floor() as i32,
+            );
+            self.path = self.waypoints_to(terrain, goal);
+            self.aim_timer = AIM_PERIOD;
+        }
+        self.follow(self.speed * scale * dt);
+    }
+
+    /// One frame of a roll towards `(ux, uy)` with `remaining` cells to go: plan to the point
+    /// that far ahead and walk `step` cells of the plan. Returns the distance moved.
+    fn roll_planned(
+        &mut self,
+        ux: f32,
+        uy: f32,
+        remaining: f32,
+        step: f32,
+        terrain: &dyn Walkable,
+    ) -> f32 {
+        let cell = self.planning_cell(terrain);
+        let ahead = remaining.min(GOAL_CLAMP);
+        let goal = (
+            cell.0 + (ux * ahead + 0.5).floor() as i32,
+            cell.1 + (uy * ahead + 0.5).floor() as i32,
+        );
+        let plan = self.plan_client(terrain, goal);
+        // Open ground: one straight leg to the goal (or the goal is this very cell). The roll
+        // then keeps its exact heading and distance (the goal cell's centre is up to half a cell
+        // off the ideal point).
+        if goal == cell || plan.reached && plan.path.len() == 2 {
+            self.x += ux * step;
+            self.y += uy * step;
+            return step;
+        }
+        self.path = plan.waypoints().collect();
+        let before = (self.x, self.y);
+        self.follow(step);
+        self.path.clear();
+        ((self.x - before.0).powi(2) + (self.y - before.1).powi(2)).sqrt()
+    }
+
     /// Walks `len` cells along the path (waypoints are cell centres). Returns whether there is
     /// path left.
     fn follow(&mut self, mut len: f32) -> bool {
@@ -357,6 +588,9 @@ impl Mover {
             let (tx, ty) = (wx as f32 + 0.5, wy as f32 + 0.5);
             let (dx, dy) = (tx - self.x, ty - self.y);
             let dist = (dx * dx + dy * dy).sqrt();
+            if dist > 1e-4 {
+                self.last_dir = Some((dx / dist, dy / dist));
+            }
             if dist <= len {
                 self.x = tx;
                 self.y = ty;

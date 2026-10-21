@@ -308,3 +308,26 @@ Details and decoded fields: [../protocol/login.md](../protocol/login.md). Names 
 | `0x140ed2ab0` | `CreateCharacterState_OnCharacterCreated` | create-screen callback: result 0 starts the creation scene, else `BackendError_GetText` into the message line `0x140ec96b0` |
 | `0x140ed8149` | | `0x000c` DeleteCharacter builder (name, `u8` from screen `+0x214`, `u32` account id from `+0x210`) |
 
+
+## Pathfinder (2026-10-21)
+Algorithm and evidence: [pathfinding.md](pathfinding.md). Signature `path_plan` (feature `path_log`) in `modules/client-hook/signatures/0.5.5e.toml`.
+
+| Address | Name | What |
+|---|---|---|
+| `0x141ed0390` | `Pathfinder_Plan` | the grid search (bounded jump point search, ellipse window of 272 x 272 cells, MSVC heap, line-of-sight thinning); `(goal*, entity, params*, ..., out path*, out count*, out flag*)`, hooked by `path_log` |
+| `0x141ece050` | | the A*-style fallback it calls when the main search is skipped (monsters/pets, or when its window test fails) |
+| `0x141ed28a0` / `0x141ed21b0` | | window setup: marks cells with dynamic obstacles (other entities) as walls |
+| `0x141ed2c70` | | classifies a window cell: 0 free, 1 wall (`level >= value`), 2 outside the terrain or the ellipse |
+| `0x141ed2f20` / `0x141ed3390` | | straight / diagonal jump with the jump limit `min(cap, 3 + 5 * alignment + 0.2 * excess)` |
+| `0x141ed2e30` | | whether the neighbour in a direction is a wall (forced-neighbour test) |
+| `0x141ecdef0` | | `h` of a cell: distance adjusted by min/max/radius plus `0.001 * |cross|` |
+| `0x141edc7f0` / `0x141edc560` | | the line-of-sight tests of the thinning passes (Bresenham over the grid) |
+| `0x141ed3760` | | whether a cell is walkable and not marked a wall in the window |
+| `0x141d0ddd0` | | reads a cell's 4-bit value of layer `n` (value 5 reads as 255) |
+| `0x141dc7b80` | | the entity's pathing level from Positioned `+0x1e8` (sizes `+0x1f8/+0x1f9`, extra bytes `+0x1fc..+0x200`) |
+| `0x141b76f90` / `0x141b77220` | | sprint/roll action start sets / end clears the larger pathing size (level 4 for characters) |
+| `0x142193120` | | world vector to cells: `floor(v * 0.092)` (cell = 250/23 = 10.87 world units) |
+| `0x141ec8520` / `0x141ec8b30` / `0x141ec8160` | | the client's own line (digital line) from cell to cell that trails the position by up to half a cell; steps it by the frame's distance |
+| `0x1419c5810` / `0x1419c56a0` / `0x1419c5900` | | open-list push / pop (MSVC `push_heap`/`pop_heap` on `f`) and the node array `0x1445d8920` (16-byte nodes, 0x110 x 0x110) |
+| `0x14212eb60`, vfunc `+0x1d8` | | world constructor; vfunc `+0x1d8` returns 2 for frame mode 2 (lockstep) |
+| `0x1421302c0` | | frame playback: speed factor 1.01 with one spare frame queued (the client's steady walking step is 1.2333 = 1.01 x 1.221; short steps when it waits for the next frame) |

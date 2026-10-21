@@ -21,7 +21,8 @@ One `World` per instance. It knows nothing about sockets, packets or opcodes: se
 | `locomotion.rs` | the movement component: `Locomotion`, `MoveInput`, `MoveEvent`, `MoveState`, `MovementConfig` |
 | `grid.rs` | `GridSource` (terrain for the simulation), `Grid` (the client's dump), `VecGrid` |
 | `movement.rs` | `Walkable`, `Mover` (advance, slide, roll speed profile, `Motion`) |
-| `pathfinding.rs` | A* (`find_path`) for click-to-move and WASD planning |
+| `clientpath.rs` | port of the client's own pathfinder (jump point search, level-dependent wall clearance, [../re/pathfinding.md](../re/pathfinding.md)); `Mover` plans walks, WASD, sprints and rolls with it (`[movement] pathfinder = "client"`) |
+| `pathfinding.rs` | the older A* (`find_path`) with line-of-sight smoothing, selected by `pathfinder = "approx"` |
 
 ### World
 ```rust

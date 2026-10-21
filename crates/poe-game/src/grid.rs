@@ -98,6 +98,10 @@ impl Walkable for VecGrid {
             && y < self.height
             && self.cells[(y * self.width + x) as usize]
     }
+
+    fn bounds(&self) -> Option<(i32, i32)> {
+        Some((self.width, self.height))
+    }
 }
 
 impl GridSource for VecGrid {
@@ -189,6 +193,14 @@ impl Walkable for Grid {
 
     fn clearance(&self, x: i32, y: i32) -> u8 {
         self.cell(0, x, y)
+    }
+
+    fn nibble(&self, x: i32, y: i32) -> u8 {
+        self.cell(0, x, y)
+    }
+
+    fn bounds(&self) -> Option<(i32, i32)> {
+        Some((self.cells_x, self.cells_y))
     }
 }
 

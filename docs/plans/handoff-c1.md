@@ -1,6 +1,6 @@
 # Handoff: WP C1 in-game drift checks (2026-10-21)
 
-**Status (fourth agent, Agents rules off): problem 1 (exactly diagonal cursor) is fixed and checked in game, see "Update, fourth agent" at the end; what is left is problem 5 (sprint ended with W held since before the roll) and the checks listed there.**
+**Status (movement-path agent, 2026-10-21): problem 1 (exactly diagonal cursor) and problem 2 (sprint towards a diagonal wall, the client's own pathfinding) are fixed and checked in game, see "Update, movement-path agent" at the end; what is left is problem 5 (sprint ended with W held since before the roll) and the checks listed there.**
 
 State: code and docs of WP C1 are committed as `c947a15` (movement gaps #11 and #12). Nothing has changed in the code since; `cargo build` passes. The in-game checks were stopped half-way (low usage). Client and server are stopped, the test prefix's `use_wasd_to_move` was never edited and is still `false`, the temporary server config (`runtime/server-c1.toml`) is deleted.
 
@@ -52,3 +52,11 @@ Code: `MoveInput::CursorDirection` (click mode = `0x63` trailer byte 2 is 1, map
 In game: exact diagonal Space-only sprint 20 -> 0.48 cells after the stop (click mode 4 runs, WASD mode 2 runs), free-angle 0.09-0.17 (4 + 2 runs), standing tap rolls 0.7-1.4 (roll tolerance). Table "Third part of the day" in movement.md. Timing finding: the client's `(0, 0)` comes in the same tick as the sprint-off batch; the "4-5 frames" were counted from the release.
 Not done: W pressed or released during a sprint (a combined key entry in the DLL is needed), problem 5, problem 2. A W press with the cursor within 10 degrees of W during a cursor sprint is taken for the cursor (rare, unverified).
 Probe used: a temporary `eprintln!` of the `0x63` trailer bytes (removed). Test method as in "How to run", plus `inmove:1000,300 wait:300 inmove:1280,300 wait:400 indown:0x20 0x20:1000 inup:0x20` from `teleport 612 462` for the diagonal (cursor straight up); the test prefix was left in `mouse_and_keyboard`, `use_wasd_to_move=false`.
+
+
+## Update, movement-path agent (2026-10-21, rules off): problems 2 and the 1 % speed note
+- **Walk speed: no deficit.** The client's steady step is 1.2333 (= 1.01 x 37 x 0.033, playback factor 1.01) with a short step every 9-12 frames; the mean per frame is 1.2210-1.2216 on both sides, `dt` is 0.033 in every frame, ticks are 33.00 ms. Nothing changed in the speed model; numbers in movement.md "Speeds".
+- **The client has its own pathfinder** (bounded jump point search, `0x141ed0390`, pathing level 4 = 5 cells of wall clearance while it sprints). Ported: `crates/poe-game/src/clientpath.rs`, used by `Mover` (`[movement] pathfinder = "client"`, `"approx"` keeps the old one). Docs: `docs/re/pathfinding.md`, movement.md "The client's pathfinder" (before/after drift table). Tests: `cargo test -p poe-game --test clientpath` (needs `dumps/0.5.5e/terrain/grids-keep/terrain_grid_1866332366.bin`; a copy of the `G1_1` grid, git-ignored) and the unit tests.
+- **DLL hook** `path_log` (client-hook submodule: `path_log.rs`, signature `path_plan`, `scripts/re/sig_spec_0.5.5e.py`), off by default: `POE_HOOK_PATH_LOG=1`. The submodule has uncommitted changes (commit and push inside it first, then bump the pointer).
+- How the in-game cases were run: `runcase`-style loop of `send_dev.py "teleport x y"`, key entries, then the `drift server=...` lines of `runtime/server-run.log`; area `G1_1` (grid 1866332366, free box around x 985..1110, y 600..740); WASD cases need `user_input_mode=wasd` in the test prefix while the client is closed, restored afterwards.
+- Open: dynamic obstacles (other entities) are not in the port; the one-waypoint deviation next to the start of a moving entity (5 of 541 plans); one standing roll against the diagonal wall in 4 runs ended 4.8 cells off (the other three 0.6).

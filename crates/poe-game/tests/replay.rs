@@ -489,9 +489,10 @@ fn walk_tap_roll_then_turn() {
 /// Roll with Space held while walking, WASD keys released with Space still down (the client
 /// sends the cursor direction, not zero), Space released. The client's walk ends with the sprint
 /// and it coasts 30 frames (about 18 cells) along the cursor direction before it stops
-/// (gap #11): from the sprint-off frame on the server stays within 3 cells of the client's own
-/// positions (2.6 at worst: the client's frame times jitter), against 18 for a server that
-/// stops at the `(0, 0)`.
+/// (gap #11): from the sprint-off frame on the server stays within 3.3 cells of the client's own
+/// positions (2.6 at worst with a straight coast, 3.0 now that the coast follows the last leg of
+/// the client's plan, which ends at a whole goal cell: the client's frame times jitter too),
+/// against 18 for a server that stops at the `(0, 0)`.
 #[test]
 fn sprint_wasd_released_then_space_up() {
     replay_tracked(
@@ -501,7 +502,7 @@ fn sprint_wasd_released_then_space_up() {
             start: 6,
             steer: ANY,
         },
-        Some(3.0),
+        Some(3.3),
     );
 }
 

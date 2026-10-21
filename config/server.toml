@@ -87,6 +87,9 @@ sprint_release_window_frames = 6
 # A key-shaped direction (axis or exact diagonal) after a sprint is the cursor's when the roll key's cursor
 # offset points within this many degrees of it (an exactly diagonal cursor sends the same vector as W).
 sprint_cursor_match_degrees = 10
+# Which search plans walks, rolls and sprints: "client" is a port of the client's own pathfinder
+# (docs/re/pathfinding.md), "approx" the older A* with wall sliding.
+pathfinder = "client"
 
 [dev]
 # Development and research tools; none are needed for normal play.

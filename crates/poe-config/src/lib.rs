@@ -675,6 +675,20 @@ pub struct MovementConfig {
     /// diagonal cursor sends the same vector as W.
     #[serde(default = "default_sprint_cursor_match_degrees")]
     pub sprint_cursor_match_degrees: f32,
+    /// Which search plans walks, rolls and sprints: `"client"` (default), a port of the client's
+    /// own pathfinder that keeps the server's positions where the client's are near walls
+    /// (docs/re/pathfinding.md), or `"approx"`, the older A* with wall sliding.
+    #[serde(default)]
+    pub pathfinder: Pathfinder,
+}
+
+/// `[movement] pathfinder`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Pathfinder {
+    #[default]
+    Client,
+    Approx,
 }
 
 impl Default for MovementConfig {
@@ -687,6 +701,7 @@ impl Default for MovementConfig {
             sprint_restart_delay_frames: default_sprint_restart_delay_frames(),
             sprint_release_window_frames: default_sprint_release_window_frames(),
             sprint_cursor_match_degrees: default_sprint_cursor_match_degrees(),
+            pathfinder: Pathfinder::default(),
         }
     }
 }

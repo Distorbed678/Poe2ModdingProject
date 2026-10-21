@@ -66,6 +66,10 @@ pub fn sim_config(
     cfg.sprint.restart_delay_frames = config.sprint_restart_delay_frames;
     cfg.sprint.release_window_frames = config.sprint_release_window_frames;
     cfg.sprint.cursor_match_degrees = config.sprint_cursor_match_degrees;
+    cfg.pathfinder = match config.pathfinder {
+        poe_config::Pathfinder::Client => poe_game::movement::Pathfinder::Client,
+        poe_config::Pathfinder::Approx => poe_game::movement::Pathfinder::Approx,
+    };
     cfg.roll.travel_distance = roll
         .and_then(|s| s.granted.constant_stat("dodge_roll_base_travel_distance"))
         .map_or(ROLL_DEFAULT_DISTANCE, |d| d as f32);
