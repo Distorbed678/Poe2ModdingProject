@@ -37,6 +37,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 |---|---|
 | [re/README.md](re/README.md) | How the client is analysed: Ghidra access, `scripts/re`, where findings go |
 | [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Ghidra addresses of functions and structures |
+| [re/update-compatibility.md](re/update-compatibility.md) | What breaks when GGG ships a new client build: ranked inventory (addresses, offsets, opcodes, layouts, data, versions), plus the proposed signature table and `versions/<ver>.toml` |
 | [re/standalone-login.md](re/standalone-login.md) | How the Steam exe picks the Steam vs email/password login (platform getter), the `0x0003` credentials packet, Remember Me tokens, the DLL patch to force standalone, and the fallback |
 | [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the HNC side channel, the DLL bypass |
 | [re/datamining.md](re/datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, the dumps folder |
