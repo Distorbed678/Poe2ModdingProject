@@ -44,13 +44,17 @@ ensure_desktop() {
   echo "$id"
 }
 
-rule_list() { kreadconfig6 --file "$RULES_FILE" --group General --key rules; }
+# Plasma 6 keeps the rule order in [General] Order (older: rules + count; KWin migrates them).
+rule_list() {
+  local order
+  order=$(kreadconfig6 --file "$RULES_FILE" --group General --key Order)
+  [[ -n "$order" ]] && echo "$order" || kreadconfig6 --file "$RULES_FILE" --group General --key rules
+}
 
 set_rule_list() {
-  local list="$1" n=0
-  [[ -n "$list" ]] && n=$(tr ',' '\n' <<<"$list" | grep -c .)
-  kwriteconfig6 --file "$RULES_FILE" --group General --key rules "$list"
-  kwriteconfig6 --file "$RULES_FILE" --group General --key count "$n"
+  kwriteconfig6 --file "$RULES_FILE" --group General --key Order "$1"
+  kwriteconfig6 --file "$RULES_FILE" --group General --key rules --delete
+  kwriteconfig6 --file "$RULES_FILE" --group General --key count --delete
 }
 
 without_ours() {
