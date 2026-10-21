@@ -28,20 +28,12 @@ jobs:
 
   server:
     name: Server workspace
-    # Skipped while the repository is private: this repo holds no deploy-key secrets, so the
-    # submodule checkout would fail on every push. It runs once the repositories are public.
-    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
+      # Path dependencies in modules/protocol and modules/client-hook (public repositories).
       - uses: actions/checkout@v4
-      # Path dependencies in modules/protocol and modules/client-hook. While those repositories
-      # are private each one is read with a read-only deploy key; once they are public the key
-      # inputs can be dropped (the action then uses plain https).
-      - uses: ./.github/actions/fetch-submodules
         with:
-          paths: modules/protocol modules/client-hook
-          protocol-key: ${{ secrets.PROTOCOL_DEPLOY_KEY }}
-          hook-key: ${{ secrets.HOOK_DEPLOY_KEY }}
+          submodules: true
       # The pinned nightly of rust-toolchain.toml (poe_data_tools needs nightly features).
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install --profile minimal

@@ -40,14 +40,6 @@ The Windows build can be cross-checked on Linux with the tool `third_party/fetch
 
 ## Secrets
 
-While the repositories are private, the workflow reads the three submodule repositories with read-only **deploy keys**, the same approach as the launcher's `ci.yml`. A deploy key can be added to one repository only, so each private repository has its own key pair; the *private* halves go into this repository's Actions secrets (Settings, Secrets and variables, Actions):
-
-| Secret | Holds the private key of | Used by |
-|---|---|---|
-| `PROTOCOL_DEPLOY_KEY` | the deploy key of `Poe2Protocol` | `build` (`modules/protocol`) |
-| `HOOK_DEPLOY_KEY` | the deploy key of `Poe2ClientHook` | `build` (`modules/client-hook`) |
-| `WEB_ADMIN_DEPLOY_KEY` | the deploy key of `Poe2WebAdmin` | `web-admin` (`modules/web-admin`) |
-
-The first two are the same keys the launcher repository stores under the same names (a key may be stored as a secret in several repositories, it is attached as a deploy key to one). The release step itself needs no secret: it uses the workflow's own `GITHUB_TOKEN` with `contents: write` for that job only. The composite action [`.github/actions/fetch-submodules`](../../.github/actions/fetch-submodules/action.yml) writes the keys to `~/.ssh` and rewrites the submodule URLs for the runner; a key that is empty is skipped and that submodule is fetched over plain https, so once the repositories are public (WP D3) the three `*-key:` lines in `release.yml` and the secrets can simply be deleted.
+The workflow needs **no secrets**. The four repositories are public, so `actions/checkout` fetches the submodules (`submodules: true`: `modules/protocol`, `modules/client-hook`, `modules/web-admin`) over plain https, and the release step uses the workflow's own `GITHUB_TOKEN` with `contents: write` for that job only. (Until 2026-10-21 the repositories were private and read-only deploy keys were stored as secrets; they and the composite action that used them are gone, WP D3.) Nothing has to be set up before the first `server-v*` tag.
 
 Nothing here signs the binaries; the checksums only protect against corrupted downloads and a swapped asset when `SHA256SUMS` comes from another channel.

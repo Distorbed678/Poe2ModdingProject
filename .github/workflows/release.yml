@@ -54,10 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/fetch-submodules
         with:
-          paths: modules/web-admin
-          web-admin-key: ${{ secrets.WEB_ADMIN_DEPLOY_KEY }}
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -123,14 +121,11 @@ jobs:
             exe: poe-server.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
       # The workspace has path dependencies in modules/protocol and modules/client-hook, so both
       # must be present even though poe-server does not use the client hook itself.
-      - uses: ./.github/actions/fetch-submodules
+      - uses: actions/checkout@v4
         with:
-          paths: modules/protocol modules/client-hook
-          protocol-key: ${{ secrets.PROTOCOL_DEPLOY_KEY }}
-          hook-key: ${{ secrets.HOOK_DEPLOY_KEY }}
+          submodules: true
       # The pinned nightly of rust-toolchain.toml (poe_data_tools needs nightly features), with
       # the targets and components that file lists.
       - name: Install the pinned Rust toolchain

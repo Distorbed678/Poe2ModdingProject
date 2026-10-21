@@ -72,6 +72,8 @@ What CI runs, and what to run before you push:
 | Poe2WebAdmin | `npm ci`, `npm run check`, `npm test`, `npm run build` | the same; after an API change `cargo xtask openapi` (main repo) then `npm run gen:api` |
 | Poe2Launcher | its own `ci.yml`: `npm run check/test/build`, `cargo fmt --check`, clippy, `cargo test` | see [docs/guides/launcher.md](docs/guides/launcher.md#building-and-running) |
 
+No CI workflow needs a secret to build or test: all five repositories are public and submodules are fetched with plain `actions/checkout` (`submodules: true` or `recursive`). Only the launcher's release workflow uses secrets (the updater signing key, [launcher.md](docs/guides/launcher.md#releasing)).
+
 Rules for tests: a behaviour change comes with a test that fails without it. Wire formats are tested with byte arrays you built yourself or anonymised ones (never a raw capture). Movement and entity behaviour use the fixtures in `crates/poe-game/tests/fixtures/`. A change to the web API updates `docs/architecture/openapi.json` (`cargo xtask openapi`); CI fails when it is stale.
 
 Things that only a running game can show (a client-side change, a message the client reacts to) are checked with the unattended test tools described in [docs/guides/setup.md](docs/guides/setup.md#unattended-client-tests). Say in the pull request what you ran and saw; if you cannot run the game, say that too and mark the change untested in-game.
