@@ -9,11 +9,20 @@ What it does:
 - **Play:** deploys the hook ([../architecture/client-dll.md](../architecture/client-dll.md)), signs the game in without typing a password, starts it (Proton on Linux, native on Windows).
 - **Mods:** installs, enables and orders mods by the `mod.toml` spec ([../../modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md)). The hook's mod loader loads the enabled ones (never in official mode); see [Mods](#mods).
 
+## Download, install and update
+
+Releases of the launcher are on the GitHub releases page of Poe2Launcher (once the repository is public; until then it is private and there is nothing to download, build it as below).
+
+- **Linux:** download `Poe2.Launcher_<version>_amd64.AppImage`, `chmod +x` it and run it. Keep it where it is: the launcher updates this file in place. (AppImages need FUSE 2 on the system, or start it with `--appimage-extract-and-run`.)
+- **Windows:** download and run `Poe2.Launcher_<version>_x64-setup.exe` (per-user NSIS installer, no administrator rights). Windows SmartScreen may warn because the installer is not code-signed (the update signature below is not a Windows code-signing certificate).
+- **Updates:** the launcher looks for a newer release when it starts and on Settings, *Updates*, *Check for updates*. When one exists, a badge "Update <version> available" appears in the top bar and Settings shows the version and the release notes. *Download and install* downloads the new AppImage or installer, verifies its signature against the public key built into the launcher (`plugins.updater.pubkey` in `tauri.conf.json`), installs it (Windows: the installer runs in passive mode, with a progress bar and no questions) and restarts the launcher. A failed check (no release yet, repository private, offline) shows "No update info available" quietly; a failed download or signature check shows the error and changes nothing. Updating only works from an installed AppImage or NSIS install, not from a `tauri dev` or plain `cargo build` binary.
+- The endpoint is `https://github.com/Distorbed678/Poe2Launcher/releases/latest/download/latest.json`; `releases/latest` ignores drafts and pre-releases (tags with a `-`).
+
 ## Building and running
 
 Commands to build and run it (`npm ci`, `npm run tauri dev`): [setup.md](setup.md#launcher-build-and-test).
 
-Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; Debian: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libdbus-1-dev librsvg2-dev`), Node 22 and Rust. The result is `src-tauri/target/{debug,release}/poe2-launcher` plus deb, rpm and AppImage bundles. CI (Poe2Launcher): Ubuntu runs `npm run check/test/build`, `cargo fmt --check`, `clippy -D warnings` and `cargo test`; Windows runs `cargo check`. The private submodules are fetched with two read-only deploy keys (repository secrets `HOOK_DEPLOY_KEY`, `PROTOCOL_DEPLOY_KEY`).
+Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; Debian: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libdbus-1-dev librsvg2-dev`), Node 22 and Rust. The result is `src-tauri/target/{debug,release}/poe2-launcher` plus deb, rpm and AppImage bundles. CI (Poe2Launcher, `.github/workflows/ci.yml`): Ubuntu runs `npm run check/test/build`, `cargo fmt --check`, `clippy -D warnings` and `cargo test`; Windows runs `cargo check`. The private submodules are fetched with two read-only deploy keys (repository secrets `HOOK_DEPLOY_KEY`, `PROTOCOL_DEPLOY_KEY`). Releases: see [Releasing](#releasing).
 
 ## One-time set-up
 
@@ -47,6 +56,26 @@ The version file is `versions/<version>.toml` of the main repo (the single defin
 4. `deploy` writes `gateway_list.txt` (one entry for this server), installs `version.dll` and `poe_hook_core.dll`, sets `poe-hook.toml` (`mode = "private"`, `login_mode = "standalone"`, `trusted_servers` = the server's login and instance `host:port`) and writes `steam_appid.txt`. Always private mode: official servers are never touched.
 5. Start: Linux `proton run PathOfExileSteam.exe --success-event 0` with the launcher's own prefix (`<data>/proton-prefix`, created with `proton run wineboot -u` on first use; crash dumps are set aside as in `run-client`); Windows runs the exe directly. Output goes to `<data>/logs/game-<time>.log`.
 
+## Releasing
+
+A release is a pushed tag; `.github/workflows/release.yml` of Poe2Launcher does the rest.
+
+1. Set the same new version in `src-tauri/tauri.conf.json` (`version`), `src-tauri/Cargo.toml` and `package.json` (and `src-tauri/Cargo.lock` follows from a build), commit and push to `main`. The workflow refuses a tag that does not match all three.
+2. Tag and push: `git tag v0.1.1 && git push origin v0.1.1` (in the Poe2Launcher repository). A tag with a `-` (`v0.2.0-rc1`) makes a pre-release, which the update endpoint ignores.
+3. The workflow (a) checks the secrets and the version, (b) creates a **draft** release with notes generated from the commits since the previous release, (c) builds on `ubuntu-22.04` (`tauri build --bundles appimage`, so the AppImage runs on distributions back to that glibc) and `windows-latest` (`--bundles nsis`) with `tauri-action`, which signs the updater artifacts, attaches the AppImage, the `.exe` installer, their `.sig` files and a merged `latest.json`, and (d) publishes the release only when `latest.json` lists both `linux-x86_64` and `windows-x86_64`. A failed job leaves a draft; delete the draft and the tag, or re-run the failed jobs.
+4. Nothing is pushed or released from a developer machine. To test locally what CI does: `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/poe2-launcher.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/poe2-launcher.key.password)" npx tauri build --bundles appimage` in `modules/launcher` gives `src-tauri/target/release/bundle/appimage/*.AppImage` and `.AppImage.sig` (do not commit the outputs). The NSIS installer cannot be built on Linux without `makensis`: `cargo xwin build --target x86_64-pc-windows-msvc` (with `third_party/cargo-xwin`, `XWIN_CACHE_DIR=third_party/xwin-cache`) compiles the Windows binary as a check, the installer is CI-only. The workflows can be linted with `third_party/actionlint/actionlint` (downloaded by `third_party/fetch-tools.sh`).
+
+**Secrets** (repository secrets of Poe2Launcher; the release workflow fails at once if one is missing):
+
+| Secret | What | How it is made |
+|---|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | the updater's private signing key (minisign format, the file's content) | `npx tauri signer generate -w ~/.tauri/poe2-launcher.key -p "$(cat ~/.tauri/poe2-launcher.key.password)"` once, in `modules/launcher`; then store the content of `~/.tauri/poe2-launcher.key` as the secret |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the key's password | a random string kept in `~/.tauri/poe2-launcher.key.password`; the same file's content is the secret |
+
+Set them with `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/poe2-launcher.key` and `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/poe2-launcher.key.password` (the project owner does this; the secrets are not created by the tooling). `HOOK_DEPLOY_KEY` and `PROTOCOL_DEPLOY_KEY` (read-only deploy keys, as for CI) stay until the repositories are public.
+
+**Key location and care.** The key pair was generated locally in `~/.tauri/` (`poe2-launcher.key`, `poe2-launcher.key.pub`, `poe2-launcher.key.password`, mode 600, outside every git repository). Only the **public** key is in the repository (`plugins.updater.pubkey` in `tauri.conf.json`). Back the three files up somewhere private: if the private key is lost, installed launchers can never be updated again (their embedded public key no longer matches; players would have to reinstall). If it leaks, generate a new pair, put the new public key in `tauri.conf.json`, release once more signed with the **old** key (so existing installs accept it and learn the new key), then switch the secrets. Never put the key or password in a file in a repository, an issue or a log.
+
 ## Mods
 
 Mods live in `<install>/poe-hook-mods/<id>/` (never in game files), as the spec says. The launcher's side of the contract with the DLL's mod loader (`modules/client-hook/poe-hook/src/mods.rs`, in the game since 2026-10-21) is `poe-hook-mods/state.toml`:
@@ -77,4 +106,5 @@ The launcher's own tests already cover profiles with a mock keyring, login/logou
 - The Windows launch path is written but untested (no Windows machine); `cargo check` runs in CI.
 - Verification reference values are unconfirmed (above); the Steam download and the Play launch have not been run by a real install yet.
 - Mod loader (DLL side); mod signatures and packaging beyond a zip.
-- Code signing and auto-update of the launcher itself.
+- Windows code signing (SmartScreen warning); macOS builds.
+- The self-update has been built and the AppImage signature verified against the embedded public key locally; the release workflow, the NSIS installer and an installed v0.1.0 updating to v0.1.1 are untested until the first real release (WP E3, needs the repositories public and the two signing secrets).

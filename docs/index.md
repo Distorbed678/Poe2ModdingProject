@@ -9,7 +9,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
 | [guides/hosting.md](guides/hosting.md) | Letting other players connect: ports, `public_host`, terrain upload, firewall, what a remote player needs, security notes, the local two-client test and its results |
 | [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
-| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): profiles, Steam depot install, Play, mods |
+| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, profiles, Steam depot install, Play, mods, releasing (tags, signing secrets and key) |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
 
 ## Architecture
