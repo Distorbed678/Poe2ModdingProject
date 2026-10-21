@@ -14,7 +14,8 @@
 #                                   second prefix, deploy-client (standalone login, LAN trust)
 #   scripts/test-mp.sh server       start poe-server (runtime/server-mp.log), detached
 #   scripts/test-mp.sh clients      log both clients in and enter the game (tokens, Enter x2)
-#   scripts/test-mp.sh client <n>   the same for one client (1 or 2)
+#   scripts/test-mp.sh client <n> [acct]   the same for one client (1 or 2); with acct, client n logs in
+#                                   as mp<acct> (duplicate-login test: client 2 as mp1 after closing it)
 #   scripts/test-mp.sh keys <n> <entries...>   send poe-hook.keys entries to client n
 #   scripts/test-mp.sh shot <n>     F8 game screenshot in client n; prints the new file
 #   scripts/test-mp.sh status       processes, memory, session lines of the server log
@@ -22,7 +23,7 @@
 #                                   the deployed GameFiles back to the private steam-login state
 #   scripts/test-mp.sh restore      only the last step of stop (deploy-client --login-mode steam)
 # Environment: LAN_IP (default: the source address of the default route), MP_PASSWORD,
-# MP_RES (window size, default 1280x720), MP_AREA (character start area, default G1_town),
+# MP_RES (window size, default 1280x720), MP_BORDERLESS (true|false, borderless_windowed_fullscreen, default false), MP_AREA (character start area, default G1_town),
 # MP_CLASS (CharacterStartStates id, default DexFourDefault).
 set -e
 cd "$(dirname "$0")/.."
@@ -31,6 +32,7 @@ CFG=runtime/server-mp.toml
 LOG=runtime/server-mp.log
 PW=${MP_PASSWORD:-mp-test-password-1}
 RES=${MP_RES:-1280x720}
+BORDERLESS=${MP_BORDERLESS:-false}
 AREA=${MP_AREA:-G1_town}
 CLASS=${MP_CLASS:-DexFourDefault}
 LAN_IP=${LAN_IP:-$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)}
@@ -73,7 +75,7 @@ cmd_setup() {
             grep -E '^resolution_(width|height)=' "$ini" > runtime/mp-orig-res.txt
         fi
         sed -i -e "s|^resolution_width=.*|resolution_width=$w|" -e "s|^resolution_height=.*|resolution_height=$h|" \
-            -e 's|^borderless_windowed_fullscreen=.*|borderless_windowed_fullscreen=false|' "$ini"
+            -e "s|^borderless_windowed_fullscreen=.*|borderless_windowed_fullscreen=$BORDERLESS|" "$ini"
     done
     xt deploy-client --no-build --login-mode standalone
     xt --prefix "$(prefix_of 2)" select-gateway
@@ -103,10 +105,10 @@ n_auth() { slog | grep -c ' authenticated' || true; }
 keys_file() { echo "GameFiles/poe-hook.$1.keys"; }
 
 cmd_client() {
-    n=$1
-    tok=$(issue_token "$n")
-    [ ${#tok} = 64 ] || { echo "no game token for mp$n"; exit 1; }
-    xt --prefix "$(prefix_of "$n")" login-token "mp$n" "$tok" | head -1
+    n=$1; acct=${2:-$n}        # client n logs in as mp<acct> (acct != n: the duplicate-login test)
+    tok=$(issue_token "$acct")
+    [ ${#tok} = 64 ] || { echo "no game token for mp$acct"; exit 1; }
+    xt --prefix "$(prefix_of "$n")" login-token "mp$acct" "$tok" | head -1
     before=$(n_auth)
     POE_HOOK_KEYS_FILE=poe-hook.$n.keys POE_HOOK_WINDOW_TITLE="PoE2 MP $n" POE_HOOK_AUTO_KEYS=20000:13 \
         POE_HOOK_FAKE_FOCUS=1 POE_HOOK_MOVEMENT_LOG=1 \
@@ -168,7 +170,7 @@ cmd_stop() {
 c=${1:-}; shift || true
 case "$c" in
     setup) cmd_setup ;; server) cmd_server ;; clients) cmd_clients ;;
-    client) cmd_client "$1" ;; keys) cmd_keys "$@" ;; shot) cmd_shot "$1" ;;
+    client) cmd_client "$@" ;; keys) cmd_keys "$@" ;; shot) cmd_shot "$1" ;;
     status) cmd_status ;; stop) cmd_stop ;; restore) cmd_restore ;;
     *) sed -n '2,/^set -e/p' "$0" | sed 's/^# \{0,1\}//' | head -n -1; exit 1 ;;
 esac

@@ -86,12 +86,41 @@ The player does not need the server's `dumps/`, `GameFiles/Bundles2` copy or any
 - **Admins.** The overlay's server commands and `!` chat commands need the admin role on the account (`account role <name> admin`); nobody is an admin by default except the dev machine-hash account `Exile1`.
 - **Dev settings.** `[dev] known_seeds`, `sweep`, `movement_trace` and the `POE_*` environment variables are one-per-server development settings; keep them off on a shared server. `[dev] drift_check` is harmless.
 
+## Local two-client test
+`scripts/test-mp.sh` runs two real game clients against one server on one machine (Steam must be running). Both connect through the machine's LAN IP, not 127.0.0.1, so the trusted-remote path of the DLL runs (the deploy puts the LAN IP into `trusted_servers`), and each logs in as its own account (`mp1`, `mp2`) on the standalone login with a remember-me token (web API launcher login, then `POST /game-token`).
+
+```sh
+scripts/test-mp.sh setup      # build, runtime/server-mp.toml (LAN IP, own database), accounts + one Ranger each in G1_town, prefix 2, deploy
+scripts/test-mp.sh server     # poe-server, log runtime/server-mp.log
+scripts/test-mp.sh clients    # token login + Play for both (client <n> [acct] for one; acct = duplicate-login test)
+scripts/test-mp.sh keys 1 inmove:640,200 indown:0x57 wait:2000 inup:0x57   # poe-hook.1.keys: input for client 1
+scripts/test-mp.sh shot 2     # F8 screenshot of client 2 (prints the file)
+scripts/test-mp.sh stop       # kill the clients; then stop the server in its own call; restores the private steam deploy
+```
+- **Second prefix.** `third_party/proton-prefix-2` is a copy of prefix 1 (own login credentials, screenshots, gateway); xtask takes `--prefix` for it (`cargo xtask --prefix third_party/proton-prefix-2 run-client|login-token|select-gateway`, [setup.md](setup.md)).
+- **Per-client input file.** `POE_HOOK_KEYS_FILE=poe-hook.<n>.keys` makes each DLL read its own `poe-hook.keys` (see [setup.md](setup.md#poe-hookkeys-entries)); the window titles are "PoE2 MP <n>".
+- **Window size.** Default 1280x720 windowed so both fit on screen (`MP_RES`, `MP_BORDERLESS`); `restore` (part of `stop`) puts prefix 1 back to its original size.
+- **Characters.** `poe-server character create <account> <name> <start_state> [area]` (offline, [server-admin.md](server-admin.md#characters-offline)). Both characters spawn on the same cell of `G1_town` (379, 356); walk one away before looking at both.
+
+Results (2026-10-21, client 0.5.5e, two clients, one `G1_town` instance, evidence from F8 screenshots, server log and each client's `packets.jsonl`):
+
+| Item | Result | Evidence |
+|---|---|---|
+| Token login of both accounts through the LAN IP (trusted remote) | pass | `authenticated ... token_login=true`; DLL log `trusted servers: loopback, <LAN>:20481, <LAN>:6112`, no latch |
+| Both in one instance, see each other | pass | entities 12000 and 12001, `players=2`; each client received two `AddObject`s; in the F8 shots each client draws the other character (the remote one looks darker and orange; not investigated) |
+| Walk and roll of one reach the other | pass | client 2's `packets.jsonl` has `0x0064` (header `(12000, 12000, 9, 0)`), `0x02e7`, `0x01c8`, `0x01ae`, `0x01b1` with client 1's entity; the remote character is drawn at the walked position. The roll animation of the remote was not looked at frame by frame |
+| Chat | pass | `text:` + Enter in client 2: `chat from=Mp2Ranger`, the line "Mp2Ranger: hello-from-two" is on client 1's screen |
+| Transfer gives the leave sequence | pass | `POST /admin/players/Mp2Ranger/transfer {"area":"G1_1"}`: client 1 got `0x0271`, `0x01c5`, `0x01c7`, `0x02fa` for entity 12001 in one frame; Mp2Ranger entered G1_1 (alone, pause request applied, then released) |
+| Duplicate login kicks the first session | pass | client 2 closed, then logged in as `mp1`: `account logged in again ...: disconnecting the player`, `player left the instance ... Mp1Ranger`, the new session enters as entity 12002 at the saved cell |
+
+**Town freeze (fixed 2026-10-21).** The first runs of this test showed WASD, clicks and a roll doing nothing in town while Escape worked. The cause was not the window mode: our `InitialState` always had `flags = 7`, whose bits 0/1 start the client's world paused (`+0x868/+0x869`, entities update with `dt = 0`; the town looked frozen). In a zone the client then sends `PauseRequest(1)` and `PauseRequest(0)` itself and the server releases the pause; **in a town it sends none** (official town capture: `InitialState` flags `04`, no `PauseRequest`), so the pause was never released. The server now sends flags `04` for towns and hideouts. The WP3.6 smoke test had run in a zone.
+
 ## Web API
 `[web]` is optional ([../architecture/web-api.md](../architecture/web-api.md)). Players never need it for the game. It listens on `127.0.0.1:8080`. Expose it only through a TLS proxy as described in the security notes.
 
 ## Not done yet
 
-- **A shared world.** Each connection still runs its own simulation with the player as entity 1; two players in the "same" instance share only chat, the player count and the instance list. The remote-player protocol (WP3.5, needs an official capture), the instance actor (WP3.6) and the two-client test (WP3.7) come next.
+- **Remote players, rough edges.** Players in one instance share one world (instance actor, WP3.6) and see each other ([Local two-client test](#local-two-client-test)). Open: two players spawn on the same cell, the remote model looks darker than the local one (not investigated), and there is no party, trade or combat sync between players yet.
 - **Real login crypto.** The bypass keys derive from a public value; fine on a LAN, not over the open internet ([../re/crypto.md](../re/crypto.md)). A later step: the DLL swaps the client's baked-in DSA public key for ours and keeps verification on.
 - **`client-pack`.** A zip with the hook and a ready `poe-hook.toml` for friends (no repository checkout) is the launcher's job (WP5).
 - **Per-client address.** One `public_host` serves everyone; LAN players and internet players of the same server need NAT loopback or their own `server.toml` for deploy.

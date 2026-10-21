@@ -64,7 +64,7 @@ cargo xtask tracker         # renders docs/status/tracker.toml into the README.m
 - Resets `auto_keys` to `[]`, and the client's remembered gateway (`gateway_id` in the test prefix's `poe2_production_Config.ini`) to ours for private deploys (after an official session it stays on an official realm and the client never contacts our server).
 - Writes `steam_appid.txt`.
 
-`run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
+`cargo xtask --prefix <dir> <command>` (global option) runs `run-client`, `login-token`, `select-gateway` and the gateway selection of `deploy-client` against another Proton prefix, for a second client (`third_party/proton-prefix-2`, a copy of the first; see [hosting.md](hosting.md#local-two-client-test)). `cargo xtask select-gateway` only writes the remembered gateway (`gateway_id`) of the chosen prefix to ours. `run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
 
 ### Web API
 
@@ -166,6 +166,7 @@ Each entry is one line; the DLL reads the file and posts the input to the game w
 - **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
 - **`inpress:x,y` / `inrelease:x,y`** hold and release the left button at a client position (held click-to-move); the hooked `GetKeyState` reports `VK_LBUTTON` held meanwhile.
 - **`text:<chars>`** posts one `WM_CHAR` per character, for text boxes such as the character name.
+- **`POE_HOOK_KEYS_FILE=<name or absolute path>`** (environment variable of the client process) makes that DLL read its input entries from another file than `GameFiles/poe-hook.keys`, so two clients on one GameFiles get one file each (`poe-hook.1.keys`, `poe-hook.2.keys` in `scripts/test-mp.sh`). The DLL logs `input file: ...` at start.
 - **`0x77` (F8)** takes a game screenshot into the test prefix's `My Games/Path of Exile 2/Screenshots`, which shows the game even when its window is not visible.
 - **`close`** posts `WM_CLOSE` to the game window (like its X button).
 - Before each batch the DLL posts `WM_ACTIVATEAPP(1)`: the game ignores input while it thinks it is in the background, and this changes only its own flag, not the real focus.

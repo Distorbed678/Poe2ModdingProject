@@ -38,7 +38,7 @@ Click-to-move in this session (local player, `f8667-9183`, 7 presses and 189 hel
 | Login `0x0017` | u16 `0x0014` right after `InstanceDetails` | not sent | sent 2026-10-15, removed 2026-10-17: it makes the client `shutdown()` its login connection, which our transfers need (`[network.login] close_after_handoff`) |
 | `AddObject` header (player) | (0xffffffff, 0, 0) | (0, 0xff, 0) | official; verified with and without the first-visit intro (the old (0, 0, 0) crash does not come back) |
 | AreaInfo league (+0x38) | the character's league | empty | the character's league |
-| InitialState | flags 7, four stash tabs "1".."4", character flags `68 40 00`, player entry `0x40`/`7` | flags 0, no tabs, `00 40 00`, `0`/`0` | official (`[accounts] stash_tabs`) |
+| InitialState | flags 7 (zone) or 4 (town: no PauseRequest follows, bits 0/1 would freeze it), four stash tabs "1".."4", character flags `68 40 00`, player entry `0x40`/`7` | flags 0, no tabs, `00 40 00`, `0`/`0` | official (`[accounts] stash_tabs`) |
 | Entry order | `LocalPlayers`, `PlayerEntity`, inventories | `PlayerEntity` after the inventories | official |
 
 ## Open (by priority)

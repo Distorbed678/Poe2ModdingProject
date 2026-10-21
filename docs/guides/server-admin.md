@@ -81,6 +81,9 @@ cargo run -p poe-server -- account role alice admin
 cargo run -p poe-server -- account list
 ```
 
+### Characters (offline)
+`poe-server character create <account> <name> <start_state> [area] [league]` creates a character the way the character creation screen does (slot limit and name rules apply); `start_state` is a `CharacterStartStates` id (for example `DexFourDefault`), `area` a `WorldAreas` id (default: the start state's hub area, else `[player] start_area`), `league` defaults to the first `[[leagues]]` entry. A character created with an explicit town or hideout area counts as having played the intro. `poe-server character list [account]` lists them. Both run against the database and exit; used by `scripts/test-mp.sh` ([hosting.md](hosting.md#local-two-client-test)).
+
 A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and `Exile1` was made an admin by the database migration.
 
 ## Instances

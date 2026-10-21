@@ -1198,9 +1198,14 @@ impl InstanceServer {
         // InitialState must follow 0x24 and the player entity (its handler uses the entity).
         // `frame_ms` is the length of each simulation frame.
         // Flag values not understood yet are the official ones (docs/re/captures.md).
+        // `flags` bits 0/1 start the client's world paused: the client unpauses itself with a
+        // PauseRequest only in zones; in a town it never sends one (official town capture:
+        // flags 4, no PauseRequest), so a town started with bits 0/1 stays frozen. Hideouts
+        // are unverified: 4 is safe there, because the world never starts paused.
+        let town = WorldArea::find(&self.data, &ticket.area)?.is_some_and(|a| a.is_town || a.is_hideout);
         let initial = InitialState {
             frame_ms: self.config.instance.tick_ms as u32,
-            flags: 0x07,
+            flags: if town { 0x04 } else { 0x07 },
             characters: vec![CharacterState {
                 stash_tabs: (self.config.accounts.stash_tabs.iter().enumerate())
                     .map(|(i, name)| StashTab::plain(i as u16, name))

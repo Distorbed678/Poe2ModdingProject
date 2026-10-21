@@ -49,7 +49,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Accounts](#accounts) | `██████░░░░ 63%` | 5/8 |
 | [Instances/Transfers](#instancestransfers) | `████████░░ 75%` | 4/6 |
 | [Movement](#movement) | `████░░░░░░ 43%` | 0/7 |
-| [Multiplayer](#multiplayer) | `████░░░░░░ 42%` | 1/6 |
+| [Multiplayer](#multiplayer) | `███████░░░ 67%` | 3/6 |
 | [Chat/Commands](#chatcommands) | `██████████ 100%` | 4/4 |
 | [Terrain](#terrain) | `██░░░░░░░░ 23%` | 1/11 |
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
@@ -99,7 +99,7 @@ Docs: [docs/architecture/instance-world.md](docs/architecture/instance-world.md)
 | ✅ | Forced topology and orientation per instance |  |
 | ✅ | Saved location (area, seed, cell) restored on login |  |
 | ❌ | [Waypoints and area transitions; transfers without character select](docs/status/history.md) | needs an official capture of a zone change |
-| 🟡 | [Instance actor (one World per instance)](docs/architecture/instance-world.md) | WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift); two clients are WP3.7 |
+| 🟡 | [Instance actor (one World per instance)](docs/architecture/instance-world.md) | WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift) and in WP3.7 with two |
 
 ### Movement
 
@@ -123,9 +123,9 @@ Docs: [docs/guides/hosting.md](docs/guides/hosting.md)
 |---|---|---|
 | 🟡 | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | WP3.3: DLL side built and unit-tested (trusted servers are not blocked, not latched, get the crypto bypass); not yet tried against a LAN server in game |
 | ✅ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](docs/guides/hosting.md) | WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine |
-| 🟡 | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); not yet seen by a second real client (WP3.7) |
-| 🟡 | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; verified with fake sessions, not with two game clients yet (WP3.7) |
-| ⬜ | [Two-client local test harness](docs/plans/orchestration-2026-10.md) | WP3.7 |
+| ✅ | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looks darker than the local one: not investigated) |
+| 🟡 | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); open: players spawn on one cell, no combat/party sync |
+| ✅ | [Two-client local test harness](docs/guides/hosting.md) | WP3.7: scripts/test-mp.sh (two prefixes, LAN IP, token logins, per-client input files, F8 shots); login, shared instance, walk/roll relay, chat, transfer leave sequence and duplicate-login kick passed; found the town freeze (InitialState flags 7 in a town) |
 | ❌ | Parties |  |
 
 ### Chat/Commands

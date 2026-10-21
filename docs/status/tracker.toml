@@ -121,7 +121,7 @@ link = "docs/status/history.md"
 [[subsystem.item]]
 name = "Instance actor (one World per instance)"
 status = "partial"
-note = "WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift); two clients are WP3.7"
+note = "WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift) and in WP3.7 with two"
 link = "docs/architecture/instance-world.md"
 
 # ---------------------------------------------------------------------------------------------
@@ -192,21 +192,21 @@ link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
 name = "Remote-player protocol (add/remove, broadcast actions)"
-status = "partial"
-note = "WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); not yet seen by a second real client (WP3.7)"
+status = "done"
+note = "WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looks darker than the local one: not investigated)"
 link = "docs/architecture/instance-world.md"
 
 [[subsystem.item]]
 name = "Shared world: players in one instance see each other"
 status = "partial"
-note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; verified with fake sessions, not with two game clients yet (WP3.7)"
+note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); open: players spawn on one cell, no combat/party sync"
 link = "docs/architecture/instance-world.md"
 
 [[subsystem.item]]
 name = "Two-client local test harness"
-status = "planned"
-note = "WP3.7"
-link = "docs/plans/orchestration-2026-10.md"
+status = "done"
+note = "WP3.7: scripts/test-mp.sh (two prefixes, LAN IP, token logins, per-client input files, F8 shots); login, shared instance, walk/roll relay, chat, transfer leave sequence and duplicate-login kick passed; found the town freeze (InitialState flags 7 in a town)"
+link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
 name = "Parties"
