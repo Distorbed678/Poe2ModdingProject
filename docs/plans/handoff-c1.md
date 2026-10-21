@@ -19,12 +19,13 @@ Problems found:
 1. **Exactly diagonal cursor**: with the cursor straight up on the screen the grid vector is exactly `(45, 45)`, which `is_key_vector` (`locomotion.rs`) takes for a key. The server then treats the zero vector as a key release (stops at once) while the client coasts: after stop 20.4 and 19.9. Real cursors are almost never exactly diagonal. A better rule is wanted (idea: remember whether a key vector was held when the roll started, or count the 0x63 vectors that changed each frame while Space was down); `a_key_released_just_after_the_sprint_stops_at_once` and `a_sprint_ended_after_the_cursor_direction_coasts_to_a_stop` pin the current rule.
 2. **Sprint towards a diagonal wall**: a 1.4 s Space-only sprint east from `650 500` ended at 11.2 cells drift: the client turned along the wall at about 10 cells clearance (it bent at (716,458) where the wall is at y 447), the server hugged the wall (ended at 730.6, 450.0). That is the pathfinder clearance gap (movement.md: the pathfinder is an approximation), not the sprint end.
 
-## Not run yet
-All WASD-mode cases (needs `use_wasd_to_move=true` in the test prefix's `poe2_production_Config.ini`, line 105, set while the client is closed; restore to `false` at the end):
-- WASD sprint end: W held since before the roll, Space held 1.4 s, release Space, keep W 2 s, then release W (old result 13 / 10; target under 8 and about 0 after the stop). Also W held with Space released first, then W released.
-- standing roll in WASD mode (three cursor directions), walking roll (W, then D).
-- click-to-move: roll with a held click (`inpress`/`inrelease`).
+## Update 2026-10-21 (second agent)
+Done: the click-mode held-click roll, the WASD-mode standing rolls and WASD-mode cursor sprints were run, the results are in movement.md ("In-game check, 2026-10-21") and the tracker. No server code changed (the problem 1 patch is in `git stash`, `stash@{0}`, not applied). Client closed, server stopped, `use_wasd_to_move=false` restored and checked, `runtime/server-c1.toml` deleted.
 
+Open, in this order:
+1. **Why the client no longer coasts after a Space-only cursor sprint** (movement.md problem 3): 1.4-2.7 cells after the stop in the first session, 23-28 in all later ones. Needs a release of Space with `0x2e6` and `0x1ac` in the same frame (a real keyboard or a hook change; `inup:0x20` gives `0x1ac` about 100 ms later), or an official click-mode capture. Only then decide on the problem 1 patch (stash: `CursorDirection` for `MoveDirection` with trailer byte 1, and the unscaled ack before a `(0, 0)` that arrives in F + 1).
+2. **W/A/S/D injection is dead under the Agents rules** (problem 4): the sprint-end-with-W and walking-roll cases are not run. Try a client run with the rules off (`scripts/agent-desktop.sh off`, the user's go-ahead), or give the hook a focus fake for keyboard Raw Input.
+3. How to run is unchanged (below); the helper scripts used were in the scratchpad and are gone: per case teleport, wait 3 s, write the entries, read the `drift server=...` lines.
 ## How to run (what worked)
 - Server: `cp config/server.toml runtime/server-c1.toml`, set `drift_check = true` there, `POE_CONFIG=runtime/server-c1.toml target/debug/poe-server > runtime/server-run.log 2>&1 &` (own Bash call to stop it: `pkill -x poe-server`).
 - Client: `scripts/test-run.sh c1 15` (`mode = "private"`, `login_mode = "steam"` in `GameFiles/poe-hook.toml`; do not deploy). Close it with the entry `close` in `GameFiles/poe-hook.keys`.
@@ -33,9 +34,3 @@ All WASD-mode cases (needs `use_wasd_to_move=true` in the test prefix's `poe2_pr
 - Screen to grid directions (window 2560x1440, player at about 1280,590): cursor right gives offset `(+38,-29)`, left `(-30,+32)`, up `(+45,+45)`, down `(-35,-35)`.
 - The summary helper used: for each run, take the `drift server=...` lines after the entries were sent; `max_cells` per second and the last `cells`.
 
-## What is left
-1. Run the not-run cases above (WASD mode) and add the numbers.
-2. Decide on problem 1 (diagonal cursor) and fix it on top of `c947a15` if cheap; update the unit tests.
-3. `docs/protocol/movement.md`: add a short "In-game check, 2026-10-21" table next to the 2026-10-20 one in the Drift checker section (the rows above plus the WASD ones), and the two problems.
-4. `docs/status/tracker.toml`: the notes of "Dodge roll" (still says "open: roll heading ... (gap #12)") and "Sprint" (still says gap #11) are to be rewritten with the drift numbers; keep the status `partial` unless every case is under 8 cells and about 0 after the stop.
-5. Run `python3 scripts/check-links.py`, `cargo build && cargo test`, do not commit (the coordinator does).

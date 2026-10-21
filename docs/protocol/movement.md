@@ -206,7 +206,7 @@ Gap #11, closed 2026-10-21 (WP C1). What the client does when a sprint ends, fro
 Server model (`Locomotion::end_sprint`, `Motion::Coast`):
 - **Key held** (`wasd` not zero): the unscaled `MoveAck` goes out at r+1 whether or not a stream ran, and the walk resumes after `sprint_restart_delay_frames` (2: Move start 2 frames after the batch, first step one later).
 - **No key** (`wasd` zero): the entity coasts: `Motion::Coast`, `sprint_coast_delay_frames` (1) frames after the batch the first step `sprint_coast_start_scale` (1.0614) x `walk_speed / 30` (1.309), falling by that over `sprint_coast_frames` (29.5), along the last direction. A zero vector does not stop a coast; a new vector walks on at once.
-- **Cursor sprint** (Space only, free-angle vector): the keys are already up when the unscaled `MoveAck` arrives, so a `(0, 0)` up to `sprint_release_window_frames` (3) after the sprint-off batch converts the restart into the coast from the step the client is at. A key vector (axis or diagonal) is a real key: its release stops at once.
+- **Cursor sprint** (Space only, free-angle vector): the keys are already up when the unscaled `MoveAck` arrives, so a `(0, 0)` up to `sprint_release_window_frames` (3) after the sprint-off batch converts the restart into the coast from the step the client is at. A key vector (axis or diagonal) is a real key: its release stops at once. Open: the in-game check of 2026-10-21 did not reproduce this coast in later sessions ([problem 3](#test-tooling))
 - Tests: `locomotion.rs` unit tests (`a_sprint_ended_with_a_key_held_is_restarted_by_the_unscaled_ack`, `a_sprint_ended_after_the_cursor_direction_coasts_to_a_stop`, `a_zero_vector_while_coasting_does_not_cut_it_short`, `a_new_direction_during_the_coast_walks_on_at_walking_speed`, `a_key_released_just_after_the_sprint_stops_at_once`), fixture `sprint_wasd_released_then_space_up` with the client's positions (`replay.rs` `sprint_wasd_released_then_space_up`: within 3 cells from the sprint-off frame on, 2.6 at worst; a server that stops at the `(0, 0)` is 18 off), `instance-server` `a_sprint_without_a_stream_ends_with_the_unscaled_direction`.
 - **Not captured**: the official server's answer to a sprint without a stream ended by key-up with W still held (we send the restart the client needs; the f1918 case ended at a wall).
 
@@ -351,6 +351,29 @@ Key and mouse injection for movement tests (`in:`, `inclick:`, `inpress:`, `indo
 | standing roll in click-to-move mode | 14.9 | 5.2 (gap 12) |
 
 The first standing-roll runs of the day were 28-35 cells off because the test sent no `0x1a8` (above); with steering they are within the roll tolerance on open ground.
+
+**In-game check, 2026-10-21 (WP C1, same method; server `c947a15`, test area `G1_1` = `MapRiverside` with tile hash 3958003549, open ground = the box x 600..710, y 450..560; cells, max in a second / after the stop)**:
+
+| Scenario | max | after stop |
+|---|---|---|
+| click mode: standing tap roll, cursor right / left / up / down (4 runs) | 3.9 | 0.34 / 0.61 / 0.36 / 0.56 |
+| click mode: click east, roll 1 s later | 3.9 (1.3 during the walk) | 0.47 |
+| click mode: standing roll east into a wall | 3.1 | 2.4, then 0.7 |
+| click mode: held click (`inpress`), tap roll, `inrelease` (3 runs) | 3.9, 3.9, 4.2 | 0.0, 9.4, 4.1 |
+| WASD mode (`use_wasd_to_move=true`): standing tap roll, cursor right / left / up / down | 3.9, 3.9, 3.9, 4.2 | 0.75 / 0.62 / 0.74 / 0.74 |
+| click mode, first session: Space only, free-angle cursor, held 1.0 s / 1.4 s | 3.9 | 1.44 / 2.73 |
+| click mode, later sessions (see problem 3): Space only, free-angle cursor, held 1.0 s (4 runs) | 3.9 | 23.2 (all four) |
+| WASD mode: Space only, free-angle cursor, held 1.0 s (2 runs) / 1.4 s | 3.9 | 23.2, 23.2 / 28.2 |
+| click mode: Space only, exact diagonal cursor ("up"), held 1.0 s (2 runs) | 3.9 | 3.3, 3.2 |
+| WASD mode: Space only, exact diagonal cursor, held 1.0 s | 3.9 | 3.2 |
+
+Not run: every case that needs a WASD key (sprint end with W held, W or D then a roll). **Problem 4** below.
+
+Problems found (open):
+1. **Exactly diagonal cursor taken as a key by `is_key_vector`** (`locomotion.rs`): the server treats the `(0, 0)` after such a sprint as a key release and stops at once. In the first session of the day the client coasted (after stop 20.4, 19.9); in the later sessions it did not (3.3, 3.2), see problem 3. A fix was tried and left out: in click mode (third trailer byte `1`) there are no keys, so a `MoveInput::CursorDirection` for those packets can never be a key vector, and a `(0, 0)` that arrives in F + 1 (before the unscaled `MoveAck` is due) needs that ack first and the `(0, 0)` in F + 2. Unit tests for both pass, but it makes the later-session diagonal cases 17 cells off, so it is not safe until problem 3 is understood (the stash entry of the C1 agent holds the patch).
+2. **Sprint towards a diagonal wall**: a 1.4 s Space-only sprint east from `650 500` ended at 11.2 cells drift: the client turned along the wall at about 10 cells clearance (it bent at (716,458) where the wall is at y 447), the server hugged the wall (ended at 730.6, 450.0). That is the pathfinder clearance gap (the pathfinder is an approximation), not the sprint end.
+3. **The cursor-sprint coast was not reproduced later the same day.** Free-angle Space-only sprints: 1.44 and 2.73 cells after the stop in the first session, 22.6 to 28.2 cells in all of the later ones (click and WASD mode, 14 runs, the server coasts about 20 cells and the client stops where the sprint ended; with an exact diagonal the server stops and so does the client: 3.2 to 3.3). What the client did in the three variants tried (`movement-trace.tsv` plus the client's `frame #n` log): the sprint-off batch, the unscaled `0x64` in F + 1 and `0x64 (0, 0)` in F + 2 (the official order): the client moves two more frames and stops (3 cells); only the `(0, 0)` ack in F + 1: it stops at once; no zero ack at all: it walks on at walking speed for good (37 cells a second drift). So a `0x64` with the keys already up can still restart a Move on the client, and the `(0, 0)` ack ends it. The test tool's key release differs from the captures: the client sends the Space release (`0x2e6`) and `0x1ac` (`SkillInputEnd`) in the same frame in the captures, but with `inup:0x20` the `0x1ac` comes about 3 frames (100 ms) later whatever the delay between the entries (the `(0, 0)` vector is 1 to 5 frames after the release in both), which is the likely difference to the first session; it was not proven. Until a real keyboard release (or a capture of a click-mode cursor sprint) confirms the coast, the model stays as in "Coasting after a sprint".
+4. **WASD key injection does not move the player any more** (`in:0x57:ms`, `indown:0x57`, plain `0x57:ms`; both input modes; the client's `wasd` log line never changes): it worked on 2026-10-14 and until 00:12 on 2026-10-21 (town, standalone login, `use_wasd_to_move` unset), and not in any client session since the KWin "Agents" rules (10:38, the game window never takes focus). Likely cause: the game only reads keyboard Raw Input while its window has the keyboard focus (`FAKE_FOCUS` only fakes `GetForegroundWindow`), not proven; the rules were left on as instructed. The W cases need either the rules off for a run or a hook for the focus check.
 
 ## Movement trace
 `[dev] movement_trace` (empty = off) writes `runtime/movement-trace.tsv`; `scripts/re/movement_trace.py` lists the frames where the player moved backwards or stalled.
