@@ -204,13 +204,13 @@ Details and the patch: [standalone-login.md](standalone-login.md).
 | `0x1420e7af0` | `ClientLoginSession_SendCredentials_0003` | builds and sends `0x0003` (class vtable `0x1435063b8`, serializer `0x1420e3b60` `Packet0003_Credentials_Serialize`) |
 | `0x1420e7e00` | `ClientLoginSession_SendSteamTicket_0005` | builds and sends `0x0005` (serializer `0x1420e34f0`) |
 | `0x1421bbd70` | `Sha256_Bytes32` | SHA-256 (IV at `0x143a0c198`) used for the password hash: UTF-16LE bytes, no salt |
-| `0x1420e7580` | `LoginClientHash_Get32` | the 32-byte client hash (global `0x1445d5f50`) |
+| `0x1420e7580` | `LoginClientHash_Get32` | the 32-byte client hash (global `0x1445d5f50`), a hash of the file at argv[0] computed on a worker thread by `0x1420eb470` (`0x1410261a0` returns argv[0], `0x1421bbdf0` hashes the file) |
 | `0x140ef07d0` | `LoginState_SaveLoginAfterAuth` | after success: ini `[LOGIN]`, writes or deletes the credentials file with the `0x0004` `session_token` |
 | `0x1423d0210` / `0x1423d03a0` / `0x1423d0490` | `LoginCredentials_GetFilePath` / `_Load32` / `_Save32` | `Documents\My Games\Path of Exile 2\<name>_login.credentials`, exactly 32 raw bytes |
-| `0x140ef63a0` | | non-zero `0x0004` result handler: notice text if present, special codes `0x62` `0x1cf` `0x0f` `0x08` `0x54` |
+| `0x140ef63a0` | `LoginState_HandleAuthenticationError` | non-zero `0x0004` result handler: notice text if present, else the `BackendErrors.dat` text; special codes `0x62` / `0x1cf` (Unlock window), `0x0f` (delete the saved credentials), `0x08`, `0x54` |
 | `0x141018170` | | `config.json` loader (`GGG_*`, `STEAM_APP_ID`, `GGG_CREDENTIAL_FILE_NAME`, `GGG_LOGIN_SERVER_PORT`, ...); defaults at `0x1446fc340` |
 | `0x140110960` | | Steam API init, returns 1 without touching Steam when the platform is not Steam |
-| `0x1421ee510` | | localized auth/error message table by result code (5 account missing, 6 wrong password, ...) |
+| `0x1421ee510` | `StandalonePatcher_GetErrorText` | the **patcher's** own 16-entry error table (only caller `StandalonePatcher_Run`); the login, create and delete texts come from `BackendErrors.dat` via `0x1425cb780` |
 | `0x14011b820` | `Client_Startup` | start-up function (WinMain-level): single-instance check, config, `StandalonePatcher_Run` (call `0x14011bf76`), `CmdLine_ReadSuccessEvent`, then engine/state init; `SetEvent`+`CloseHandle` of `DAT_144431668` at `0x14011c916` |
 | `0x1401162d0` | `StandalonePatcher_Run` | returns bool; Steam/Epic return 1 at once; skipped (returns 1) when `--success-event` is given and `--disable-client-switching` is not; else the patcher window + patch-server connection. First bytes `48 8B C4`; the DLL safety net writes `B0 01 C3` |
 | `0x142737620` | `Patcher_RunPatching` | patching run ("Started patching ({} free bytes available)" `0x14358d340`, "No patching required" `0x14358d100`); only caller is `StandalonePatcher_Run` |
@@ -246,3 +246,29 @@ Layouts: [../protocol/entities.md](../protocol/entities.md#other-players-add-act
 | `0x1420ee915` | | account-session case for `0x00c4`: logs "InstanceClientSetSelfPartyInvitationSecurityCode = " (`0x143506870`) and stores the `u32` at session `+0x3ec0` |
 | `0x141f45090` | | deserializer of `0x0271` (`u8 × 4`); handler not found |
 | `0x142156320` | | `0x00c8` PartyUpdate reader (`0x1421560b0` ctor); `0x1421574b0` `0x00d9` TradeState reader; `0x141f43e80` `0x00c9`; `0x141f38d80` `0x00da`; `0x141f38ce0` serializer of `0x00d2`/`0x00c9`; `0x141f3cd50` `0x00e0`; `0x142150da0` `0x0019` |
+
+## Login results, flags, create and delete (WP B1, 2026-10-21)
+Details and decoded fields: [../protocol/login.md](../protocol/login.md). Names are set in Ghidra.
+
+| Address | Name | What |
+|---|---|---|
+| `0x1420e8391`..`0x1420e8427` | | case 4 of the login dispatcher: splits the two `0x0004` flag bytes into the ten booleans of the account entry (`+0x30`..`+0x39`, entry size `0x78`, vector at login session `+0xef0`) |
+| `0x140ef5140` | `LoginState_AuthenticationResultHandler` | success path: ToU (entry `+0x32`), cheating (`+0x33`), RMT (`+0x34`), update required (`+0x35`), notice popup, or continue (`0x140ef62c0`) |
+| `0x1425cb780` | `BackendError_GetText` | result code to text: `Data/Balance/BackendErrors.dat` row `code - 1` (language `0xb` is read directly, others through a language path); `bad-error-code` for an unknown row |
+| `0x140f0f600` | `SelectScreen_UpdateStrictUnlockBanner` | builds/updates `strict_unlock_warning_frame` / `_label` (text `StrictUnlocksEnabledMessage`, id `0x10d4`); needs entry `+0x38` (flag byte 0 bit 6) |
+| `0x140f05b20` | `SelectScreen_ShowWidgets` | select-screen enter: on a non-Steam platform shows the strict-unlock banner when an entry has `+0x38` and screen `+0x4b0` is clear |
+| `0x140ec7700` | | (create-screen range) after a successful unlock: deletes the credentials file, sets screen `+0x4b0 = 1` when an entry has `+0x38` |
+| `0x140effac0` | | login-screen widget shown when an entry has `+0x31` |
+| `0x1406c19a0` | | league start time choice, uses entry `+0x31` and league `+0xe0` bit 5 |
+| `0x1406c08b0` / `0x1406c7ae0` | | select-screen refresh: hides widget `+0x6e0` when entry `+0x39` is set |
+| `0x1427164c0` | `CharacterEntries_Read` | reads the character entries of `0x0015` (`0x58`-byte struct, order in login.md) |
+| `0x1406b9b90` | `SelectScreen_SetEntry` | fills one select-screen row from an entry; calls the next three |
+| `0x1406b8460` | `SelectScreen_SetEntryPortraitFrame` | entry `+0x44`: `DefaultIconFrame` or `MTX/SupporterIconFrame<id>` |
+| `0x1425ff110` | `CharacterPortrait_GetIconPath` | entry `+0x4e` bits 0-4 class, bits 5-7 ascendancy; entry `+0x46` portrait variation |
+| `0x1406b9010` / `0x1406b8e90` | `SelectScreen_SetEntryLocation` / | entry `+0x50` (MiniQuestStates row), areas `+0x48` / `+0x4a` (WorldAreas lookup) |
+| `0x140f0c090` | `SelectScreen_OnCharacterDetails` | caches the preview event (31 gear slots, two `u16`, pairs, shapeshift form) per character index |
+| `0x1420e8534`..`0x1420e8936` | | `0x0015` handler: stores the list in the account entry (`+0x40` vector, `+0x58`/`+0x59` bytes), builds the preview event; signal at login session `+0xd08` |
+| `0x14214ea70` / `0x1420e895e` | | `0x0013` CharacterCreated reader / handler (signal `+0xb08` with account id and result; the `notify` byte makes `0x1420e89c1` build an `/api/tracking-conversions/` request) |
+| `0x140ed2ab0` | `CreateCharacterState_OnCharacterCreated` | create-screen callback: result 0 starts the creation scene, else `BackendError_GetText` into the message line `0x140ec96b0` |
+| `0x140ed8149` | | `0x000c` DeleteCharacter builder (name, `u8` from screen `+0x214`, `u32` account id from `+0x210`) |
+
