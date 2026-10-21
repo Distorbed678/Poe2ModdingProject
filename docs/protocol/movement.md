@@ -173,7 +173,8 @@ Client steps per frame from `poe-hook.log` (cells per 33 ms frame, 30 rolls, `dt
 - It falls about **0.215 per frame from 3.9 to 1.2 (t0+13), levels out at 0.94 until `t0+23` and tapers to zero by `t0+31`**. Sum 45.9: the roll covers `dodge_roll_travel_distance` (46 cells) in 30 frames (36 cells in the first 16, 34 in 14); straight-line displacement 42.6-46.2 (the cursor steering bends the path).
 - Walking resumes at `t0+30` (tap) with the walking speed 1.23 (WASD) or stands (no key): the standing roll ends **without any `0x64`**; the next message is the next input's reply. A held-key roll's `0x64`s are only the replies to `0x63`.
 - **Positions agree**: the `0x1c8` start cell is within 0.2-2.9 cells of the client's position before the first roll step, and the `0x64` cells (600 of them, also after rolls) are within 0-2.8 cells of the client's position (median 0): the official server simulates the same roll path and needs no correction. In our own session of the same day (`GameFiles/logs/poe-hook/2026-10-20_19-14-52_336`) a roll along the keys that the server simulated towards the cursor made the client jump 36 cells at the next roll's `0x1c8` (the roll start places the client on its start cell), and the drift never recovered.
-- Our `roll_speed` (117.6 - 206.6 t cells/s down to 28.2) matches the first 14 frames and the plateau (1.19 at t0+13 against 1.23) and ends about 3 frames before the client (27 against 30); the table above can replace it.
+- `crates/poe-game/src/movement.rs` plays the table frame by frame (`ROLL_STEPS`, 30 values, sum 45.9; `roll_speed(t, sprint)`). A blocked step costs no distance and does not end the roll (the client's roll runs its 30 frames against a wall too).
+- **A roll that becomes a sprint (key still down at `t0+15`) does not taper**: the 7 sprint rolls of the session step 0.91, 0.96, 1.02, 1.08, 1.09, 1.11, 1.20, 1.34, 1.36, 1.46, 1.49, 1.52, 1.54, 1.70 in `t0+16..t0+29` and about 2.4 in `t0+30` (2.0 to 3.4), then sprint at 1.86 (`ROLL_SPRINT_STEPS`, `Mover::sprint_roll` at the sprint start). The tap table would leave the server about 10 cells behind after a sprint roll.
 
 ### Reply details found by replay
 - **Direction scaling truncates**: `v × 550 / |v|` toward zero (WP2.1b: not `v × 550 / 180`, which is only equal for lengths of exactly 180: `(94,-153)` → `(287,-468)`, not `(287,-467)`; `(-53, 172)` → `(-161, 525)`, not `-162, 526`).
@@ -308,7 +309,27 @@ The DLL's per-frame position report (`servers/instance-server/src/sync.rs`, DLL 
 - On the next login into that area, the login server puts the location in the ticket. The instance server sends the same seed, so the layout is the same, and spawns the player on the saved cell (or the nearest walkable cell if it is blocked). Characters that have never been in the game start at the area's start position.
 
 ## Test tooling
-Key and mouse injection for movement tests (`in:`, `inclick:`, `inpress:`, `indown:`/`inup:`/`wait:`, posted keys such as Space) and `movement_log`: [../guides/setup.md](../guides/setup.md#poe-hookkeys-entries), [../architecture/client-dll.md](../architecture/client-dll.md#movement-log). 
+Key and mouse injection for movement tests (`in:`, `inclick:`, `inpress:`, `indown:`/`inup:`/`wait:`, posted keys such as Space) and `movement_log`: [../guides/setup.md](../guides/setup.md#poe-hookkeys-entries), [../architecture/client-dll.md](../architecture/client-dll.md#movement-log). `movement_log` (the DLL's read-only per-frame position log, `frame #n ... world ... step ... grid`) is kept: it is what the official captures' client positions and the roll tables come from, and the unattended tests set it through `POE_HOOK_MOVEMENT_LOG`.
+
+**A roll test needs a real hold of Space**: the plain `0x20` entry (and `0x20:ms`) posts key-down and key-up in one go, the client's polled key state reads "up", and `0x1a5` and `0x1ac` arrive together before the roll starts: the client then sends **no `0x1a8` at all** (4 of 4 rolls) and rolls along its facing instead of steering. Use `indown:0x20`, `0x20`, `wait:250`, `inup:0x20` (a hold: `0x20:1400` between them); with it the client sends `0x1a8` every 2 frames and each gets its `0x1af`. The skill id (ours 1, official `0x80000040`) makes no difference.
+
+**In-game check, 2026-10-20 (drift checker, `[dev] drift_check`, cells; max in the second / after the stop; teleport lines left out)**:
+
+| Scenario | max | after stop |
+|---|---|---|
+| WASD walk and turns (4 directions) | 3.2 | 0.4 |
+| roll while walking (W, D) | 4.1, 3.9 | 1.8, 3.1 |
+| standing roll, 3 cursor directions, open ground | 3.9 | 0.5 to 0.7 |
+| standing roll, cursor steering while the player moves | 7.2 | 7.2 |
+| sprint, Space held 1.0 s, W held | 6.4 | 2.7 |
+| sprint, Space held 1.4 s, W held (open ground, 2 runs) | 13.8, 11.2 | 13.0, 10.1 (gap 11) |
+| click-to-move (3 clicks) | 1.3 | 0 |
+| held click | 2.5 | 2.2 |
+| click, then roll | 5.4 | 3.8 |
+| standing roll in click-to-move mode | 14.9 | 5.2 (gap 12) |
+
+The first standing-roll runs of the day were 28-35 cells off because the test sent no `0x1a8` (above); with steering they are within the roll tolerance on open ground.
+
 ## Movement trace
 `[instance] movement_trace` writes `runtime/movement-trace.tsv`; `scripts/re/movement_trace.py` lists the frames where the player moved backwards or stalled.
 
@@ -327,5 +348,7 @@ What the seven official captures **still do not cover** (after the 2026-10-20 se
 | 8 (low) | **Sprint against a monster** (blocked by an entity, not a wall), knockback (`0x1e0`) and stuns while walking or rolling, `0x1b0`/`0x1aa` with a Move or roll | stream while blocked by entities; movement refusal while stunned | sprint into a pack; get hit while walking and while rolling; roll while a monster is hovered |
 | 9 (low) | Buffs with definition-dependent `0x1eb` fields (flag `0x10`, rows with a `u16`/vector from the definition; 6 of 51 `0x1eb` in the captures decode with 2 bytes left) | only the three sprint buffs are fully decoded | (no capture needed: decode the buff definition table) |
 | 10 (low) | The monster's cell in the `0x1c8` target of an attack on a hovered monster (505,963 vs the press' 454,969): needs entity positions in the world, and the `u1a` header values (1/3/4/8/17/25) of the replies | entity-targeted attacks | (server work: entity positions) |
+| 11 (med) | **Walking on after a sprint ended with the key held and no `0x64` stream** (WASD held since before the roll, Space released): our client slows down on its own from 1.3 to 0.4 cells per frame over ~30 frames (2 runs), the official client in `f2393` stepped 1.0, 0.97, 0.91, 0.74, 0.8, 0.35 (plateau 7 frames) and then rose to 1.35; the server keeps walking at 1.23 and ends 10 to 13 cells ahead | the walk-on rule after a sprint without stream (RE: what the client does with its WASD path at the sprint end, or what `0x64` it expects) | sprint with W held since before the roll, release Space, keep W 2 s |
+| 12 (med) | **Roll heading in the first frames and in click-to-move mode**: the client rolls towards its facing/last direction for 2 to 7 frames (in quantized angles) before it follows the `0x1a8` offsets, and in click-to-move mode one standing roll kept west (180 degrees) while the offsets pointed north-west (-133) until it hit a wall; the server rolls along the offset from the first frame | up to ~5 cells of drift per roll, more near walls | standing rolls in click-to-move mode with the cursor 90 and 180 degrees from the last walk; rolls from a standstill after turning the cursor |
 
 Closed by the 2026-10-20 session (kept for reference, with the evidence): click-to-move replies (sections above), standing roll, chained rolls and the roll queue rule, WASD stop during sprint (never sent: the client sends the cursor direction), held click during roll/sprint, input-mode/stance change (standing), sprint into a wall (3), roll path and speed profile (30 rolls with client positions), non-8-way `0x63` vectors (cursor direction while Space is held).

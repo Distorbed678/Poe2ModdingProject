@@ -10,6 +10,7 @@ What was built when, newest last. Detail lives in the topic docs linked from eac
 - **By 2026-10-16, dungeon layouts.** `.dgr` areas ported (G1_3, G1_6 to G1_9; [../re/terrain/dungeon.md](../re/terrain/dungeon.md)).
 - **2026-10-17, instances, transfers, chat.** Instance directory, transfers between instances, forced layouts, the Instances page, chat channels, server commands in chat and the overlay, overlay sidebar and command palette ([../guides/server-admin.md](../guides/server-admin.md)). Multiplayer gap analysis ([../guides/hosting.md](../guides/hosting.md)).
 - **2026-10-20, restructure.** Docs, scripts and runtime data moved into the current layout; protocol and client hook split into submodules; datamined outputs moved to `dumps/` ([../plans/orchestration-2026-10.md](../plans/orchestration-2026-10.md)).
+- **2026-10-20, movement verified in game.** The drift checker against the real client: WASD, rolls (standing, walking, sprint), click-to-move and held click. Found and fixed: the server's roll ended at the first blocked step, and rolls used a taper that does not fit sprint rolls (per-frame official tables now, [../protocol/movement.md](../protocol/movement.md#roll-path-and-speed-profile)); a plain `0x20` test key sends no roll steering, use `indown:`/`inup:`. Open: the client's own slow-down after a sprint without stream and its first-frame roll heading (gaps #11, #12).
 
 ## Open items
 

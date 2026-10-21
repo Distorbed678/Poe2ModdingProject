@@ -41,7 +41,7 @@ Start at [docs/index.md](docs/index.md): guides, architecture, the wire protocol
 Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xtask tracker`; do not edit this block by hand. The history of what was built when is in [docs/status/history.md](docs/status/history.md), the terrain generator in [docs/status/terrain.md](docs/status/terrain.md).
 
 <!-- tracker:start -->
-> **Current task:** [Phase 2: movement rewrite (WP2.3 built; WP2.4 in-game verification next; capture gate G-MOVE open)](docs/plans/orchestration-2026-10.md)
+> **Current task:** [Phase 2: movement rewrite (WP2.4 verified in game; gaps #11/#12 open; capture gate G-MOVE open)](docs/plans/orchestration-2026-10.md)
 
 | Subsystem | Progress | Done |
 |---|---|---|
@@ -107,12 +107,12 @@ Docs: [docs/protocol/movement.md](docs/protocol/movement.md)
 
 | | Item | Note |
 |---|---|---|
-| 🟡 | [WASD and click-to-move (held click, turns)](docs/protocol/movement.md) | server-authoritative World/Locomotion with the official reply sequences, verified against captures by replay tests: WASD, rolls (standing, chained, along the keys), sprint, click-to-move and held click (2026-10-20 capture); gaps in the movement spec's gap list, in-game check pending |
-| 🟡 | [Dodge roll](docs/protocol/movement.md) | official reply batch (stats, 0x1ae, 0x1af steering, 0x1ca not yet in instance.toml); standing roll and roll edge cases unverified (gaps #2-#4) |
-| 🟡 | [Facing the cursor](docs/protocol/movement.md) | 0x62 aim echoed as 0x1dc like official servers (replay-tested); the cursor/0x1df workarounds are gone; in-game check pending (WP2.4) |
-| 🟡 | [Sprint](docs/protocol/movement.md) | official sequence (3 buffs, stats, 0x64 stream, end); sprint into roll and zero WASD during a sprint unverified (gaps #4, #5) |
+| 🟡 | [WASD and click-to-move (held click, turns)](docs/protocol/movement.md) | server-authoritative World/Locomotion with the official reply sequences, verified against captures by replay tests and in game 2026-10-20 (drift checker): WASD walk/turn 1-3 cells, click-to-move 0-1.3, held click 2.2; gaps in the movement spec's gap list |
+| 🟡 | [Dodge roll](docs/protocol/movement.md) | official reply batch and per-frame speed profile (tap and sprint rolls); in game: standing roll on open ground 0.5-3.9 cells, while walking 4, while steering by a moving cursor 7; open: roll heading in the first frames and in click-to-move mode (gap #12) |
+| 🟡 | [Facing the cursor](docs/protocol/movement.md) | 0x62 aim echoed as 0x1dc like official servers (replay-tested); the cursor/0x1df workarounds and their config keys are gone |
+| 🟡 | [Sprint](docs/protocol/movement.md) | official sequence (3 buffs, stats, 0x64 stream, end) and the sprint-roll speed profile; in game: sprint 1.0 s 2.7 cells after the stop, 1.4 s with W held since before the roll 10-13 (gap #11: the client slows down on its own after the sprint) |
 | 🟡 | [Capture analysis: 0x1ae / 0x1af / 0x1b1 / 0x1ac, official sequences](docs/protocol/movement.md) | decoded; 2026-10-20 capture covers click-to-move, standing/chained rolls, roll direction and speed profile, input-mode stance; remaining items in the gap list |
-| 🟡 | [Server-authoritative movement on the walkability grid (official packets only)](docs/plans/orchestration-2026-10.md) | built (WP2.3): one World per session, thin packet glue, PSY2 is a drift checker only; in-game verification is WP2.4 |
+| 🟡 | [Server-authoritative movement on the walkability grid (official packets only)](docs/plans/orchestration-2026-10.md) | built (WP2.3), verified in game (WP2.4, 2026-10-20): drift under ~4 cells walking and rolling, 0-3 after stops; open: gaps #11 and #12 of the movement spec |
 | ❌ | [Server collision](docs/status/terrain.md) | needs the terrain generator to cover more areas |
 
 ### Multiplayer

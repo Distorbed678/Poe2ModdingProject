@@ -160,7 +160,7 @@ With Steam running (without it the client logs `Unable to init Steam API` and ex
 
 ### `poe-hook.keys` entries
 Each entry is one line; the DLL reads the file and posts the input to the game window only (nothing goes to other windows; `SendInput` is not used, because it types into whatever window has focus). Never while read-only.
-- A plain virtual-key number (`0x0d`, `0x57:800` with a hold time in ms) is a posted key message. Plain keys (`0x20`, Space = dodge roll) reach the input bindings that are read from window messages.
+- A plain virtual-key number (`0x0d`, `0x57:800` with a hold time in ms) is a posted key message. Plain keys (`0x20`, Space = dodge roll) reach the input bindings that are read from window messages. A plain `0x20` is down and up in one go, so the client's key state never reads "held" and a roll started that way is not steered (no `0x1a8`); for roll and sprint tests use `indown:0x20`, `0x20`, `wait:250`, `inup:0x20` ([movement spec](../protocol/movement.md#test-tooling)).
 - **`in:<vk>[:ms]`** posts `WM_INPUT` with a marker handle. The game reads WASD through Raw Input, so posted key messages do not move the player; the DLL hooks `GetRawInputData` (user32) to return a synthetic keyboard record for that handle, and `GetKeyState` reports the key as held meanwhile.
 - **`indown:<vk>` / `inup:<vk>` / `wait:<ms>`** hold and release a key while other input arrives.
 - **`inmove:x,y` / `inclick:x,y`** make the hooked `GetCursorPos` return that client position, then post the mouse messages.
