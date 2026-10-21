@@ -62,18 +62,53 @@ pub enum Motion {
         y: f32,
         remaining: f32,
         elapsed: f32,
+        /// The sprint key was still down at `t0 + 15`: from there the client speeds up
+        /// ([`ROLL_SPRINT_STEPS`]) instead of tapering off.
+        sprint: bool,
     },
 }
 
-/// Dodge roll speed (cells per second) `t` seconds into the roll, measured on the client
-/// (33 ms frames): it starts at about 3.9 cells per frame, loses about 0.225 cells per frame
-/// every frame and then holds about 0.93 cells per frame until the travel distance is covered
-/// (46 cells take about 28 frames). The client drives it from the roll animation.
-pub fn roll_speed(t: f32) -> f32 {
-    const START: f32 = 117.6;
-    const DECELERATION: f32 = 206.6;
-    const MIN: f32 = 28.2;
-    (START - DECELERATION * t).max(MIN)
+/// Seconds per frame of the roll table (the official 33 ms frames).
+const ROLL_FRAME: f32 = 0.033;
+
+/// Cells the client moves in each frame of a dodge roll (`t0 + 1` to `t0 + 30`), mean of the 6
+/// standing rolls on open ground of the 2026-10-20 capture (`dodge_roll_travel_distance` 46:
+/// the sum is 45.9, see docs/protocol/movement.md). The roll falls from 3.9 to 1.2 cells per
+/// frame, holds about 0.94 and tapers to zero at `t0 + 31`.
+pub const ROLL_STEPS: [f32; 30] = [
+    3.89, 3.74, 3.45, 3.27, 3.02, 2.72, 2.54, 2.30, 1.98, 1.76, 1.59, 1.35, 1.23, 1.16, 1.06, 0.99,
+    0.97, 0.94, 0.94, 0.94, 0.94, 0.95, 0.93, 0.85, 0.74, 0.68, 0.49, 0.31, 0.16, 0.04,
+];
+
+/// The steps of frames `t0 + 16` to `t0 + 30` of a roll that became a sprint (the key was still
+/// down at `t0 + 15`), mean of the 7 sprint rolls of the 2026-10-20 capture: the client blends
+/// into the sprint, so it speeds up from 0.9 to 1.7 cells per frame instead of tapering off, and
+/// takes a catch-up step of about 2.4 in the last frame (median of 7: 2.0 to 3.4). From
+/// `t0 + 31` on it sprints at 1.86 (the sprint motion).
+pub const ROLL_SPRINT_STEPS: [f32; 15] = [
+    0.91, 0.96, 1.02, 1.08, 1.09, 1.11, 1.20, 1.34, 1.36, 1.46, 1.49, 1.52, 1.54, 1.70, 2.40,
+];
+
+/// Index into [`ROLL_STEPS`] of the frame `t` seconds into the roll.
+fn roll_frame(t: f32) -> usize {
+    ((t / ROLL_FRAME) + 1e-3).floor().max(0.0) as usize
+}
+
+/// Cells per frame of frame `frame` (0 based) of a roll.
+fn roll_step(frame: usize, sprint: bool) -> f32 {
+    if sprint && frame >= 15 {
+        ROLL_SPRINT_STEPS.get(frame - 15)
+    } else {
+        ROLL_STEPS.get(frame)
+    }
+    .copied()
+    .unwrap_or(0.0)
+}
+
+/// Dodge roll speed (cells per second) `t` seconds into the roll: the per-frame steps of
+/// [`ROLL_STEPS`] (0 once the table is over). The client drives it from the roll animation.
+pub fn roll_speed(t: f32, sprint: bool) -> f32 {
+    roll_step(roll_frame(t), sprint) / ROLL_FRAME
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,6 +151,18 @@ impl Mover {
         self.motion = motion;
         self.path.clear();
         self.replan_in = 0;
+    }
+
+    /// The running roll turns into a sprint roll (the key was still down at `t0 + 15`): the
+    /// rest of it follows [`ROLL_SPRINT_STEPS`] and is not limited to the roll's distance.
+    pub fn sprint_roll(&mut self) {
+        if let Motion::Roll {
+            remaining, sprint, ..
+        } = &mut self.motion
+        {
+            *sprint = true;
+            *remaining = f32::MAX;
+        }
     }
 
     /// Waypoints (cells) left of the current walk.
@@ -161,19 +208,26 @@ impl Mover {
                 y,
                 remaining,
                 elapsed,
+                sprint,
             } => {
-                let step = (roll_speed(elapsed) * dt).min(remaining);
+                let step = (roll_speed(elapsed, sprint) * dt).min(remaining);
                 let moved = match unit(x, y) {
                     Some((ux, uy)) => self.slide(ux, uy, step, terrain),
                     None => 0.0,
                 };
-                let remaining = remaining - step;
-                self.motion = if moved > 1e-3 && remaining > 1e-3 {
+                // A blocked frame costs no distance: the roll goes on with the profile (the
+                // client's roll animation runs its 30 frames even against a wall, and a later
+                // steer can free it).
+                let remaining = remaining - moved;
+                // The last table step is the last frame of the roll.
+                let last = roll_frame(elapsed) + 1 >= ROLL_STEPS.len();
+                self.motion = if remaining > 1e-3 && !last {
                     Motion::Roll {
                         x,
                         y,
                         remaining,
                         elapsed: elapsed + dt,
+                        sprint,
                     }
                 } else {
                     Motion::Idle
@@ -328,14 +382,67 @@ mod tests {
             y: 1.0,
             remaining: 46.0,
             elapsed: 0.0,
+            sprint: false,
         });
         let mut frames = 0;
         while m.is_moving() {
             m.advance(0.033, &Open);
             frames += 1;
         }
-        assert!((m.y - 46.5).abs() < 0.6, "{}", m.y);
-        // The client takes about 28 frames.
-        assert!((26..=30).contains(&frames), "{frames}");
+        // The official profile covers 45.9 of the 46 cells in 30 frames.
+        assert!(
+            (m.y - (0.5 + ROLL_STEPS.iter().sum::<f32>())).abs() < 0.05,
+            "{}",
+            m.y
+        );
+        assert_eq!(frames, 30);
+    }
+
+    #[test]
+    fn a_sprint_roll_speeds_up_after_frame_15() {
+        let mut m = Mover::at_cell((0, 0), 37.0);
+        m.start(Motion::Roll {
+            x: 1.0,
+            y: 0.0,
+            remaining: 46.0,
+            elapsed: 0.0,
+            sprint: false,
+        });
+        let mut last = m.x;
+        for i in 0..30 {
+            if i == 15 {
+                m.sprint_roll();
+            }
+            m.advance(0.033, &Open);
+            let expect = if i < 15 {
+                ROLL_STEPS[i]
+            } else {
+                ROLL_SPRINT_STEPS[i - 15]
+            };
+            assert!((m.x - last - expect).abs() < 1e-3, "frame {}", i + 1);
+            last = m.x;
+        }
+        assert!(!m.is_moving());
+        // About 55 cells in the 30 frames, against 46 for a tap roll.
+        assert!(m.x > 0.5 + 54.0 && m.x < 0.5 + 56.0, "{}", m.x);
+    }
+
+    #[test]
+    fn roll_follows_the_official_steps() {
+        let mut m = Mover::at_cell((0, 0), 37.0);
+        m.start(Motion::Roll {
+            x: 1.0,
+            y: 0.0,
+            remaining: 46.0,
+            elapsed: 0.0,
+            sprint: false,
+        });
+        let mut last = m.x;
+        for (i, step) in ROLL_STEPS.iter().enumerate() {
+            m.advance(0.033, &Open);
+            assert!((m.x - last - step).abs() < 1e-3, "frame {}", i + 1);
+            last = m.x;
+        }
+        assert!(!m.is_moving());
     }
 }

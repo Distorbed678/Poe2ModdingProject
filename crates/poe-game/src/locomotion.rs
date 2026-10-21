@@ -833,6 +833,7 @@ impl Locomotion {
                 y: heading.1 as f32,
                 remaining: cfg.roll.travel_distance,
                 elapsed: 0.0,
+                sprint: false,
             }
         });
         let t0 = ctx.frame;
@@ -1062,6 +1063,7 @@ impl Locomotion {
                     streaming: false,
                 });
                 r.sprinted = true;
+                self.mover.sprint_roll();
                 for (i, row) in cfg.sprint.buff_rows.iter().enumerate() {
                     out.push(MoveEvent::BuffAdded {
                         index: n + i as u16,
