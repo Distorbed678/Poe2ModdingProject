@@ -50,7 +50,7 @@ Streams: the client's UDP stream (kinds 1 and 2, shared counter), the client's u
 - Datagrams arrive on the instance bind address, UDP, same port number as the TCP listener. No source address filter (remote clients work); identity is the session id plus the tag.
 - A datagram is dropped, without any reply, if it is malformed or has another version, names an unknown session, fails the tag, travels the wrong way, has an unexpected kind, or replays a counter. The first rejection and every thousandth are logged (`side-channel datagram rejected`, with the reason).
 - Debug frames go to the source address of the session's latest **authentic** datagram (NAT rebinding follows; spoofed packets cannot redirect it).
-- Reports never move the player; only the drift checker reads them ([movement.md](movement.md#drift-checker-psy2)).
+- Reports never move the player; only the drift checker reads them ([movement.md](movement.md#drift-checker)).
 
 ## Terrain upload
 Over the instance TCP port, no extra port. The server tells an upload from a game connection by peeking the first four bytes: `PSUP` is not a game opcode (a `Hello` starts with its u16 opcode).

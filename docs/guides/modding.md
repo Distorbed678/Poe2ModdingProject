@@ -10,5 +10,5 @@ Modding is a design goal from the start. This page records the hooks that alread
 
 ## Client
 - **Debug core (exists):** `modules/client-hook/poe-hook-core` is hot-reloadable (a running client reloads a redeployed core, see [setup.md](setup.md)); its features are toggled in `poe-hook.toml` ([../architecture/client-dll.md](../architecture/client-dll.md)). The loader (`modules/client-hook/poe-hook`) keeps the permanent hooks.
-- **Mod manifest (spec only):** `mod.toml` (id, version, game version compatibility, load order, dependencies, entry DLL, data files) is specified in [modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md); the loader and the launcher will both read it.
+- **Mod manifest (spec only):** `mod.toml` (id, version, game version compatibility, load order, dependencies, entry DLL, data files) is specified in [modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md); the launcher already installs, enables and orders mods by it ([launcher.md](launcher.md#mods)); the DLL loader does not read it yet.
 - **Planned:** a loose-file override hook so client mods can ship replacement assets (sharing the same `mods/<name>/` layout as the server), plus packet hooks for custom messages.

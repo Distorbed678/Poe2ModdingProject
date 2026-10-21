@@ -9,7 +9,8 @@ places:
 - **Chat**: `!name args` (prefix `[commands] prefix`; `/` stays with the client's own
   commands). Replies come back as chat lines from `<Server>`.
 - **Overlay**: the DLL's Commands page builds a form per command from the registry, which the
-  server sends over the debug link (`cmds` datagrams; the overlay asks with `registry`).
+  server sends over the authenticated debug link (`cmds` lines in debug frames; the overlay
+  asks with a `registry` command frame, [../protocol/side-channel.md](../protocol/side-channel.md)).
   Results arrive as `ack` lines. Commands added to the registry show up in the overlay by
   themselves.
 
@@ -42,24 +43,15 @@ ones.
 
 ## Web API
 
-The same commands are available over HTTP for the web admin site: `kick`, `mute`/`unmute`, `announce`, instance create/close, player transfer and the `account` actions are endpoints of `poe-web-api` that run the registry command as the logged-in web admin (role checked at the time, audit lines tagged `<admin> (web)`, passwords redacted). Endpoints, authentication and the live log: [../architecture/web-api.md](../architecture/web-api.md). Setup in short: make an admin offline (below), start `poe-server`, `POST /api/v1/login` on `[web] bind` (default `127.0.0.1:8080`), and send the token as `Authorization: Bearer`. `[accounts] open_registration = true` lets `POST /api/v1/register` create player accounts; server commands always can.
+The same commands are available over HTTP for the web admin site: `kick`, `mute`/`unmute`, `announce`, instance create/close, player transfer and the `account` actions are endpoints of `poe-web-api` that run the registry command as the logged-in web admin (role checked at the time, audit lines tagged `<admin> (web)`, passwords redacted). Endpoints, authentication and the live log: [../architecture/web-api.md](../architecture/web-api.md). Setup in short: make an admin offline ([setup.md](setup.md#accounts-and-characters-offline)), start `poe-server`, `POST /api/v1/login` on `[web] bind` (default `127.0.0.1:8080`), and send the token as `Authorization: Bearer`. `[accounts] open_registration = true` lets `POST /api/v1/register` create player accounts; server commands always can.
 
 ## Web admin
 
 A browser UI for the same commands: dashboard, live logs, players online (kick, mute, transfer), instances, accounts, characters and an announce dialog. It is the Svelte app in the submodule `modules/web-admin` (repo Poe2WebAdmin); how it is built is in [../architecture/web-api.md](../architecture/web-api.md#the-web-admin-spa).
 
-1. Build it once (Node 22 and npm; `git submodule update --init modules/web-admin` if the folder is empty):
-   ```sh
-   cd modules/web-admin && npm ci && npm run build
-   ```
-2. Point the server at the build in `config/server.toml` and restart `poe-server`:
-   ```toml
-   [web]
-   static_dir = "modules/web-admin/dist"
-   ```
-3. Make an admin offline if you have none (`account create` and `account role <name> admin`, below), then open <http://127.0.0.1:8080> (the `[web] bind` address) and sign in. Only accounts with the `admin` role get in; the session lasts 12 hours.
+Build it, point `[web] static_dir` at `modules/web-admin/dist`, restart `poe-server` and open <http://127.0.0.1:8080> (the `[web] bind` address): [setup.md](setup.md#web-admin-build). Only accounts with the `admin` role get in (make one offline, [setup.md](setup.md#accounts-and-characters-offline)); the session lasts 12 hours.
 
-The log page shows what the server's `[logging] filter` lets through (to see `debug` events, enable them there). For development run `npm run dev` in `modules/web-admin` (port 5173, proxies `/api` to `[web] bind`).
+The log page shows what the server's `[logging] filter` lets through (to see `debug` events, enable them there). For development the Vite dev server proxies `/api` to `[web] bind` ([setup.md](setup.md#web-admin-build)).
 
 ## Accounts
 
@@ -73,16 +65,7 @@ Admins are accounts with the `admin` role; there is no admin list in the config.
 | `account passwd <name> <password>` | new password; revokes the account's saved logins (Remember Me, launcher, web) |
 | `account list` | every account: id, role, state, last login (`no password (dev)` marks machine-hash accounts) |
 
-An admin cannot demote or disable themselves. Passwords typed in chat travel over the game connection and appear on screen: prefer the offline form for real passwords. It runs against the database, also while the server is up, and works for the first admin:
-
-```
-cargo run -p poe-server -- account create alice "a long password"
-cargo run -p poe-server -- account role alice admin
-cargo run -p poe-server -- account list
-```
-
-### Characters (offline)
-`poe-server character create <account> <name> <start_state> [area] [league]` creates a character the way the character creation screen does (slot limit and name rules apply); `start_state` is a `CharacterStartStates` id (for example `DexFourDefault`), `area` a `WorldAreas` id (default: the start state's hub area, else `[player] start_area`), `league` defaults to the first `[[leagues]]` entry. A character created with an explicit town or hideout area counts as having played the intro. `poe-server character list [account]` lists them. Both run against the database and exit; used by `scripts/test-mp.sh` ([hosting.md](hosting.md#local-two-client-test)).
+An admin cannot demote or disable themselves. Passwords typed in chat travel over the game connection and appear on screen: prefer the offline form for real passwords. `poe-server account ...` runs against the database, also while the server is up, and works for the first admin; it and the offline `poe-server character create|list` (test setups, `scripts/test-mp.sh`) are in [setup.md](setup.md#accounts-and-characters-offline).
 
 A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and `Exile1` was made an admin by the database migration.
 

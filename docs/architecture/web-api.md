@@ -17,15 +17,8 @@ Related: accounts, tokens and hashing in [accounts.md](accounts.md); the command
 | `[web] log_buffer` | `2000` | recent log events kept for the live log viewer |
 | `[accounts] open_registration` | `false` | whether `POST /register` works |
 
-```sh
-cargo run -p poe-server -- account create alice "a long password"   # offline, the first admin
-cargo run -p poe-server -- account role alice admin
-cargo run -p poe-server                                              # API on http://127.0.0.1:8080
-curl localhost:8080/api/v1/server
-T=$(curl -s -XPOST localhost:8080/api/v1/login -H 'content-type: application/json' \
-      -d '{"username":"alice","password":"a long password"}' | jq -r .token)
-curl localhost:8080/api/v1/admin/accounts -H "authorization: Bearer $T"
-```
+Start the server and make an admin as described in [../guides/setup.md](../guides/setup.md#web-api) (`curl localhost:8080/api/v1/server`, `POST /api/v1/login` with `{"username", "password"}`, then `Authorization: Bearer <token>` on `/api/v1/admin/...`).
+
 
 `cargo xtask openapi` rewrites `docs/architecture/openapi.json` (`--check` fails when it is stale; a unit test in the crate fails too). The SPA and the launcher generate their types from that file.
 
@@ -100,7 +93,7 @@ With `[web] static_dir` set to the SPA build (`modules/web-admin/dist`), the sam
 
 ## The web admin SPA
 
-Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the submodule `modules/web-admin`. Svelte 5 + Vite + TypeScript, plain CSS (dark by default, light by `prefers-color-scheme`). Build and run: [../guides/server-admin.md](../guides/server-admin.md#web-admin); the repo's own README covers development.
+Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the submodule `modules/web-admin`. Svelte 5 + Vite + TypeScript, plain CSS (dark by default, light by `prefers-color-scheme`). Build and run: [../guides/setup.md](../guides/setup.md#web-admin-build); usage: [../guides/server-admin.md](../guides/server-admin.md#web-admin); the repo's own README covers development.
 
 | Page (hash route) | Uses |
 |---|---|

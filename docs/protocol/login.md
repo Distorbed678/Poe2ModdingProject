@@ -1,6 +1,6 @@
 # Login protocol (0.5.5e)
 
-Connection: client to the login host from `gateway_list.txt` (ours: `127.0.0.1:20481`).
+Connection: client to the login host from `gateway_list.txt` (ours: `[network] public_host` and `[network.login]` port, written by `cargo xtask deploy-client`).
 
 ## Observed sequence
 1. **C→S `0x0002` ephemeral public key** (the first message, unencrypted). Captured 2026-10-12:
@@ -49,7 +49,7 @@ Opcode in `login.toml` (`Credentials`), Rust type `poe_proto::login::Credentials
 Answer with the same `0x0004`. With `save_login = 1` (or a token login) a successful answer carries a fresh 32-byte `session_token`, which the client saves for Remember Me; without it the token is all zeros. `password_hash` is checked against the argon2id hash of the digest ([../architecture/accounts.md](../architecture/accounts.md)). Failures are listed under [Authentication results](#authentication-results).
 
 ### Authentication results
-`result` codes our login server sends (`servers/login-server/src/auth.rs`, `auth::code`). A present `notice` is shown by the client as the error text. Behaviour of the codes is inferred from the client ([../re/standalone-login.md](../re/standalone-login.md) section 5) and not yet seen at runtime.
+`result` codes our login server sends (`servers/login-server/src/auth.rs`, `auth::code`). A present `notice` is shown by the client as the error text. The client's handling of the codes is inferred from its code ([../re/standalone-login.md](../re/standalone-login.md) section 5); only `0` (password and remember-me token logins, also in the [two-client test](../guides/hosting.md#local-two-client-test)) has been seen at runtime.
 
 | Code | When | Client effect |
 |---|---|---|

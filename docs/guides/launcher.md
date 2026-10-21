@@ -11,18 +11,13 @@ What it does:
 
 ## Building and running
 
-```sh
-git submodule update --init --recursive        # modules/launcher, with its nested client-hook and protocol
-cd modules/launcher
-npm ci
-npm run tauri dev                              # or: npm run tauri build -- --debug
-```
+Commands to build and run it (`npm ci`, `npm run tauri dev`): [setup.md](setup.md#launcher-build-and-test).
 
 Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; Debian: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libdbus-1-dev librsvg2-dev`), Node 22 and Rust. The result is `src-tauri/target/{debug,release}/poe2-launcher` plus deb, rpm and AppImage bundles. CI (Poe2Launcher): Ubuntu runs `npm run check/test/build`, `cargo fmt --check`, `clippy -D warnings` and `cargo test`; Windows runs `cargo check`. The private submodules are fetched with two read-only deploy keys (repository secrets `HOOK_DEPLOY_KEY`, `PROTOCOL_DEPLOY_KEY`).
 
 ## One-time set-up
 
-1. **Hook DLLs.** Settings, *Hook DLL directory*: a build of Poe2ClientHook holding `poe_hook.dll` and `poe_hook_core.dll`, normally `modules/client-hook/target/x86_64-pc-windows-msvc/release` (`cargo xtask build-dll` here). Bundling them into the launcher is not done.
+1. **Hook DLLs.** Settings, *Hook DLL directory*: a build of Poe2ClientHook holding `poe_hook.dll` and `poe_hook_core.dll`, normally `modules/client-hook/target/x86_64-pc-windows-msvc/release` (built with `build-dll`, [setup.md](setup.md#build-and-test)). Bundling them into the launcher is not done.
 2. **Keyring (Linux).** Login tokens are stored only in the Secret Service (GNOME Keyring, or KWallet with its Secret Service interface switched on in System Settings). Without a provider the login is refused with an explanation, and the token is revoked again. Windows uses the Credential Manager.
 3. **Linux:** Steam must be running when you press Play, and the Proton set in Settings (default `Proton - Experimental`) must exist under `<Steam>/steamapps/common`. The launcher only reads Proton from there.
 4. **Server:** a server that has the web API on (`[web] enabled`, reachable from the player; use TLS outside a trusted network) and an account (`open_registration = true`, or `account create`).
@@ -64,21 +59,14 @@ enabled = ["core-lib", "my-mod"]    # load order; the mods' own mod.toml files a
 
 ## Testing the launcher against a local server
 
-```sh
-# a scratch copy of config/server.toml with shifted ports (see setup.md "Web API"): web 127.0.0.1:18080, login 29481, instance 29112, scratch sqlite, open_registration = true
-POE_CONFIG=/path/to/scratch.toml cargo run -p poe-server -- account create alice "a long password"
-POE_CONFIG=/path/to/scratch.toml cargo run -p poe-server
-cd modules/launcher/src-tauri
-POE_LAUNCHER_TEST_URL=http://127.0.0.1:18080 POE_LAUNCHER_TEST_USER=alice POE_LAUNCHER_TEST_PASS="a long password" \
-  cargo test --test core_flow real_server -- --nocapture
-```
+The real-server test needs a scratch server config (shifted ports, `open_registration = true`, an account made offline); commands: [setup.md](setup.md#launcher-build-and-test), config: [setup.md](setup.md#web-api).
 
-The launcher's tests (`cargo test` in `src-tauri`) already cover profiles with a mock keyring, login/logout/register and the whole Play preparation against a mock web API and a fake Proton; `cargo test --test fetch_tool -- --ignored` downloads and starts the pinned DepotDownloader (never logs in).
+The launcher's own tests already cover profiles with a mock keyring, login/logout/register and the whole Play preparation against a mock web API and a fake Proton; an ignored test downloads and starts the pinned DepotDownloader (never logs in).
 
 ## End-to-end test on a real machine
 
 1. Start the server with the web API and an account (above, or the real config).
-2. `cd modules/launcher && npm run tauri dev`; set the DLL directory (Settings).
+2. Start the launcher in dev mode ([setup.md](setup.md#launcher-build-and-test)); set the DLL directory (Settings).
 3. Servers: add the server; Account: log in.
 4. Install: enter your Steam account, answer the Steam Guard prompt, wait for "Done" and the verification table. Report any failed check; the warning on the executable checksum would mean the recorded value needs correcting.
 5. Start Steam (Linux), press Play. Expected: the client opens on the realm and logs in by itself.

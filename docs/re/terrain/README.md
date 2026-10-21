@@ -161,7 +161,7 @@ objects, not sent by the server.
   and presses Play for each entry (about 20 s per layout); the DLL exports every layout. A second
   AreaInfo on one connection crashes the client (the old objects sample the regenerated terrain,
   `0x141d04eb0`), hence one layout per session.
-- **Dev command** `area <id> <seed>` (`scripts/re/send_dev.py auto area G1_1 12345`) sends a new
+- **Server command** `area_info <area> <seed>` (`scripts/re/send_dev.py area_info G1_1 12345`) sends a new
   AreaInfo on a live connection: it crashes the client for the reason above; kept for experiments.
 - **Port examples** (`cargo run --release -p poe-world --example <name> -- <args>`), which compare
   the port with client data:

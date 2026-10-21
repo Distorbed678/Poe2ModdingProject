@@ -1,6 +1,6 @@
 # Terrain generator: status and next steps
 
-Last updated 2026-10-16 (commit `4f45ba1`), results consolidated 2026-10-20. This is the only place
+Last updated 2026-10-21 (the G1_12 work stopped on 2026-10-16, results consolidated 2026-10-20, matrix added 2026-10-21). This is the only place
 for terrain status and the resume point for the server-side terrain generator (`crates/poe-world`).
 How the client's generator works, and the tools used below, are in
 [../re/terrain/](../re/terrain/README.md): [README](../re/terrain/README.md#tools) (tools),
@@ -8,6 +8,7 @@ How the client's generator works, and the tools used below, are in
 [shared-passes.md](../re/terrain/shared-passes.md).
 The plan for the remaining areas (scope matrix, verification at scale, blockers, work packages) is
 [../plans/terrain-all-areas.md](../plans/terrain-all-areas.md).
+The per-area coverage (every area x topology x orientation: match, fail or untested, plus the generator probe) is the generated table [terrain-matrix.tsv](terrain-matrix.tsv) (`cargo xtask terrain-matrix`, [../guides/setup.md](../guides/setup.md#run)); its totals are in the README tracker. At the time of writing only act 1 has been compared with client hashes.
 
 ## Goal
 

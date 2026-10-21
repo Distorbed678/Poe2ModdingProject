@@ -38,7 +38,7 @@ Consequence of the client's design: the digest is a password equivalent for this
 - A token is valid when its hash is known, its `cluster_id` equals `[cluster] id`, it is not revoked, not expired, of an accepted kind, and the account is not disabled. On a token login the client's saved user name must also match the token's account.
 - A new password (`account passwd`) and disabling an account revoke all the account's tokens.
 - **Cluster id:** change `[cluster] id` to invalidate every saved login at once; a database copied between clusters keeps its accounts and passwords, but no token from the other cluster works.
-- Launcher and web tokens use the same table and trait (`TokenKind::Launcher`, `TokenKind::Web`), issued by `POST /api/v1/login` ([web-api.md](web-api.md)): web 12 hours, launcher `remember_days`. The token login of the game accepts `game_remember` and `launcher`, so the launcher can pass a token for auto-login (WP3.3/WP5); the admin API accepts `web` only.
+- Launcher and web tokens use the same table and trait (`TokenKind::Launcher`, `TokenKind::Web`), issued by `POST /api/v1/login` ([web-api.md](web-api.md)): web 12 hours, launcher `remember_days`. The token login of the game accepts `game_remember` and `launcher`, so a launcher-issued token could be passed for auto-login; the launcher itself uses `POST /api/v1/game-token`, which issues a separate one-off `game_remember` token because the game's rolling login would revoke the launcher token. The admin API accepts `web` only.
 
 Result codes the client gets for failures: [login.md](../protocol/login.md#authentication-results).
 
@@ -46,7 +46,7 @@ Result codes the client gets for failures: [login.md](../protocol/login.md#authe
 
 | Path | Packet | When |
 |---|---|---|
-| Username and password | `0x0003`, `token_login = 0` | the standalone login screen (needs the DLL patch of WP3.3) |
+| Username and password | `0x0003`, `token_login = 0` | the standalone login screen (`login_mode = "standalone"` in the DLL config, [client-dll.md](client-dll.md#login-mode-and-trusted-servers)) |
 | Saved token | `0x0003`, `token_login = 1` | Remember Me, launcher auto-login |
 | Machine hash (dev) | `0x0005` (Steam) | only with `[accounts] dev_machine_hash_login = true`; auto-creates `Exile<id>` accounts without a password. Default in `config/server.toml` for now, off in code |
 
@@ -76,4 +76,4 @@ A new login of an account ends the old one: `LoginSessions::supersede(account)` 
 - Rate limiting of password attempts (the client has a "too many attempts" code, `0x49`).
 - Rate limiting of the web login (`/api/v1/login` shares the missing limit).
 - Per-account settings.
-- Whether `0x0f`/`0x62` behave as inferred in the client: [../re/standalone-login.md](../re/standalone-login.md) section 8, to be checked once the DLL forces the standalone screen (WP3.3).
+- Whether `0x0f`/`0x62` behave as inferred in the client (a rejected token has not been tried in game; the password login and remember-me token login work in game): [../re/standalone-login.md](../re/standalone-login.md) section 5.

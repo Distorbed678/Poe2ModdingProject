@@ -21,7 +21,7 @@ login-server ──(ticket + instance address)──► client ──► instanc
 
 ## Design rules
 The project rules (no hardcoded opcodes, ports, leagues or game data; subsystems behind traits) are in [../../CLAUDE.md](../../CLAUDE.md). In practice:
-- Ports, hosts, leagues, paths, admins and command settings live in `config/server.toml`; classes, areas and items come from game tables; opcodes and other client-version values live in `modules/protocol/opcodes/<version>/`.
+- Ports, hosts, leagues, paths and command settings live in `config/server.toml`; classes, areas and items come from game tables; opcodes and other client-version values live in `modules/protocol/opcodes/<version>/`.
 - The traits are: cipher, storage, game data source, tickets, login sessions and the instance directory, so implementations can be swapped (for example SQLite → Postgres, or one process → a split deployment).
 - **Version-specific RE knowledge** (addresses, struct offsets) lives in `docs/re/` and in the DLL's pattern signatures. It is never spread through server code.
 - **Mod-friendly:** game files are read through an override stack, server commands come from one registry, and gameplay events will go through a hook bus (see [../guides/modding.md](../guides/modding.md)).

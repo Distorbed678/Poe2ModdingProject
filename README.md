@@ -8,11 +8,11 @@ This repo holds the server. The shared protocol code, the client hook and the we
 
 | Repo | Where | Role |
 |---|---|---|
-| **Poe2ModdingProject** (this repo) | `/` | `servers/` (login, instance, and the `poe-server` launcher that runs both), `crates/` (config, data, store, cluster, terrain generator, simulation), `xtask`, `docs/`, `scripts/` |
+| **Poe2ModdingProject** (this repo) | `/` | `servers/` (login, instance, and the `poe-server` launcher that runs both plus the web API), `crates/` (config, data, store, accounts, cluster, web API, terrain generator, simulation), `xtask`, `docs/`, `scripts/` |
 | [Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol) | `modules/protocol` | `poe-proto`, `poe-net` (codec and ciphers) and the opcode tables `opcodes/<version>/*.toml`, used by the server and the client hook |
 | [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) | `modules/client-hook` | The client DLLs (`version.dll` loader, hot-reloadable debug core with the in-game overlay) and `poe-hook-deploy`; carries Poe2Protocol as a nested submodule |
 | [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) | `modules/launcher` | Player launcher (Tauri 2 + Svelte 5): server profiles and login (keyring), installs 0.5.5e from Steam depots, deploys the hook and starts the game, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)); carries Poe2ClientHook as a nested submodule |
-| [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API; build it and set `[web] static_dir = "modules/web-admin/dist"` ([docs/guides/server-admin.md](docs/guides/server-admin.md#web-admin)) |
+| [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API; build it and set `[web] static_dir = "modules/web-admin/dist"` ([docs/guides/setup.md](docs/guides/setup.md#web-admin-build), [docs/architecture/web-api.md](docs/architecture/web-api.md)) |
 
 Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (server data and logs, git-ignored), `dumps/` (datamined outputs, git-ignored; [dumps/README.md](dumps/README.md)), `GameFiles/` (your copy of the 0.5.5e client, never in git). Every crate and server: [docs/architecture/crates.md](docs/architecture/crates.md).
 
@@ -20,17 +20,9 @@ Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (serve
 
 Needs Linux with rustup, Steam with Proton Experimental, and a copy of the 0.5.5e client in `GameFiles/`. The full requirements, options and the unattended test tools are in [docs/guides/setup.md](docs/guides/setup.md).
 
-```sh
-git clone --recursive https://github.com/Distorbed678/Poe2ModdingProject.git   # private repos: gh auth login first
-cd Poe2ModdingProject
-third_party/fetch-tools.sh      # downloads the external tools into third_party/
-cargo build
-cargo run -p poe-server         # login (20481) and instance (6112) servers, config/server.toml
-cargo xtask deploy-client       # builds the DLLs, points GameFiles/ at the local server
-cargo xtask run-client          # launches the client through Proton (Steam must be running)
-```
+The steps are in [docs/guides/setup.md](docs/guides/setup.md): [clone](docs/guides/setup.md#clone) with submodules, [fetch the tools](docs/guides/setup.md#tools), [build](docs/guides/setup.md#build-and-test), [start the server and deploy the client](docs/guides/setup.md#run) into `GameFiles/`, and [play](docs/guides/setup.md#playing-from-steam-non-steam-game-shortcut) or launch the client through Proton. `revert-client` restores `GameFiles/`.
 
-Server commands and admins: [docs/guides/server-admin.md](docs/guides/server-admin.md). `cargo xtask revert-client` restores `GameFiles/`.
+Server commands and admins: [docs/guides/server-admin.md](docs/guides/server-admin.md).
 
 ## Documentation
 

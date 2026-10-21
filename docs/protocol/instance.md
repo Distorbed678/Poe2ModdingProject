@@ -1,6 +1,6 @@
 # Instance protocol (0.5.5e)
 
-Connection: client to `InstanceDetails.host:port` (ours: `127.0.0.1:6112`).
+Connection: client to `InstanceDetails.host:port` (ours: `[network] public_host` and `[network.instance] public_port`).
 Opcodes: `modules/protocol/opcodes/0.5.5e/instance.toml`. Rust types: `modules/protocol/poe-proto/src/instance.rs`.
 The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the full opcode → class map (with deserializer addresses) is in `dumps/0.5.5e/ghidra/instance_factory_s2c.json` (316 classes; local and git-ignored, see [dumps/README.md](../../dumps/README.md)). The game-session handler is `0x142121f70` (`ClientInstanceGameSession::ProcessPacket`); in-game packets are handled by `0x1420ee310` (`ClientInstanceAccountSession::ProcessPacket`).
 
@@ -41,7 +41,7 @@ The client's incoming factory is `0x142170380` (switch on opcode − 0x0d); the 
 
    The client logs "Client-Safe Instance ID = …" and "Generating level N area "X" with seed S", then generates the terrain.
 
-   Some seeds fail to generate (`TerrainGenerationException`, e.g. "Mismatching ground types … Cannot place Mud over WideRiverWater" in `G1_1`), and the client then never sends TerrainHashes. The official server generates terrain itself, so it never sends such seeds. Until the server generates terrain for every area, it picks seeds from `instance.known_seeds` (the area/seed pairs from live logs, `scripts/re/clientlog_terrain.py`). Towns and hideouts always use seed 1.
+   Some seeds fail to generate (`TerrainGenerationException`, e.g. "Mismatching ground types … Cannot place Mud over WideRiverWater" in `G1_1`), and the client then never sends TerrainHashes. The official server generates terrain itself, so it never sends such seeds. Until the server generates terrain for every area, it picks seeds from `[dev] known_seeds` (the area/seed pairs from live logs, `scripts/re/clientlog_terrain.py`). Towns and hideouts always use seed 1.
 5. **C→S `0x009a` TerrainHashes** after terrain generation: `u8, u32 tile hash, u32 doodad hash`. Confirmed: the client logs "Tile hash: N" and "Doodad hash: N" with the same values. These are the reference values for server-side terrain generation ([../status/terrain.md](../status/terrain.md)).
 
 ## After the area loads (verified 2026-10-13: the player is visible in town and in the Riverbank intro)
@@ -115,7 +115,7 @@ If the entity id equals a local player's id (+0x184, set by `0x24`), `0x14210bb3
 
 ## Pause (2026-10-14)
 - **C→S `0x01ff` PauseRequest**: `u8, u8 paused` (class `0x1434e50f8`). Sent when the escape menu opens or closes in a solo game, and once (`00 00`) after entering an area.
-- **S→C `0x01fe` SetPause** (simulation message, reader `0x1421842a0`): simulation header, then `u8` (bit 0 → world +0x868 paused, bit 1 → +0x869). Applied by `0x142134240` through world vfunc +0x200 (`0x14168aaf0`). While +0x868 is set, pausable entities update with dt 0. With both bits set the client also applies its "Pause" audio state and shows "GAME PAUSED". The server answers every request with both bits equal to the request, and pauses its own simulation while paused (see [movement.md](movement.md#pause)).
+- **S→C `0x01fe` SetPause** (simulation message, reader `0x1421842a0`): simulation header, then `u8` (bit 0 → world +0x868 paused, bit 1 → +0x869). Applied by `0x142134240` through world vfunc +0x200 (`0x14168aaf0`). While +0x868 is set, pausable entities update with dt 0. With both bits set the client also applies its "Pause" audio state and shows "GAME PAUSED". The server answers every request with both bits equal to the request, and pauses the instance's simulation while paused, but only when the player is alone in the instance ([movement.md](movement.md#pause), [instance-world.md](../architecture/instance-world.md#pause)); with other players it refuses and answers `SetPause(false)`.
 
 ## Chat channels (2026-10-14)
 - **C→S `0x014c` ChatJoinRequest**: `u8, u16 channel (0xffff = any), u8 kind (0 global, 1 trade), u8, u8`. Sent for global and trade chat after entering an area.

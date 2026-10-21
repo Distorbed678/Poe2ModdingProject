@@ -1,6 +1,6 @@
 # Hosting: letting other players connect
 
-How to run the server so people on other machines can play on it, and what each of them needs. Status after WP3.4: a remote client can log in (WP3.3), needs no shared disk (terrain upload) and its side channels are authenticated. What is still missing is the shared world: every connection is its own simulation, players only share chat and the instance list (see [Not done yet](#not-done-yet)). The related designs: [../architecture/accounts.md](../architecture/accounts.md) (who is logging in), [../architecture/instance-world.md](../architecture/instance-world.md) (the shared world), [../protocol/side-channel.md](../protocol/side-channel.md) (the DLL's side channel).
+How to run the server so people on other machines can play on it, and what each of them needs. Status: a remote client can log in with an account and password (or a launcher token), needs no shared disk (terrain upload), its side channels are authenticated, and all players in an instance share one world and see each other (verified with two real clients on a LAN, [below](#local-two-client-test)). What is still rough is listed under [Not done yet](#not-done-yet). The related designs: [../architecture/accounts.md](../architecture/accounts.md) (who is logging in), [../architecture/instance-world.md](../architecture/instance-world.md) (the shared world), [../protocol/side-channel.md](../protocol/side-channel.md) (the DLL's side channel).
 
 ## Ports
 
@@ -63,13 +63,13 @@ On a router, forward the same three (TCP 20481, TCP 6112, UDP 6112) to the serve
 Check from outside: `nc -vz <host> 20481`, `nc -vz <host> 6112`; the UDP port answers nothing by design (datagrams without a valid tag are dropped silently). The server log shows `client position reports started` and `side-channel session` lines when a client gets through.
 
 ### Accounts
-Create the players' accounts on the server: `cargo run -p poe-server -- account create <name> <password>` ([server-admin.md](server-admin.md)), or turn on `[accounts] open_registration` and use the web API's register endpoint. Keep `[accounts] dev_machine_hash_login = false` on a shared server: that Steam-login shortcut creates an account for anyone without a password.
+Create the players' accounts on the server: the offline `account create <name> <password>` ([setup.md](setup.md#accounts-and-characters-offline), other account commands: [server-admin.md](server-admin.md#accounts)), or turn on `[accounts] open_registration` and use the web API's register endpoint. Keep `[accounts] dev_machine_hash_login = false` on a shared server: that Steam-login shortcut creates an account for anyone without a password.
 
 ## What a remote player needs
 
 1. **Their own legal install** of Path of Exile 2 0.5.5e (the files are not distributed). They also need Steam running when they start the client (without it the client exits at `Unable to init Steam API`).
 2. **The client hook** (`version.dll`, `poe_hook.dll`, `poe_hook_core.dll`, `poe-hook.toml`) in the game folder, with a gateway entry and a trust list that point at your server. Either:
-   - **the launcher** (`modules/launcher`, WP5): installs 0.5.5e from Steam depots, deploys the hook and asks for the server address; or
+   - **the launcher** (`modules/launcher`, [launcher.md](launcher.md)): installs 0.5.5e from Steam depots, deploys the hook and takes the server's web API address (so the web API must be reachable for it, behind TLS outside a trusted network); or
    - **`cargo xtask deploy-client`** from a checkout of this repository, with a `config/server.toml` that has your `public_host` and ports (copy yours, or edit just `[network]`), and the client files in `GameFiles/`: `cargo xtask build-dll` (once), then `cargo xtask deploy-client --no-build --login-mode standalone`. It writes the gateway entry `public_host:login port`, `login_mode`, `position_sync_port` and `trusted_servers = ["<public_host>:<login port>", "<public_host>:<instance port>"]`. Add more servers by hand in `GameFiles/poe-hook.toml`, e.g. `"203.0.113.7:*"`.
 3. **Start the client** (`cargo xtask run-client`, or Steam with the deployed folder) and log in with the account name and password ([setup.md](setup.md#remember-me-token-launcher-auto-login)).
 
@@ -79,7 +79,7 @@ The player does not need the server's `dumps/`, `GameFiles/Bundles2` copy or any
 
 ## Security notes
 
-- **Side channel (WP3.4).** Position reports, the overlay's debug link and the terrain upload are authenticated per session: the DLL and the server derive an HMAC-SHA256 key from the instance session's ticket keys (the 64 bytes the login server gives only to that client), every frame carries the session id, a counter and a 16-byte tag, and the server drops datagrams without a valid tag, from an unknown session, or with a replayed counter. Another player, or anyone who can send UDP to the server, cannot move a session's reports, inject overlay commands (which can be admin commands) or redirect its debug state. Details: [../protocol/side-channel.md](../protocol/side-channel.md). There is no unauthenticated fallback.
+- **Side channel.** Position reports, the overlay's debug link and the terrain upload are authenticated per session: the DLL and the server derive an HMAC-SHA256 key from the instance session's ticket keys (the 64 bytes the login server gives only to that client), every frame carries the session id, a counter and a 16-byte tag, and the server drops datagrams without a valid tag, from an unknown session, or with a replayed counter. Another player, or anyone who can send UDP to the server, cannot move a session's reports, inject overlay commands (which can be admin commands) or redirect its debug state. Details: [../protocol/side-channel.md](../protocol/side-channel.md). There is no unauthenticated fallback.
 - **What it does not protect.** The frames are authenticated, not encrypted: someone on the network path can read positions and the debug state, though not forge them. The game stream itself is encrypted, but with the crypto bypass its keys derive from a value the server sends in clear ([../re/crypto.md](../re/crypto.md)), so on the open internet someone on the path can decrypt a session, and with the instance key material, its side channel keys. It is fine on a LAN or for friends over a VPN; for the open internet use a VPN (WireGuard or similar) until the real key exchange is restored.
 - **The terrain upload** is accepted only from a session that redeemed a ticket, for the tile hash that session reported, and is size-limited, decompression-limited and format-checked. It cannot overwrite an existing cache entry. A player who is allowed to play can still upload a wrong layout for their own area (the hash cannot be recomputed from the export), so a wrong cache entry is a server-side file to delete: `dumps/0.5.5e/terrain/layouts/terrain_layout_<hash>.tsv` and the grid beside it.
 - **Web API.** `[web] bind` defaults to loopback because passwords travel in request bodies and the admin endpoints act on the whole server. To use it from other machines put a TLS reverse proxy (Caddy, nginx) in front, keep the bind on loopback, forward `/api/` and the WebSocket upgrade, and set `[web] cors_origins` only for the origins that need it. Do not forward port 8080 to the internet without TLS. `[accounts] open_registration` stays off unless you want strangers to create accounts.
@@ -89,18 +89,10 @@ The player does not need the server's `dumps/`, `GameFiles/Bundles2` copy or any
 ## Local two-client test
 `scripts/test-mp.sh` runs two real game clients against one server on one machine (Steam must be running). Both connect through the machine's LAN IP, not 127.0.0.1, so the trusted-remote path of the DLL runs (the deploy puts the LAN IP into `trusted_servers`), and each logs in as its own account (`mp1`, `mp2`) on the standalone login with a remember-me token (web API launcher login, then `POST /game-token`).
 
-```sh
-scripts/test-mp.sh setup      # build, runtime/server-mp.toml (LAN IP, own database), accounts + one Ranger each in G1_town, prefix 2, deploy
-scripts/test-mp.sh server     # poe-server, log runtime/server-mp.log
-scripts/test-mp.sh clients    # token login + Play for both (client <n> [acct] for one; acct = duplicate-login test)
-scripts/test-mp.sh keys 1 inmove:640,200 indown:0x57 wait:2000 inup:0x57   # poe-hook.1.keys: input for client 1
-scripts/test-mp.sh shot 2     # F8 screenshot of client 2 (prints the file)
-scripts/test-mp.sh stop       # kill the clients; then stop the server in its own call; restores the private steam deploy
-```
-- **Second prefix.** `third_party/proton-prefix-2` is a copy of prefix 1 (own login credentials, screenshots, gateway); xtask takes `--prefix` for it (`cargo xtask --prefix third_party/proton-prefix-2 run-client|login-token|select-gateway`, [setup.md](setup.md)).
-- **Per-client input file.** `POE_HOOK_KEYS_FILE=poe-hook.<n>.keys` makes each DLL read its own `poe-hook.keys` (see [setup.md](setup.md#poe-hookkeys-entries)); the window titles are "PoE2 MP <n>".
-- **Window size.** Default 1280x720 windowed so both fit on screen (`MP_RES`, `MP_BORDERLESS`); `restore` (part of `stop`) puts prefix 1 back to its original size.
-- **Characters.** `poe-server character create <account> <name> <start_state> [area]` (offline, [server-admin.md](server-admin.md#characters-offline)). Both characters spawn on the same cell of `G1_town` (379, 356); walk one away before looking at both.
+Commands (`setup`, `server`, `clients`, `keys`, `shot`, `stop`): [setup.md](setup.md#two-client-test-lan).
+
+- **Setup details.** The second client uses its own Proton prefix and its own input file, window title ("PoE2 MP <n>") and session folder; the windows default to 1280x720 so both fit on screen. All of it and the environment variables: [setup.md](setup.md#two-client-test-lan).
+- **Characters.** One Ranger per account in `G1_town`, made offline. Both spawn on the same cell (379, 356); walk one away before looking at both.
 
 Results (2026-10-21, client 0.5.5e, two clients, one `G1_town` instance, evidence from F8 screenshots, server log and each client's `packets.jsonl`):
 
@@ -113,14 +105,14 @@ Results (2026-10-21, client 0.5.5e, two clients, one `G1_town` instance, evidenc
 | Transfer gives the leave sequence | pass | `POST /admin/players/Mp2Ranger/transfer {"area":"G1_1"}`: client 1 got `0x0271`, `0x01c5`, `0x01c7`, `0x02fa` for entity 12001 in one frame; Mp2Ranger entered G1_1 (alone, pause request applied, then released) |
 | Duplicate login kicks the first session | pass | client 2 closed, then logged in as `mp1`: `account logged in again ...: disconnecting the player`, `player left the instance ... Mp1Ranger`, the new session enters as entity 12002 at the saved cell |
 
-**Town freeze (fixed 2026-10-21).** The first runs of this test showed WASD, clicks and a roll doing nothing in town while Escape worked. The cause was not the window mode: our `InitialState` always had `flags = 7`, whose bits 0/1 start the client's world paused (`+0x868/+0x869`, entities update with `dt = 0`; the town looked frozen). In a zone the client then sends `PauseRequest(1)` and `PauseRequest(0)` itself and the server releases the pause; **in a town it sends none** (official town capture: `InitialState` flags `04`, no `PauseRequest`), so the pause was never released. The server now sends flags `04` for towns and hideouts. The WP3.6 smoke test had run in a zone.
+**Town freeze (fixed 2026-10-21).** The first runs of this test showed WASD, clicks and a roll doing nothing in town while Escape worked. The cause was not the window mode: our `InitialState` always had `flags = 7`, whose bits 0/1 start the client's world paused (`+0x868/+0x869`, entities update with `dt = 0`; the town looked frozen). In a zone the client then sends `PauseRequest(1)` and `PauseRequest(0)` itself and the server releases the pause; **in a town it sends none** (official town capture: `InitialState` flags `04`, no `PauseRequest`), so the pause was never released. The server now sends flags `04` for towns and hideouts. The earlier single-client smoke test of the instance actor had run in a zone.
 
 ## Web API
-`[web]` is optional ([../architecture/web-api.md](../architecture/web-api.md)). Players never need it for the game. It listens on `127.0.0.1:8080`. Expose it only through a TLS proxy as described in the security notes.
+`[web]` is optional ([../architecture/web-api.md](../architecture/web-api.md)). The game itself never needs it, but the launcher does (account login and register, `GET /server`, `POST /game-token`), so a server for launcher users has to expose it through a TLS proxy as described in the security notes. It listens on `127.0.0.1:8080` by default.
 
 ## Not done yet
 
 - **Remote players, rough edges.** Players in one instance share one world (instance actor, WP3.6) and see each other ([Local two-client test](#local-two-client-test)). Open: two players spawn on the same cell, the remote model looks darker than the local one (not investigated), and there is no party, trade or combat sync between players yet.
 - **Real login crypto.** The bypass keys derive from a public value; fine on a LAN, not over the open internet ([../re/crypto.md](../re/crypto.md)). A later step: the DLL swaps the client's baked-in DSA public key for ours and keeps verification on.
-- **`client-pack`.** A zip with the hook and a ready `poe-hook.toml` for friends (no repository checkout) is the launcher's job (WP5).
+- **Bundled hook DLLs.** The launcher still needs the hook DLLs from a local build of the client hook (its settings point at them); a ready package of the hook with a `poe-hook.toml` for friends does not exist yet ([launcher.md](launcher.md#not-done)).
 - **Per-client address.** One `public_host` serves everyone; LAN players and internet players of the same server need NAT loopback or their own `server.toml` for deploy.
