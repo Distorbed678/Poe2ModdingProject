@@ -243,6 +243,18 @@ async fn server_info_is_public() {
         (body["login_host"].as_str(), body["login_port"].as_u64()),
         (Some("play.example"), Some(20481))
     );
+    assert!(body["instance_port"].as_u64().is_some_and(|p| p > 0));
+    assert!(body["gateway_region"].is_string());
+}
+
+#[tokio::test]
+async fn server_info_reports_the_public_login_port() {
+    let f = fixture_with(&CONFIG.replace(
+        "bind = \"0.0.0.0:20481\"",
+        "bind = \"0.0.0.0:20481\"\n    public_port = 30481",
+    ));
+    let (_, body) = f.call("GET", "/api/v1/server", None, None).await;
+    assert_eq!(body["login_port"], 30481);
 }
 
 #[tokio::test]
@@ -433,6 +445,61 @@ async fn launcher_login_issues_a_launcher_token_the_game_accepts() {
             "GET",
             "/api/v1/admin/accounts",
             again["token"].as_str(),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn game_token_exchange_gives_the_client_a_token_the_launcher_keeps() {
+    let f = fixture();
+    f.account("alice", "correct horse", Role::Player);
+    let launcher = f
+        .call(
+            "POST",
+            "/api/v1/login",
+            None,
+            Some(json!({"username": "alice", "password": "correct horse", "kind": "launcher"})),
+        )
+        .await
+        .1["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, body) = f
+        .call("POST", "/api/v1/game-token", Some(&launcher), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["kind"], "game_remember");
+    assert_eq!(body["account"]["username"], "alice");
+    let game: [u8; 32] = hex::decode(body["token"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    // The game's token login accepts it and retires it (rolling); the launcher token stays.
+    let account = f
+        .state
+        .accounts
+        .authenticate_token(&game, &[TokenKind::GameRemember])
+        .unwrap();
+    assert_eq!(account.username, "alice");
+    f.state.accounts.revoke_token(&game).unwrap();
+    let (status, _) = f
+        .call("POST", "/api/v1/game-token", Some(&launcher), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "the launcher token survives game logins");
+    // Not for web tokens, nor without a token, nor for the game token itself.
+    let web = f.login("alice", "correct horse").await;
+    let (status, _) = f.call("POST", "/api/v1/game-token", Some(&web), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = f.call("POST", "/api/v1/game-token", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = f
+        .call(
+            "POST",
+            "/api/v1/game-token",
+            Some(body["token"].as_str().unwrap()),
             None,
         )
         .await;
@@ -990,6 +1057,7 @@ async fn openapi_lists_every_endpoint() {
         "/api/v1/login",
         "/api/v1/logout",
         "/api/v1/password",
+        "/api/v1/game-token",
         "/api/v1/admin/sessions",
         "/api/v1/admin/instances",
         "/api/v1/admin/instances/{id}/close",

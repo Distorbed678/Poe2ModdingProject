@@ -19,7 +19,13 @@ pub struct ServerInfo {
     pub open_registration: bool,
     /// Host the game client connects to.
     pub login_host: String,
+    /// Port the client connects to for login (`[network.login] public_port`, else the bind port).
     pub login_port: u16,
+    /// Port of the instance server the client is sent to (with `login_host`); the launcher
+    /// trusts both addresses in the client hook.
+    pub instance_port: u16,
+    /// Realm region written into the client's gateway list.
+    pub gateway_region: String,
     pub uptime_secs: u64,
 }
 
@@ -75,7 +81,7 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     /// 64 hex characters: send as `Authorization: Bearer <token>`. Shown only once.
     pub token: String,
-    /// `web` or `launcher`.
+    /// `web`, `launcher` or (from `POST /game-token`) `game_remember`.
     pub kind: String,
     /// Unix seconds.
     pub expires_at: i64,

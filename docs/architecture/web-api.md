@@ -1,6 +1,6 @@
 # Web API
 
-The server's HTTP and WebSocket API, for the web admin site ([Poe2WebAdmin](#the-web-admin-spa)) and the launcher (WP5.1). It is the crate `crates/poe-web-api` (axum 0.8), started by `poe-server` next to the login and instance servers. The machine-readable description is [openapi.json](openapi.json), generated from the code (`cargo xtask openapi`) and also served live at `GET /api/v1/openapi.json`.
+The server's HTTP and WebSocket API, for the web admin site ([Poe2WebAdmin](#the-web-admin-spa)) and the launcher ([../guides/launcher.md](../guides/launcher.md)). It is the crate `crates/poe-web-api` (axum 0.8), started by `poe-server` next to the login and instance servers. The machine-readable description is [openapi.json](openapi.json), generated from the code (`cargo xtask openapi`) and also served live at `GET /api/v1/openapi.json`.
 
 Related: accounts, tokens and hashing in [accounts.md](accounts.md); the commands the admin endpoints run in [../guides/server-admin.md](../guides/server-admin.md); the plan in [../plans/orchestration-2026-10.md](../plans/orchestration-2026-10.md) (phase 4).
 
@@ -34,7 +34,7 @@ curl localhost:8080/api/v1/admin/accounts -H "authorization: Bearer $T"
 - **Passwords are plain text in the request body** (`register`, `login`, `password`). The server turns them into the client's digest itself (`poe_accounts::password_digest`: SHA-256 of the UTF-16LE text) and then calls `AccountStore` exactly as the game login does (argon2id over the digest). So an account made on the web logs in in game with the same password, and the other way round. Minimum 8 characters, maximum 256.
 - **Tokens** come from `AccountStore::issue_token`: 32 random bytes sent as 64 hex characters, only their SHA-256 stored, bound to `[cluster] id`, expiring, revocable. `POST /login` returns one of two kinds:
   - `web` (default): 12 hours. For the browser; the only kind the admin endpoints accept.
-  - `launcher` (`"kind":"launcher"`): `[accounts] remember_days`. For the launcher, which keeps it in the OS keyring; the game's token login accepts it too. Never valid for `/admin/*`, so a leaked launcher token cannot administer the server.
+  - `launcher` (`"kind":"launcher"`): `[accounts] remember_days`. For the launcher, which keeps it in the OS keyring; the game's token login accepts it too, but the launcher does not use it that way (the game would revoke it): it calls `POST /game-token` instead. Never valid for `/admin/*`, so a leaked launcher token cannot administer the server.
 - Send `Authorization: Bearer <token>`. The log WebSocket also takes `?token=<token>`, because browsers cannot set headers on a WebSocket.
 - A token stops working when it is revoked (`POST /logout`, a password change or `account passwd`, disabling the account), expired, from another cluster, or its account is disabled: `401` with the reason. The role is read at every call, so a demoted admin loses access at once.
 - Wrong username and wrong password give the same `401` (names cannot be probed); a disabled account with the right password gets `403`.
@@ -48,11 +48,12 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 
 | Endpoint | Auth | |
 |---|---|---|
-| `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects), uptime |
+| `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects; the public login port), `instance_port` (public), `gateway_region`, uptime |
 | `POST /register` `{username, password}` | none | new player account; `403` unless `open_registration`, `409` when taken |
 | `POST /login` `{username, password, kind?}` | none | `{token, kind, expires_at, account}` |
 | `POST /logout` | any token | revokes the token used (`204`) |
 | `POST /password` `{old_password, new_password}` | any token | changes the password, revokes every token of the account (game Remember Me included) and returns a fresh token of the same kind |
+| `POST /game-token` | launcher token | exchanges it for a fresh `game_remember` token (same response as `/login`, `kind: "game_remember"`) for the client's credentials file; web tokens get `403`. The launcher uses it for auto-login: the game's token login retires the token it uses, so the launcher token itself must never be handed to the game |
 | `GET /openapi.json` | none | the OpenAPI document |
 | `GET /admin/sessions` | admin | players in game: character, account, instance, area |
 | `GET /admin/instances` | admin | every instance (area, seed, forced layout, players, age, persistent) |

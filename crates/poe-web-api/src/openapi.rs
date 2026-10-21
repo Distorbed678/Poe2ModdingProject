@@ -35,6 +35,7 @@ impl Modify for BearerAuth {
     ),
     paths(
         public::server, public::register, public::login, public::logout, public::password,
+        public::game_token,
         admin::sessions, admin::instances, admin::create_instance, admin::close_instance,
         admin::kick, admin::mute, admin::unmute, admin::transfer, admin::announce,
         admin::accounts, admin::disable_account, admin::enable_account, admin::set_role,

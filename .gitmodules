@@ -7,3 +7,6 @@
 [submodule "modules/web-admin"]
 	path = modules/web-admin
 	url = https://github.com/Distorbed678/Poe2WebAdmin.git
+[submodule "modules/launcher"]
+	path = modules/launcher
+	url = https://github.com/Distorbed678/Poe2Launcher.git

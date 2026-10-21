@@ -391,25 +391,39 @@ link = "docs/guides/launcher.md"
 
 [[subsystem.item]]
 name = "Poe2Launcher repo (Tauri 2 + Svelte)"
-status = "planned"
-note = "WP5.1"
+status = "done"
+note = "WP5.1; submodule modules/launcher (nests Poe2ClientHook); Rust + vitest tests, CI on Linux and Windows"
 link = "docs/guides/launcher.md"
 
 [[subsystem.item]]
 name = "Server profiles and account login through the web API"
-status = "planned"
+status = "done"
+note = "profiles, register, login (kind launcher), token in the OS keyring, logout revokes; tested with a mock keyring and a real server"
+link = "docs/guides/launcher.md#the-flow"
+
+[[subsystem.item]]
+name = "Game-token exchange for auto-login (`POST /api/v1/game-token`)"
+status = "done"
+note = "launcher token -> one-off game_remember token (the game's rolling login would revoke the launcher token)"
+link = "docs/architecture/web-api.md#endpoints"
 
 [[subsystem.item]]
 name = "Install 0.5.5e from Steam depots"
-status = "planned"
+status = "partial"
+note = "DepotDownloader 3.4.0 pinned, args/prompts/progress tested with a stand-in; the real Steam login and download not run yet; verification values unconfirmed"
+link = "docs/guides/launcher.md#install-in-detail"
 
 [[subsystem.item]]
 name = "Deploy and launch via poe-hook-deploy"
-status = "planned"
+status = "partial"
+note = "deploy, token file and Proton command tested with a fake Proton; real game start not run; Windows path untested"
+link = "docs/guides/launcher.md#play-in-detail"
 
 [[subsystem.item]]
 name = "Mod install and ordering"
-status = "planned"
+status = "done"
+note = "files and poe-hook-mods/state.toml only; the DLL loader does not exist yet"
+link = "docs/guides/launcher.md#mods"
 
 # ---------------------------------------------------------------------------------------------
 

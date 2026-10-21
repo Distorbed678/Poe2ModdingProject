@@ -60,6 +60,7 @@ pub fn router(state: WebState) -> Router {
         .route("/login", post(public::login))
         .route("/logout", post(public::logout))
         .route("/password", post(public::password))
+        .route("/game-token", post(public::game_token))
         .route("/admin/sessions", get(admin::sessions))
         .route(
             "/admin/instances",

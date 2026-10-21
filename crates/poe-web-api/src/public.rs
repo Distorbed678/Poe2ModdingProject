@@ -76,7 +76,9 @@ pub async fn server(State(s): State<WebState>) -> Json<ServerInfo> {
         online: s.admin.online().len(),
         open_registration: c.accounts.open_registration,
         login_host: c.network.public_host.clone(),
-        login_port: c.network.login.bind.port(),
+        login_port: c.network.login.public_port(),
+        instance_port: c.network.instance.public_port,
+        gateway_region: c.gateway.region.clone(),
         uptime_secs: s.started.elapsed().as_secs(),
     })
 }
@@ -173,4 +175,36 @@ pub async fn password(
 pub async fn logout(State(s): State<WebState>, Auth(who): Auth) -> Result<StatusCode, ApiError> {
     s.accounts.revoke_token(&who.token)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Exchanges a launcher token for a fresh `game_remember` token (the client's Remember Me
+/// credential). The launcher writes it into the client's credentials file for auto-login.
+///
+/// The game login retires a token when it uses it (rolling tokens), so the launcher token
+/// itself must never be written to the client: it would be revoked by the first game login
+/// and the launcher would be logged out. Only launcher tokens may call this; the new token
+/// lasts `[accounts] remember_days` and does not touch the account's other tokens.
+#[utoipa::path(post, path = "/api/v1/game-token", tag = "account", security(("bearer" = [])),
+    responses((status = 200, body = LoginResponse),
+        (status = 401, body = crate::ErrorBody),
+        (status = 403, description = "not a launcher token", body = crate::ErrorBody)))]
+pub async fn game_token(
+    State(s): State<WebState>,
+    Auth(who): Auth,
+) -> Result<Json<LoginResponse>, ApiError> {
+    if who.kind != TokenKind::Launcher {
+        return Err(ApiError::forbidden("a launcher token is required"));
+    }
+    let kind = TokenKind::GameRemember;
+    let accounts = s.accounts.clone();
+    let id = who.account.id;
+    let ttl = i64::from(s.config.accounts.remember_days) * 86_400;
+    let issued = blocking(move || accounts.issue_token(id, kind, ttl)).await??;
+    tracing::info!(account = %who.account.username, "game token issued to the launcher");
+    Ok(Json(LoginResponse {
+        token: hex::encode(issued.token),
+        kind: kind.as_str().into(),
+        expires_at: issued.expires_at,
+        account: who.account.into(),
+    }))
 }

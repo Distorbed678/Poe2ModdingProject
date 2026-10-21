@@ -11,7 +11,7 @@ This repo holds the server. The shared protocol code, the client hook and the we
 | **Poe2ModdingProject** (this repo) | `/` | `servers/` (login, instance, and the `poe-server` launcher that runs both), `crates/` (config, data, store, cluster, terrain generator, simulation), `xtask`, `docs/`, `scripts/` |
 | [Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol) | `modules/protocol` | `poe-proto`, `poe-net` (codec and ciphers) and the opcode tables `opcodes/<version>/*.toml`, used by the server and the client hook |
 | [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) | `modules/client-hook` | The client DLLs (`version.dll` loader, hot-reloadable debug core with the in-game overlay) and `poe-hook-deploy`; carries Poe2Protocol as a nested submodule |
-| Poe2Launcher | planned | Player launcher: installs 0.5.5e, logs in, deploys the hook, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)) |
+| [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) | `modules/launcher` | Player launcher (Tauri 2 + Svelte 5): server profiles and login (keyring), installs 0.5.5e from Steam depots, deploys the hook and starts the game, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)); carries Poe2ClientHook as a nested submodule |
 | [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API; build it and set `[web] static_dir = "modules/web-admin/dist"` ([docs/guides/server-admin.md](docs/guides/server-admin.md#web-admin)) |
 
 Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (server data and logs, git-ignored), `dumps/` (datamined outputs, git-ignored; [dumps/README.md](dumps/README.md)), `GameFiles/` (your copy of the 0.5.5e client, never in git). Every crate and server: [docs/architecture/crates.md](docs/architecture/crates.md).
@@ -55,7 +55,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `█████████░ 90%` | 4/5 |
-| [Launcher](#launcher) | `░░░░░░░░░░ 0%` | 0/5 |
+| [Launcher](#launcher) | `████████░░ 83%` | 4/6 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `█████░░░░░ 50%` | 2/5 |
 
@@ -197,11 +197,12 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 
 | | Item | Note |
 |---|---|---|
-| ⬜ | [Poe2Launcher repo (Tauri 2 + Svelte)](docs/guides/launcher.md) | WP5.1 |
-| ⬜ | Server profiles and account login through the web API |  |
-| ⬜ | Install 0.5.5e from Steam depots |  |
-| ⬜ | Deploy and launch via poe-hook-deploy |  |
-| ⬜ | Mod install and ordering |  |
+| ✅ | [Poe2Launcher repo (Tauri 2 + Svelte)](docs/guides/launcher.md) | WP5.1; submodule modules/launcher (nests Poe2ClientHook); Rust + vitest tests, CI on Linux and Windows |
+| ✅ | [Server profiles and account login through the web API](docs/guides/launcher.md#the-flow) | profiles, register, login (kind launcher), token in the OS keyring, logout revokes; tested with a mock keyring and a real server |
+| ✅ | [Game-token exchange for auto-login (`POST /api/v1/game-token`)](docs/architecture/web-api.md#endpoints) | launcher token -> one-off game_remember token (the game's rolling login would revoke the launcher token) |
+| 🟡 | [Install 0.5.5e from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned, args/prompts/progress tested with a stand-in; the real Steam login and download not run yet; verification values unconfirmed |
+| 🟡 | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | deploy, token file and Proton command tested with a fake Proton; real game start not run; Windows path untested |
+| ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml only; the DLL loader does not exist yet |
 
 ### Web Admin
 

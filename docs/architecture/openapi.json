@@ -1081,6 +1081,53 @@
         ]
       }
     },
+    "/api/v1/game-token": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Exchanges a launcher token for a fresh `game_remember` token (the client's Remember Me\ncredential). The launcher writes it into the client's credentials file for auto-login.",
+        "description": "The game login retires a token when it uses it (rolling tokens), so the launcher token\nitself must never be written to the client: it would be revoked by the first game login\nand the launcher would be logged out. Only launcher tokens may call this; the new token\nlasts `[accounts] remember_days` and does not touch the account's other tokens.",
+        "operationId": "game_token",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not a launcher token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/login": {
       "post": {
         "tags": [
@@ -1713,7 +1760,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`web` or `launcher`."
+            "description": "`web`, `launcher` or (from `POST /game-token`) `game_remember`."
           },
           "token": {
             "type": "string",
@@ -1863,11 +1910,23 @@
           "open_registration",
           "login_host",
           "login_port",
+          "instance_port",
+          "gateway_region",
           "uptime_secs"
         ],
         "properties": {
           "cluster_id": {
             "type": "string"
+          },
+          "gateway_region": {
+            "type": "string",
+            "description": "Realm region written into the client's gateway list."
+          },
+          "instance_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port of the instance server the client is sent to (with `login_host`); the launcher\ntrusts both addresses in the client hook.",
+            "minimum": 0
           },
           "login_host": {
             "type": "string",
@@ -1876,6 +1935,7 @@
           "login_port": {
             "type": "integer",
             "format": "int32",
+            "description": "Port the client connects to for login (`[network.login] public_port`, else the bind port).",
             "minimum": 0
           },
           "name": {
