@@ -172,6 +172,13 @@ objects, not sent by the server.
     `dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv`). It tries forced topologies when the natural
     choice fails.
   - `check_exports`: recomputes the tile and doodad hashes of every DLL area export.
+  - `area_probe [seed] [area|all] [timeout]`: tries every topology of every `WorldAreas` row (first
+    allowed orientation) and prints `ok` / `error` / `panic` / `timeout` per topology (no hash check);
+    group the errors by unported system with `scripts/re/probe_classes.py`.
+  - `cargo xtask terrain-matrix`: writes `docs/status/terrain-matrix.tsv` (area x topology x
+    orientation -> untested/fail/match) from the game data, `area_vectors` output, forced-layout
+    results and the probe; the README tracker renders it. Plan:
+    [../../plans/terrain-all-areas.md](../../plans/terrain-all-areas.md).
   - `town_check <town export> 1 <trace>`: the room-pass placements of Clearfell Encampment.
   - `river_gen <export> 1000`: Riverbank graph layout (jitter, room nodes, routing).
   - `smooth_check <trace>`: replays the logged arc steps of edge smoothing.

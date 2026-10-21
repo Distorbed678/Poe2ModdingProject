@@ -14,6 +14,7 @@ use clap::{Parser, Subcommand};
 use poe_config::Config;
 use poe_hook_deploy::{DeployOptions, GatewayEntry, LoginMode, Mode, launch::ProtonLaunch};
 
+mod terrain_matrix;
 mod tracker;
 
 /// The client DLL workspace (Poe2ClientHook submodule), relative to the repo root.
@@ -90,6 +91,17 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Write the terrain verification matrix (area x topology x orientation -> untested/fail/match)
+    /// to docs/status/terrain-matrix.tsv from the game data and the verification outputs in
+    /// dumps/0.5.5e/terrain/vectors/ (docs/plans/terrain-all-areas.md).
+    TerrainMatrix {
+        /// Folder of the verification outputs (default dumps/0.5.5e/terrain/vectors).
+        #[arg(long)]
+        dumps: Option<PathBuf>,
+        /// Output file (default docs/status/terrain-matrix.tsv).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Write the web API's OpenAPI document to docs/architecture/openapi.json (the web admin
     /// and the launcher generate their types from it).
     Openapi {
@@ -128,6 +140,9 @@ fn main() -> Result<()> {
     if let Cmd::Openapi { check } = cli.cmd {
         return openapi(&root, check);
     }
+    if let Cmd::TerrainMatrix { dumps, out } = cli.cmd {
+        return terrain_matrix::run(&root, dumps, out);
+    }
     let prefix = cli.prefix.map(|p| root.join(p)).unwrap_or_else(|| proton_prefix(&root));
     if let Cmd::LoginToken { account, token_hex } = &cli.cmd {
         return login_token(&prefix, account, token_hex);
@@ -143,7 +158,7 @@ fn main() -> Result<()> {
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::DllData => export_dll_data(&config),
-        Cmd::Tracker { .. } | Cmd::Openapi { .. } | Cmd::LoginToken { .. } => {
+        Cmd::Tracker { .. } | Cmd::Openapi { .. } | Cmd::LoginToken { .. } | Cmd::TerrainMatrix { .. } => {
             unreachable!("handled before the config is loaded")
         }
         Cmd::SelectGateway => {

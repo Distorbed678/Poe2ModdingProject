@@ -6,6 +6,8 @@ How the client's generator works, and the tools used below, are in
 [../re/terrain/](../re/terrain/README.md): [README](../re/terrain/README.md#tools) (tools),
 [tgr.md](../re/terrain/tgr.md), [dungeon.md](../re/terrain/dungeon.md),
 [shared-passes.md](../re/terrain/shared-passes.md).
+The plan for the remaining areas (scope matrix, verification at scale, blockers, work packages) is
+[../plans/terrain-all-areas.md](../plans/terrain-all-areas.md).
 
 ## Goal
 

@@ -4,6 +4,11 @@
 //! per area. When the natural topology choice (world-map pins, not ported) does not match, every
 //! forced topology and orientation is tried: a match there is what the server reproduces by
 //! sending `map_force_topology` / `map_force_orientation`.
+//!
+//! Result lines (`cargo xtask terrain-matrix` parses them; keep the format):
+//! `area  seed  match (natural T:O)`, `area  seed  match (forced T:O)` (T the 1-based topology
+//! index, O the orientation), `area  seed  differ  ...`, `area  seed  error  ...`,
+//! `area  seed  panic`. Keep the output in `dumps/0.5.5e/terrain/vectors/area-vectors-results.txt`.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -54,7 +59,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let ours = g.map.tile_hash().to_string();
                 if ours == want {
                     e.0 += 1;
-                    println!("{area}\t{seed}\tmatch");
+                    let entries = poe_world::area::topology_entries(&gd, area, 1).unwrap_or_default();
+                    let at = entries.iter().position(|(p, _)| *p == g.graph);
+                    let natural = at.map(|i| {
+                        let mask = entries[i].1;
+                        let o = if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() };
+                        format!(" (natural {}:{o})", i + 1)
+                    });
+                    println!("{area}\t{seed}\tmatch{}", natural.unwrap_or_default());
                 } else {
                     e.1 += 1;
                     println!("{area}\t{seed}\tdiffer\tours {ours} client {want}\t{}", g.graph);

@@ -118,7 +118,14 @@ fn linked(text: &str, link: Option<&str>) -> String {
 }
 
 /// The generated block, without the markers; ends with a newline.
+#[cfg(test)]
 pub fn render(t: &Tracker) -> String {
+    render_with(t, None)
+}
+
+/// [`render`] with the terrain matrix section (`terrain_matrix::summary_markdown`) placed after
+/// the Terrain subsystem's table.
+pub fn render_with(t: &Tracker, terrain_matrix: Option<&str>) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "> **Current task:** {}\n\n",
@@ -152,6 +159,10 @@ pub fn render(t: &Tracker) -> String {
                 linked(&i.name, i.link.as_deref()),
                 i.note.as_deref().map(cell).unwrap_or_default()
             ));
+        }
+        if let (Some(m), "Terrain") = (terrain_matrix, s.name.as_str()) {
+            out.push('\n');
+            out.push_str(m);
         }
     }
     out
@@ -187,7 +198,8 @@ pub fn run(root: &Path, check: bool) -> Result<()> {
     let readme_path = root.join(README_PATH);
     let readme = std::fs::read_to_string(&readme_path)
         .with_context(|| format!("reading {}", readme_path.display()))?;
-    let updated = splice(&readme, &render(&tracker))?;
+    let matrix = crate::terrain_matrix::summary_of_repo(root)?;
+    let updated = splice(&readme, &render_with(&tracker, matrix.as_deref()))?;
     if updated == readme {
         println!("README.md tracker is up to date");
         return Ok(());
@@ -265,6 +277,18 @@ name = "Empty"
         assert!(md.contains("| 🟡 | Two \\| pipe | half |"));
         assert!(md.contains("| ❌ | Three |  |"));
         assert!(md.contains("| ⬜ | Four |  |"));
+    }
+
+    #[test]
+    fn terrain_matrix_goes_after_the_terrain_subsystem() {
+        let t: Tracker = toml::from_str(
+            "current_task = \"X\"\n[[subsystem]]\nname = \"Terrain\"\n[[subsystem.item]]\nname = \"a\"\nstatus = \"done\"\n[[subsystem]]\nname = \"Other\"\n",
+        )
+        .unwrap();
+        let md = render_with(&t, Some("### Terrain matrix\n\nbody\n"));
+        let (matrix, other) = (md.find("### Terrain matrix").unwrap(), md.find("### Other").unwrap());
+        assert!(md.find("### Terrain\n").unwrap() < matrix && matrix < other);
+        assert!(!render_with(&t, None).contains("Terrain matrix"));
     }
 
     #[test]

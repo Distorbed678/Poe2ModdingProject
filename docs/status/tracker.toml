@@ -8,8 +8,8 @@
 # status = "done" (1.0) | "partial" (0.5) | "missing" (0) | "planned" (0).
 #   missing = needed and not started or known broken; planned = scheduled in a plan document.
 
-current_task = "Phase 2: movement rewrite (WP2.4 verified in game; gaps #11/#12 open; capture gate G-MOVE open)"
-current_task_link = "docs/plans/orchestration-2026-10.md"
+current_task = "Terrain port to all areas (docs/plans/terrain-all-areas.md)"
+current_task_link = "docs/plans/terrain-all-areas.md"
 
 # ---------------------------------------------------------------------------------------------
 
@@ -294,14 +294,32 @@ link = "docs/status/terrain.md"
 
 [[subsystem.item]]
 name = "Per-area x topology x orientation matrix (cargo xtask terrain-matrix)"
+status = "done"
+note = "2026-10-21: 442 WorldAreas rows (10 without topologies), 1141 topologies, 4508 combinations: 18 match, 1 fail, 4489 untested; generator probe: 701 of 1141 topologies run at seed 1001, 284 of 432 areas run for every topology (no hash check); table below the Terrain items"
+link = "docs/plans/terrain-all-areas.md"
+
+[[subsystem.item]]
+name = "Verification at scale: forced-layout sweeps and bulk vectors (WP7.2, WP7.3)"
 status = "planned"
-note = "WP7.1"
-link = "docs/plans/orchestration-2026-10.md"
+note = "every topology once is about 1141 client layouts at 20 s each; needs unattended client runs"
+link = "docs/plans/terrain-all-areas.md#2-verification-at-scale"
+
+[[subsystem.item]]
+name = "Dungeon height-change and virtual edge types (chirality), unlocks 44 areas"
+status = "missing"
+note = "149 topologies stop at the guard in dungeon.rs; G1_11 is the first test"
+link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
+
+[[subsystem.item]]
+name = "3x3 door spots (0x14209dc90), unlocks 27 areas; FileGroups and nested subgraphs, 11 areas"
+status = "missing"
+link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
 
 [[subsystem.item]]
 name = "Collision and walkability output for server movement"
 status = "planned"
-link = "docs/plans/orchestration-2026-10.md"
+note = "poe-world emits the PWG1 cell grid that poe_game::grid::Grid reads (GridSource); checked against the DLL's grids; the client's upload covers it until then"
+link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
 
 # ---------------------------------------------------------------------------------------------
 
