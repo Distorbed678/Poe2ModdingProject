@@ -19,6 +19,13 @@ optional blocks and `AddInventory` items.
 ## Movement capture 2026-10-20
 `dumps/0.5.5e/captures/official/2026-10-20_18-41-14_336/`: a read-only official session that followed a checklist for the movement gaps (standing and chained rolls, taps around the sprint threshold, stops during a sprint, attacks during rolls, sprints into walls, click-to-move and held clicks with rolls, an input-mode toggle). The DLL's movement log was on, so `poe-hook.log` has the client's position per frame (`frame #n ... world ... step ... grid`, same frame numbers as the capture) and the client's action starts/ends (`action start slot 0: DodgeRoll`). `check_capture` decodes every movement message with 0 errors and 0 leftover bytes (only `AddInventory` items mismatch, as before). Results: [../protocol/movement.md](../protocol/movement.md) (index at "Session 2026-10-20"), fixtures `crates/poe-game/tests/fixtures/` (`scripts/re/movement_fixtures.py`).
 
+## Town capture with other players 2026-10-20
+| Session | What | Results |
+|---|---|---|
+| `dumps/0.5.5e/captures/official/2026-10-20_21-51-49_336/` (read-only official; 29,412 instance messages) | The Riverbank cleared, then Clearfell Encampment for 160 s with three other players (WASD and click-to-move, waypoint, stash, NPCs). Party invites (one cancelled by us), a whisper and a cancelled trade request. The DLL's `actions` log is on (action start/end with the client's frame number: client frame + 4527 = capture frame in the town; no per-frame positions) | Remote players' `AddObject`, removal, relayed actions, party and trade: [../protocol/entities.md](../protocol/entities.md#other-players-add-actions-remove-party-and-trade-wp35). New decoders in `poe-proto` (`player_blob.rs`, `remote.rs`) decode every message of the session without errors or leftover bytes except `AddInventory` items, `BuffAdded` flag `0x10` and `SetAimTarget` kind 1 (a `u32 entity` after `x, y`); anonymised fixtures in `modules/protocol/poe-proto/tests/data/`. Names and chat in the capture are not copied anywhere |
+
+Click-to-move in this session (local player, `f8667-9183`, 7 presses and 189 held repeats): two single-click walks reached their target with no message at arrival (`f8988` 44.6 cells in 34 frames, `f9027` 32 cells in 26 frames: 1.2-1.3 cells per frame; the next click's `StartAction` starts exactly at the previous target); a held-click's server restarts (`StartAction` Move, flags 0, header `(self, 9, n)`) came 13-17 frames and 13.6-17.7 cells apart. These findings are not yet merged into [../protocol/movement.md](../protocol/movement.md) (gap 2).
+
 ## Fixed (2026-10-14/15)
 | What | Official | Ours before | Now |
 |---|---|---|---|

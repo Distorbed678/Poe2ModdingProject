@@ -8,7 +8,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [guides/setup.md](guides/setup.md) | Commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, official read-only sessions, crash dumps |
 | [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
 | [guides/hosting.md](guides/hosting.md) | What blocks remote players and the same-machine dependencies; suggested order |
-| [guides/launcher.md](guides/launcher.md) | The planned player launcher |
+| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): profiles, Steam depot install, Play, mods |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (planned and existing) |
 
 ## Architecture
@@ -27,7 +27,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [protocol/framing.md](protocol/framing.md) | Wire format: encodings, framing, encryption |
 | [protocol/login.md](protocol/login.md) | Login messages, character list, leagues, hand-off |
 | [protocol/instance.md](protocol/instance.md) | Instance messages: opening sequence, area info, inventories, frames, pause, chat, leaving the game |
-| [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components, actor skills, NPCs) |
+| [protocol/entities.md](protocol/entities.md) | Entity initial-state blobs (player components, actor skills, NPCs), other players (add, relayed actions, removal), party and trade messages, and what the instance actor must send |
 | [protocol/movement.md](protocol/movement.md) | Lockstep movement: WASD, click-to-move, skills, dodge roll, facing, lag |
 | [protocol/side-channel.md](protocol/side-channel.md) | DLL to instance server side channel: HMAC-authenticated position reports and debug link (UDP), terrain upload (TCP) |
 

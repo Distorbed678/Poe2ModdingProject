@@ -222,3 +222,27 @@ Details and the patch: [standalone-login.md](standalone-login.md).
 | `0x1423cd120` | | reads an integer option value (`wistringstream`), throws "value is not an integer" |
 | `0x14010ac40` / `0x14010aca0` | | config singleton / its default builder (patch servers `us.patch.pathofexile2.com` `0x142f76fd0`, `patch.pathofexile2.tw`, `patch2/3.pathofexile2.tw`, `kr-patch.pathofexile2.com`) |
 | `0x141050a30` | `Window_CreateMain_POEWindowClass` | registers and creates the game window (class `POEWindowClass`, string `0x142f797b8`); `FUN_14011ac30` uses the same class for the single-instance check |
+
+## Remote players, entity lifetime, party and trade (WP3.5, 2026-10-20)
+Layouts: [../protocol/entities.md](../protocol/entities.md#other-players-add-actions-remove-party-and-trade-wp35). Structs: `modules/protocol/poe-proto/src/player_blob.rs`, `remote.rs`.
+
+| Address | Ghidra name | What |
+|---|---|---|
+| `0x141e71120` | `Entity_ReadInitialState` | AddObject blob reader: `u8 flags`, link records, components in template order, `u8 m` keyed entries (`0x141e7dbe0`) |
+| `0x141e71420` | `Entity_ReadLinkRecords` | `u8 n`, each `u32 key, u8 tag`, values by `0x141e7e9d0`; stored in the entity's property map (`entity +0x28`: `0x1421f12b0` / `0x1421f0c50`) |
+| `0x141e7e9d0` | `LinkRecord_ReadValues` | `u8 count`, then (count != 0) `u8 kind` and `count` values: kind 1 = `u32` entity ids (resolved with `0x141e72030`, unresolved ones queued by `0x141e73210`), other kinds through the variant reader table at `0x1434db750` (kind `0x0a` `0x141e80dc0`, `0x0b` = `u32` `0x141e80eb0`, `0x0c`-`0x0e` `0x141e80fb0`/`0x141e810d0`/`0x141e811e0`) |
+| `0x141e71620` | `Entity_Destroy` | `(entity, bool destroy parent chain)`: sets `+0x8c |= 1`, recurses into the children (`+0xd0..+0xd8`), appends the entity to the world's delete list (`world +0xb8`), calls vfunc `+0xa8` when id < `0x40000000`; logs "Attempting to delete an object that is flagged as CannotBeDeleted" for flag `+0x8c & 0x10`. Called by `0x1c5` (parent flag 0) and `0x2fa` (1) |
+| `0x142135b9b` (case), `0x142135baa`, `0x142135bc5`, `0x142136099` | | frame processor cases (`0x142134240`): `0x1c5` → `Entity_Destroy(e, 0)`; `0x1c6` → `+0x8d |= 4`, `ObjectInWakeZone` (`0x141e73bf0`); `0x1c7` → `+0x8d &= ~4`, `Entity_LeaveWakeZone` (`0x141e73f20`); `0x2fa` → skipped when `+0x8c & 1`, deferred when `+0x8c & 4`, `+0x8d & 4` and the type flag `+0x29` is clear, else `Entity_Destroy(e, 1)` |
+| `0x141db4f00` | `BuffsComponent_Read` | `u16 n`, each `u16, u8`, body `Buff_ReadBody`, then `0x141db5940` (add the buff to the component) |
+| `0x141d72910` | `Buff_ReadBody` | buff record: `u16 row, u16 buff-definition index (Buffs table stride 0x137), u32 +0x28, u32 +0x2c, u16 +0x38, u32 +0x34, u16 +0x3a, u16 +0x48, u32 +0x44, u32 +0x4c, varuint +0x3c, u8 +0xb8`, `[u16 +0x64 if definition +0xfe]`, `[u32 × k if definition +0x7c]`, `i32 n`, `n × u32` |
+| `0x142180fe0` | `StatsComponent_Read` | stat list (`0x1419970a0`/`0x141e25d50`, applied by `0x1426ac920`); player types (type +0x158 → +0x20): `u8 +0x168`, `u8` shapeshift form (row + 1 of `FUN_1423e55b0`'s table), `u8 × 3` weapon-set forms (`+0x180..+0x1b0`), `u8 k` + k × (`u8 set id` via `0x142181ca0`, stat list), then `u32 +0x1b0, u8 +0x1b4, u8 +0x1b5` |
+| `0x141dcf320` | `PlayerComponent_Read` | already listed; the first `u32` after the class is experience (`0x141dd11e0`), `flags` bit 2 = combat stance (`+0x20c`) |
+| `0x141d82a40` | `InventoriesComponent_Read` | `u8 n` × (`u8 slot`, `EquipmentVisual_Read`), `u8 k` × `u32` (applied by `0x141d84830` per slot) |
+| `0x1426c3f60` | `EquipmentVisual_Read` | `u8 id`; `0` = empty, else `0x1426c3b40` and `0x1426c3d10` (`u16` row, `u32` row of `Data/Balance/MTXTypeGameSpecific.dat`, `u8`) twice, `u8` (row of a 0x11-byte table), `u16` row, `u8 × 3` |
+| `0x14210d630` | `Chat_ProcessCommand` | `/command` dispatcher (called by the chat sender `0x14210ee60` for lines starting with `/`); case `0x16` sends `0x00b6` through `Social_SendPartyInvite`, case `0x1a` sends `0x00b7`, `0x28`/`0x29` join a chat channel by name (`0x142128f60`, global/trade) |
+| `0x142110810` | `Social_SendPartyInvite` | sends `PartyInvite` `0x00b6` (class `0x1434e51f0`, `u8 local player` from session `+0x181`, wstring name) and raises the UI event `FourSocialPartySend` (string `0x143507418`) |
+| class vtable `0x1434e51f0` | | generic `u8 + wstring` packet class (ctor `0x140855780`, serializer `0x141f37db0`): `0xb6`, `0xb7`, `0xc7` and others (the chat sender also builds `0xba` from it); the opcode is stored at `+8` by the sender |
+| `0x141f35de0` | `SocialEntryPacket_Read` | S→C `0x00c6` (flags byte: bit 2 character data, bits 0/1 extra `u16` pairs); handler `0x142123f1a` keeps `0x210`-byte entries in the session at `+0x27d8` (add/update by account) |
+| `0x1420ee915` | | account-session case for `0x00c4`: logs "InstanceClientSetSelfPartyInvitationSecurityCode = " (`0x143506870`) and stores the `u32` at session `+0x3ec0` |
+| `0x141f45090` | | deserializer of `0x0271` (`u8 × 4`); handler not found |
+| `0x142156320` | | `0x00c8` PartyUpdate reader (`0x1421560b0` ctor); `0x1421574b0` `0x00d9` TradeState reader; `0x141f43e80` `0x00c9`; `0x141f38d80` `0x00da`; `0x141f38ce0` serializer of `0x00d2`/`0x00c9`; `0x141f3cd50` `0x00e0`; `0x142150da0` `0x0019` |
