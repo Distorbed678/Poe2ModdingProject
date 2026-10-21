@@ -8,6 +8,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [guides/setup.md](guides/setup.md) | The only place for commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, offline accounts and characters, web admin and launcher builds, two-client test, official read-only sessions, config keys and migration, crash dumps |
 | [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
 | [guides/hosting.md](guides/hosting.md) | Letting other players connect: ports, `public_host`, terrain upload, firewall, what a remote player needs, security notes, the local two-client test and its results |
+| [guides/releasing-server.md](guides/releasing-server.md) | Releasing the server: tagging `server-v*`, what the release workflow builds and packages, the secrets it needs, checking a package locally |
 | [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
 | [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, profiles, Steam depot install, Play, mods, releasing (tags, signing secrets and key) |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
@@ -60,5 +61,6 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [research/tools.md](research/tools.md) | Survey of datamining and RE tools |
 | [plans/orchestration-2026-10.md](plans/orchestration-2026-10.md) | Orchestration plan (2026-10-20): restructure, repo split, movement rewrite, accounts and multiplayer, web admin, launcher, docs cleanup, terrain handoff |
 | [plans/orchestration-2026-10b.md](plans/orchestration-2026-10b.md) | Orchestration plan 2 (2026-10-21): game-update resilience, login/accounts completion, public release, launcher releases with auto-update, server setup in the launcher, plan-1 leftovers |
+| [plans/public-release-audit.md](plans/public-release-audit.md) | Public release audit (WP D1, 2026-10-21): secrets, personal data, game data and security findings across the 5 repos, the git filter-repo scrub lists, D3 hygiene items, open questions |
 | [plans/terrain-all-areas.md](plans/terrain-all-areas.md) | Terrain port to all areas (2026-10-21): scope matrix (`cargo xtask terrain-matrix`), verification at scale, blockers, unported systems ranked, work packages |
 | [../modules/client-hook/docs/mod-manifest.md](../modules/client-hook/docs/mod-manifest.md) | `mod.toml` spec, mod ABI and loader rules for client mods (Poe2ClientHook submodule) |

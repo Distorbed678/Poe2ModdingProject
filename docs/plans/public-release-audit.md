@@ -1,0 +1,171 @@
+# Public release audit (WP D1, 2026-10-21)
+
+Read-only audit of the five repos before they go public (plan: [orchestration-2026-10b.md](orchestration-2026-10b.md), Phase D). It feeds D2 (fix and scrub) and D3 (guides and hygiene). Secret values are not written here: a secret appears as its first two characters and its length, with the file and commit where it sits.
+
+## Summary
+
+- **No credential, token, private key, `.env` file, capture, dump, GGG asset or game table is in any repo's history.** gitleaks over the full history of all five repos found one hit, and it is not a credential (D-01).
+- **A history rewrite is needed for the main repo and for all four modules.** Reasons: the author email on every commit (all repos), a compiled-Python file with the dev home path (main), the dev LAN IP and home path in two plan/handoff docs (main), and, depending on the user's decision, the 64-byte HNC table copied from the client exe (main, protocol). Nothing in the rewrite is urgent for secrecy; it is privacy and hygiene.
+- **One high finding in the code/config:** the committed `config/server.toml` is the developer's config: it turns on the password-less machine-hash login and listens on all interfaces (S-01). The code default is safe; the shipped file is not.
+- The web API, the accounts code, the UDP/TCP side channel, the launcher (tokens, zip handling, DepotDownloader pin) and the DLL latch are in good shape. The main gaps are pre-auth resource limits on the game ports (S-02), plain `http://` accepted by the launcher without a warning (S-03), and the wording around the official-server mode (S-04).
+- The history is small (27 MB in the main repo, 5 MB or less in the others), so a rewrite is cheap. Because the repos are private with no forks, pull requests or issues, the cleanest publication path is to push the rewritten history to **fresh repositories** instead of force-pushing over the old ones (P-01).
+
+Counts (findings table below): **critical 0, high 1, medium 6, low 15, info 11** (33 in total).
+
+## Scope and method
+
+Audited state (all on `main`, no tags, no other branches or remotes):
+
+| Repo | Commits (all refs) | Tip audited |
+|---|---|---|
+| Poe2ModdingProject (main) | 179 | 93a2d18 |
+| Poe2Protocol (`modules/protocol`) | 45 | c845efd |
+| Poe2ClientHook (`modules/client-hook`) | 68 | 2d4d0a9 |
+| Poe2Launcher (`modules/launcher`) | 6 | 6954269 |
+| Poe2WebAdmin (`modules/web-admin`) | 2 | 92cbad0 |
+
+Other agents were editing the working trees in parallel (web API, `config/server.toml`, the launcher's updater). Code was reviewed at the committed tips unless a finding says otherwise; what lands later (Phase E/F, the launcher updater, `POST /web-token`) needs a short re-review (S-13, S-14).
+
+What was run, all local:
+
+1. **gitleaks v8.30.1** (`third_party/gitleaks/gitleaks`, added to `third_party/fetch-tools.sh` with a pinned version and a checksum check; git-ignored like the rest of `third_party/`): `gitleaks git <repo> --log-opts=--all --redact=100`, once per repo. Result: 0 findings in client-hook, launcher and web-admin; 1 in main and 1 in protocol, both the same line (D-01).
+2. **A pattern scan over every added line of `git log --all -p`** in each repo: emails, home paths, private and public IPs, the test account names (mp1, mp2, b2test, phasea, tester1, hunter2*), password assignments, token shapes (`ghp_`, `github_pat_`, AWS, Slack, JWT), private-key headers, CI secret names, Steam ids, `Client.txt`, 64-hex strings.
+3. **A path and blob audit:** every path ever committed (`git log --all --name-only`), file extensions, and every blob over 200 KB (`git rev-list --objects --all` + `git cat-file --batch-check`).
+4. **A name check against the user's official captures:** every UTF-16 and ASCII string in the login, character and `AddObject` packets of the local official captures under `dumps/0.5.5e/captures/official/` (about 60 strings, account name included) was searched in the full history of all repos, including inside hex literals of tests. Only game vocabulary matched (league names, animation sets). Nothing from the captures was copied into this report.
+5. **Code review** of the web API, accounts, rate limiter, login and instance servers, the side channel, the launcher and the DLL guard (files named in the findings).
+6. **GitHub state, read-only:** `gh repo list`, deploy keys, secret names, Actions runs and artifacts. Nothing was changed.
+7. **A dry run of the scrub** on a bare clone in the scratchpad (not on the real repos): the main-repo commands in "Scrub lists" produced a history with no match for the replaced strings and no `.pyc` path.
+
+Not done: trufflehog (gitleaks was enough and only one scanner was asked for), a dynamic test of the servers, a dependency audit (`cargo audit`/`npm audit`: D3 should add both to CI), and anything on the Steam install or `GameFiles/`.
+
+## Findings
+
+Severity: critical (secret or legal blocker), high (exploitable with defaults), medium (should be fixed before going public), low (fix when convenient or accept), info (no action, or a recorded decision).
+
+| ID | Repo | Sev | Where | What | Fix |
+|---|---|---|---|---|---|
+| S-01 | main | high | `config/server.toml` (41 commits; committed tip 93a2d18) | The committed dev config sets `[accounts] dev_machine_hash_login = true` and binds the login and instance ports to `0.0.0.0`. With it, the Steam login (`0x0005`) needs no password: it creates and logs into an account keyed by a machine hash the client chooses (`servers/login-server/src/session.rs` `authenticate`). Anyone who learns another player's hash gets that account, and anyone can create accounts without the rate limiter. The code default is `false` (`crates/poe-config/src/lib.rs`), but `cargo run -p poe-server` reads `config/server.toml`. `[dev] debug_link` is also on (admin commands still need the admin role, `exec.rs`). | Ship only `config/server.example.toml` with safe values (`dev_machine_hash_login = false`, loopback binds or a comment that says why not); git-ignore `config/server.toml`; keep the dev settings in `config/server.dev.toml` that `scripts/` and `xtask` pass explicitly. Log a warning at start when `dev_machine_hash_login` is on and a bind is not loopback. Consider removing the path from release builds (a Cargo feature). |
+| S-02 | main, protocol | medium | `servers/login-server/src/lib.rs` (accept loop), `session.rs`; `modules/protocol/poe-net/src/conn.rs` `Connection::decode`/`read_more` | Before login there is no read timeout, no cap on buffered bytes (`inbound` grows while the decoder says `Incomplete`) and no cap on connections or connections per IP. A few hundred idle or slow sockets, or one socket that announces a huge string and trickles bytes, can pin memory and tasks. The instance server has 10 s and 60 s timeouts for its first steps, the login server none. | Pre-auth read deadline (for example 15 s per message, 60 s to finish the login), a buffer limit (64 KiB before auth), a global and per-IP connection limit, and a limit on unknown-ticket attempts per IP. Put a test next to the existing rate-limiter tests. |
+| S-03 | launcher | medium | `src-tauri/src/profiles.rs` `normalize_base_url`, `src/lib/url.ts`, `src/pages/Servers.svelte` | A bare `host:port` becomes `http://`, and `http://` is accepted for any host with no warning. The launcher then sends the account password (`POST /login`) and later the 30-day launcher token in clear text over the network. The server's own docs say to use a TLS proxy, the launcher does not enforce it. | Default to `https://` for non-private hosts; for `http://` to a host that is not loopback or a private address, show a clear warning and require a confirmation (remember it per profile). Keep `http://127.0.0.1` frictionless. |
+| S-04 | client-hook, docs | medium | `poe-hook/src/guard.rs`, `poe-hook-core/src/hooks.rs`, `docs/architecture/client-dll.md` "Using it on official servers" | The latch really does stop everything that sends or alters game behaviour (checked: crypto bypass, position sync, side channel, mods, login patch, key injection all test it). But in official mode the observer hooks still patch game code in memory (inline detours, a Vulkan hook, the version.dll proxy). That is "read-only" for the game state, not for the process, and GGG's anti-cheat may treat any injected DLL as a violation. A public README that says "read-only" without this caveat invites bans and support requests. | D3 disclaimer: any DLL in the client may be detected, even passive; no one should use it on official servers they care about; the project does not endorse it. Say "observes and logs, patches code to do so". Keep `--official` out of the launcher (it already is) and mark it developer-only in the xtask help. |
+| D-01 | main, protocol | medium | main `protocol/0.5.5e/hnc.toml` line 8, commit f5da1fa (2026-10-14); protocol `opcodes/0.5.5e/hnc.toml` line 8, commit 87bc840 (still in the protocol HEAD; the main repo has it in history only, the file moved with the repo split) | gitleaks `generic-api-key`: `key_xor = "e5…"` (128 hex chars = 64 bytes). It is not a credential: it is the XOR table the client keeps at `0x142f10960` for the anti-cheat side channel (see `docs/re/crypto.md`), copied out of GGG's executable. So it is game data in the repo, contrary to "no GGG data committed", and it is the only thing a scanner reports. | User decision (open question 2). Option A: keep it as a documented RE constant and allowlist exactly this file in a `.gitleaks.toml` (path allowlist, not a commit fingerprint: fingerprints change with the rewrite). Option B (cleaner): read the table from the user's `GameFiles` exe at start (the address is in the signature tables), remove `key_xor` from `hnc.toml`, and scrub it from history with the `--replace-text` rule in "Scrub lists". |
+| P-01 | all | medium | GitHub state | (a) After a force-push over an existing repo, the old commits stay fetchable by SHA until GitHub garbage-collects them, and any cached view keeps them; a repo that goes public exposes whatever the old history held. (b) Actions state becomes public: Poe2ClientHook has 15 runs and 12 artifacts (built DLLs), Poe2Launcher 5 runs, Poe2Protocol 12 runs, Poe2WebAdmin 2 runs and 2 artifacts. (c) Secrets and keys exist on GitHub: `SUBMODULE_TOKEN` on Poe2ClientHook, `HOOK_DEPLOY_KEY` and `PROTOCOL_DEPLOY_KEY` on Poe2Launcher, and two read-only deploy keys (ids 167130886 on Poe2ClientHook, 167130888 on Poe2Protocol, titled "Poe2Launcher CI (read-only)"). Forks, PRs, issues, releases and webhooks: none. | Prefer fresh repositories: create new empty repos (after a private backup of the old ones), push the rewritten history there, then retire the old ones. If the names must stay, delete and recreate the repos instead of force-pushing. Either way delete the Actions runs and artifacts, then remove the three secrets and the two deploy keys (D3 already plans this). Do the swap with the user's confirmation only. |
+| L-01 | main, web-admin | medium | repo roots | No LICENSE file in the main repo (the workspace declares `MIT OR Apache-2.0` in `Cargo.toml`) and none in Poe2WebAdmin (`package.json` is `"private": true`, no license field). A public repo without a license is all rights reserved. | Add `LICENSE-MIT` and `LICENSE-APACHE` to both, as in the other three; set `license` in `package.json`; see the D3 list. |
+| S-05 | main | low | `crates/poe-web-api/src/auth.rs` `ClientIp`; `crates/poe-accounts/src/ratelimit.rs` | (a) With `trust_forwarded_for = true` the **first** `X-Forwarded-For` entry is used; a client can prepend its own, so an attacker picks the IP the limiter sees. (b) With it `false` behind a proxy, every client shares the proxy's IP, so 20 failures lock everyone out. (c) 5 failures lock an account name for everybody, so a stranger can lock a known name out of password logins every 5 minutes (saved-token logins are not affected). | Use the rightmost entry the proxy appended (or a configured proxy count); document both modes in hosting.md; accept (c) or lock per (name, IP) pair first. |
+| S-06 | accounts | low | `crates/poe-accounts/src/sqlite.rs` `authenticate` | An unknown name returns before argon2 runs, a known name with a wrong password after the argon2 time: login timing tells whether a name exists (the web answers with one text for both, the game login returns different codes by design of the client's table). | Verify against a fixed dummy hash when the name is unknown. Low value while the rate limiter is on. |
+| S-07 | web-api, web-admin | low | `crates/poe-web-api/src/auth.rs` `WsAdminAuth`; `lib.rs` | (a) The log WebSocket takes the admin token as `?token=`, which ends up in reverse-proxy access logs. (b) The static SPA is served without CSP or other security headers. (c) No TLS in the server itself (loopback by default; documented). (d) Admin endpoints have no extra throttle beyond the token. | Short-lived single-use WebSocket ticket (the in-progress `POST /web-token` work may cover it, re-check); add a conservative CSP, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`; keep the TLS-proxy guidance prominent. |
+| S-08 | instance-server | low | `servers/instance-server/src/terrain_store.rs`; `[spawn.upload] enabled = true` default | A modified client can fill the shared terrain-cache slot of its own area hash with a layout that is well-formed but wrong (documented in `docs/protocol/side-channel.md`); later players of that area spawn by that layout. Authentication, size limits, decompression limits and "never replace" are in place. | Default `enabled = false` for a public server, or only accept uploads from admin accounts, or validate against `[terrain] generate`. |
+| S-09 | cluster | low | `crates/poe-cluster/src/lib.rs` `MemoryTickets` | Instance tickets are a random `u32`, valid 60 s, single use, sent in the Hello in the clear; unknown ids are only logged. Guessing needs about 2^32 tries per ticket in the window, so it is impractical, but there is no per-IP limit. | Covered by the unknown-ticket limit in S-02; widen the id to `u64` when the wire format allows it. |
+| S-10 | client-hook | low | `poe-hook/src/guard.rs`; `poe-hook-shared/src/trust.rs` | The latch triggers in the hooks of `connect` and `WSAConnect` only. A build that connects with `ConnectEx` or `WSAConnectByName` would neither be blocked in private mode nor latch. An entry in `trusted_servers` switches the latch off for that IP, so a bad config entry (an official address) would too; the deploy resolves names but does not refuse well-known official hosts. | Hook `ConnectEx` (via `WSAIoctl` `SIO_GET_EXTENSION_FUNCTION_POINTER`) too, or fail closed: latch on any socket call the guard does not know. Refuse the official gateway hostnames in `trusted.rs`. Add a startup check that prints the effective mode. |
+| S-11 | store, docs | low | `crates/poe-store/migrations/0006_accounts_auth.sql` line 19; `docs/guides/setup.md` line 212 | The migration promotes an account named `Exile1` to admin. On a fresh database it runs before any account exists, so nothing is promoted; on an existing database a player who happens to be `Exile1` (a machine-hash account) becomes admin. The setup guide still says the first dev account is an admin, which is no longer true on a fresh database. | Keep the migration (history), add a comment, and fix the guide text. Public servers should never enable the machine-hash login anyway (S-01). |
+| S-12 | main | low | `third_party/fetch-tools.sh` | `cargo install cargo-xwin` and the `dat-schema` release are unpinned (`latest`), and the `reference/` clones track HEAD; only the new gitleaks download is checksum-verified. Dev-only, but anyone running the script trusts those sources at that moment. | Pin cargo-xwin with `--version`, keep the dat-schema sha256 check (it already warns), pin the reference clones to a commit or label them "research, unpinned". |
+| D-02 | main | low | `tools/re/__pycache__/packet_layout.cpython-314.pyc`, `pe.cpython-314.pyc`; commits 7bb3601 (added), c86c5cc; removed in 6cd1e75 | Compiled Python bytecode was committed; it embeds the absolute dev path (home directory) as the script path. Not visible in text diffs, so the text scans cannot see it. | Remove by path in the rewrite (list below). `__pycache__/` is already in `.gitignore`. |
+| D-03 | main | low | `docs/plans/handoff-wp3.7.md` (commit fa16e9f, 3 lines, file gone from HEAD); `docs/plans/orchestration-2026-10b.md` line 167 (commit 017f9f9, still in HEAD) | The dev machine's LAN IP, 192.168.1.xx (private range). Also shown in the DLL log excerpt in that handoff. | `--replace-text` in the rewrite; reword the plan line at HEAD. |
+| D-04 | main | low | `docs/plans/orchestration-2026-10b.md` line 167 (017f9f9, HEAD); the two `.pyc` files | The dev Linux login name in `/home/<user>` (9 characters, the lower-case GitHub handle). Elsewhere only generic `/home/u/…` test strings (launcher `paths.rs`, `settings.rs`, `core_flow.rs`; client-hook `hook_config.rs`), which are fine. | `--replace-text` plus the HEAD edit. |
+| D-05 | all five | low | commit metadata | Author and committer email `Di…@gmail.com` (22 characters) on all 300 commits (179, 45, 68, 6, 2), name `Distorbed`, timezone offset -0400 on every commit, and `Co-Authored-By: Claude … <noreply@anthropic.com>` on 177 of the main repo's commits (not personal). | Rewrite with `--mailmap` to the GitHub noreply address (open question 1). Timezone cannot be changed by mailmap; leave it or use a commit callback. |
+| D-06 | main | low | `docs/status/terrain-matrix.tsv` (271 KB, 4519 rows, one commit) | A table generated by `cargo xtask terrain-matrix` from the game's area tables: internal area ids with the project's own status columns. It is derived from game data, though only names and counts. | Keep (facts, small, and the terrain plan uses it) or generate on demand and git-ignore it. Mention in the disclaimer that internal ids appear in docs. |
+| D-07 | protocol | low | `poe-proto/tests/data/{local_dex,remote_dex,remote_int,remote_strint}_blob.hex` (3 to 7 KB, commit a2fe9ea only) | Real `AddObject` player blobs from the official town capture. Text in them is anonymised (`player0`…`player3`; the animation-set names are game vocabulary), verified in the only version that ever existed. What cannot be checked offline: numeric ids inside (character, account or item ids of the other players). | Ask the user to compare the u32 fields with the capture; if any matches a real account or character id, zero them in the test (the round trip only needs the layout) and in the history. Otherwise keep. |
+| C-01 | all | low | `.github/workflows/ci.yml` of protocol, client-hook, launcher, web-admin | No `permissions:` block (the token gets the repo default), actions pinned by tag and not by commit, no secret scan or `cargo audit`/`npm audit` job. client-hook and launcher use the three secrets above. | D3: `permissions: contents: read`, plain public checkouts without tokens, add a gitleaks job (`gitleaks/gitleaks-action` or the pinned binary) and the audits. |
+| D-08 | main | info | `CLAUDE.md`, `docs/plans/*` (orchestration, handoffs), `scripts/agent-desktop.sh`, `docs/status/tracker.toml`, `README.md` tracker | Personal workflow: agent orchestration, handoffs, a KWin desktop script that names the launcher's app id (`com.distorbed.poe2launcher`). Nothing sensitive. | Decide whether it stays (open question 7). If it stays, handoff files are noisy in a public repo; consider moving finished ones to `docs/status/history.md`. |
+| D-09 | main, client-hook, launcher | info | docs, `scripts/test-mp.sh`, tests | The test account names (mp1, mp2, b2test, phasea) appear in docs and scripts only as names; **no password sits next to them** in any file or commit. `hunter22` (login-server and accounts tests), `hunter2` (launcher redaction test) and `tester1`/`hunter2pass` (an example string in the plan text, 017f9f9) are clearly test strings. | No scrub needed unless any of them was a real password (open question 4); then rotate. |
+| D-10 | main, client-hook, launcher | info | `docs/guides/launcher.md` (aa580fe), `docs/plans/handoff-orchestrator-2.md` (05922af), `docs/plans/orchestration-2026-10b.md` (017f9f9); `client-hook/.github/workflows/ci.yml` (144ff90, 9e475d8); `launcher/.github/workflows/ci.yml` and README (1d0af2e) | CI secret **names** (`SUBMODULE_TOKEN`, `HOOK_DEPLOY_KEY`, `PROTOCOL_DEPLOY_KEY`) and SSH host aliases. No values, no keys. | Remove with the D3 CI change; history needs no scrub. |
+| D-11 | main | info | local `refs/stash` (2 files of WIP), 3 dangling commits, 1 dangling blob | They exist only in the working copy, not on GitHub, and no scan found anything in them. A `git clone --mirror` of the local path would copy `refs/stash`. | Do the rewrite on clones taken from GitHub, not from the working copy (D2 already says "fresh mirror clones"; make it explicit). |
+| D-12 | main, client-hook | info | `docs/re/*`, `docs/re/terrain/*`, `docs/protocol/*`, `modules/client-hook/poe-hook-core/assets/symbols.tsv` (586 symbols), the address tables in history (`docs/re/packet_classes_0.5.5e.json`, `instance_factory*_s2c.json`, removed in 2c17f15) | RE results: addresses, struct offsets, opcode meanings, function names. No decompiler output is pasted (only a few lines mention `FUN_`/`param_` names). The `.dat` column notes and terrain format notes describe formats, they do not contain data. | Keep, as planned, with the disclaimer. Recommendation: keep `docs/re/` and the symbol table; keep the address JSONs out of the next release (they are in history only); say in `docs/re/README.md` that addresses are for 0.5.5e and carry no GGG code or assets. |
+| D-13 | all | info | search over the full history | Official capture data: no character or account name, no other player's name, no chat text, no `Client.txt` line (searched by the log line format and by the names extracted from the captures, including inside hex literals). Mentions of `Client.txt` are the file name only (config docs, the DLL's overlay reader). Test text in docs ("hello-from-two", `Mp1Ranger`) is the project's own. | None. |
+| D-14 | all | info | paths and blobs | No `dumps/`, `runtime/`, `GameFiles/`, `captures/`, `.pcap`, `.log`, `.sqlite`, `.dat`, `.datc64`, bundle, exe or DLL ever committed; `dumps/README.md` is the only file under `dumps/`. Largest blobs: `DejaVuSansMono.ttf` (343 KB, with its licence file) and the terrain matrix. | None. |
+| D-15 | main | info | `crates/poe-game/tests/fixtures/*.json` (20 files) | Movement-only: inputs (skill row ids, flags, cursor offsets) and expected events (cells, stats, entity ids), derived from the user's own official sessions. The only strings are the fixture name and description, the op names, and `source` (the capture folder name, a timestamp). No names, no packets. | None; if the capture folder name bothers the user, replace `source` with a label. |
+| S-13 | launcher | info | `src-tauri/src/{keystore,depot,mods,play,paths}.rs`, `tauri.conf.json`, `capabilities/default.json` | Reviewed and good: tokens only in the OS keyring (no file fallback; clear errors), `Debug` output redacts them; the game credentials file is written 0600 (`poe-hook-deploy/src/login_token.rs`); the Steam password goes to DepotDownloader's stdin and is wiped; DepotDownloader is downloaded over HTTPS and refused unless size and SHA-256 match the pin (`versions/depotdownloader.toml`); zip extraction uses `enclosed_name`, refuses symlinks, and the mod installer also limits entries and unpacked bytes and guards copies with `canonicalize` + `starts_with`; a lexical Steam-path guard refuses anything under the Steam install or the 2694490 prefix; CSP is set, the window has only `core:default`, the folder dialog, and (working tree) updater and restart. The working tree adds the Tauri updater with a minisign public key and the GitHub release endpoint, which verifies signatures. | Re-review once Phase E lands: the private signing key and password only in GitHub secrets, never in a file; the first public release must be signed; keep `updater:default` minimal. |
+| S-14 | launcher, client-hook | info | `src-tauri/src/mods.rs`, `poe-hook-mods` | Mods are native DLLs loaded into the game process with the user's rights; the installer cannot make that safe. The loader loads no mod (and does not even read `poe-hook-mods/`) in official mode or once the latch is on. | Say it in `docs/guides/modding.md` and the launcher UI: install only mods you trust. |
+| S-15 | main (in progress) | info | working tree: `POST /api/v1/web-token`, `[web] web_token_ttl_secs` | Another agent is adding a short-lived single-use token the launcher hands to the browser. Not in the audited commits. | Re-review when committed: single use, 60 s, bound to the admin role, not logged, not accepted as `?token=` for the WebSocket once redeemed. |
+
+## Scrub lists for git filter-repo
+
+Tool: `git-filter-repo 2.47.0` is in `third_party/pyenv/bin` (installed by the fetch script). Work on clones taken **from GitHub** (`git clone --mirror https://github.com/Distorbed678/<repo>.git`), after a private backup of every repo. Build the files below locally; the values are not in this report on purpose.
+
+### Files D2 builds (local, never committed)
+
+`replace-main.txt` (one rule per line, `old==>new`):
+
+| Expression | Where it comes from |
+|---|---|
+| `<LAN IP, 192.168.1.xx, find it with the command below>==>192.168.1.20` | D-03 (fa16e9f, 017f9f9) |
+| `/home/<user>==>/home/user` (`<user>` is 9 characters) | D-04 (017f9f9) |
+| optional: `hunter2pass==>REDACTED-PASSWORD` and `tester1==>testuser` | D-09, only if open question 4 says they were real |
+| Option B of D-01 only: `regex:key_xor = "[0-9a-f]{128}"==>key_xor = "<read from the client exe>"` | D-01 |
+
+To read the exact strings without copying them here (run in the repo, prints the line numbers only):
+`git grep -n -I -E '192\.168\.1\.|/home/[a-z]' $(git rev-list --all) -- docs | cut -d: -f1-3 | sort -u | head` gives the commit and file, and the string is on that line.
+
+`mailmap.txt` (all five repos): `Distorbed <ID+Distorbed678@users.noreply.github.com> <the 22-character email, first two characters Di>`. The numeric `ID` is the GitHub user id (`gh api users/Distorbed678 --jq .id`). `git filter-repo --mailmap mailmap.txt` rewrites author and committer.
+
+### Per repo
+
+| Repo | Needs rewrite | Commands |
+|---|---|---|
+| Poe2Protocol | yes (email; D-01 option B) | `git filter-repo --mailmap mailmap.txt` plus, for option B, `--replace-text replace-protocol.txt` with the key_xor rule. Keep `commit-map`. |
+| Poe2ClientHook | yes (email) | `--mailmap mailmap.txt` and a commit callback that maps the gitlink `protocol` through Protocol's `.git/filter-repo/commit-map` (below). Keep `commit-map`. |
+| Poe2Launcher | yes (email) | `--mailmap mailmap.txt` and a callback for the gitlink `client-hook` through ClientHook's commit-map. Keep `commit-map`. |
+| Poe2WebAdmin | yes (email) | `--mailmap mailmap.txt`. No submodules. |
+| Poe2ModdingProject | yes (email, `.pyc`, IP, home path; D-01 option B) | `--mailmap mailmap.txt --replace-text replace-main.txt --path-glob '*.pyc' --invert-paths` and a callback for the four gitlinks `modules/{protocol,client-hook,launcher,web-admin}` through the four commit-maps (the history also holds the earlier gitlink commits). |
+
+Order: Protocol, then ClientHook, then Launcher and WebAdmin (independent of each other), then the main repo, because each gitlink holds a commit SHA that changes with the rewrite. A callback that retargets gitlinks (a sketch, not run: test it on the mirror clones), for each `commit-map` (`old new` per line, first line is a header):
+
+```python
+# --commit-callback body, maps = {old_hex: new_hex} loaded from the commit-map files
+for change in commit.file_changes:
+    if change.mode == b'160000' and change.blob_id.decode() in maps:
+        change.blob_id = maps[change.blob_id.decode()].encode()
+```
+
+(In filter-repo a gitlink's `blob_id` is the target commit's hex id.) The nested `.gitmodules` files (`client-hook/.gitmodules`, `launcher/.gitmodules`) only hold URLs; they stay valid as long as the repo names do (if D3 creates differently named repos, edit them in a final commit, not in the history). After the rewrite, `git submodule update --init --recursive` from a fresh clone must succeed; that is the D2 acceptance test along with the scanners. Commit SHAs written in docs and handoffs (for example "client-hook 2d4d0a9") will no longer exist; that is cosmetic.
+
+The dry run of the main-repo rules (IP, home path, `.pyc`, mailmap) on a bare clone in the scratchpad gave: one author/committer identity, 0 matches for the replaced strings in `git log --all -p`, 0 `.pyc` paths.
+
+### Acceptance (D2)
+
+1. `gitleaks git <repo> --log-opts=--all` on every rewritten repo reports 0 findings. With D-01 option A, add `.gitleaks.toml` first:
+   ```toml
+   [extend]
+   useDefault = true
+   [[allowlists]]
+   description = "RE constant copied from the client exe, not a credential (D-01)"
+   paths = ['''opcodes/.*/hnc\.toml''']
+   ```
+2. The pattern scan of this audit (emails, home paths, private IPs, test names, token shapes) returns only the allowed generic test strings.
+3. `git log --all --format='%ae %ce' | sort -u` shows only the noreply address in every repo.
+
+## Hygiene items for D3
+
+- **Main repo:** add `LICENSE-MIT` and `LICENSE-APACHE` (L-01); `SECURITY.md` (how to report, supported version 0.5.5e, the private server is for personal use); `CONTRIBUTING.md`; issue and PR templates; a `.github/workflows/ci.yml` (there is none: build, test, `cargo fmt`/`clippy`, link check, gitleaks, `cargo audit`); extend `.gitignore` with `.env*`, `*.pem`, `*.key`, `config/server.toml` (S-01); remove "All repos are private" and the `gh auth login first` clone note from `README.md` and `CLAUDE.md`.
+- **Poe2WebAdmin:** LICENSE files, `SECURITY.md`, templates; `npm audit` in CI.
+- **Poe2Protocol, Poe2ClientHook, Poe2Launcher:** `SECURITY.md`, templates; their READMEs say "private repo" (2 to 7 mentions each) and need the same edit.
+- **Every README:** the disclaimer block (unofficial; not affiliated with or endorsed by Grinding Gear Games; no game files are distributed and users need their own legal copy; the client DLL can be detected as a modification and is used at the user's own risk (S-04); official servers are observe-only and not supported). No README mentions GGG or a disclaimer today.
+- **CI:** replace `SUBMODULE_TOKEN` and the two deploy keys with plain public checkouts (`submodules: recursive`), add `permissions: contents: read`, then remove the three secrets, the two deploy keys and the old runs and artifacts (P-01, C-01).
+- **Third-party notices:** DejaVu Sans Mono ships with its licence in `poe-hook-core/assets/` (keep it and mention it in a `NOTICE`); `third_party/README.md` lists AGPL reference projects that are read, never linked: state in `CONTRIBUTING.md` that code from them must not be copied in.
+- **Docs fixes found on the way:** `docs/guides/setup.md` line 212 (S-11); `docs/re/update-compatibility.md` line 430 says the capture redaction list lacks `Credentials`, but `poe-hook-shared/src/redact.rs` now has it plus a fail-safe for unknown builds: update that line.
+
+## Open questions for the user
+
+1. **Commit email:** rewrite all author/committer emails to the GitHub noreply address (recommended), or keep the gmail address public? The timezone offset (-0400) is on every commit and stays unless a callback strips it.
+2. **The HNC `key_xor` table (D-01):** keep it as a documented RE constant with a gitleaks allowlist, or read it from the user's own exe and scrub it from history? And more broadly: the repos document and implement the login crypto bypass and the client's anti-cheat side channel. Are you comfortable publishing that as it is, or should the HNC part stay private?
+3. **Publication path:** push the rewritten history to fresh repositories (recommended; avoids stale objects and old Actions data), or delete and recreate the same names, or force-push over the existing ones? The old repos would become the private backup under a new name.
+4. **Test credentials:** were `mp1`, `mp2`, `b2test`, `phasea` or `tester1` ever given real passwords, or the same password as any real account? No password is in git, but if yes, rotate. May `tester1`/`hunter2pass` be replaced in the plan text?
+5. **Machine-hash login (S-01):** keep `dev_machine_hash_login` in the public code (off by default, loud warning), or remove it from release builds?
+6. **Official mode:** keep `deploy-client --official` documented in the public README and `docs/guides/setup.md`, or document it only for the project's own research? Given S-04, the recommendation is developer-only wording.
+7. **Personal workflow files:** keep `CLAUDE.md`, the orchestration plans and handoffs, `scripts/agent-desktop.sh` in the public repo, or move them out? Keep the Claude co-author trailers?
+8. **App identifier** `com.distorbed.poe2launcher`: keep (renaming resets existing keyring entries and app data) or change before the first release?
+9. **Blobs (D-07):** please check that no real account or character id is inside the four `.hex` test blobs.
+10. **Licences:** use `MIT OR Apache-2.0` for all five repos (main and web-admin get the files)? Confirm that no code was ported from KiwiNet or exileSniffer (AGPL) into the Rust sources: the references are noted as read-only, but nothing in this audit could prove the negative.
+11. **D-06:** keep `docs/status/terrain-matrix.tsv` committed?
+
+## Reproduce
+
+```sh
+bash third_party/fetch-tools.sh        # or only the gitleaks block; installs third_party/gitleaks/gitleaks
+for r in . modules/protocol modules/client-hook modules/launcher modules/web-admin; do
+  third_party/gitleaks/gitleaks git "$r" --log-opts=--all --redact=100 --no-banner -l warn
+done
+git log --all --format='%ae %ce' | sort -u          # per repo
+git log --all --name-only --format= | sort -u        # paths ever committed
+gh api repos/Distorbed678/<repo>/keys; gh secret list -R Distorbed678/<repo>   # read-only
+```

@@ -6,6 +6,8 @@ cd "$(dirname "$0")"
 
 POE_DATA_TOOLS_CLI=cli-v2.2.1
 LIBGGPK3=v2.7.5
+GITLEAKS=v8.30.1
+ACTIONLINT=v1.7.12
 
 echo "== poe_data_tools CLI ($POE_DATA_TOOLS_CLI)"
 mkdir -p poe_data_tools
@@ -29,6 +31,20 @@ echo "== LibGGPK3 ($LIBGGPK3)"
 mkdir -p LibGGPK3
 gh release download "$LIBGGPK3" -R aianlinb/LibGGPK3 -p linux-x64.zip -D LibGGPK3 --clobber
 (cd LibGGPK3 && unzip -oq linux-x64.zip && rm linux-x64.zip)
+
+echo "== gitleaks ($GITLEAKS, secret scanner for the public-release audit; runs locally)"
+mkdir -p gitleaks
+gl_ver="${GITLEAKS#v}"
+gh release download "$GITLEAKS" -R gitleaks/gitleaks -p "gitleaks_${gl_ver}_linux_x64.tar.gz" -p "gitleaks_${gl_ver}_checksums.txt" -D gitleaks --clobber
+(cd gitleaks && sha256sum --check --ignore-missing "gitleaks_${gl_ver}_checksums.txt" \
+    && tar -xzf "gitleaks_${gl_ver}_linux_x64.tar.gz" gitleaks && rm "gitleaks_${gl_ver}_linux_x64.tar.gz")
+
+echo "== actionlint ($ACTIONLINT, GitHub Actions workflow linter; runs locally)"
+mkdir -p actionlint
+al_ver="${ACTIONLINT#v}"
+gh release download "$ACTIONLINT" -R rhysd/actionlint -p "actionlint_${al_ver}_linux_amd64.tar.gz" -p "actionlint_${al_ver}_checksums.txt" -D actionlint --clobber
+(cd actionlint && sha256sum --check --ignore-missing "actionlint_${al_ver}_checksums.txt" \
+    && tar -xzf "actionlint_${al_ver}_linux_amd64.tar.gz" actionlint && rm "actionlint_${al_ver}_linux_amd64.tar.gz")
 
 echo "== reference repositories (read-only, for research)"
 mkdir -p reference
