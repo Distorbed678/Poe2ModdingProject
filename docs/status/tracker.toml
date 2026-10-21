@@ -192,13 +192,13 @@ link = "docs/guides/hosting.md"
 [[subsystem.item]]
 name = "Remote-player protocol (add/remove, broadcast actions)"
 status = "done"
-note = "WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looked darker than the local one; WP C2 built the remote blob to the official layout, found and fixed the remote roll's stat lists, and added bisect switches, the in-game check is planned: docs/guides/hosting.md)"
+note = "WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looked darker and orange before WP C2; WP C2 built the remote blob to the official layout and fixed the remote roll's stat lists; in-game re-check 2026-10-21: no remote tint left, the remote roll animates and its packets match the official order; the bisect switches stayed unused, docs/guides/hosting.md)"
 link = "docs/architecture/instance-world.md"
 
 [[subsystem.item]]
 name = "Shared world: players in one instance see each other"
 status = "partial"
-note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`); open: no combat/party sync"
+note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat/party sync"
 link = "docs/architecture/instance-world.md"
 
 [[subsystem.item]]
