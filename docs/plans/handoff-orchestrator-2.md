@@ -16,37 +16,29 @@ For a new orchestrator that continues [orchestration-2026-10b.md](orchestration-
 - When usage is low, the user asks for a graceful stop: agents stop at a safe point and write `docs/plans/handoff-<wp>.md`. On resume, start fresh agents from the handoffs. Don't resume old agent ids.
 - Monitor quietly. Report to the user when a WP finishes, at a gate, or on a failure.
 
-## Status
+## Status (updated 2026-10-21, evening)
 | WP | State | Commits |
 |---|---|---|
-| A1 assessment | done | 31e2b4f ([../re/update-compatibility.md](../re/update-compatibility.md)) |
-| A2 signatures | done, verified in game | client-hook d8b06a3, main ffda417 |
-| A3/A4 check-build, versions | done, verified in game: client_hash = exe sha256, `hashes_confirmed = true`, unknown build gets code 8, broken table fails closed | main 0ac816b, a2eb526; protocol 457c1a6; launcher d39c7b0, 0391a68 |
-| B1 login RE | done (gate G-LOGIN not needed) | 5ca0bec |
-| B2 login and accounts | done, verified in game; fix: close the login connection after a refusal | 5c35884, 5f36335; protocol aeca943 |
-| C1 movement gaps #11/#12 | code done (sprint-end coast, roll facing fallback); **in-game drift check was running at the stop**, see [handoff-c1.md](handoff-c1.md) | c947a15 |
-| C2 multiplayer polish | done, verified with two clients (spawn 8 cells apart, no tint, remote roll) | 80e7de6, 5e349b8; protocol 76c28cd |
-| C3 party and trade | code done: invite/cancel, trade request/cancel. Invitee side derived from Ghidra (UNVERIFIED). Accept/decline only logged. **Two-client check not run** | 2b5cc48; protocol c845efd |
-| C4 mod loader | done, sample mod loads in game | 224f5a5; client-hook 2d4d0a9; launcher 6954269 |
-| Phase D-F | not started | |
+| A1-A4, B1, B2, C2, C4 | done, verified in game | see git log before 05922af |
+| C1 movement | done except problem 5 (sprint end with W held: client coasts then restarts itself; official answer uncaptured). Problems 1, 3, 4 solved: WASD tests need `user_input_mode=wasd` + `last_selected_KBM_input_mode=wasd`; sprint-end checks need the Agents desktop rules OFF | 86d0e88, 593a790, f420e3d |
+| C3 party and trade | verified with two clients (invite/cancel, trade request/cancel; crash "Invalid inventory id" fixed with the two trade AddInventory). Accept/decline only logged: gate G-PARTY | 93a2d18 |
+| D1 audit | done: [public-release-audit.md](public-release-audit.md), questions 1-15 for the user | ab89ae4 |
+| D2 code fixes | done for everything that needs no user answer (S-01 safe committed config + `scripts/dev-config.py`, S-02 pre-auth limits, S-07, ...) | 61f1603 |
+| D2 history scrub | **user gate**: answers to the audit questions, then fresh mirror clones, filter-repo, backups, push only after confirmation | |
+| D3 hygiene | done: CONTRIBUTING, SECURITY, licences, templates, disclaimers, client guide, hosting guide, main CI (server job skipped while private). CI checkout secrets switch when public | 61f1603, launcher b70a3c5 |
+| D4 go public | **user gate** | |
+| E1/E2 release CI, updater | done, workflow never run. Signing key in `~/.tauri/poe2-launcher.key{,.pub,.password}`; user must create `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` | launcher a02901d, main 5237edb |
+| E3 test releases | after D4 | |
+| F1 server release CI, F3 server side | done, workflow never run (tag `server-v*`) | 619cc1b, web-admin 1544232 |
+| F2/F3 launcher | done, tested against a real package (backend tests) | launcher b70a3c5, main 343187c |
 
 ## Next steps
-1. **C1:** start a fresh agent from [handoff-c1.md](handoff-c1.md). It finishes the in-game drift cases (click-to-move first, then `use_wasd_to_move=true` in the test prefix's `poe2_production_Config.ini` for the WASD cases, then restore it), then updates movement.md and the tracker's Dodge roll and Sprint notes. Then commit.
-2. **C3 two-client check:** the plan is in docs/protocol/entities.md, "Party and trade flows (WP C3)", run with `scripts/test-mp.sh`. If the invitee's popups don't appear, the two derivations are the first suspects: party role 0 with `unk_0` = the invitee's index, and `TradeState.unk_c = 0x32`.
-3. **Gate G-PARTY (user):** the capture checklist was given to the user and is in entities.md. Before the user captures: `scripts/agent-desktop.sh off`, `cargo xtask deploy-client --official`, and no test running. Afterwards: `deploy-client` back to private, rules `on`. Then implement accept and decline.
-4. **Phase D (public release):** D1 audit (read-only, all 5 repos and their full history), D2 fix and scrub (user confirmation before any force-push), D3 guides and hygiene, D4 go public (user gate). Inputs for D1:
-   - The test credentials (mp1/mp2, b2test, phasea) are in docs and runtime only. Check the history for them.
-   - `dumps/` and `runtime/` are git-ignored; check the history anyway.
-   - Poe2Launcher CI uses deploy keys and secrets (HOOK_DEPLOY_KEY, PROTOCOL_DEPLOY_KEY); Poe2ClientHook CI uses SUBMODULE_TOKEN. Both go away in D3.
-5. **Phases E and F** follow the plan.
+1. User decisions: audit questions (docs/plans/public-release-audit.md), the launcher signing secrets, `account create --password-stdin` (an agent for it was blocked by the auto-mode classifier; the launcher creates the admin via a private loopback start + POST /register meanwhile).
+2. G-PARTY capture (plus a W-held sprint end for problem 5): before it, no test running, `cargo xtask deploy-client --official`; afterwards deploy-client back to private. The Agents rules are OFF since 2026-10-21 (user allowed it).
+3. D2 scrub -> D4 public -> D3 CI switch to public checkouts -> E3 releases v0.1.0/v0.1.1 -> launcher end-to-end with a Steam depot download (Secret Service/KWallet is on now).
+4. Repo-wide `cargo fmt` in the main repo is still pending (CI does not check it there).
 
 ## State left behind
-- `GameFiles/`: private mode. The login mode is `steam`, left by test-mp.sh restore. The current DLL is from client-hook 2d4d0a9, with `sample-mod` enabled. For the standalone login: `cargo xtask deploy-client --no-build`.
-- KWin "Agents" desktop rules: on.
-- Dev databases: `runtime/server.sqlite` (accounts b2test, phasea, mp1, ...) and `runtime/server-mp.sqlite`. Test passwords are not in this file.
-- Open items, from CLAUDE.md "Open elsewhere":
-  - movement (C1 in-game);
-  - party/trade replies (G-PARTY);
-  - remote equipment visuals;
-  - the server walks about 1% slower than the client (`dt` 0.033 vs `speed/30`), noted by C1;
-  - early roll steps deviate up to about 11° (the client's own path planning).
+- `GameFiles/`: private mode, login_mode steam; the DLL there is still client-hook 2d4d0a9 (newer builds not deployed).
+- KWin "Agents" rules: off.
+- An old `stash@{0}` in the main repo holds the first C1 diagonal-cursor attempt (superseded by f420e3d); the user decides whether to drop it.
