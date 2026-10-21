@@ -245,7 +245,7 @@ Each entry is one line; the DLL reads the file and posts the input to the game w
 - **`0x77` (F8)** takes a game screenshot into the test prefix's `My Games/Path of Exile 2/Screenshots`, which shows the game even when its window is not visible.
 - **`close`** posts `WM_CLOSE` to the game window (like its X button).
 - Before each batch the DLL posts `WM_ACTIVATEAPP(1)`: the game ignores input while it thinks it is in the background, and this changes only its own flag, not the real focus.
-- Click-to-move needs `user_input_mode=mouse_and_keyboard` in the test prefix's `poe2_production_Config.ini` (edit it only while the client is closed: the client rewrites it on exit).
+- Click-to-move needs `user_input_mode=mouse_and_keyboard` in the test prefix's `poe2_production_Config.ini` (edit it only while the client is closed: the client rewrites it on exit). W/A/S/D move the player only with `user_input_mode=wasd` (plus `last_selected_KBM_input_mode=wasd`); `use_wasd_to_move` is a different setting and does not switch the mode. Neither mode needs the game window to be active for injected keys.
 
 ## Logs
 - Client: `GameFiles/logs/Client.txt`.

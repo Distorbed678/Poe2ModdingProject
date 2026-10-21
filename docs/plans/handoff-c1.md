@@ -1,5 +1,7 @@
 # Handoff: WP C1 in-game drift checks (2026-10-21)
 
+**Status (third agent, Agents rules off): the in-game checks are done; what is left is server work, see "Update, third agent" at the end.**
+
 State: code and docs of WP C1 are committed as `c947a15` (movement gaps #11 and #12). Nothing has changed in the code since; `cargo build` passes. The in-game checks were stopped half-way (low usage). Client and server are stopped, the test prefix's `use_wasd_to_move` was never edited and is still `false`, the temporary server config (`runtime/server-c1.toml`) is deleted.
 
 ## Results so far (click-to-move mode, `use_wasd_to_move=false`, drift checker, cells: max in a second / after the stop)
@@ -34,3 +36,12 @@ Open, in this order:
 - Screen to grid directions (window 2560x1440, player at about 1280,590): cursor right gives offset `(+38,-29)`, left `(-30,+32)`, up `(+45,+45)`, down `(-35,-35)`.
 - The summary helper used: for each run, take the `drift server=...` lines after the entries were sent; `max_cells` per second and the last `cells`.
 
+
+## Update, third agent (2026-10-21, KWin Agents rules off)
+Done, results in movement.md (second table of "In-game check, 2026-10-21" and problems 1, 3, 4, 5):
+- **Problem 4 solved**: W/A/S/D did not move the player because the prefix was in click mode (`user_input_mode=mouse_and_keyboard`); real WASD mode is `user_input_mode=wasd` (+ `last_selected_KBM_input_mode=wasd`). Injected W works with the game window active or not. The first agent's "WASD mode" rows were click mode (`use_wasd_to_move` is unrelated). setup.md says so now.
+- **Problem 3**: the Space-only free-angle cursor sprint coasts correctly again with the rules off (11 runs, click and WASD mode, 0.1-4.2 cells after the stop); the `0x1ac` timing is not the cause (still 2-3 frames late). Likely the hidden Agents desktop; to prove it, run the same case once with the rules on. Any sprint-end check must run with the rules off.
+- **Problem 1 re-measured, still open**: exact diagonal cursor 20 cells after the stop (4 of 4); the client's `(0, 0)` comes 4-5 frames after the sprint-off batch, beyond `sprint_release_window_frames` (3), so the saved patch (`git stash@{0}`; copy in the first agent's scratchpad) is not enough and not applied.
+- **New, problem 5 (open, server change wanted)**: a sprint ended with W held since before the roll (no `0x63` stream) is 14-17 cells off: the unscaled `0x64` does not restart the client, which coasts 30 frames and resumes the walk by itself 31 frames after the batch (same 13.8/11.2 as on 2026-10-20). Proposed model in problem 5; `Locomotion::end_sprint`/`finish_sprint_by_release` is the place (no-stream + key held: no `UnscaledAck`, coast, then a `Due` that resumes the walk in the key direction), with a replay fixture from `runtime/movement-trace.tsv` of such a run (not kept) or a new unit test.
+- Not run: W released before Space while sprinting, W pressed during a sprint (the key entries are sequential; a combined entry in the DLL would be needed, which also gives `inup` and the posted key-up in one frame like a real keyboard), and the official answer to problem 5 (needs a capture).
+- How to run, additions: set `user_input_mode` per mode while the client is closed; a KWin script (`workspace.activeWindow = ...`) activates the game window for a few seconds; `GameFiles/logs/poe-hook/<session>` and `runtime/movement-trace.tsv` (client `report` rows per frame, server `out-*` rows) show the per-frame client steps against the server's messages.
