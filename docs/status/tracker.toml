@@ -425,6 +425,12 @@ note = "WP5.1; submodule modules/launcher (nests Poe2ClientHook); Rust + vitest 
 link = "docs/guides/launcher.md"
 
 [[subsystem.item]]
+name = "Releases and auto-update (AppImage, NSIS installer, signed latest.json)"
+status = "done"
+note = "WP E1-E3, 2026-10-21: v0.1.0 and v0.1.1 released by the tag workflow; on Linux an installed 0.1.0 found, downloaded, verified and installed 0.1.1 and restarted as 0.1.1; the Windows installer and its update are built in CI but untested (no Windows machine)"
+link = "docs/guides/launcher.md#releasing"
+
+[[subsystem.item]]
 name = "Server profiles and account login through the web API"
 status = "done"
 note = "profiles, register, login (kind launcher), token in the OS keyring, logout revokes; tested with a mock keyring and a real server"

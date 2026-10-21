@@ -51,7 +51,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
-| [Launcher](#launcher) | `████████░░ 83%` | 4/6 |
+| [Launcher](#launcher) | `█████████░ 86%` | 5/7 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `██████░░░░ 60%` | 3/5 |
 
@@ -661,6 +661,7 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 | | Item | Note |
 |---|---|---|
 | ✅ | [Poe2Launcher repo (Tauri 2 + Svelte)](docs/guides/launcher.md) | WP5.1; submodule modules/launcher (nests Poe2ClientHook); Rust + vitest tests, CI on Linux and Windows |
+| ✅ | [Releases and auto-update (AppImage, NSIS installer, signed latest.json)](docs/guides/launcher.md#releasing) | WP E1-E3, 2026-10-21: v0.1.0 and v0.1.1 released by the tag workflow; on Linux an installed 0.1.0 found, downloaded, verified and installed 0.1.1 and restarted as 0.1.1; the Windows installer and its update are built in CI but untested (no Windows machine) |
 | ✅ | [Server profiles and account login through the web API](docs/guides/launcher.md#the-flow) | profiles, register, login (kind launcher), token in the OS keyring, logout revokes; tested with a mock keyring and a real server |
 | ✅ | [Game-token exchange for auto-login (`POST /api/v1/game-token`)](docs/architecture/web-api.md#endpoints) | launcher token -> one-off game_remember token (the game's rolling login would revoke the launcher token) |
 | 🟡 | [Install 0.5.5e from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned, args/prompts/progress tested with a stand-in; the real Steam login and download not run yet; verification values unconfirmed |

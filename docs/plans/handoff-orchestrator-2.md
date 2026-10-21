@@ -27,8 +27,8 @@ For a new orchestrator that continues [orchestration-2026-10b.md](orchestration-
 | D2 history scrub | done: rewritten main history in a NEW repo `Poe2ModdingProject`; old repo renamed `Poe2ModdingProject-private-backup` (private); modules needed no rewrite | new history head a0f1456 |
 | D3 hygiene | done: CONTRIBUTING, SECURITY, licences, templates, disclaimers, client guide, hosting guide, main CI; 2026-10-21: CI switched to plain public checkouts, deploy keys and SUBMODULE_TOKEN deleted | 61f1603, launcher b70a3c5 |
 | D4 go public | **user gate** | |
-| E1/E2 release CI, updater | done, workflow never run. Signing key in `~/.tauri/poe2-launcher.key{,.pub,.password}`; user must create `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` | launcher a02901d, main 5237edb |
-| E3 test releases | after D4 | |
+| E1/E2 release CI, updater | done; ran 2026-10-21 (E3): tag workflow builds AppImage + NSIS, signs, publishes with latest.json. Signing key in `~/.tauri/poe2-launcher.key{,.pub,.password}`, secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` set | launcher 7107277 |
+| E3 test releases | done 2026-10-21: v0.1.0 and v0.1.1 released; on Linux an installed 0.1.0 updated itself to 0.1.1 (details: docs/guides/launcher.md, Releasing). Windows update untested | launcher v0.1.0, v0.1.1 |
 | F1 server release CI, F3 server side | done, workflow never run (tag `server-v*`) | 619cc1b, web-admin 1544232 |
 | F2/F3 launcher | done, tested against a real package (backend tests) | launcher b70a3c5, main 343187c |
 

@@ -12,7 +12,7 @@ What it does:
 
 ## Download, install and update
 
-Releases of the launcher are on the GitHub releases page of Poe2Launcher (once the repository is public; until then it is private and there is nothing to download, build it as below).
+Releases of the launcher are on the [GitHub releases page of Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher/releases) (v0.1.0 is the first, 2026-10-21). Each has the Linux AppImage, the Windows installer, their `.sig` files and `latest.json`.
 
 - **Linux:** download `Poe2.Launcher_<version>_amd64.AppImage`, `chmod +x` it and run it. Keep it where it is: the launcher updates this file in place. (AppImages need FUSE 2 on the system, or start it with `--appimage-extract-and-run`.)
 - **Windows:** download and run `Poe2.Launcher_<version>_x64-setup.exe` (per-user NSIS installer, no administrator rights). Windows SmartScreen may warn because the installer is not code-signed (the update signature below is not a Windows code-signing certificate).
@@ -24,7 +24,7 @@ Releases of the launcher are on the GitHub releases page of Poe2Launcher (once t
 
 Commands to build and run it (`npm ci`, `npm run tauri dev`): [setup.md](setup.md#launcher-build-and-test).
 
-Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; Debian: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libdbus-1-dev librsvg2-dev`), Node 22 and Rust. The result is `src-tauri/target/{debug,release}/poe2-launcher` plus deb, rpm and AppImage bundles. CI (Poe2Launcher, `.github/workflows/ci.yml`): Ubuntu runs `npm run check/test/build`, `cargo fmt --check`, `clippy -D warnings` and `cargo test`; Windows runs `cargo check`. The private submodules are fetched with two read-only deploy keys (repository secrets `HOOK_DEPLOY_KEY`, `PROTOCOL_DEPLOY_KEY`). Releases: see [Releasing](#releasing).
+Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; Debian: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libdbus-1-dev librsvg2-dev`), Node 22 and Rust. The result is `src-tauri/target/{debug,release}/poe2-launcher` plus deb, rpm and AppImage bundles. CI (Poe2Launcher, `.github/workflows/ci.yml`): Ubuntu runs `npm run check/test/build`, `cargo fmt --check`, `clippy -D warnings` and `cargo test`; Windows runs `cargo check`. The submodules are public and fetched by `actions/checkout`. Releases: see [Releasing](#releasing).
 
 ## One-time set-up
 
@@ -115,6 +115,14 @@ Set them with `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/poe2-launcher.
 
 **Key location and care.** The key pair was generated locally in `~/.tauri/` (`poe2-launcher.key`, `poe2-launcher.key.pub`, `poe2-launcher.key.password`, mode 600, outside every git repository). Only the **public** key is in the repository (`plugins.updater.pubkey` in `tauri.conf.json`). Back the three files up somewhere private: if the private key is lost, installed launchers can never be updated again (their embedded public key no longer matches; players would have to reinstall). If it leaks, generate a new pair, put the new public key in `tauri.conf.json`, release once more signed with the **old** key (so existing installs accept it and learn the new key), then switch the secrets. Never put the key or password in a file in a repository, an issue or a log.
 
+**First real run (2026-10-21, WP E3).** Result: v0.1.0 and v0.1.1 were released by the workflow, and an installed v0.1.0 updated itself to v0.1.1 on Linux.
+
+- *What was fixed:* the first v0.1.0 tag failed in `create-release`: `gh release create --draft` succeeded, but the list API did not show the new draft yet ("release for v0.1.0 not found"). The step now asks up to 10 times, 3 seconds apart (launcher commit 7107277). No release had been published, so the draft and the tag were deleted and `v0.1.0` was set again on the fixed commit. The CI switch to public checkouts (`actions/checkout` with `submodules: recursive`) worked at once on both runners.
+- *Release contents (both versions):* `Poe2.Launcher_<v>_amd64.AppImage` (about 83 MB) and `.sig`, `Poe2.Launcher_<v>_x64-setup.exe` (about 3 MB) and `.sig`, `latest.json` with `linux-x86_64`, `linux-x86_64-appimage`, `windows-x86_64` and `windows-x86_64-nsis`. The URLs in `latest.json` are GitHub API asset URLs (`api.github.com/repos/.../releases/assets/<id>`); the updater downloads them anonymously, which works because the repository is public. A whole release run takes about 7 minutes.
+- *Update test (Linux):* the v0.1.0 AppImage was downloaded from the release into `runtime/e3/` and started: Settings said "Installed: 0.1.0, The launcher is up to date." After v0.1.1 was released, the same file, started again, showed the badge "Update 0.1.1 available" and in Settings "Update available: 0.1.1"; *Download and install* replaced the AppImage file in place (new SHA-256, same name), the launcher restarted and Settings showed "Installed: 0.1.1, The launcher is up to date." (About: Launcher 0.1.1). The test drove the UI through the WebKit remote inspector (`WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9334` in the environment, a WebSocket client sending `Runtime.evaluate` to the page target), with the launcher's config and data in `runtime/e3/xdg/`. No game client or Play button was involved.
+- *Windows:* the NSIS installer is built and signed by the same run and the Windows CI job passes, but nothing was installed or updated on Windows (no Windows machine here). The Windows update (passive NSIS install over the old version) is **untested**.
+- *Not tried:* an offline start and a tampered download (the signature check is covered by the plugin; the UI's error state by unit tests).
+
 ## Mods
 
 Mods live in `<install>/poe-hook-mods/<id>/` (never in game files), as the spec says. The launcher's side of the contract with the DLL's mod loader (`modules/client-hook/poe-hook/src/mods.rs`, in the game since 2026-10-21) is `poe-hook-mods/state.toml`:
@@ -153,7 +161,7 @@ It installs the package (checksum verified), sets it up in a temp launcher folde
 ## Not done
 
 - Bundling the hook DLLs; downloading them from a release.
-- Host a server: the real GitHub download has not run (the repository is private, the page shows the 404 explanation); the Windows paths (zip, `taskkill`, no console window) compile but have not run; the in-app page has not been clicked through on a desktop, its logic is covered by unit tests and the backend by the tests above.
+- Host a server: the real GitHub download has not run against a published `server-v*` release (none exists yet); the Windows paths (zip, `taskkill`, no console window) compile but have not run; the in-app page has not been clicked through on a desktop, its logic is covered by unit tests and the backend by the tests above.
 - The Windows launch path is written but untested (no Windows machine); `cargo check` runs in CI.
 - Verification reference values are unconfirmed (above); the Steam download and the Play launch have not been run by a real install yet.
 - Mod loader (DLL side); mod signatures and packaging beyond a zip.
