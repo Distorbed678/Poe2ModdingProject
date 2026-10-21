@@ -689,9 +689,9 @@
         "operationId": "logs_ws",
         "parameters": [
           {
-            "name": "token",
+            "name": "ticket",
             "in": "path",
-            "description": "The admin's web token, because browsers cannot set headers on a WebSocket (the\n`Authorization` header works too).",
+            "description": "A ticket from `POST /admin/logs/ws-ticket`, because browsers cannot set headers on a\nWebSocket (the `Authorization` header with the admin's web token works too).",
             "required": true,
             "schema": {
               "type": [
@@ -716,6 +716,62 @@
             }
           },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/logs/ws-ticket": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A single-use ticket for the log WebSocket, valid for `[web] web_token_ttl_secs`. Pass it as\n`?ticket=` to `GET /admin/logs/ws`; ask again for every connection.",
+        "operationId": "logs_ws_ticket",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WsTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "",
             "content": {
               "application/json": {
@@ -2213,6 +2269,26 @@
           "token": {
             "type": "string",
             "description": "64 hex characters. Single use: redeem it with `POST /web-token/redeem` (the web admin\ndoes this itself when opened through `login_path`). Shown only once; never log it."
+          }
+        }
+      },
+      "WsTicketResponse": {
+        "type": "object",
+        "description": "`POST /admin/logs/ws-ticket`.",
+        "required": [
+          "ticket",
+          "expires_in_secs"
+        ],
+        "properties": {
+          "expires_in_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds from now until it expires (`[web] web_token_ttl_secs`).",
+            "minimum": 0
+          },
+          "ticket": {
+            "type": "string",
+            "description": "64 hex characters, single use: `GET /admin/logs/ws?ticket=<ticket>`. Never log it."
           }
         }
       }

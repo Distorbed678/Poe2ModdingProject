@@ -48,10 +48,13 @@ api_port() { sed -n 's/^bind *= *"[0-9.]*:\([0-9]*\)".*/\1/p' <<<"$(sed -n '/^\[
 cmd_setup() {
     [ -n "$LAN_IP" ] || { echo "no LAN IP (set LAN_IP)"; exit 1; }
     cargo build -p poe-server -p xtask
-    # Runtime copy of the config: LAN address, its own database (mp accounts stay out of the dev one).
-    sed -e "s|^public_host = .*|public_host = \"$LAN_IP\"|" \
+    # Runtime copy of the config: the dev settings (config/server.toml is committed with safe
+    # values: loopback binds, no machine-hash login), the LAN address, and its own database (mp
+    # accounts stay out of the dev one).
+    python3 scripts/dev-config.py --out $CFG >/dev/null
+    sed -i -e "s|^public_host = .*|public_host = \"$LAN_IP\"|" \
         -e 's|^path = "runtime/server.sqlite"|path = "runtime/server-mp.sqlite"|' \
-        -e 's|^audit_log = .*|audit_log = "runtime/server-mp-audit.log"|' config/server.toml > $CFG
+        -e 's|^audit_log = .*|audit_log = "runtime/server-mp-audit.log"|' $CFG
     grep -q "public_host = \"$LAN_IP\"" $CFG && echo "config: $CFG (public_host $LAN_IP)"
     for n in 1 2; do
         acct=mp$n

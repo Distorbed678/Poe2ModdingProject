@@ -71,7 +71,7 @@ Password attempts are rate limited (`[security]`: 5 failures per account name an
 
 A client whose exe is not a known build of `[game] version` (its `client_hash` is not in `versions/<version>.toml` `[client] hashes`) is refused at login with the client's own "There has been a patch that you need to update to" popup. `[security] allow_unknown_client = true` lets any build in (logged); a test config made without a version file checks nothing. Nothing is refused while the version file's `hashes_confirmed` is `false` ([new-game-version.md](new-game-version.md#what-the-server-does-with-the-clients-version)).
 
-A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and `Exile1` was made an admin by the database migration.
+A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and an existing `Exile1` was made an admin by the database migration (a fresh database promotes nobody).
 
 ## Instances
 

@@ -90,29 +90,49 @@ impl FromRequestParts<WebState> for AdminAuth {
     }
 }
 
-/// The WebSocket route: browsers cannot set headers on a WebSocket, so `?token=` works too.
+/// The WebSocket route: an admin's web token in the `Authorization` header, or, because
+/// browsers cannot set headers on a WebSocket, a single-use ticket from
+/// `POST /admin/logs/ws-ticket` as `?ticket=`. The ticket is short-lived and dead after the
+/// first use, so a proxy that logs the URL learns nothing worth having. (The web token itself
+/// is not accepted in the URL.)
 pub struct WsAdminAuth;
 
 impl FromRequestParts<WebState> for WsAdminAuth {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &WebState) -> Result<Self, ApiError> {
-        let from_query = parts
+        if let Some(token) = bearer(parts) {
+            return authenticate(state, token, true).map(|_| WsAdminAuth);
+        }
+        let ticket = parts
             .uri
             .query()
-            .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=")))
-            .map(str::to_owned);
-        let token = match bearer(parts) {
-            Some(t) => t.to_owned(),
-            None => from_query.ok_or_else(missing)?,
-        };
-        authenticate(state, &token, true).map(|_| WsAdminAuth)
+            .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("ticket=")))
+            .ok_or_else(missing)?;
+        let ticket = parse_token(ticket)?;
+        let account_id = state
+            .ws_tickets
+            .redeem(&ticket, std::time::Instant::now())
+            .ok_or_else(|| ApiError::unauthorized("invalid or expired ticket"))?;
+        let account = state
+            .accounts
+            .find_by_id(account_id)?
+            .ok_or_else(|| ApiError::unauthorized("invalid or expired ticket"))?;
+        if account.disabled {
+            return Err(AccountError::Disabled.into());
+        }
+        if account.role != Role::Admin {
+            return Err(ApiError::forbidden("admin role required"));
+        }
+        Ok(WsAdminAuth)
     }
 }
 
 /// The caller's IP for the password attempt limits: the socket address (set by `serve`), or
-/// with `[security] trust_forwarded_for` the first `X-Forwarded-For` entry. An address that
-/// cannot be determined (tests that call the router directly) counts as `0.0.0.0`.
+/// with `[security] trust_forwarded_for` the **last** `X-Forwarded-For` entry, the one the
+/// reverse proxy appended (a client can prepend entries of its own to the header, but not the
+/// proxy's). An address that cannot be determined (tests that call the router directly)
+/// counts as `0.0.0.0`.
 pub struct ClientIp(pub std::net::IpAddr);
 
 impl FromRequestParts<WebState> for ClientIp {
@@ -131,12 +151,16 @@ impl FromRequestParts<WebState> for ClientIp {
             .security
             .trust_forwarded_for
             .then(|| {
+                // The proxy appends to the header (or adds one more header line): the last
+                // entry of the last line is its observation of the real peer.
                 parts
                     .headers
-                    .get("x-forwarded-for")?
+                    .get_all("x-forwarded-for")
+                    .iter()
+                    .next_back()?
                     .to_str()
                     .ok()?
-                    .split(',')
+                    .rsplit(',')
                     .next()?
                     .trim()
                     .parse()

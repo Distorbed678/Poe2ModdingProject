@@ -453,6 +453,39 @@ pub struct NetworkConfig {
     pub instance: NetworkInstanceConfig,
 }
 
+impl Config {
+    /// Settings that are fine on a developer machine and dangerous on a server others can
+    /// reach (logged at startup; none of them stops the server). The committed
+    /// `config/server.toml` triggers none of them.
+    pub fn security_warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let net = &self.network;
+        let exposed = !net.login.bind.ip().is_loopback() || !net.instance.bind.ip().is_loopback();
+        if self.accounts.dev_machine_hash_login {
+            out.push(if exposed {
+                "[accounts] dev_machine_hash_login is on and a game port listens beyond loopback: \
+                 anyone who can reach it can create accounts and sign in without a password"
+                    .into()
+            } else {
+                "[accounts] dev_machine_hash_login is on: the Steam login needs no password \
+                 (development only; keep it off on any server others can reach)"
+                    .into()
+            });
+        }
+        if !self.web.bind.ip().is_loopback() {
+            out.push(format!(
+                "[web] bind {} is not loopback: passwords and admin actions travel in the clear \
+                 unless a TLS reverse proxy sits in front (docs/guides/hosting.md)",
+                self.web.bind
+            ));
+        }
+        if self.accounts.open_registration && !self.web.bind.ip().is_loopback() {
+            out.push("[accounts] open_registration is on and the web API is reachable".into());
+        }
+        out
+    }
+}
+
 impl NetworkConfig {
     /// Problems with the advertised address that would send remote clients to the wrong place
     /// (logged at startup; none of them stops the server).
@@ -498,6 +531,44 @@ pub struct NetworkLoginConfig {
     /// deploy-client`); differs from `bind` behind port forwarding. Default: the bind port.
     #[serde(default)]
     pub public_port: Option<u16>,
+    /// Before a login: longest time (seconds) one message may take to arrive completely, the
+    /// key exchange included. A slow or idle socket is closed. 0 = no limit.
+    #[serde(default = "default_pre_auth_read_timeout_secs")]
+    pub pre_auth_read_timeout_secs: u64,
+    /// Before a login: longest time (seconds) from connecting to a successful login. 0 = no limit.
+    #[serde(default = "default_pre_auth_login_timeout_secs")]
+    pub pre_auth_login_timeout_secs: u64,
+    /// Before a login: most bytes held for an incomplete message (the real messages are far
+    /// smaller). 0 = no limit.
+    #[serde(default = "default_pre_auth_max_buffer")]
+    pub pre_auth_max_buffer: usize,
+    /// Most connections that have not logged in yet, all addresses together. 0 = no limit.
+    #[serde(default = "default_max_pre_auth_connections")]
+    pub max_pre_auth_connections: usize,
+    /// Most connections that have not logged in yet from one client IP (IPv6: per /64).
+    /// 0 = no limit.
+    #[serde(default = "default_max_pre_auth_per_ip")]
+    pub max_pre_auth_per_ip: usize,
+}
+
+fn default_pre_auth_read_timeout_secs() -> u64 {
+    15
+}
+
+fn default_pre_auth_login_timeout_secs() -> u64 {
+    60
+}
+
+fn default_pre_auth_max_buffer() -> usize {
+    64 * 1024
+}
+
+fn default_max_pre_auth_connections() -> usize {
+    256
+}
+
+fn default_max_pre_auth_per_ip() -> usize {
+    16
 }
 
 impl NetworkLoginConfig {
@@ -514,6 +585,20 @@ pub struct NetworkInstanceConfig {
     /// Port the login server tells the client to connect to (and where the DLL sends position
     /// reports); differs from `bind` behind port forwarding.
     pub public_port: u16,
+    /// Before the ticket is checked: longest time (seconds) for the client's first message to
+    /// arrive completely. 0 = no limit.
+    #[serde(default = "default_pre_auth_read_timeout_secs")]
+    pub pre_auth_read_timeout_secs: u64,
+    /// Before the ticket is checked: most bytes held for an incomplete message. 0 = no limit.
+    #[serde(default = "default_pre_auth_max_buffer")]
+    pub pre_auth_max_buffer: usize,
+    /// Most connections that have not shown a valid ticket yet, all addresses together.
+    /// 0 = no limit.
+    #[serde(default = "default_max_pre_auth_connections")]
+    pub max_pre_auth_connections: usize,
+    /// Most such connections from one client IP (IPv6: per /64). 0 = no limit.
+    #[serde(default = "default_max_pre_auth_per_ip")]
+    pub max_pre_auth_per_ip: usize,
 }
 
 /// `[instance]`: instances of areas and their simulation clock.
@@ -894,11 +979,16 @@ mod tests {
         // protocol_dir is not in the shipped config: it comes from the version file.
         assert_eq!(cfg.game.protocol_dir, root.join(&v.protocol.opcodes));
         // `{version}` is replaced in the path settings.
-        assert!(
-            cfg.dev
-                .known_seeds
-                .to_string_lossy()
-                .contains(&format!("dumps/{}/", cfg.game.version))
+        // `{version}` is replaced in the path settings (known_seeds is empty in the safe
+        // committed config; the dev config sets a path with the placeholder).
+        let dev = Config::parse(&std::fs::read_to_string(root.join("config/server.toml")).unwrap().replace(
+            "known_seeds = \"\"",
+            "known_seeds = \"dumps/{version}/terrain/seeds.tsv\"",
+        ))
+        .unwrap();
+        assert_eq!(
+            dev.dev.known_seeds,
+            Path::new(&format!("dumps/{}/terrain/seeds.tsv", cfg.game.version))
         );
         assert!(!cfg.spawn.layout_dir.contains('{'));
         assert!(!cfg.dev.sweep_results.to_string_lossy().contains('{'));
@@ -921,8 +1011,11 @@ mod tests {
     #[test]
     fn advertised_host_warnings() {
         let mut cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
-        // The shipped config listens on 0.0.0.0 and advertises loopback: fine alone, a warning
-        // for remote players.
+        // The committed config listens on loopback and advertises loopback: correct.
+        assert!(cfg.network.warnings().is_empty());
+        // Listening beyond loopback and advertising loopback: a warning for remote players.
+        cfg.network.login.bind = "0.0.0.0:20481".parse().unwrap();
+        cfg.network.instance.bind = "0.0.0.0:6112".parse().unwrap();
         assert_eq!(cfg.network.warnings().len(), 1);
         cfg.network.public_host = "192.168.1.20".into();
         assert!(cfg.network.warnings().is_empty());
@@ -938,6 +1031,84 @@ mod tests {
         assert_eq!(cfg.network.login.public_port(), 20481);
         cfg.network.login.public_port = Some(30481);
         assert_eq!(cfg.network.login.public_port(), 30481);
+    }
+
+    /// S-01 of the public release audit (docs/plans/public-release-audit.md): the committed
+    /// config is safe to run on a checkout. Development setups use runtime/server.dev.toml
+    /// (scripts/dev-config.py).
+    #[test]
+    fn committed_config_is_safe() {
+        let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
+        assert!(!cfg.accounts.dev_machine_hash_login, "password-less login");
+        assert!(cfg.network.login.bind.ip().is_loopback());
+        assert!(cfg.network.instance.bind.ip().is_loopback());
+        assert!(cfg.web.bind.ip().is_loopback());
+        assert!(!cfg.accounts.open_registration);
+        assert!(!cfg.security.trust_forwarded_for);
+        assert!(!cfg.security.allow_unknown_client);
+        assert!(!cfg.dev.debug_link && !cfg.dev.position_sync && !cfg.dev.drift_check);
+        assert!(cfg.dev.movement_trace.as_os_str().is_empty());
+        assert!(cfg.dev.sweep.as_os_str().is_empty());
+        assert!(!cfg.terrain.generate);
+        // The pre-login limits are on.
+        let l = &cfg.network.login;
+        assert!(l.pre_auth_read_timeout_secs > 0 && l.pre_auth_login_timeout_secs > 0);
+        assert!(l.pre_auth_max_buffer > 0 && l.max_pre_auth_connections > 0 && l.max_pre_auth_per_ip > 0);
+        let i = &cfg.network.instance;
+        assert!(i.pre_auth_read_timeout_secs > 0 && i.pre_auth_max_buffer > 0);
+        assert!(i.max_pre_auth_connections > 0 && i.max_pre_auth_per_ip > 0);
+        // Same for the example (a hosting template: it may listen beyond loopback, but nothing
+        // password-less).
+        let ex = Config::parse(include_str!("../../../config/server.example.toml")).unwrap();
+        assert!(!ex.accounts.dev_machine_hash_login);
+        assert!(!ex.accounts.open_registration);
+        assert!(ex.web.bind.ip().is_loopback());
+    }
+
+    #[test]
+    fn security_warnings_name_the_dangerous_combinations() {
+        let mut cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
+        assert!(cfg.security_warnings().is_empty());
+        cfg.accounts.dev_machine_hash_login = true;
+        let w = cfg.security_warnings();
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("development only"), "{w:?}");
+        cfg.network.login.bind = "0.0.0.0:20481".parse().unwrap();
+        assert!(cfg.security_warnings()[0].contains("beyond loopback"));
+        cfg.web.bind = "0.0.0.0:8080".parse().unwrap();
+        cfg.accounts.open_registration = true;
+        assert_eq!(cfg.security_warnings().len(), 3);
+    }
+
+    #[test]
+    fn pre_login_limit_defaults_match_the_example() {
+        let ex = Config::parse(include_str!("../../../config/server.example.toml")).unwrap();
+        let min = Config::parse(
+            "[game]\nversion=\"x\"\ngame_dir=\"g\"\nschema=\"s\"\n[network]\npublic_host=\"h\"\n\
+             [network.login]\nbind=\"0.0.0.0:1\"\n[network.instance]\nbind=\"0.0.0.0:2\"\npublic_port=2\n\
+             [database]\npath=\"d\"\n[accounts]\nname_prefix=\"E\"\nmax_characters=1\n\
+             [gateway]\nregion=\"r\"\ndisplay_name=\"n\"\n",
+        )
+        .unwrap();
+        let t = |c: &NetworkLoginConfig| {
+            (
+                c.pre_auth_read_timeout_secs,
+                c.pre_auth_login_timeout_secs,
+                c.pre_auth_max_buffer,
+                c.max_pre_auth_connections,
+                c.max_pre_auth_per_ip,
+            )
+        };
+        assert_eq!(t(&ex.network.login), t(&min.network.login));
+        let i = |c: &NetworkInstanceConfig| {
+            (
+                c.pre_auth_read_timeout_secs,
+                c.pre_auth_max_buffer,
+                c.max_pre_auth_connections,
+                c.max_pre_auth_per_ip,
+            )
+        };
+        assert_eq!(i(&ex.network.instance), i(&min.network.instance));
     }
 
     #[test]

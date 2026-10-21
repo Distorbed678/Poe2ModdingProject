@@ -29,10 +29,10 @@ Start the server and make an admin as described in [../guides/setup.md](../guide
 - **Tokens** come from `AccountStore::issue_token`: 32 random bytes sent as 64 hex characters, only their SHA-256 stored, bound to `[cluster] id`, expiring, revocable. `POST /login` returns one of two kinds:
   - `web` (default): 12 hours. For the browser; the only kind the admin endpoints accept.
   - `launcher` (`"kind":"launcher"`): `[accounts] remember_days`. For the launcher, which keeps it in the OS keyring; the game's token login accepts it too, but the launcher does not use it that way (the game would revoke it): it calls `POST /game-token` instead. Never valid for `/admin/*`, so a leaked launcher token cannot administer the server.
-- Send `Authorization: Bearer <token>`. The log WebSocket also takes `?token=<token>`, because browsers cannot set headers on a WebSocket.
+- Send `Authorization: Bearer <token>`. The log WebSocket cannot use the header from a browser, so it takes a **single-use ticket** instead: `POST /admin/logs/ws-ticket` (admin web token) returns `{ticket, expires_in_secs}` (valid `[web] web_token_ttl_secs`, separate from the web sign-in tokens), and `GET /admin/logs/ws?ticket=<ticket>` redeems it once. The session token itself is never accepted in a URL (proxy access logs record URLs). Non-browser clients can use the `Authorization` header on the WebSocket request.
 - A token stops working when it is revoked (`POST /logout`, a password change or `account passwd`, disabling the account), expired, from another cluster, or its account is disabled: `401` with the reason. The role is read at every call, so a demoted admin loses access at once.
 - Wrong username and wrong password give the same `401` (names cannot be probed); a disabled account with the right password gets `403`.
-- **Rate limiting:** `POST /login` and the old-password check of `POST /password` count failures per account name and per client IP (`[security]`, shared with the game login; see [accounts.md](accounts.md#password-attempt-limits)). A locked name or IP gets `429` with a `Retry-After` header (seconds) before the password is checked, also for the right password. The client IP is the socket address; with `[security] trust_forwarded_for = true` (behind your own TLS proxy) the first `X-Forwarded-For` entry.
+- **Rate limiting:** `POST /login` and the old-password check of `POST /password` count failures per account name and per client IP (`[security]`, shared with the game login; see [accounts.md](accounts.md#password-attempt-limits)). A locked name or IP gets `429` with a `Retry-After` header (seconds) before the password is checked, also for the right password. The client IP is the socket address; with `[security] trust_forwarded_for = true` (behind your own TLS proxy) the **last** `X-Forwarded-For` entry, which is the one the proxy appended (a client can prepend its own, so the first entry is never used).
 
 ### Opening the web admin from the launcher
 
@@ -82,7 +82,8 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 | `POST /admin/accounts/{name}/role` `{role}` | admin | `player` or `admin`; not on yourself |
 | `GET /admin/characters[?account=name]` | admin | characters of all accounts or one, with an `online` flag |
 | `GET /admin/characters/{id}` | admin | one character (level, area, saved location, ...) |
-| `GET /admin/logs/ws` | admin | live log, below |
+| `POST /admin/logs/ws-ticket` | admin | single-use ticket for the log WebSocket |
+| `GET /admin/logs/ws` | admin | live log, below (`?ticket=` or the `Authorization` header) |
 
 Character names and account names in paths must not contain whitespace (they go into registry command lines).
 
@@ -110,6 +111,8 @@ Protocol (JSON text frames), after the upgrade:
 
 ## Serving the web admin
 
+Every response (API and static files) carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a `Content-Security-Policy` that allows only the app's own scripts, styles, images and connections (`default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`); a reverse proxy that sets the same headers wins. The server has no TLS of its own: put a TLS proxy in front ([../guides/hosting.md](../guides/hosting.md#tls-reverse-proxy-for-the-web-api)).
+
 With `[web] static_dir` set to the SPA build (`modules/web-admin/dist`), the same port serves it: files as they are, any unknown non-API path as `index.html`. Unknown `/api/v1/...` paths stay JSON `404`s. During SPA development run Vite on its own port; its dev server proxies `/api` (and the log WebSocket) to `[web] bind`, so `cors_origins` is only needed when the page calls the API cross-origin.
 
 ## The web admin SPA
@@ -121,7 +124,7 @@ Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the
 | Login | `POST /login` with `kind: "web"`; accounts that are not admins are refused and their token revoked |
 | `#/token-login?t=<token>` | the launcher's one-time sign-in link: strips the token from the URL, redeems it with `POST /web-token/redeem`, then behaves like a login (same admin check); failures land on the login page with a notice |
 | `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s |
-| `#/logs` | `GET /admin/logs/ws?token=...`: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
+| `#/logs` | `POST /admin/logs/ws-ticket`, then `GET /admin/logs/ws?ticket=...` for every connection attempt: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
 | `#/sessions` | `GET /admin/sessions`; kick, mute (minutes or until unmuted), unmute, transfer (instance id or area/seed/topology/orientation) |
 | `#/instances` | `GET /admin/instances`; close, create |
 | `#/accounts` | `GET /admin/accounts`; role change, disable and enable |

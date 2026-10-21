@@ -88,6 +88,15 @@ pub struct LoginResponse {
     pub account: AccountInfo,
 }
 
+/// `POST /admin/logs/ws-ticket`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WsTicketResponse {
+    /// 64 hex characters, single use: `GET /admin/logs/ws?ticket=<ticket>`. Never log it.
+    pub ticket: String,
+    /// Seconds from now until it expires (`[web] web_token_ttl_secs`).
+    pub expires_in_secs: u64,
+}
+
 /// `POST /web-token`.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct WebTokenResponse {

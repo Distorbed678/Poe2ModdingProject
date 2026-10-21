@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems: do not use this form**, see SECURITY.md.
+        Please do not attach game files, official-server captures or `Client.txt` excerpts, and remove passwords, tokens and account names from logs.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ..."
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Commit hash or release tag of Poe2ModdingProject, and the game client build (0.5.5e is the supported one)."
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options: [Linux (Proton), Linux (native tools only), Windows, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Relevant lines only (server log, DLL log, test output). Remove secrets first.
+      render: text

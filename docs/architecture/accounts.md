@@ -48,11 +48,11 @@ Result codes the client gets for failures: [login.md](../protocol/login.md#authe
 |---|---|---|
 | Username and password | `0x0003`, `token_login = 0` | the standalone login screen (`login_mode = "standalone"` in the DLL config, [client-dll.md](client-dll.md#login-mode-and-trusted-servers)) |
 | Saved token | `0x0003`, `token_login = 1` | Remember Me, launcher auto-login |
-| Machine hash (dev) | `0x0005` (Steam) | only with `[accounts] dev_machine_hash_login = true`; auto-creates `Exile<id>` accounts without a password. Default in `config/server.toml` for now, off in code |
+| Machine hash (dev) | `0x0005` (Steam) | only with `[accounts] dev_machine_hash_login = true`; auto-creates `Exile<id>` accounts without a password. Off in the code and in the committed `config/server.toml`; only the git-ignored developer config (`runtime/server.dev.toml`, [setup.md](../guides/setup.md#developer-config)) turns it on. Never on a server others can reach |
 
 With `dev_machine_hash_login = false` a `0x0005` gets result `9` ("Access to the game is not currently enabled") with a notice.
 
-Accounts that existed before migration `0006` (machine-hash accounts) are kept with a null password: they can only log in on the dev path, and `account passwd <name> <password>` gives one a real password. The migration made `Exile1` an admin, as the old `[admin] accounts` list of the dev config did.
+Accounts that existed before migration `0006` (machine-hash accounts) are kept with a null password: they can only log in on the dev path, and `account passwd <name> <password>` gives one a real password. The migration made an existing `Exile1` an admin, as the old `[admin] accounts` list of the dev config did; on a fresh database no account exists when it runs, so nobody is promoted.
 
 ## Admins and account commands
 
@@ -70,9 +70,25 @@ Admin is the `admin` role. Commands (chat `!account ...`, the overlay's Commands
 | `login_max_failures_per_ip` | 20 | the same per client IP; 0 = off |
 | `login_failure_window_secs` | 300 | failures older than this are forgotten |
 | `login_lockout_secs` | 300 | how long a locked key stays locked (counted from the failure that locked it; refused attempts do not extend it) |
-| `trust_forwarded_for` | false | web API behind a reverse proxy: take the client IP from the first `X-Forwarded-For` entry. Only with a proxy that sets it; otherwise a client chooses its own IP |
+| `trust_forwarded_for` | false | web API behind a reverse proxy: take the client IP from the **last** `X-Forwarded-For` entry, the one your proxy appended (a client can prepend entries of its own to the header, so the first one proves nothing). Only with a proxy that appends the real peer address (nginx `$proxy_add_x_forwarded_for`, Caddy's default); otherwise a client chooses its own IP |
 
 The game answers a locked attempt with result `0x49` (`LoginRateLimited`, "You have attempted to log in too often within a short time period. Try again later.") and a notice that names the wait; the web API answers `429` with `Retry-After`. A right password clears the account's count but not the IP's. Saved-token logins are neither counted nor refused (a 256-bit token cannot be guessed, and a stale file must not lock an honest player). The state is in memory: a restart clears it. Trade-off: someone who knows a name can lock that account for the lockout time by failing on purpose (the owner can still use a saved token, which is not limited). A restart clears all locks; there is no unlock command yet. Behind a proxy without `trust_forwarded_for` every web client shares the proxy's IP and one attacker locks the web login for everyone; the game login sees real client addresses.
+
+**Timing.** A password login for an unknown account name, or for a machine-hash account that has no password, verifies the password digest against a throw-away decoy argon2 hash before it answers, so a wrong login takes about as long whether or not the name exists (`SqliteAccounts::spend_verify_time`). The reply codes still differ by the client's own table (5 no such account, 6 wrong password); the web API answers one text for both.
+
+## Limits before the login
+
+Idle or slow sockets must not pin memory and tasks before anyone has authenticated. Both game ports have limits that apply until the client has logged in (login server) or shown a valid ticket (instance server); they are config values, `0` turns one off:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `[network.login] pre_auth_read_timeout_secs` | 15 | longest time one message (the key exchange included) may take to arrive completely; then the connection is closed |
+| `[network.login] pre_auth_login_timeout_secs` | 60 | longest time from connecting to a successful login (keep-alives do not extend it) |
+| `[network.login] pre_auth_max_buffer` | 65536 | bytes held for an incomplete message (`Connection::set_max_buffer` in `poe-net`); after the login the limit is 16 times that |
+| `[network.login] max_pre_auth_connections`, `max_pre_auth_per_ip` | 256, 16 | connections that have not logged in yet, in total and per client IP (IPv6 per /64); `poe_accounts::ConnectionLimiter`. A place is freed at login |
+| `[network.instance] pre_auth_read_timeout_secs`, `pre_auth_max_buffer`, `max_pre_auth_connections`, `max_pre_auth_per_ip` | 15, 65536, 256, 16 | the same for the instance server's first message (`Hello`); a place is freed when the ticket is redeemed, and the buffer limit is lifted |
+
+A refused connection is closed at once and logged (at most one line per second). Instance tickets are random 32-bit numbers valid for 60 seconds and single use; with these limits guessing one is not practical, but the id is not wider because the wire format has a 32-bit field.
 
 ## One session per account
 

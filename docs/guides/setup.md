@@ -22,7 +22,7 @@ $T -p 2 --steam GameFiles dump-tables ...      # tables -> CSV/JSON using the sc
 ```
 
 ## Clone
-The repo uses git submodules: `modules/protocol` (Poe2Protocol), `modules/client-hook` (Poe2ClientHook, with a nested `protocol`), `modules/web-admin` (Poe2WebAdmin) and `modules/launcher` (Poe2Launcher, with nested `client-hook` and `protocol`). They are private repos, so run `gh auth login` first:
+The repo uses git submodules: `modules/protocol` (Poe2Protocol), `modules/client-hook` (Poe2ClientHook, with a nested `protocol`), `modules/web-admin` (Poe2WebAdmin) and `modules/launcher` (Poe2Launcher, with nested `client-hook` and `protocol`). `gh` is only needed for the tool downloads; the repositories are cloned over plain https:
 ```sh
 git clone --recursive https://github.com/Distorbed678/Poe2ModdingProject.git
 # or, after a plain clone / after pulling a changed submodule pointer:
@@ -42,8 +42,8 @@ python3 scripts/check-links.py   # relative links and #anchors in the docs, READ
 
 ## Run
 ```sh
-cargo run -p poe-server     # login (20481) + instance (6112) servers + web API (127.0.0.1:8080), config/server.toml (add --release for play)
-cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: read-only, official servers; --no-build; --sample-mod: also install the sample mod, enabled)
+cargo run -p poe-server     # login (20481) + instance (6112) servers + web API (127.0.0.1:8080), config/server.toml (add --release for play); developers: POE_CONFIG=runtime/server.dev.toml, see below
+cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: developer-only research on official servers, read-only, see below; --no-build; --sample-mod: also install the sample mod, enabled)
 cargo xtask deploy-mod      # install a client mod (default: the sample mod) into GameFiles/poe-hook-mods/<id>/ and enable it; [dir] [--dll f] [--disable] [--no-build]
 cargo xtask deploy-core     # rebuilds and installs only the debug core; a running client reloads it within about a second (--no-build)
 cargo xtask dll-data        # rewrites only GameFiles/poe-hook-data/ (stats, action types, areas)
@@ -72,6 +72,20 @@ cargo xtask select-gateway  # only points the remembered gateway of the prefix a
 - With `--sample-mod` (not with `--official`), or with `cargo xtask deploy-mod [dir]`: installs a client mod into `GameFiles/poe-hook-mods/<id>/` (`mod.toml`, data, entry DLL) and appends its id to `GameFiles/poe-hook-mods/state.toml`; the loader loads it at the next client start ([../architecture/client-dll.md](../architecture/client-dll.md#mod-loader), spec in `modules/client-hook/docs/mod-manifest.md`). `revert-client` removes the mods installed this way (not ones the launcher installed). `deploy-mod` refuses when GameFiles is deployed in official mode.
 
 `cargo xtask --prefix <dir> <command>` (global option) runs `run-client`, `login-token`, `select-gateway` and the gateway selection of `deploy-client` against another Proton prefix, for a second client (`third_party/proton-prefix-2`, a copy of the first; see [hosting.md](hosting.md#local-two-client-test)). `cargo xtask select-gateway` only writes the remembered gateway (`gateway_id`) of the chosen prefix to ours. `run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
+
+### Developer config
+
+`config/server.toml` is committed with **safe values**: the login and instance servers listen on loopback only, the password-less Steam login (`dev_machine_hash_login`) is off, and the developer tools (`[dev] position_sync`, `debug_link`, `movement_trace`, `known_seeds`) are off. A checkout therefore cannot be reached from the network by accident and needs a real account (`account create`, [below](#accounts-and-characters-offline)) to log in through the standalone login screen.
+
+The development setup needs the opposite: the Steam login that creates `Exile<id>` accounts by itself, listening on every interface for remote and two-client tests, the debug link and position sync for the overlay and drift checks, the movement trace and the known terrain seeds. Those overrides live in a **git-ignored copy**:
+
+```sh
+python3 scripts/dev-config.py                      # writes runtime/server.dev.toml from config/server.toml (all comments kept)
+POE_CONFIG=runtime/server.dev.toml cargo run -p poe-server
+POE_CONFIG=runtime/server.dev.toml cargo xtask deploy-client      # deploy-client reads public_host and the ports from the same file
+```
+
+`scripts/dev-config.py --if-missing` only writes a missing file; run it without the flag to pick up new keys of the committed file (it overwrites, so keep personal changes in your own copy under another name). `scripts/test-mp.sh setup` makes its own `runtime/server-mp.toml` from the same script. The unattended tests ([below](#unattended-client-tests)) and `deploy-client --login-mode steam` need the dev config because the Steam login needs `dev_machine_hash_login`. Never use the dev config on a server others can reach ([hosting.md](hosting.md#security-notes)).
 
 ### Web API
 
@@ -147,11 +161,11 @@ It writes the token to `third_party/proton-prefix/pfx/drive_c/users/steamuser/Do
 
 ### `login_mode` and `trusted_servers`
 
-`cargo xtask deploy-client` writes `login_mode = "standalone"` into `GameFiles/poe-hook.toml` by default (the DLL's own default too): the client shows the account/password screen and sends `0x0003`, which the login server handles. Existing configs get the keys on the next deploy; to go back set `login_mode = "steam"` and `trusted_servers = []` (or deploy with `--login-mode steam`). `cargo xtask deploy-core` does not touch the config. `scripts/test-run.sh` and `auto_keys` press Enter on the Steam login screen, so for them deploy with `--login-mode steam` (and `[accounts] dev_machine_hash_login = true`); `scripts/test-mp.sh` uses the standalone login with remember-me tokens.
+`cargo xtask deploy-client` writes `login_mode = "standalone"` into `GameFiles/poe-hook.toml` by default (the DLL's own default too): the client shows the account/password screen and sends `0x0003`, which the login server handles. Existing configs get the keys on the next deploy; to go back set `login_mode = "steam"` and `trusted_servers = []` (or deploy with `--login-mode steam`). `cargo xtask deploy-core` does not touch the config. `scripts/test-run.sh` and `auto_keys` press Enter on the Steam login screen, so for them deploy with `--login-mode steam` and run the server with the [dev config](#developer-config) (`[accounts] dev_machine_hash_login = true`); `scripts/test-mp.sh` uses the standalone login with remember-me tokens.
 
 ## Config
 
-`config/server.toml` is the working dev config; `config/server.example.toml` is a fully commented copy with every key and its default (a `poe-config` test parses both). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]` (+ `.start_tiles.<area>`, `.upload`), `[cluster]`, `[web]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
+`config/server.toml` is the committed config with safe values (a checkout works on this machine only; developer switches: [Developer config](#developer-config)); `config/server.example.toml` is a fully commented copy with every key and its default, the template for a hosted server (a `poe-config` test parses both, and checks the committed one is safe). `POE_CONFIG=<path>` selects another file. Sections: `[game]`, `[network]` (+ `.login`, `.instance`), `[instance]`, `[movement]`, `[accounts]`, `[database]`, `[dev]`, `[terrain]`, `[spawn]` (+ `.start_tiles.<area>`, `.upload`), `[cluster]`, `[web]`, `[commands]`, `[chat]`, `[player]`, `[inventories]`, `[gateway]`, `[logging]`, `[[leagues]]`. Env overrides: `POE_CONFIG`, `POE_SWEEP` (overrides `[dev] sweep`), `RUST_LOG` (overrides `[logging] filter`).
 
 ### Config migration (2026-10)
 
@@ -173,7 +187,7 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | (new) `[security]` | password attempt limits and `trust_forwarded_for` (WP B2; [accounts.md](../architecture/accounts.md#password-attempt-limits)) |
 | `[admin] accounts = [...]` | removed: admin is the account's role (`account role <name> admin`; the migration made `Exile1` an admin). A leftover `[admin]` section is ignored |
 | (new) `[cluster] id` | cluster identity; login tokens from another id are invalid (default `"local"`) |
-| (new) `[accounts] dev_machine_hash_login` | Steam `0x0005` login without a password, auto-creating `Exile<id>` accounts (default `false`; `config/server.toml` sets `true` for now) |
+| (new) `[accounts] dev_machine_hash_login` | Steam `0x0005` login without a password, auto-creating `Exile<id>` accounts (default `false`; only the dev config `runtime/server.dev.toml` sets `true`) |
 | (new) `[accounts] open_registration` | whether `POST /api/v1/register` may create accounts (default `false`) |
 | (new) `[web]` | `enabled` (`true`), `bind` (`127.0.0.1:8080`), `static_dir`, `cors_origins`, `log_buffer` (`2000`): the web API ([../architecture/web-api.md](../architecture/web-api.md)) |
 | (new) `[accounts] remember_days` | lifetime of a Remember Me login (default `30`) |
@@ -181,6 +195,7 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | (new) `[instance] first_entity_id` | first entity id of an instance's counter (default `12000`, the official value for players) |
 | (new) `[game] version` selects `versions/<version>.toml`; `[game] protocol_dir` optional | the version file is the single definition of a build (depots, exe checksum, opcode folder, signature table, accepted client hashes; [new-game-version.md](new-game-version.md)); `protocol_dir` defaults to its `[protocol] opcodes`; `{version}` in `[dev] known_seeds`, `[dev] sweep_results` and `[spawn] layout_dir` is replaced by `[game] version`; an unknown version stops the start-up |
 | (new) `[security] allow_unknown_client` | default `false`: a client whose exe hash (`client_hash`) is not a known value of the version is refused with "you need to update"; `true` accepts it (logged). Nothing is refused while the version file's `[client] hashes_confirmed` is `false` ([new-game-version.md](new-game-version.md#what-the-server-does-with-the-clients-version)) |
+| (new) `[network.login]` `pre_auth_read_timeout_secs`, `pre_auth_login_timeout_secs`, `pre_auth_max_buffer`, `max_pre_auth_connections`, `max_pre_auth_per_ip` and `[network.instance]` `pre_auth_read_timeout_secs`, `pre_auth_max_buffer`, `max_pre_auth_connections`, `max_pre_auth_per_ip` | limits before a client has logged in or shown its ticket: a message must arrive complete within 15 s, the login must finish within 60 s (login server), at most 64 KiB are buffered for an incomplete message, and at most 256 such connections in total and 16 per client IP (IPv6 per /64) exist at a time; connections over a limit are closed (a log line, at most one per second). `0` turns a limit off. See [hosting.md](hosting.md#security-notes) |
 | (new) `[spawn.upload]` | terrain upload from client DLLs: `enabled`, `max_bytes`, `max_layout_bytes`, `max_grid_bytes`, `wait_ms`, `wait_upload_secs` ([hosting.md](hosting.md#terrain-spawn-spawnupload)) |
 | (new) `[spawn] player_spacing` | WP C2: the smallest distance in grid cells between a joining player's spawn cell and the players already in the instance (default `8`; `0` = spawn where requested). A closer spawn moves to the nearest free walkable cell ([../protocol/entities.md](../protocol/entities.md#implementation-notes-wp36)) |
 | (new) `[dev] remote_blob_omit`, `remote_animated_path` | WP C2 bisect switches for the remote player's look: parts of the generated remote blob to leave out (`"stat_sets"`, `"derived_stats"`, `"life_state"`, `"player_flags"`) and whether to add the class's `.ao` path (defaults: everything sent, no path; [../protocol/entities.md](../protocol/entities.md#remote-player-look-wp-c2)) |
@@ -204,16 +219,18 @@ One-time setup, after `cargo xtask deploy-client`:
 
 To play:
 1. Start the server from the repo: `cargo run --release -p poe-server` (leave it running; Ctrl+C stops it).
-2. Launch the shortcut from Steam. The login screen shows "Local Server". With the default `login_mode = "standalone"` sign in with an account name and password (make one offline, [above](#accounts-and-characters-offline); Remember Me works). After `deploy-client --login-mode steam` the Steam login screen appears instead and, with `[accounts] dev_machine_hash_login = true`, creates an `Exile<id>` account by itself.
+2. Launch the shortcut from Steam. The login screen shows "Local Server". With the default `login_mode = "standalone"` sign in with an account name and password (make one offline, [above](#accounts-and-characters-offline); Remember Me works). After `deploy-client --login-mode steam` the Steam login screen appears instead and, with `[accounts] dev_machine_hash_login = true` (the [dev config](#developer-config); never on a shared server), creates an `Exile<id>` account by itself.
 
 Notes:
 - `auto_keys` in `GameFiles/poe-hook.toml` is `[]` after every deploy (nothing is pressed for you); the unattended tests set it per run with `POE_HOOK_AUTO_KEYS` ([Unattended client tests](#unattended-client-tests)).
 - Keep `dump_object_types = true`: the spawn position relies on the tile layout and cell grid the DLL exports to `dumps/<version>/terrain/{layouts,grids}/` (the server reads them through `[spawn] layout_dir`, or receives them as an upload from a remote client, [hosting.md](hosting.md); it has no collision of its own yet).
-- Admin commands (`!help`, the overlay's Commands and Instances pages) need an account with the admin role. On the dev machine-hash login the first account `Exile1` is an admin; otherwise `cargo run -p poe-server -- account create <name> <password>` then `account role <name> admin`; see [server-admin.md](server-admin.md).
+- Admin commands (`!help`, the overlay's Commands and Instances pages) need an account with the admin role. Make an admin with `cargo run -p poe-server -- account create <name> <password>` then `account role <name> admin` (no account is an admin by default; a machine-hash `Exile<id>` account has no password, so give it a role with `account role` only for local tests); see [server-admin.md](server-admin.md).
 - Movement: WASD works in the default input mode. For click-to-move, pick the mouse input method in the game's options (in the config file: `user_input_mode=mouse_and_keyboard`). Space is the dodge roll in both modes.
 - After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
 
-## Official servers (read-only)
+## Official servers (read-only, developer research only)
+**Read this first.** This mode exists for the project's own research (comparing a real session with ours). It is not supported and not endorsed. The DLL sends, alters and injects nothing in this mode, but it still **patches game code in memory** to observe (inline detours, a Vulkan hook, the `version.dll` proxy), and the game's anti-cheat may detect any injected DLL as a violation. Do not use it on an account you care about. The launcher never does this.
+
 1. `cargo xtask deploy-client --official`: the original gateway list goes back into `GameFiles/`, and `poe-hook.toml` gets `mode = "official"`, `login_mode = "steam"` (the client is not patched; the Steam login screen shows) and `trusted_servers = []`. The GameFiles copy must be the same build as the live game; after a patch, update GameFiles first.
 2. Start Steam, then `cargo xtask run-client` (the GameFiles copy in its own Proton prefix; the Steam install is never touched).
 3. The user plays. The overlay shows `OFFICIAL: read-only`; packets, logs and snapshots go to the session folder (see [Logs](#logs)). What the DLL does and does not do in this mode: [../architecture/client-dll.md](../architecture/client-dll.md#modes-and-the-read-only-latch).
@@ -222,7 +239,7 @@ Notes:
 Comparing a session with one from our server: [../re/captures.md](../re/captures.md).
 
 ## Unattended client tests
-With Steam running (without it the client logs `Unable to init Steam API` and exits with code 1) and the server writing to `runtime/server-run.log` (`target/debug/poe-server > runtime/server-run.log 2>&1`):
+With Steam running (without it the client logs `Unable to init Steam API` and exits with code 1) and the server, started with the [dev config](#developer-config), writing to `runtime/server-run.log` (`POE_CONFIG=runtime/server.dev.toml target/debug/poe-server > runtime/server-run.log 2>&1`):
 - `scripts/test-run.sh <name> [seconds]` launches the client, logs in and enters the game by itself (`auto_keys`). It first deletes `dumps/<version>/terrain/layouts/*` and `grids/*` so the run shows whether the DLL exports them again (the server waits for the layout by tile hash). It sets these environment variables for the client:
   - `POE_HOOK_AUTO_KEYS=20000:13` (Enter at 20 s, the login; `[[ms, vk], ...]` in `auto_keys` form);
   - `POE_HOOK_MOVEMENT_LOG=1` (per-frame movement log, `movement_log` in the config);

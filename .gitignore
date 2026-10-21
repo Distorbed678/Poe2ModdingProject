@@ -25,3 +25,9 @@
 
 # Python bytecode
 __pycache__/
+
+# Secrets and keys never belong in the repository
+.env
+.env.*
+*.pem
+*.key

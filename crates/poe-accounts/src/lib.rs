@@ -15,7 +15,7 @@ mod sqlite;
 use sha2::{Digest, Sha256};
 
 pub use commands::{CommandOutput, redact, run_account_command};
-pub use ratelimit::{LoginLimiter, Locked};
+pub use ratelimit::{ConnectionLimiter, ConnectionSlot, LoginLimiter, Locked};
 pub use sqlite::SqliteAccounts;
 /// Argon2 cost parameters (see [`SqliteAccounts::with_params`]).
 pub use argon2::Params;

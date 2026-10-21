@@ -22,6 +22,10 @@ pub struct SqliteAccounts {
     cluster_id: String,
     argon: Argon2<'static>,
     clock: Clock,
+    /// A hash nobody knows the password of, verified when the account is unknown or has no
+    /// password so that a wrong login takes as long for every name (login timing must not
+    /// tell whether a name exists). Built on first use with the current argon2 cost.
+    decoy: std::sync::OnceLock<String>,
 }
 
 impl From<rusqlite::Error> for AccountError {
@@ -58,6 +62,7 @@ impl SqliteAccounts {
             clock: Arc::new(|| {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
             }),
+            decoy: std::sync::OnceLock::new(),
         }
     }
 
@@ -65,6 +70,7 @@ impl SqliteAccounts {
     /// their own parameters.
     pub fn with_params(mut self, params: argon2::Params) -> Self {
         self.argon = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+        self.decoy = std::sync::OnceLock::new();
         self
     }
 
@@ -86,6 +92,19 @@ impl SqliteAccounts {
             .hash_password(digest, &salt)
             .map(|h| h.to_string())
             .map_err(|e| AccountError::Db(format!("argon2: {e}")))
+    }
+
+    /// Spends the time of a password check without a result that could matter: the digest never
+    /// matches the decoy hash (random, never stored).
+    fn spend_verify_time(&self, digest: &[u8; 32]) {
+        let decoy = self.decoy.get_or_init(|| {
+            let mut secret = [0u8; 32];
+            rand::rng().fill_bytes(&mut secret);
+            self.hash(&secret).unwrap_or_default()
+        });
+        if let Ok(parsed) = PasswordHash::new(decoy) {
+            let _ = self.argon.verify_password(digest, &parsed);
+        }
     }
 
     fn by_name(&self, name: &str) -> Result<AccountRecord> {
@@ -148,8 +167,14 @@ impl AccountStore for SqliteAccounts {
             )
             .optional()
         })?;
-        let (id, hash) = stored.ok_or(AccountError::NoAccount)?;
-        let hash = hash.ok_or(AccountError::WrongPassword)?;
+        let Some((id, hash)) = stored else {
+            self.spend_verify_time(password_digest);
+            return Err(AccountError::NoAccount);
+        };
+        let Some(hash) = hash else {
+            self.spend_verify_time(password_digest);
+            return Err(AccountError::WrongPassword);
+        };
         let parsed = PasswordHash::new(&hash).map_err(|e| AccountError::Db(format!("stored hash: {e}")))?;
         if self.argon.verify_password(password_digest, &parsed).is_err() {
             return Err(AccountError::WrongPassword);
@@ -301,7 +326,10 @@ mod tests {
         assert_eq!(a.find("aLiCe").unwrap().unwrap().id, rec.id);
         assert_eq!(a.authenticate("alice", &d).unwrap().id, rec.id);
         assert_eq!(a.authenticate("alice", &password_digest("nope")).unwrap_err(), AccountError::WrongPassword);
+        assert!(a.decoy.get().is_none());
         assert_eq!(a.authenticate("bob", &d).unwrap_err(), AccountError::NoAccount);
+        // The unknown name spent a verification on the decoy hash (no timing difference).
+        assert!(a.decoy.get().is_some_and(|h| h.starts_with("$argon2id$")));
         assert!(a.find("alice").unwrap().unwrap().last_login.is_some());
         let stored: String = a.store.with_connection(|c| {
             c.query_row("SELECT password_hash FROM accounts WHERE id = ?1", params![rec.id], |r| r.get(0)).unwrap()

@@ -492,9 +492,41 @@ async fn log_session(mut socket: WebSocket, logs: std::sync::Arc<LogBuffer>) {
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 #[allow(dead_code)]
 pub struct WsQuery {
-    /// The admin's web token, because browsers cannot set headers on a WebSocket (the
-    /// `Authorization` header works too).
-    pub token: Option<String>,
+    /// A ticket from `POST /admin/logs/ws-ticket`, because browsers cannot set headers on a
+    /// WebSocket (the `Authorization` header with the admin's web token works too).
+    pub ticket: Option<String>,
+}
+
+/// A single-use ticket for the log WebSocket, valid for `[web] web_token_ttl_secs`. Pass it as
+/// `?ticket=` to `GET /admin/logs/ws`; ask again for every connection.
+#[utoipa::path(post, path = "/api/v1/admin/logs/ws-ticket", tag = "admin", security(("bearer" = [])),
+    responses((status = 200, body = WsTicketResponse), (status = 401, body = crate::ErrorBody),
+        (status = 403, body = crate::ErrorBody), (status = 503, body = crate::ErrorBody)))]
+pub async fn logs_ws_ticket(
+    State(s): State<WebState>,
+    AdminAuth(who): AdminAuth,
+) -> Result<([(axum::http::HeaderName, &'static str); 1], Json<WsTicketResponse>), ApiError> {
+    let ttl = s.config.web.web_token_ttl_secs.max(1);
+    let ticket = s
+        .ws_tickets
+        .mint(
+            who.account.id,
+            std::time::Duration::from_secs(ttl),
+            std::time::Instant::now(),
+        )
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "too many unused tickets, try again shortly",
+            )
+        })?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(WsTicketResponse {
+            ticket: hex::encode(ticket),
+            expires_in_secs: ttl,
+        }),
+    ))
 }
 
 /// Live log over WebSocket (upgrade). Server messages are JSON with a `type` of `hello`

@@ -164,7 +164,7 @@ Same as plan 1, which has the full text. Specifically:
 
 **WP D1: audit** (read-only, all 5 repos and their **full history**)
 - **Secrets:** use gitleaks or trufflehog in `third_party/`, run over all history: tokens, keys, `.env` files, hardcoded passwords (for example the `tester1`/`hunter2pass` and `mp1`/`mp2` test credentials, if any are committed), and PATs in CI files.
-- **Personal data:** emails, local paths like `/home/user`, the LAN IP `192.168.1.93`, account names from captures, other players' names, chat text, and `Client.txt` excerpts.
+- **Personal data:** emails, local paths (the dev machine's home directory), the dev machine's LAN IP, account names from captures, other players' names, chat text, and `Client.txt` excerpts.
 - **Game data:**
   - no GGG assets, bundles, extracted tables or dumps committed;
   - check the test fixtures, which hold movement-only capture data, and the anonymised blobs;

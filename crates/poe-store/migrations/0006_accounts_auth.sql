@@ -16,6 +16,11 @@ CREATE UNIQUE INDEX accounts_name_nocase ON accounts (name COLLATE NOCASE);
 
 -- Admins used to be listed in `[admin] accounts` (the dev config named the first auto-created
 -- account). That list is gone: carry the dev admin over so existing databases keep working.
+-- Only an upgrade of an old development database does anything here: on a fresh database no
+-- account exists yet when this runs, so nobody is promoted. (A player who happens to be
+-- named Exile1 on a database that was created before this migration would become admin: keep
+-- `dev_machine_hash_login` off on any server others can reach. Only comments change here: an
+-- applied migration's statements are never edited.)
 UPDATE accounts SET role = 'admin' WHERE name = 'Exile1';
 
 -- Revocable tokens. Only the SHA-256 of the 32 random token bytes is stored.

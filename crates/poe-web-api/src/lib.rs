@@ -53,6 +53,9 @@ pub struct WebState {
     pub logs: Arc<LogBuffer>,
     /// Single-use sign-in tokens handed from the launcher to the browser.
     pub web_tokens: Arc<WebTokens>,
+    /// Single-use tickets for the log WebSocket (`POST /admin/logs/ws-ticket`): a browser
+    /// cannot send headers on a WebSocket, and a ticket in the URL is worthless once used.
+    pub ws_tickets: Arc<WebTokens>,
     pub started: Instant,
 }
 
@@ -90,6 +93,7 @@ pub fn router(state: WebState) -> Router {
         .route("/admin/accounts/{name}/role", post(admin::set_role))
         .route("/admin/characters", get(admin::characters))
         .route("/admin/characters/{id}", get(admin::character))
+        .route("/admin/logs/ws-ticket", post(admin::logs_ws_ticket))
         .route("/admin/logs/ws", get(admin::logs_ws))
         .route("/openapi.json", get(openapi::serve))
         .fallback(|| async { ApiError::not_found("no such endpoint") });
@@ -125,7 +129,27 @@ pub fn router(state: WebState) -> Router {
                 .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]),
         );
     }
-    app.with_state(state)
+    app.layer(axum::middleware::map_response(security_headers))
+        .with_state(state)
+}
+
+/// Response headers for the API and the static web admin: no MIME sniffing, no referrer, no
+/// framing, and a content security policy that allows only the app's own scripts, styles and
+/// connections (the web admin loads nothing from elsewhere).
+async fn security_headers(mut res: axum::response::Response) -> axum::response::Response {
+    const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+        img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; \
+        form-action 'self'; frame-ancestors 'none'";
+    let h = res.headers_mut();
+    for (name, value) in [
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::REFERRER_POLICY, "no-referrer"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::CONTENT_SECURITY_POLICY, CSP),
+    ] {
+        h.entry(name).or_insert(HeaderValue::from_static(value));
+    }
+    res
 }
 
 /// Listens on `[web] bind` until the process ends.

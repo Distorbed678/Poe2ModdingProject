@@ -4,7 +4,7 @@ A private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust and de
 
 ## How the repos fit together
 
-This repo holds the server. The shared protocol code, the client hook and the web admin live in their own repos, included as git submodules. All repos are private, under `Distorbed678`.
+This repo holds the server. The shared protocol code, the client hook, the launcher and the web admin live in their own repos (under `Distorbed678`), included as git submodules.
 
 | Repo | Where | Role |
 |---|---|---|
@@ -27,6 +27,10 @@ Server commands and admins: [docs/guides/server-admin.md](docs/guides/server-adm
 ## Documentation
 
 Start at [docs/index.md](docs/index.md): guides, architecture, the wire protocol, reverse-engineering notes, status and plans. The rules for working in this repo are in [CLAUDE.md](CLAUDE.md).
+
+## Disclaimer
+
+This is an unofficial, fan-made project for personal and educational use. It is **not affiliated with, endorsed by or connected to Grinding Gear Games**; "Path of Exile" is their trademark. **No game files are distributed** here (no assets, bundles, tables or executables): you need your own legal copy of the game, and the project only reads it from your machine. The client hook is meant for the private server; on official servers it is **observe-only** (read-only) and not supported. Even then it patches game code in memory to observe, which the game's anti-cheat may detect, so do not use it on an account you care about. You use all of this at your own risk. More: [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md); licensed under MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
 
 ## Status
 

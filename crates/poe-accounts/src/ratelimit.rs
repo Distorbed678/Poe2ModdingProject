@@ -171,6 +171,91 @@ impl LoginLimiter {
     }
 }
 
+/// Caps the connections that have not authenticated yet, in total and per client IP (IPv6 per
+/// /64), so idle or slow sockets cannot pin memory and tasks before a login (`[network.login]`
+/// `max_pre_auth_connections`, `max_pre_auth_per_ip`). A limit of 0 turns that limit off.
+///
+/// [`try_acquire`](ConnectionLimiter::try_acquire) returns a [`ConnectionSlot`] that frees its
+/// place when it is dropped; call [`ConnectionSlot::release`] as soon as the login succeeds so
+/// signed-in players do not use up the pre-login budget.
+pub struct ConnectionLimiter {
+    max_total: usize,
+    max_per_ip: usize,
+    state: Mutex<ConnectionCounts>,
+}
+
+#[derive(Default)]
+struct ConnectionCounts {
+    total: usize,
+    per_ip: HashMap<IpAddr, usize>,
+}
+
+/// A place in a [`ConnectionLimiter`]; freed on drop or by [`ConnectionSlot::release`].
+pub struct ConnectionSlot {
+    limiter: Arc<ConnectionLimiter>,
+    key: Option<IpAddr>,
+}
+
+impl ConnectionLimiter {
+    pub fn new(max_total: usize, max_per_ip: usize) -> Arc<Self> {
+        Arc::new(Self {
+            max_total,
+            max_per_ip,
+            state: Mutex::default(),
+        })
+    }
+
+    /// Takes a place for a new connection from `ip`, or `None` when a limit is reached.
+    pub fn try_acquire(self: &Arc<Self>, ip: IpAddr) -> Option<ConnectionSlot> {
+        let key = ip_key(ip);
+        let mut st = self.state.lock().unwrap();
+        if self.max_total > 0 && st.total >= self.max_total {
+            return None;
+        }
+        let n = st.per_ip.get(&key).copied().unwrap_or(0);
+        if self.max_per_ip > 0 && n >= self.max_per_ip {
+            return None;
+        }
+        st.total += 1;
+        st.per_ip.insert(key, n + 1);
+        Some(ConnectionSlot {
+            limiter: self.clone(),
+            key: Some(key),
+        })
+    }
+
+    /// Connections currently holding a place.
+    pub fn active(&self) -> usize {
+        self.state.lock().unwrap().total
+    }
+
+    fn free(&self, key: IpAddr) {
+        let mut st = self.state.lock().unwrap();
+        st.total = st.total.saturating_sub(1);
+        if let Some(n) = st.per_ip.get_mut(&key) {
+            *n -= 1;
+            if *n == 0 {
+                st.per_ip.remove(&key);
+            }
+        }
+    }
+}
+
+impl ConnectionSlot {
+    /// Frees the place now (the connection is trusted from here on).
+    pub fn release(&mut self) {
+        if let Some(key) = self.key.take() {
+            self.limiter.free(key);
+        }
+    }
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicI64, Ordering};
@@ -280,5 +365,38 @@ mod tests {
             l.failure("Alice", ip("10.0.0.1"));
         }
         assert!(l.check("Alice", ip("10.0.0.1")).is_ok());
+    }
+
+    #[test]
+    fn connection_limits_total_and_per_ip_and_free_on_drop() {
+        let l = ConnectionLimiter::new(3, 2);
+        let a = l.try_acquire(ip("10.0.0.1")).expect("first");
+        let b = l.try_acquire(ip("10.0.0.1")).expect("second");
+        assert!(l.try_acquire(ip("10.0.0.1")).is_none(), "per-IP limit");
+        let c = l.try_acquire(ip("10.0.0.2")).expect("other IP");
+        assert!(l.try_acquire(ip("10.0.0.3")).is_none(), "total limit");
+        assert_eq!(l.active(), 3);
+        drop(a);
+        let d = l.try_acquire(ip("10.0.0.3"));
+        assert!(d.is_some(), "a place was freed");
+        drop((b, c));
+        assert_eq!(l.active(), 1);
+        drop(d);
+        assert_eq!(l.active(), 0);
+    }
+
+    #[test]
+    fn connection_slot_release_is_idempotent_and_ipv6_is_per_prefix() {
+        let l = ConnectionLimiter::new(0, 1);
+        let mut s = l.try_acquire(ip("2001:db8::1")).unwrap();
+        assert!(l.try_acquire(ip("2001:db8::2")).is_none(), "same /64");
+        assert!(l.try_acquire(ip("2001:db9::1")).is_some());
+        s.release();
+        s.release();
+        drop(s);
+        assert!(l.try_acquire(ip("2001:db8::2")).is_some());
+        let l = ConnectionLimiter::new(0, 0);
+        let _slots: Vec<_> = (0..50).map(|_| l.try_acquire(ip("10.0.0.1")).unwrap()).collect();
+        assert_eq!(l.active(), 50, "0 = no limit");
     }
 }

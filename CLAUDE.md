@@ -22,6 +22,7 @@ Open elsewhere: movement gaps #11/#12 (docs/protocol/movement.md), party/trade r
 
 ## Where things are
 - Commands, logs, unattended in-game tests: [docs/guides/setup.md](docs/guides/setup.md)
+- Dev config: the committed `config/server.toml` is safe (loopback, no machine-hash login, no dev tools). For in-game tests run `python3 scripts/dev-config.py` and start the server with `POE_CONFIG=runtime/server.dev.toml` ([setup.md](docs/guides/setup.md#developer-config))
 - Server commands and admins: [docs/guides/server-admin.md](docs/guides/server-admin.md)
 - Architecture and crates: [docs/architecture/](docs/architecture/overview.md)
 - Protocol: [docs/protocol/](docs/protocol/framing.md); RE how-to (Ghidra MCP, `scripts/re/`): [docs/re/README.md](docs/re/README.md)

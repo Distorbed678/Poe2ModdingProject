@@ -29,7 +29,7 @@ Open, in this order:
 2. **W/A/S/D injection is dead under the Agents rules** (problem 4): the sprint-end-with-W and walking-roll cases are not run. Try a client run with the rules off (`scripts/agent-desktop.sh off`, the user's go-ahead), or give the hook a focus fake for keyboard Raw Input.
 3. How to run is unchanged (below); the helper scripts used were in the scratchpad and are gone: per case teleport, wait 3 s, write the entries, read the `drift server=...` lines.
 ## How to run (what worked)
-- Server: `cp config/server.toml runtime/server-c1.toml`, set `drift_check = true` there, `POE_CONFIG=runtime/server-c1.toml target/debug/poe-server > runtime/server-run.log 2>&1 &` (own Bash call to stop it: `pkill -x poe-server`).
+- Server: `python3 scripts/dev-config.py --out runtime/server-c1.toml` (the committed `config/server.toml` is the safe one since WP D2: no Steam machine-hash login, no drift checker), set `drift_check = true` there, `POE_CONFIG=runtime/server-c1.toml target/debug/poe-server > runtime/server-run.log 2>&1 &` (own Bash call to stop it: `pkill -x poe-server`).
 - Client: `scripts/test-run.sh c1 15` (`mode = "private"`, `login_mode = "steam"` in `GameFiles/poe-hook.toml`; do not deploy). Close it with the entry `close` in `GameFiles/poe-hook.keys`.
 - Teleport into the open box: `python3 scripts/re/send_dev.py "teleport 650 500"` (corner start for long sprints: `612 462`).
 - Key entries (one per line in `GameFiles/poe-hook.keys`): the cursor only changes reliably after a double move: `inmove:1000,300`, `wait:300`, `inmove:<x>,<y>`, `wait:400`. A tap roll: `indown:0x20`, `0x20`, `wait:250`, `inup:0x20` (`held` stays false); a Space hold for a sprint: `indown:0x20`, `0x20:1400`, `inup:0x20`.

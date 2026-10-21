@@ -1,0 +1,18 @@
+name: Feature request or question
+description: An idea, a missing piece, or a question about how something works
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like, or what do you want to know?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why (the use case)
+  - type: markdown
+    attributes:
+      value: |
+        This project is unofficial and personal. Requests that involve cheating, official servers or distributing game files will not be accepted.

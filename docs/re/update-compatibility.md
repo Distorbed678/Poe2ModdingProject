@@ -427,7 +427,7 @@ Each block reports found / ambiguous / missing (or OK / drift / fail):
 Exit code: 0 all fine, 1 warnings (a research signature missing), 2 a required feature missing.
 
 ## Surprises
-- The packet capture's redaction list is by name and **does not contain `Credentials` (`0x0003`)** (`packets.rs:198-211`: `Authenticate`, `ResumeSession`, `AuthenticationResult`, `InstanceDetails`, `Hello`, instance `0x000e`). On a standalone login, `packets.jsonl` stores the account name and the SHA-256 password hash (and the saved login token on a token login). This is not an update issue, but it is the same weakness: redaction depends on the opcode table. Both are small fixes: add `Credentials` and redact **every** outgoing login-channel body when the build is unknown. Check `dumps/0.5.5e/captures/local/` before the repos go public (WP D1).
+- The packet capture's redaction list used to be by name only and did not contain `Credentials` (`0x0003`); `poe-hook-shared/src/redact.rs` now redacts `Credentials` too and has a fail-safe for unknown builds (every outgoing login-channel body is redacted when the opcode table is not the known one). The weakness remains in principle: redaction depends on the opcode table, so check a capture after a game update. Captures in `dumps/` are never committed (WP D1 found none in any repo).
 - The build revision is a plain ASCII string in `.rdata`. It is the easiest version fingerprint, and it is also what `Client.txt` prints.
 - Research hooks run by default on official sessions. A signature failure there is a crash risk, not just a lost feature.
 - `Play` never verifies the exe. `exe_sha256_enforce = false`, and `verify` is a separate button.

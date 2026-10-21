@@ -155,6 +155,7 @@ fn fixture_with(config: &str) -> Fixture {
         admin: mock.clone(),
         logs: LogBuffer::new(50),
         web_tokens: Default::default(),
+        ws_tickets: Default::default(),
         started: Instant::now(),
     };
     Fixture {
@@ -520,6 +521,7 @@ async fn tokens_are_required() {
         ("GET", "/api/v1/admin/accounts"),
         ("GET", "/api/v1/admin/characters"),
         ("GET", "/api/v1/admin/logs/ws"),
+        ("POST", "/api/v1/admin/logs/ws-ticket"),
         ("POST", "/api/v1/admin/announce"),
     ] {
         let (status, body) = f.call(method, uri, None, None).await;
@@ -1078,6 +1080,7 @@ async fn openapi_lists_every_endpoint() {
         "/api/v1/admin/characters",
         "/api/v1/admin/characters/{id}",
         "/api/v1/admin/logs/ws",
+        "/api/v1/admin/logs/ws-ticket",
     ] {
         assert!(
             paths.contains_key(p),
@@ -1169,37 +1172,75 @@ async fn cors_allows_only_configured_origins() {
 }
 
 #[tokio::test]
-async fn log_websocket_needs_an_admin_token() {
+async fn log_websocket_needs_an_admin_token_or_a_ticket() {
     let f = fixture();
     f.account("alice", "correct horse", Role::Player);
     f.account("root", "correct horse", Role::Admin);
     let player = f.login("alice", "correct horse").await;
-    let (status, _) = f
-        .call(
-            "GET",
-            &format!("/api/v1/admin/logs/ws?token={player}"),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    // An admin gets past authentication (and then fails the upgrade: this is not a WebSocket).
     let admin = f.login("root", "correct horse").await;
-    let (status, _) = f
-        .call(
-            "GET",
-            &format!("/api/v1/admin/logs/ws?token={admin}"),
-            None,
-            None,
-        )
-        .await;
+    // The bearer header: a player is refused, an admin gets past authentication (and then
+    // fails the upgrade: this is not a WebSocket).
+    let (status, _) = f.call("GET", "/api/v1/admin/logs/ws", Some(&player), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = f.call("GET", "/api/v1/admin/logs/ws", Some(&admin), None).await;
     assert_ne!(status, StatusCode::UNAUTHORIZED);
     assert_ne!(status, StatusCode::FORBIDDEN);
+    // The web token is not accepted in the URL any more (it would end up in proxy logs).
+    let (status, _) = f
+        .call("GET", &format!("/api/v1/admin/logs/ws?token={admin}"), None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // Tickets: only admins mint them.
+    let (status, _) = f.call("POST", "/api/v1/admin/logs/ws-ticket", Some(&player), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = f.call("POST", "/api/v1/admin/logs/ws-ticket", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = f.call("POST", "/api/v1/admin/logs/ws-ticket", Some(&admin), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["expires_in_secs"], 60);
+    let ticket = body["ticket"].as_str().unwrap().to_owned();
+    assert_ne!(ticket, admin, "a ticket is not the web token");
+    // A ticket works once (then it is gone) and is not a bearer token.
+    let uri = format!("/api/v1/admin/logs/ws?ticket={ticket}");
+    let (status, _) = f.call("GET", &uri, Some(&ticket), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "tickets are not tokens");
+    let (status, _) = f.call("GET", &uri, None, None).await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+    assert_ne!(status, StatusCode::FORBIDDEN);
+    let (status, _) = f.call("GET", &uri, None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "single use");
+    // A ticket of an account that lost the admin role is refused.
+    let (_, body) = f.call("POST", "/api/v1/admin/logs/ws-ticket", Some(&admin), None).await;
+    let ticket = body["ticket"].as_str().unwrap().to_owned();
+    f.state.accounts.set_role("root", Role::Player).unwrap();
+    let (status, _) = f
+        .call("GET", &format!("/api/v1/admin/logs/ws?ticket={ticket}"), None, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
     // Events pushed to the buffer reach a subscriber.
     f.state
         .logs
         .push(LogLevel::Info, "t", "hello".into(), Default::default());
     assert_eq!(f.state.logs.history(&Default::default()).len(), 1);
+}
+
+/// Every response carries the security headers (API and static files alike).
+#[tokio::test]
+async fn responses_carry_security_headers() {
+    let f = fixture();
+    let req = Request::builder().uri("/api/v1/server").body(Body::empty()).unwrap();
+    let res = f.app.clone().oneshot(req).await.unwrap();
+    let h = res.headers();
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert_eq!(h["referrer-policy"], "no-referrer");
+    assert_eq!(h["x-frame-options"], "DENY");
+    let csp = h["content-security-policy"].to_str().unwrap();
+    assert!(csp.contains("default-src 'self'") && csp.contains("frame-ancestors 'none'"), "{csp}");
+    // Errors too.
+    let req = Request::builder().uri("/api/v1/nope").body(Body::empty()).unwrap();
+    let res = f.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.headers()["x-content-type-options"], "nosniff");
 }
 
 /// The log stream over a real socket: history first, then live events, filtered per client.
@@ -1230,18 +1271,24 @@ async fn log_websocket_streams_filtered_events() {
     let app = f.app.clone();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-    // An unknown token is refused before the upgrade.
+    // An unknown ticket is refused before the upgrade.
     let bad = tokio_tungstenite::connect_async(format!(
-        "ws://{addr}/api/v1/admin/logs/ws?token={}",
+        "ws://{addr}/api/v1/admin/logs/ws?ticket={}",
         "00".repeat(32)
     ))
     .await;
     assert!(bad.is_err());
 
-    let (mut ws, _) =
-        tokio_tungstenite::connect_async(format!("ws://{addr}/api/v1/admin/logs/ws?token={token}"))
-            .await
-            .unwrap();
+    let (status, body) = f
+        .call("POST", "/api/v1/admin/logs/ws-ticket", Some(&token), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ticket = body["ticket"].as_str().unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!(
+        "ws://{addr}/api/v1/admin/logs/ws?ticket={ticket}"
+    ))
+    .await
+    .unwrap();
     async fn next(
         ws: &mut (impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin),
     ) -> Value {
@@ -1390,11 +1437,15 @@ async fn login_is_rate_limited_per_ip_and_honours_forwarded_for() {
     let f = fixture_with(&format!("{cfg}trust_forwarded_for = true\n"));
     f.account("alice", "correct horse", Role::Player);
     for name in ["ghost1", "ghost2"] {
-        login_from(&f, "127.0.0.1", name, "x", Some("10.0.0.1, 127.0.0.1")).await;
+        // A client that prepends entries of its own ("10.9.9.9") cannot hide: the proxy's own
+        // entry is the last one.
+        login_from(&f, "127.0.0.1", name, "x", Some("10.9.9.9, 10.0.0.1")).await;
     }
     // Same proxy socket, a different forwarded client: allowed; the locked client is not.
     assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7")).await.0, StatusCode::OK);
     assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.1")).await.0, StatusCode::TOO_MANY_REQUESTS);
+    // Spoofed leading entries do not choose the IP the limiter sees.
+    assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7, 10.0.0.1")).await.0, StatusCode::TOO_MANY_REQUESTS);
 }
 
 /// A launcher token for the account (the launcher's login).

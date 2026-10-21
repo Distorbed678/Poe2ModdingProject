@@ -2,15 +2,18 @@
 
 A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules and the project overview: [../CLAUDE.md](../CLAUDE.md). Start with [guides/setup.md](guides/setup.md), then [architecture/overview.md](architecture/overview.md).
 
+Contributing, security reports and the legal notice: [../CONTRIBUTING.md](../CONTRIBUTING.md) (setup, pull requests, checks, docs rule, how RE findings are documented), [../SECURITY.md](../SECURITY.md), [the disclaimer](../README.md#disclaimer).
+
 ## Guides
 | Document | Contents |
 |---|---|
 | [guides/setup.md](guides/setup.md) | The only place for commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, offline accounts and characters, web admin and launcher builds, two-client test, official read-only sessions, config keys and migration, crash dumps |
 | [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
-| [guides/hosting.md](guides/hosting.md) | Letting other players connect: ports, `public_host`, terrain upload, firewall, what a remote player needs, security notes, the local two-client test and its results |
+| [guides/hosting.md](guides/hosting.md) | The hosting guide: release package or source, ports, `public_host`, config, terrain upload, firewall, accounts, running it permanently (systemd, Windows), TLS reverse proxy, backups and updates, logs, what a remote player needs, security notes, troubleshooting, the local two-client test and its results |
+| [guides/client.md](guides/client.md) | The client and install guide: install through the launcher, or by hand with `cargo xtask` on Linux (Proton) and Windows; first start, updating, going back, troubleshooting |
 | [guides/releasing-server.md](guides/releasing-server.md) | Releasing the server: tagging `server-v*`, what the release workflow builds and packages, the secrets it needs, checking a package locally |
 | [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
-| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, profiles, Steam depot install, Play, mods, releasing (tags, signing secrets and key) |
+| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, profiles, Steam depot install, Play, hosting a server from the launcher, Open web admin, the plain-http warning, mods, releasing (tags, signing secrets and key) |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
 
 ## Architecture

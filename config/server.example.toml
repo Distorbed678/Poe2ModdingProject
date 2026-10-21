@@ -33,12 +33,27 @@ close_after_handoff = false
 # Port written into the client's gateway entry and trusted list when it differs from the bind
 # port (port forwarding, docs/guides/hosting.md). Default: the bind port.
 # public_port = 20481
+# Limits before a client has logged in (a slow or idle socket must not pin memory and tasks).
+# Longest time one message may take to arrive completely, the key exchange included (seconds, 0 = off).
+pre_auth_read_timeout_secs = 15
+# Longest time from connecting to a successful login (seconds, 0 = off).
+pre_auth_login_timeout_secs = 60
+# Most bytes held for an incomplete message (bytes, 0 = off).
+pre_auth_max_buffer = 65536
+# Most connections that have not logged in yet: in total and per client IP (IPv6: per /64). 0 = off.
+max_pre_auth_connections = 256
+max_pre_auth_per_ip = 16
 
 [network.instance]
 bind = "0.0.0.0:6112"
 # Port the login server tells the client to connect to; also where the DLL sends position
 # reports (`cargo xtask deploy-client` writes it into the DLL config).
 public_port = 6112
+# Limits before a client has shown its ticket (as for the login server above).
+pre_auth_read_timeout_secs = 15
+pre_auth_max_buffer = 65536
+max_pre_auth_connections = 256
+max_pre_auth_per_ip = 16
 
 [instance]
 # Empty instances close after this many minutes (towns and hideouts stay open); 0 = never.

@@ -9,7 +9,7 @@ mod session;
 
 use std::sync::Arc;
 
-use poe_accounts::{AccountStore, LoginLimiter};
+use poe_accounts::{AccountStore, ConnectionLimiter, LoginLimiter};
 use poe_cluster::TicketRegistry;
 use poe_config::Config;
 use poe_data::GameData;
@@ -42,13 +42,26 @@ impl LoginServer {
         }
         let listener = TcpListener::bind(self.config.network.login.bind).await?;
         info!(addr = %self.config.network.login.bind, "login server listening");
+        let login = &self.config.network.login;
+        // Connections that have not logged in yet are capped (a slot is freed at login).
+        let limiter = ConnectionLimiter::new(login.max_pre_auth_connections, login.max_pre_auth_per_ip);
+        let mut last_refusal_log: Option<std::time::Instant> = None;
         loop {
             let (stream, peer) = listener.accept().await?;
+            let Some(slot) = limiter.try_acquire(peer.ip()) else {
+                // Dropping the stream closes it. One log line per second keeps a flood from
+                // filling the log as well.
+                if last_refusal_log.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+                    last_refusal_log = Some(std::time::Instant::now());
+                    warn!(%peer, active = limiter.active(), "too many connections before login: refused");
+                }
+                continue;
+            };
             let span = tracing::info_span!("login", %peer);
             let server = self.clone();
             tokio::spawn(
                 async move {
-                    if let Err(e) = session::run(server, stream, peer.ip()).await {
+                    if let Err(e) = session::run(server, stream, peer.ip(), slot).await {
                         warn!("connection error: {e:#}");
                     }
                 }

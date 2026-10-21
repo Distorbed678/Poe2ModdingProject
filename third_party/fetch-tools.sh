@@ -8,13 +8,14 @@ POE_DATA_TOOLS_CLI=cli-v2.2.1
 LIBGGPK3=v2.7.5
 GITLEAKS=v8.30.1
 ACTIONLINT=v1.7.12
+CARGO_XWIN=0.23.1
 
 echo "== poe_data_tools CLI ($POE_DATA_TOOLS_CLI)"
 mkdir -p poe_data_tools
 gh release download "$POE_DATA_TOOLS_CLI" -R adamthedash/poe_data_tools -p poe_data_tools -D poe_data_tools --clobber
 chmod +x poe_data_tools/poe_data_tools
 
-echo "== dat-schema (rolling 'latest')"
+echo "== dat-schema (rolling 'latest'; the sha256 check below only warns, the schema is data, not code)"
 mkdir -p dat-schema
 gh release download latest -R poe-tool-dev/dat-schema -p 'schema-poe2.min.json' -p 'schema.min.json' -D dat-schema --clobber
 # The schema is a rolling download: say when it is not the file the version files were checked with.
@@ -46,7 +47,7 @@ gh release download "$ACTIONLINT" -R rhysd/actionlint -p "actionlint_${al_ver}_l
 (cd actionlint && sha256sum --check --ignore-missing "actionlint_${al_ver}_checksums.txt" \
     && tar -xzf "actionlint_${al_ver}_linux_amd64.tar.gz" actionlint && rm "actionlint_${al_ver}_linux_amd64.tar.gz")
 
-echo "== reference repositories (read-only, for research)"
+echo "== reference repositories (read-only research material; they track the default branch and are NOT pinned: nothing is built or run from them)"
 mkdir -p reference
 for repo in adamthedash/poe_data_tools annalithic/poeformats Crypto137/KiwiNet ncatlin/exileSniffer poe-tool-dev/dat-schema; do
     dir="reference/$(basename "$repo")"
@@ -54,7 +55,7 @@ for repo in adamthedash/poe_data_tools annalithic/poeformats Crypto137/KiwiNet n
 done
 
 echo "== cargo-xwin (Windows MSVC cross-linking for the client DLL)"
-cargo +stable install cargo-xwin --locked --root cargo-xwin
+cargo +stable install cargo-xwin --version "$CARGO_XWIN" --locked --root cargo-xwin
 
 echo "== pyenv (Python venv for scripts/re: capstone, numpy, pefile, git-filter-repo)"
 python3 -m venv --clear pyenv

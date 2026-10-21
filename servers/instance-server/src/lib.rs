@@ -116,8 +116,20 @@ impl InstanceServer {
                 }
             });
         }
+        // Connections that have not shown a valid ticket yet are capped (a slot is freed once
+        // the ticket is redeemed).
+        let cfg = &self.config.network.instance;
+        let limiter = poe_accounts::ConnectionLimiter::new(cfg.max_pre_auth_connections, cfg.max_pre_auth_per_ip);
+        let mut last_refusal_log: Option<std::time::Instant> = None;
         loop {
             let (stream, peer) = listener.accept().await?;
+            let Some(slot) = limiter.try_acquire(peer.ip()) else {
+                if last_refusal_log.is_none_or(|t| t.elapsed() >= Duration::from_secs(1)) {
+                    last_refusal_log = Some(std::time::Instant::now());
+                    warn!(%peer, active = limiter.active(), "too many connections before the ticket: refused");
+                }
+                continue;
+            };
             let span = tracing::info_span!("instance", %peer);
             let server = self.clone();
             tokio::spawn(
@@ -130,7 +142,7 @@ impl InstanceServer {
                         }
                         return;
                     }
-                    if let Err(e) = server.handle(stream).await {
+                    if let Err(e) = server.handle(stream, slot).await {
                         warn!("connection error: {e:#}");
                     }
                 }
@@ -139,24 +151,37 @@ impl InstanceServer {
         }
     }
 
-    async fn handle(&self, stream: TcpStream) -> anyhow::Result<()> {
+    async fn handle(&self, stream: TcpStream, mut slot: poe_accounts::ConnectionSlot) -> anyhow::Result<()> {
         let client_port = stream.peer_addr()?.port();
         let mut conn = Connection::new(stream)?;
         info!("client connected");
         let hello_op = self.protocol.instance.id(Hello::DIRECTION, Hello::NAME)?;
-        let Some(hello) = conn
-            .decode(|r| {
-                let at = r.position();
-                if r.u16()? != hello_op {
-                    return Err(DecodeError::Invalid {
-                        offset: at,
-                        what: "expected Hello",
-                    });
+        // The first message must arrive complete within the read timeout and without piling up
+        // bytes (`[network.instance] pre_auth_*`).
+        let cfg = &self.config.network.instance;
+        conn.set_max_buffer((cfg.pre_auth_max_buffer > 0).then_some(cfg.pre_auth_max_buffer));
+        let read = conn.decode(|r| {
+            let at = r.position();
+            if r.u16()? != hello_op {
+                return Err(DecodeError::Invalid {
+                    offset: at,
+                    what: "expected Hello",
+                });
+            }
+            Hello::decode(r)
+        });
+        let hello = if cfg.pre_auth_read_timeout_secs > 0 {
+            match tokio::time::timeout(Duration::from_secs(cfg.pre_auth_read_timeout_secs), read).await {
+                Ok(r) => r?,
+                Err(_) => {
+                    warn!("no complete Hello in time: closing the connection");
+                    return Ok(());
                 }
-                Hello::decode(r)
-            })
-            .await?
-        else {
+            }
+        } else {
+            read.await?
+        };
+        let Some(hello) = hello else {
             return Ok(());
         };
         let Some(ticket) = self.tickets.redeem(hello.ticket) else {
@@ -166,6 +191,10 @@ impl InstanceServer {
             );
             return Ok(());
         };
+        // A valid ticket: the connection no longer counts against the pre-ticket budget and
+        // may carry the game's messages.
+        slot.release();
+        conn.set_max_buffer(None);
         info!(
             ticket = format_args!("{:#010x}", ticket.id),
             account = ticket.account_id,

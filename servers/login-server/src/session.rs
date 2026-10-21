@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+use std::time::Duration;
+
+use poe_accounts::ConnectionSlot;
 use poe_cluster::TicketCharacter;
 use poe_data::views::{StartState, WorldArea, league_flag_index};
 use poe_net::{Connection, DecodeError, Reader, hexdump::hexdump};
@@ -84,10 +87,83 @@ pub(crate) fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<C
     }
 }
 
-pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::IpAddr) -> anyhow::Result<()> {
+/// Limits of a connection that has not logged in yet (`[network.login] pre_auth_*`); a zero
+/// setting means no limit.
+struct PreAuth {
+    /// Longest time for one message to arrive completely.
+    read_timeout: Option<Duration>,
+    /// Point in time by which the login must have succeeded.
+    login_deadline: Option<tokio::time::Instant>,
+    /// Buffer limit before and after the login.
+    max_buffer: Option<usize>,
+    max_buffer_authenticated: Option<usize>,
+}
+
+impl PreAuth {
+    fn new(cfg: &poe_config::NetworkLoginConfig) -> Self {
+        let secs = |s: u64| (s > 0).then(|| Duration::from_secs(s));
+        let buffer = (cfg.pre_auth_max_buffer > 0).then_some(cfg.pre_auth_max_buffer);
+        Self {
+            read_timeout: secs(cfg.pre_auth_read_timeout_secs),
+            login_deadline: secs(cfg.pre_auth_login_timeout_secs)
+                .map(|d| tokio::time::Instant::now() + d),
+            max_buffer: buffer,
+            // Real messages stay small after the login too; the limit just grows.
+            max_buffer_authenticated: buffer.map(|b| b.saturating_mul(16)),
+        }
+    }
+
+    /// Resolves with the reason when a connection that has not logged in yet runs out of time;
+    /// never once `active` is false (logged in).
+    async fn expired(&self, active: bool) -> &'static str {
+        if !active {
+            return std::future::pending().await;
+        }
+        let message = async {
+            match self.read_timeout {
+                Some(d) => tokio::time::sleep(d).await,
+                None => std::future::pending().await,
+            }
+        };
+        let login = async {
+            match self.login_deadline {
+                Some(t) => tokio::time::sleep_until(t).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            () = message => "no complete message in time",
+            () = login => "login not finished in time",
+        }
+    }
+
+    /// The connection has logged in: frees its place in the pre-login connection budget and
+    /// raises the buffer limit.
+    fn logged_in(&self, conn: &mut Connection, slot: &mut ConnectionSlot) {
+        slot.release();
+        conn.set_max_buffer(self.max_buffer_authenticated);
+    }
+}
+
+pub async fn run(
+    server: Arc<LoginServer>,
+    stream: TcpStream,
+    peer: std::net::IpAddr,
+    mut slot: ConnectionSlot,
+) -> anyhow::Result<()> {
     let mut conn = Connection::new(stream)?;
     info!("client connected");
-    if !handshake::perform(&mut conn, &server.protocol).await? {
+    let pre_auth = PreAuth::new(&server.config.network.login);
+    conn.set_max_buffer(pre_auth.max_buffer);
+    // The key exchange is one message from the client.
+    let handshake = tokio::select! {
+        r = handshake::perform(&mut conn, &server.protocol) => r?,
+        reason = pre_auth.expired(true) => {
+            warn!("{reason} during the key exchange: closing the connection");
+            return Ok(());
+        }
+    };
+    if !handshake {
         info!("client disconnected during key exchange");
         return Ok(());
     }
@@ -104,6 +180,10 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::Ip
             d = conn.decode(|r| decode_client(&server.protocol, r)) => d,
             () = logged_out(&mut logout) => {
                 info!("account left the game: closing the login connection");
+                return Ok(());
+            }
+            reason = pre_auth.expired(account.is_none()) => {
+                warn!("{reason} before the login: closing the connection");
                 return Ok(());
             }
             Some(ticket) = next_transfer(&mut transfers) => {
@@ -134,6 +214,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::Ip
             }
             ClientMessage::Authenticate(auth) => {
                 if let Some(a) = authenticate(&server, &mut conn, auth).await? {
+                    pre_auth.logged_in(&mut conn, &mut slot);
                     logout = Some(server.sessions.subscribe(a.id));
                     transfers = Some(server.sessions.subscribe_transfers(a.id));
                     account = Some(a);
@@ -141,6 +222,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::Ip
             }
             ClientMessage::Credentials(creds) => {
                 if let Some(a) = credentials(&server, &mut conn, peer, creds).await? {
+                    pre_auth.logged_in(&mut conn, &mut slot);
                     logout = Some(server.sessions.subscribe(a.id));
                     transfers = Some(server.sessions.subscribe_transfers(a.id));
                     account = Some(a);
@@ -185,6 +267,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::Ip
                 };
                 info!(account = %resumed.name, id = resumed.id, "session resumed");
                 send_authentication_result(&server, &mut conn, &resumed).await?;
+                pre_auth.logged_in(&mut conn, &mut slot);
                 logout = Some(server.sessions.subscribe(resumed.id));
                 transfers = Some(server.sessions.subscribe_transfers(resumed.id));
                 account = Some(resumed);
@@ -720,8 +803,79 @@ async fn send_instance_details(server: &LoginServer, conn: &mut Connection, tick
 #[cfg(test)]
 mod tests {
     use poe_config::LeagueConfig;
+    use poe_proto::login::{ClientKeyExchange, KeyExchange};
+    use tokio::{
+        io::AsyncWriteExt,
+        net::{TcpListener, TcpStream},
+    };
 
     use super::*;
+
+    async fn socket_pair() -> (Connection, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        (Connection::new(server).unwrap(), client)
+    }
+
+    fn pre_auth(read_ms: Option<u64>, login_ms: Option<u64>) -> PreAuth {
+        PreAuth {
+            read_timeout: read_ms.map(Duration::from_millis),
+            login_deadline: login_ms.map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms)),
+            max_buffer: Some(1024),
+            max_buffer_authenticated: Some(16 * 1024),
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_auth_timers_fire_before_the_login_and_never_after() {
+        let p = pre_auth(Some(30), None);
+        assert_eq!(p.expired(true).await, "no complete message in time");
+        let p = pre_auth(None, Some(30));
+        assert_eq!(p.expired(true).await, "login not finished in time");
+        // The per-message timer restarts with every message, the login deadline does not.
+        let p = pre_auth(Some(200), Some(30));
+        assert_eq!(p.expired(true).await, "login not finished in time");
+        // Logged in: no timer; no limits configured: no timer either.
+        for p in [pre_auth(Some(10), Some(10)), pre_auth(None, None)] {
+            let r = tokio::time::timeout(Duration::from_millis(100), p.expired(p.read_timeout.is_none())).await;
+            assert!(r.is_err(), "must stay pending");
+        }
+    }
+
+    /// A client that connects and sends nothing is dropped by the key exchange's timeout.
+    #[tokio::test]
+    async fn an_idle_socket_times_out_in_the_key_exchange() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let proto = Protocol::load(&poe_config::VersionFile::latest(&root).unwrap().opcodes_dir(&root)).unwrap();
+        let (mut conn, _idle_client) = socket_pair().await;
+        let p = pre_auth(Some(50), None);
+        let started = std::time::Instant::now();
+        let outcome = tokio::select! {
+            r = handshake::perform(&mut conn, &proto) => format!("handshake {r:?}"),
+            reason = p.expired(true) => reason.to_string(),
+        };
+        assert_eq!(outcome, "no complete message in time");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A key exchange that announces a large key and trickles bytes hits the buffer limit
+    /// instead of growing the buffer.
+    #[tokio::test]
+    async fn a_trickled_oversized_message_hits_the_buffer_limit() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let proto = Protocol::load(&poe_config::VersionFile::latest(&root).unwrap().opcodes_dir(&root)).unwrap();
+        let (mut conn, mut client) = socket_pair().await;
+        conn.set_max_buffer(pre_auth(None, None).max_buffer);
+        let announced = proto
+            .login
+            .encode(&ClientKeyExchange(KeyExchange { public_key: vec![0; 60_000], signature: Vec::new() }))
+            .unwrap();
+        // 4 KiB of the 60 kB message arrive, then the sender stalls.
+        client.write_all(&announced[..4096]).await.unwrap();
+        let err = handshake::perform(&mut conn, &proto).await.unwrap_err();
+        assert!(err.to_string().contains("limit"), "{err:#}");
+    }
 
     fn protocol() -> Protocol {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

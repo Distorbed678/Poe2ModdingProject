@@ -1,0 +1,71 @@
+name: CI
+
+# Checks on every push to main and every pull request: the docs' links, the server workspace
+# (build and tests) and a scan of the working tree for secrets. What contributors should run
+# locally before a PR: CONTRIBUTING.md. The release workflow is release.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-links.py
+
+  server:
+    name: Server workspace
+    # Skipped while the repository is private: this repo holds no deploy-key secrets, so the
+    # submodule checkout would fail on every push. It runs once the repositories are public.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Path dependencies in modules/protocol and modules/client-hook. While those repositories
+      # are private each one is read with a read-only deploy key; once they are public the key
+      # inputs can be dropped (the action then uses plain https).
+      - uses: ./.github/actions/fetch-submodules
+        with:
+          paths: modules/protocol modules/client-hook
+          protocol-key: ${{ secrets.PROTOCOL_DEPLOY_KEY }}
+          hook-key: ${{ secrets.HOOK_DEPLOY_KEY }}
+      # The pinned nightly of rust-toolchain.toml (poe_data_tools needs nightly features).
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+      # Tests that read the game files (poe-data) skip themselves when GameFiles/ is absent.
+      - run: cargo test --locked
+      - name: The committed OpenAPI document is current
+        run: cargo run --locked -q -p xtask -- openapi --check
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # gitleaks over the checked-out files (the history is scanned before a repository goes
+      # public, docs/plans/public-release-audit.md). Version and checksum are pinned; the
+      # checksum file comes from the same release.
+      - name: Scan the working tree
+        env:
+          GITLEAKS: 8.30.1
+        run: |
+          curl -fsSL -o gl.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS}/gitleaks_${GITLEAKS}_linux_x64.tar.gz"
+          curl -fsSL -o gl.sums "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS}/gitleaks_${GITLEAKS}_checksums.txt"
+          sha256sum --check --ignore-missing gl.sums
+          tar -xzf gl.tgz gitleaks
+          ./gitleaks dir . --redact=100 --no-banner

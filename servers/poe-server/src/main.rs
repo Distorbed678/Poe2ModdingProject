@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("client {} is `{:?}`, not a supported build", v.version, v.status);
         }
     }
-    for w in config.network.warnings() {
+    for w in config.network.warnings().into_iter().chain(config.security_warnings()) {
         tracing::warn!("{w}");
     }
 
@@ -109,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         admin: instance.clone(),
         logs: logs.clone(),
         web_tokens: Default::default(),
+        ws_tickets: Default::default(),
         started: std::time::Instant::now(),
     };
     let web = async move {

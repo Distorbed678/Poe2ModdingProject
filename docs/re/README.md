@@ -2,6 +2,8 @@
 
 How the client is analysed and where the results are written down. The rules (static analysis only, official servers read-only, never the Steam install) are in [../../CLAUDE.md](../../CLAUDE.md).
 
+**Scope of what is committed.** Everything under `docs/re/` is research about the 0.5.5e client: addresses, struct offsets, opcode meanings, formats and function names, written in our own words. No decompiler output, game code, assets, bundles or data tables are pasted here or anywhere in the repositories (the datamined dumps stay in the git-ignored `dumps/<version>/`). The addresses are for build 0.5.5e only and change with every client update ([update-compatibility.md](update-compatibility.md)). The project is unofficial and not affiliated with Grinding Gear Games ([disclaimer](../../README.md#disclaimer)).
+
 ## Reverse engineering access
 - **Ghidra MCP** (`mcp__ghidra__*`). Call `connect_instance("Poe2ModdingProject")` first; `/PathOfExileSteam.exe` (image base 0x140000000) is open and analyzed.
   - Use targeted calls (`search_strings`, `get_xrefs_to`, `decompile_function`).

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Unattended client test (server must already be running; Steam must be running):
+# Unattended client test (server must already be running with the dev config, POE_CONFIG=runtime/server.dev.toml
+# (python3 scripts/dev-config.py), because the Steam login needs dev_machine_hash_login; Steam must be running):
 # launches the client, which logs in via poe-hook auto_keys (POE_HOOK_AUTO_KEYS: Enter at 20 s), presses Play and
 # waits. It first deletes the terrain layouts/grids in dumps/<version>/terrain. The client window is titled "PoE2 Test Client" (POE_HOOK_WINDOW_TITLE), so a desktop
 # rule can keep it off the screen (see docs/guides/setup.md). SHOT=1 also takes a

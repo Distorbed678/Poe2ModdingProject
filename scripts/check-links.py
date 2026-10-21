@@ -2,7 +2,7 @@
 """Check the relative links and #anchors of the Markdown docs (stdlib only).
 
 Usage: python3 scripts/check-links.py [file-or-dir ...]
-Default: docs/, README.md, CLAUDE.md and dumps/README.md.
+Default: docs/, README.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md and dumps/README.md.
 
 Checks `[text](target)` links outside code blocks and inline code:
 - a relative path must exist (files and directories);
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULTS = ["docs", "README.md", "CLAUDE.md", "dumps/README.md"]
+DEFAULTS = ["docs", "README.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "dumps/README.md"]
 SOFT_DIRS = {"dumps", "runtime", "third_party", "GameFiles", "modules"}
 
 LINK_RE = re.compile(r"(?<!\!)\[((?:[^\[\]]|\[[^\]]*\])*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
