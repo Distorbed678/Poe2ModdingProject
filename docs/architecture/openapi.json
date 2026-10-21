@@ -4,8 +4,8 @@
     "title": "PoE2 private server API",
     "description": "Accounts, administration and live log of the private server. Passwords are sent as plain text: use HTTPS outside the local machine.",
     "license": {
-      "name": "MIT OR Apache-2.0",
-      "identifier": "MIT OR Apache-2.0"
+      "name": "MIT",
+      "identifier": "MIT"
     },
     "version": "1"
   },

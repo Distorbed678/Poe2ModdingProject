@@ -160,11 +160,8 @@ path = "runtime/server.sqlite"
 [accounts]
 # Real accounts have a username and a password (`account create <name> <password>`, admins by
 # role: `account role <name> admin`; docs/guides/server-admin.md). Admin is the account's role.
-# Dev only, keep off on any server others can reach: the Steam login (0x0005) works without a
-# password and auto-creates accounts keyed by the client's machine hash, named <name_prefix><id>.
-# The dev config (runtime/server.dev.toml) turns it on; clients of this config log in through
-# the standalone screen with an account name and password.
-dev_machine_hash_login = false
+# Clients log in through the standalone screen with an account name and password (or a saved
+# Remember Me token); a Steam login (0x0005) is always refused. name_prefix is not used any more.
 name_prefix = "Exile"
 # Whether POST /api/v1/register may create accounts (docs/architecture/web-api.md); server commands always can.
 open_registration = false

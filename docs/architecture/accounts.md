@@ -48,11 +48,10 @@ Result codes the client gets for failures: [login.md](../protocol/login.md#authe
 |---|---|---|
 | Username and password | `0x0003`, `token_login = 0` | the standalone login screen (`login_mode = "standalone"` in the DLL config, [client-dll.md](client-dll.md#login-mode-and-trusted-servers)) |
 | Saved token | `0x0003`, `token_login = 1` | Remember Me, launcher auto-login |
-| Machine hash (dev) | `0x0005` (Steam) | only with `[accounts] dev_machine_hash_login = true`; auto-creates `Exile<id>` accounts without a password. Off in the code and in the committed `config/server.toml`; only the git-ignored developer config (`runtime/server.dev.toml`, [setup.md](../guides/setup.md#developer-config)) turns it on. Never on a server others can reach |
 
-With `dev_machine_hash_login = false` a `0x0005` gets result `9` ("Access to the game is not currently enabled") with a notice.
+There is no password-less login. The Steam `0x0005` login that used to create `Exile<id>` accounts from the client's machine hash (`[accounts] dev_machine_hash_login`) was removed (audit question 5, 2026-10-21): a `0x0005` always gets result `9` ("Access to the game is not currently enabled") with the notice "This server needs a username and password login." (an unknown client build still gets its update popup first). A config that still has `dev_machine_hash_login` loads: the key is ignored and the server logs a warning at startup. The unattended in-game tests sign in with a Remember Me token ([setup.md](../guides/setup.md#unattended-client-tests)).
 
-Accounts that existed before migration `0006` (machine-hash accounts) are kept with a null password: they can only log in on the dev path, and `account passwd <name> <password>` gives one a real password. The migration made an existing `Exile1` an admin, as the old `[admin] accounts` list of the dev config did; on a fresh database no account exists when it runs, so nobody is promoted.
+Accounts that existed before migration `0006` (made by the old machine-hash login) are kept with a null password: nobody can log in to them until `account passwd <name> <password>` gives one a real password. The migration history is unchanged. The migration made an existing `Exile1` an admin, as the old `[admin] accounts` list of the dev config did; on a fresh database no account exists when it runs, so nobody is promoted.
 
 ## Admins and account commands
 

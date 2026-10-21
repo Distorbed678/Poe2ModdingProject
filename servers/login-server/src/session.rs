@@ -334,49 +334,17 @@ async fn logged_out(logout: &mut Option<tokio::sync::watch::Receiver<u64>>) {
     std::future::pending().await
 }
 
-/// Dev-only Steam login (`0x0005`): the account is keyed by the machine hash, no password.
-/// Off unless `[accounts] dev_machine_hash_login`.
+/// Steam login (`0x0005`): always refused (result 9 with a notice). The password-less machine-hash
+/// login was removed (audit question 5); every login is the standalone `0x0003`.
 async fn authenticate(
     server: &LoginServer,
     conn: &mut Connection,
     auth: Authenticate,
 ) -> anyhow::Result<Option<Account>> {
-    if let Some(refusal) = auth::check_client(&server.config, &auth.client_hash) {
-        send_verdict(server, conn, &refusal).await?;
-        return Ok(None);
-    }
-    if !server.config.accounts.dev_machine_hash_login {
-        warn!("Steam login (0x0005) refused: [accounts] dev_machine_hash_login is off");
-        send_refusal(server, conn, auth::code::NOT_ENABLED, "This server needs a username and password login.").await?;
-        return Ok(None);
-    }
-    let login_key = hex::encode(auth.machine_hash);
-    let account = match server.store.account_by_login_key(&login_key)? {
-        Some(a) => a,
-        None => {
-            let a = server
-                .store
-                .create_account(&login_key, &server.config.accounts.name_prefix)?;
-            info!(account = %a.name, "created account");
-            a
-        }
-    };
-    if server.accounts.find_by_id(account.id)?.is_some_and(|r| r.disabled) {
-        warn!(account = %account.name, "disabled account refused");
-        send_refusal(server, conn, auth::code::DISABLED, "This account has been disabled.").await?;
-        return Ok(None);
-    }
-    server.accounts.record_login(account.id)?;
-    info!(
-        account = %account.name,
-        id = account.id,
-        ticket_len = auth.ticket.len(),
-        "authenticated (dev machine hash)"
-    );
-    // A second login of the account replaces the first one (login connection and game).
-    server.sessions.supersede(account.id);
-    send_authentication_result(server, conn, &account).await?;
-    Ok(Some(account))
+    warn!("Steam login (0x0005) refused: this server needs a username and password login");
+    let verdict = auth::steam_login_refusal(&server.config, &auth.client_hash);
+    send_verdict(server, conn, &verdict).await?;
+    Ok(None)
 }
 
 /// Standalone login (`0x0003`): username and password hash, or a saved login token.
@@ -423,17 +391,6 @@ async fn credentials(
 /// Sends a refusal made by [`auth`] as the `0x0004` reply.
 async fn send_verdict(server: &LoginServer, conn: &mut Connection, verdict: &auth::Verdict) -> anyhow::Result<()> {
     let reply = auth::reply(&server.config.accounts, verdict);
-    conn.send(&server.protocol.login.encode(&reply)?).await?;
-    Ok(())
-}
-
-async fn send_refusal(
-    server: &LoginServer,
-    conn: &mut Connection,
-    result: u16,
-    notice: &'static str,
-) -> anyhow::Result<()> {
-    let reply = auth::reply(&server.config.accounts, &auth::Verdict::Refused { result, notice: notice.to_owned() });
     conn.send(&server.protocol.login.encode(&reply)?).await?;
     Ok(())
 }

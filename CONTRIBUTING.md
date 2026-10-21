@@ -102,4 +102,4 @@ Maintainers cut releases from tags; contributors do not need to. How: the server
 
 ## Licence
 
-By contributing you agree that your contribution is licensed under the repository's terms: MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
+By contributing you agree that your contribution is licensed under the repository's licence: MIT ([LICENSE](LICENSE)).

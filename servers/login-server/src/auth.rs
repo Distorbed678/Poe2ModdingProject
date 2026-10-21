@@ -59,6 +59,13 @@ fn refused(result: u16, notice: &str) -> Verdict {
     Verdict::Refused { result, notice: notice.to_owned() }
 }
 
+/// The reply to a Steam login (`0x0005`): the password-less machine-hash login no longer exists, so
+/// it is always refused (an unknown client build keeps its own update-popup refusal).
+pub fn steam_login_refusal(config: &poe_config::Config, client_hash: &[u8; 32]) -> Verdict {
+    check_client(config, client_hash)
+        .unwrap_or_else(|| refused(code::NOT_ENABLED, "This server needs a username and password login."))
+}
+
 fn map_error(e: AccountError, token_login: bool) -> Verdict {
     match e {
         AccountError::NoAccount => refused(code::NO_ACCOUNT, "The specified account does not exist."),
@@ -279,6 +286,25 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         c.version_info = Some(poe_config::VersionFile::load(&root, &c.game.version).unwrap());
         c
+    }
+
+    /// The Steam login (`0x0005`) is gone: result 9 with a notice and no account, whatever the
+    /// config (also one that still has the removed `dev_machine_hash_login = true`).
+    #[test]
+    fn a_steam_login_is_always_refused() {
+        let old_key = include_str!("../../../config/server.example.toml")
+            .replace("[accounts]", "[accounts]\ndev_machine_hash_login = true");
+        for text in [include_str!("../../../config/server.example.toml").to_owned(), old_key] {
+            let mut c = poe_config::Config::parse(&text).unwrap();
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            c.version_info = Some(poe_config::VersionFile::load(&root, &c.game.version).unwrap());
+            c.version_info.as_mut().unwrap().client.hashes_confirmed = false;
+            let verdict = steam_login_refusal(&c, &[1; 32]);
+            assert!(matches!(&verdict, Verdict::Refused { result: 9, notice } if !notice.is_empty()), "{verdict:?}");
+            let r = reply(&c.accounts, &verdict);
+            assert_eq!((r.result, r.account_id), (9, 0));
+            assert_eq!(r.session_token, [0; 32]);
+        }
     }
 
     #[test]

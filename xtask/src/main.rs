@@ -72,11 +72,11 @@ enum Cmd {
         /// Skip building the DLLs first.
         #[arg(long)]
         no_build: bool,
-        /// DEVELOPER ONLY, for the project's own research: keep the original gateway list and
-        /// set the DLL's `mode = "official"` (no crypto bypass, no injection; only observing
-        /// and logging). The DLL still patches game code in memory to observe, which the
-        /// game's anti-cheat can detect: do not use it on an account you care about. Not
-        /// supported, not for general use (the launcher never does this).
+        /// Observe the official servers, read-only: keep the original gateway list and set the
+        /// DLL's `mode = "official"` (no crypto bypass, no injection; it only observes and
+        /// logs). The DLL still patches game code in memory to observe, which the game's
+        /// anti-cheat may detect: use it at your own risk and not on an account you care
+        /// about. The launcher never does this. Guide: docs/guides/official-mode.md
         #[arg(long)]
         official: bool,
         /// `login_mode` written to poe-hook.toml for private deploys: `standalone` (account

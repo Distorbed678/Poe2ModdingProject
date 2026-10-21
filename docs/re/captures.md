@@ -9,7 +9,7 @@ server's traffic, and what was changed to match. Tools: the DLL's Packets/Protoc
 `--dump <channel> <in|out> <0xop>` prints them) and `scripts/re/packets_diff.py`.
 Run it inside the Poe2Protocol submodule (it is not a member of the main workspace): `cd modules/protocol && cargo run -p poe-proto --example check_capture -- opcodes/0.5.5e <packets.jsonl> [--show N]`, with captures from `dumps/0.5.5e/captures/`.
 
-Compare a capture with one from our server: `third_party/pyenv/bin/python scripts/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`. How a capture is made: [../guides/setup.md](../guides/setup.md#official-servers-read-only-developer-research-only), [../architecture/client-dll.md](../architecture/client-dll.md#packet-capture-packets-packetsrs).
+Compare a capture with one from our server: `third_party/pyenv/bin/python scripts/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`. How a capture is made: [../guides/setup.md](../guides/setup.md#official-servers-read-only-observation), [../architecture/client-dll.md](../architecture/client-dll.md#packet-capture-packets-packetsrs).
 
 ## Layout check
 Every official message we have a decoder for decodes without errors or leftover bytes, except

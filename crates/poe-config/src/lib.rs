@@ -459,18 +459,13 @@ impl Config {
     /// `config/server.toml` triggers none of them.
     pub fn security_warnings(&self) -> Vec<String> {
         let mut out = Vec::new();
-        let net = &self.network;
-        let exposed = !net.login.bind.ip().is_loopback() || !net.instance.bind.ip().is_loopback();
-        if self.accounts.dev_machine_hash_login {
-            out.push(if exposed {
-                "[accounts] dev_machine_hash_login is on and a game port listens beyond loopback: \
-                 anyone who can reach it can create accounts and sign in without a password"
-                    .into()
-            } else {
-                "[accounts] dev_machine_hash_login is on: the Steam login needs no password \
-                 (development only; keep it off on any server others can reach)"
-                    .into()
-            });
+        if self.accounts.dev_machine_hash_login.is_some() {
+            out.push(
+                "[accounts] dev_machine_hash_login is gone and ignored: the password-less Steam login \
+                 (0x0005) was removed, every login is an account name and password or a saved \
+                 login token (remove the key from this config)"
+                    .into(),
+            );
         }
         if !self.web.bind.ip().is_loopback() {
             out.push(format!(
@@ -830,11 +825,11 @@ pub struct AccountsConfig {
     /// Stash tab names an account gets (sent in InitialState; official: "1".."4").
     #[serde(default = "default_stash_tabs")]
     pub stash_tabs: Vec<String>,
-    /// Dev only: the Steam login (`0x0005`) auto-creates and logs into an account keyed by the
-    /// client's machine hash, with no password. Off: only username/password and token logins
-    /// (`0x0003`) work.
+    /// Removed: the password-less Steam login (`0x0005`) no longer exists (a `0x0005` is always
+    /// refused). The key is still read so an old config loads; any value only gives a startup
+    /// warning ([`Config::security_warnings`]).
     #[serde(default)]
-    pub dev_machine_hash_login: bool,
+    pub dev_machine_hash_login: Option<bool>,
     /// Whether the web API may register accounts (WP4.1); server commands always can.
     #[serde(default)]
     pub open_registration: bool,
@@ -1052,7 +1047,7 @@ mod tests {
     #[test]
     fn committed_config_is_safe() {
         let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
-        assert!(!cfg.accounts.dev_machine_hash_login, "password-less login");
+        assert!(cfg.accounts.dev_machine_hash_login.is_none(), "removed key");
         assert!(cfg.network.login.bind.ip().is_loopback());
         assert!(cfg.network.instance.bind.ip().is_loopback());
         assert!(cfg.web.bind.ip().is_loopback());
@@ -1073,7 +1068,7 @@ mod tests {
         // Same for the example (a hosting template: it may listen beyond loopback, but nothing
         // password-less).
         let ex = Config::parse(include_str!("../../../config/server.example.toml")).unwrap();
-        assert!(!ex.accounts.dev_machine_hash_login);
+        assert!(ex.accounts.dev_machine_hash_login.is_none());
         assert!(!ex.accounts.open_registration);
         assert!(ex.web.bind.ip().is_loopback());
     }
@@ -1082,15 +1077,17 @@ mod tests {
     fn security_warnings_name_the_dangerous_combinations() {
         let mut cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
         assert!(cfg.security_warnings().is_empty());
-        cfg.accounts.dev_machine_hash_login = true;
+        // An old config that still has the removed key loads and gets a warning.
+        cfg.accounts.dev_machine_hash_login = Some(true);
         let w = cfg.security_warnings();
         assert_eq!(w.len(), 1);
-        assert!(w[0].contains("development only"), "{w:?}");
+        assert!(w[0].contains("is gone and ignored"), "{w:?}");
+        cfg.accounts.dev_machine_hash_login = None;
         cfg.network.login.bind = "0.0.0.0:20481".parse().unwrap();
-        assert!(cfg.security_warnings()[0].contains("beyond loopback"));
+        assert!(cfg.security_warnings().is_empty());
         cfg.web.bind = "0.0.0.0:8080".parse().unwrap();
         cfg.accounts.open_registration = true;
-        assert_eq!(cfg.security_warnings().len(), 3);
+        assert_eq!(cfg.security_warnings().len(), 2);
     }
 
     #[test]
@@ -1216,16 +1213,8 @@ mod tests {
         // Accounts: the example documents the defaults of the optional keys.
         let (e, m) = (&example.accounts, &minimal.accounts);
         assert_eq!(
-            (
-                e.dev_machine_hash_login,
-                e.open_registration,
-                e.remember_days
-            ),
-            (
-                m.dev_machine_hash_login,
-                m.open_registration,
-                m.remember_days
-            )
+            (e.open_registration, e.remember_days),
+            (m.open_registration, m.remember_days)
         );
     }
 }

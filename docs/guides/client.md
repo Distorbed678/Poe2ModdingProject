@@ -2,7 +2,7 @@
 
 How a player gets the game client onto a private server of this project: through the launcher, or by hand with `cargo xtask`, on Linux (Proton) or Windows. For running a server for others see [hosting.md](hosting.md); for developers [setup.md](setup.md) has every command.
 
-**Unofficial.** This project is not affiliated with or endorsed by Grinding Gear Games. No game files are distributed: you need your own legal copy of Path of Exile 2, on the build the server supports (**0.5.5e**; the exact build and its executable checksum are in `versions/0.5.5e.toml`). The client hook is a DLL that is loaded into the game; the game's anti-cheat may detect it. Use it only for the private server, never on an account you care about, and never on official servers ([why](#going-back-to-the-official-game)). See the [disclaimer](../../README.md#disclaimer).
+**Unofficial.** This project is not affiliated with or endorsed by Grinding Gear Games. No game files are distributed: you need your own legal copy of Path of Exile 2, on the build the server supports (**0.5.5e**; the exact build and its executable checksum are in `versions/0.5.5e.toml`). The client hook is a DLL that is loaded into the game; the game's anti-cheat may detect it. Use it only for the private server and never on an account you care about; if you want to use it to observe an official session, read [official-mode.md](official-mode.md) first ([overview](#going-back-to-the-official-game)). See the [disclaimer](../../README.md#disclaimer).
 
 ## What gets installed
 
@@ -78,7 +78,7 @@ The deploy code in `poe-hook-deploy` (used by `cargo xtask deploy-client`) write
 
 A client deployed for a private server refuses connections to anything but loopback and your server (`block_external`), so it cannot reach official services by accident, but it also cannot play the official game. To play the official game, use Steam's own, untouched install (the project never modifies it). If you want to remove the hook from a copy: `cargo xtask revert-client` (by hand: delete `version.dll`, `poe_hook_core.dll`, `poe-hook.toml`, `steam_appid.txt` and rename `gateway_list.txt.orig` back to `gateway_list.txt`; the launcher's uninstall does it).
 
-The project has an `--official` mode for the developers' own research. It sends and changes nothing, but it patches game code in memory to observe, and the anti-cheat can detect that. It is not supported and not for players ([setup.md](setup.md#official-servers-read-only-developer-research-only)).
+The project also has an `--official` mode that lets the hook *observe* a session on the official servers (it sends and changes nothing, but it patches game code in memory to do so, and the anti-cheat may detect that). What it does, the risk to your account and the steps are in [official-mode.md](official-mode.md); the launcher does not offer it.
 
 ## Troubleshooting
 

@@ -43,7 +43,7 @@ python3 scripts/check-links.py   # relative links and #anchors in the docs, READ
 ## Run
 ```sh
 cargo run -p poe-server     # login (20481) + instance (6112) servers + web API (127.0.0.1:8080), config/server.toml (add --release for play); developers: POE_CONFIG=runtime/server.dev.toml, see below
-cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: developer-only research on official servers, read-only, see below; --no-build; --sample-mod: also install the sample mod, enabled)
+cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: read-only observation of official sessions, see below and official-mode.md; --no-build; --sample-mod: also install the sample mod, enabled)
 cargo xtask deploy-mod      # install a client mod (default: the sample mod) into GameFiles/poe-hook-mods/<id>/ and enable it; [dir] [--dll f] [--disable] [--no-build]
 cargo xtask deploy-core     # rebuilds and installs only the debug core; a running client reloads it within about a second (--no-build)
 cargo xtask dll-data        # rewrites only GameFiles/poe-hook-data/ (stats, action types, areas)
@@ -65,7 +65,7 @@ cargo xtask select-gateway  # only points the remembered gateway of the prefix a
 - Writes `dump_dir` (`<repo>/dumps/<version>` as a `Z:\` path) into `GameFiles/poe-hook.toml`; the DLL writes terrain grids and layouts, area exports and client tables there ([../../dumps/README.md](../../dumps/README.md)).
 - Writes the DLL's name tables to `GameFiles/poe-hook-data/` (`stats.tsv`, `action_types.tsv`, `areas.tsv` for the area picker).
 - Copies `modules/client-hook/poe-hook/poe-hook.toml`, unless a copy already exists (so your local edits survive).
-- Sets `login_mode` (`standalone` by default; `--login-mode steam` keeps the Steam login) and `trusted_servers` (`[network] public_host` with the login and instance ports) at the top of that file. `--official` writes `login_mode = "steam"` and `trusted_servers = []`.
+- Sets `login_mode` (`standalone` by default; `--login-mode steam` is for observing official servers: our server refuses the Steam login) and `trusted_servers` (`[network] public_host` with the login and instance ports) at the top of that file. `--official` writes `login_mode = "steam"` and `trusted_servers = []`.
 - Sets `position_sync_port` in that file's `[features]` to `[network.instance] public_port`, so the side channel (position reports, debug link, terrain upload) goes to the instance server.
 - Resets `auto_keys` to `[]`, and the client's remembered gateway (`gateway_id` in the test prefix's `poe2_production_Config.ini`) to ours for private deploys (after an official session it stays on an official realm and the client never contacts our server).
 - Writes `steam_appid.txt`.
@@ -75,9 +75,9 @@ cargo xtask select-gateway  # only points the remembered gateway of the prefix a
 
 ### Developer config
 
-`config/server.toml` is committed with **safe values**: the login and instance servers listen on loopback only, the password-less Steam login (`dev_machine_hash_login`) is off, and the developer tools (`[dev] position_sync`, `debug_link`, `movement_trace`, `known_seeds`) are off. A checkout therefore cannot be reached from the network by accident and needs a real account (`account create`, [below](#accounts-and-characters-offline)) to log in through the standalone login screen.
+`config/server.toml` is committed with **safe values**: the login and instance servers listen on loopback only, there is no password-less login (the machine-hash login was removed), and the developer tools (`[dev] position_sync`, `debug_link`, `movement_trace`, `known_seeds`) are off. A checkout therefore cannot be reached from the network by accident and needs a real account (`account create`, [below](#accounts-and-characters-offline)) to log in through the standalone login screen.
 
-The development setup needs the opposite: the Steam login that creates `Exile<id>` accounts by itself, listening on every interface for remote and two-client tests, the debug link and position sync for the overlay and drift checks, the movement trace and the known terrain seeds. Those overrides live in a **git-ignored copy**:
+The development setup needs the opposite: listening on every interface for remote and two-client tests, the debug link and position sync for the overlay and drift checks, the movement trace and the known terrain seeds. Those overrides live in a **git-ignored copy**:
 
 ```sh
 python3 scripts/dev-config.py                      # writes runtime/server.dev.toml from config/server.toml (all comments kept)
@@ -85,7 +85,7 @@ POE_CONFIG=runtime/server.dev.toml cargo run -p poe-server
 POE_CONFIG=runtime/server.dev.toml cargo xtask deploy-client      # deploy-client reads public_host and the ports from the same file
 ```
 
-`scripts/dev-config.py --if-missing` only writes a missing file; run it without the flag to pick up new keys of the committed file (it overwrites, so keep personal changes in your own copy under another name). `scripts/test-mp.sh setup` makes its own `runtime/server-mp.toml` from the same script. The unattended tests ([below](#unattended-client-tests)) and `deploy-client --login-mode steam` need the dev config because the Steam login needs `dev_machine_hash_login`. Never use the dev config on a server others can reach ([hosting.md](hosting.md#security-notes)).
+`scripts/dev-config.py --if-missing` only writes a missing file; run it without the flag to pick up new keys of the committed file (it overwrites, so keep personal changes in your own copy under another name). `scripts/test-mp.sh setup` makes its own `runtime/server-mp.toml` from the same script. The unattended tests ([below](#unattended-client-tests)) use the dev config for the debug link, position sync and the interface binds; they log in with a test account, not a dev login. Never use the dev config on a server others can reach ([hosting.md](hosting.md#security-notes)).
 
 ### Web API
 
@@ -96,7 +96,7 @@ POE_CONFIG=runtime/server.dev.toml cargo xtask deploy-client      # deploy-clien
 These run against the database (also while the server is up), print a result and exit. They are the way to make the first admin; every other account command also works in chat and in the overlay ([server-admin.md](server-admin.md#accounts)).
 
 ```sh
-cargo run -p poe-server -- account create alice "a long password"   # also: role <name> <player|admin>, disable|enable <name>, passwd <name> <password>, list
+cargo run -p poe-server -- account create alice --password-stdin   # type the password, Enter; also: role <name> <player|admin>, disable|enable <name>, passwd <name> --password-stdin, list
 cargo run -p poe-server -- account role alice admin
 cargo run -p poe-server -- character create <account> <name> <start_state> [area] [league]
 cargo run -p poe-server -- character list [account]
@@ -135,7 +135,7 @@ cargo test --test fetch_tool -- --ignored                # downloads and starts 
 
 ### Two-client test (LAN)
 
-`scripts/test-mp.sh` runs two real game clients against one server on one machine (Steam must be running); what it checks and the results: [hosting.md](hosting.md#local-two-client-test). Environment: `LAN_IP`, `MP_PASSWORD`, `MP_RES`, `MP_BORDERLESS`, `MP_AREA`, `MP_CLASS` (documented in the script's header).
+`scripts/test-mp.sh` runs two real game clients against one server on one machine (Steam must be running); what it checks and the results: [hosting.md](hosting.md#local-two-client-test). Environment: `LAN_IP`, `MP_RES`, `MP_BORDERLESS`, `MP_AREA`, `MP_CLASS` (documented in the script's header).
 
 ```sh
 scripts/test-mp.sh setup      # build, runtime/server-mp.toml (LAN IP, own database), accounts + one Ranger each in G1_town, prefix 2, deploy
@@ -144,7 +144,7 @@ scripts/test-mp.sh clients    # token login + Play for both (client <n> [acct] f
 scripts/test-mp.sh keys 1 inmove:640,200 indown:0x57 wait:2000 inup:0x57   # poe-hook.1.keys: input for client 1
 scripts/test-mp.sh shot 2     # F8 screenshot of client 2 (prints the file)
 scripts/test-mp.sh status     # processes, memory, session lines of the server log
-scripts/test-mp.sh stop       # kill the clients; then stop the server in its own call; puts prefix 1's window size back and redeploys the private steam-login state (`restore` does just that)
+scripts/test-mp.sh stop       # kill the clients; then stop the server in its own call; puts prefix 1's window size back and redeploys the private standalone-login state (`restore` does just that)
 ```
 
 The second client uses `third_party/proton-prefix-2` (a copy of the first prefix with its own login credentials, screenshots and gateway) through `cargo xtask --prefix third_party/proton-prefix-2 ...`. `POE_HOOK_KEYS_FILE=poe-hook.<n>.keys` gives each DLL its own input file ([entries](#poe-hookkeys-entries)).
@@ -161,7 +161,7 @@ It writes the token to `third_party/proton-prefix/pfx/drive_c/users/steamuser/Do
 
 ### `login_mode` and `trusted_servers`
 
-`cargo xtask deploy-client` writes `login_mode = "standalone"` into `GameFiles/poe-hook.toml` by default (the DLL's own default too): the client shows the account/password screen and sends `0x0003`, which the login server handles. Existing configs get the keys on the next deploy; to go back set `login_mode = "steam"` and `trusted_servers = []` (or deploy with `--login-mode steam`). `cargo xtask deploy-core` does not touch the config. `scripts/test-run.sh` and `auto_keys` press Enter on the Steam login screen, so for them deploy with `--login-mode steam` and run the server with the [dev config](#developer-config) (`[accounts] dev_machine_hash_login = true`); `scripts/test-mp.sh` uses the standalone login with remember-me tokens.
+`cargo xtask deploy-client` writes `login_mode = "standalone"` into `GameFiles/poe-hook.toml` by default (the DLL's own default too): the client shows the account/password screen and sends `0x0003`, which the login server handles. Existing configs get the keys on the next deploy; to go back set `login_mode = "steam"` and `trusted_servers = []` (or deploy with `--login-mode steam`). `cargo xtask deploy-core` does not touch the config. `scripts/test-run.sh` and `scripts/test-mp.sh` both need `standalone` (they sign in with a Remember Me token, see [Unattended client tests](#unattended-client-tests)); the Steam login mode only makes sense for observing official servers (`--official`).
 
 ## Config
 
@@ -187,7 +187,7 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | (new) `[security]` | password attempt limits and `trust_forwarded_for` (WP B2; [accounts.md](../architecture/accounts.md#password-attempt-limits)) |
 | `[admin] accounts = [...]` | removed: admin is the account's role (`account role <name> admin`; the migration made `Exile1` an admin). A leftover `[admin]` section is ignored |
 | (new) `[cluster] id` | cluster identity; login tokens from another id are invalid (default `"local"`) |
-| (new) `[accounts] dev_machine_hash_login` | Steam `0x0005` login without a password, auto-creating `Exile<id>` accounts (default `false`; only the dev config `runtime/server.dev.toml` sets `true`) |
+| (new, then removed) `[accounts] dev_machine_hash_login` | the Steam `0x0005` login without a password is gone (a `0x0005` is always refused); an old config that still has the key loads, the server warns at startup and ignores it. `name_prefix` is not used any more (it named those accounts) |
 | (new) `[accounts] open_registration` | whether `POST /api/v1/register` may create accounts (default `false`) |
 | (new) `[web]` | `enabled` (`true`), `bind` (`127.0.0.1:8080`), `static_dir`, `cors_origins`, `log_buffer` (`2000`): the web API ([../architecture/web-api.md](../architecture/web-api.md)) |
 | (new) `[accounts] remember_days` | lifetime of a Remember Me login (default `30`) |
@@ -219,17 +219,19 @@ One-time setup, after `cargo xtask deploy-client`:
 
 To play:
 1. Start the server from the repo: `cargo run --release -p poe-server` (leave it running; Ctrl+C stops it).
-2. Launch the shortcut from Steam. The login screen shows "Local Server". With the default `login_mode = "standalone"` sign in with an account name and password (make one offline, [above](#accounts-and-characters-offline); Remember Me works). After `deploy-client --login-mode steam` the Steam login screen appears instead and, with `[accounts] dev_machine_hash_login = true` (the [dev config](#developer-config); never on a shared server), creates an `Exile<id>` account by itself.
+2. Launch the shortcut from Steam. The login screen shows "Local Server". With the default `login_mode = "standalone"` sign in with an account name and password (make one offline, [above](#accounts-and-characters-offline); Remember Me works). There is no password-less login.
 
 Notes:
 - `auto_keys` in `GameFiles/poe-hook.toml` is `[]` after every deploy (nothing is pressed for you); the unattended tests set it per run with `POE_HOOK_AUTO_KEYS` ([Unattended client tests](#unattended-client-tests)).
 - Keep `dump_object_types = true`: the spawn position relies on the tile layout and cell grid the DLL exports to `dumps/<version>/terrain/{layouts,grids}/` (the server reads them through `[spawn] layout_dir`, or receives them as an upload from a remote client, [hosting.md](hosting.md); it has no collision of its own yet).
-- Admin commands (`!help`, the overlay's Commands and Instances pages) need an account with the admin role. Make an admin with `cargo run -p poe-server -- account create <name> <password>` then `account role <name> admin` (no account is an admin by default; a machine-hash `Exile<id>` account has no password, so give it a role with `account role` only for local tests); see [server-admin.md](server-admin.md).
+- Admin commands (`!help`, the overlay's Commands and Instances pages) need an account with the admin role. Make an admin with `cargo run -p poe-server -- account create <name> --password-stdin` then `account role <name> admin` (no account is an admin by default); see [server-admin.md](server-admin.md).
 - Movement: WASD works in the default input mode. For click-to-move, pick the mouse input method in the game's options (in the config file: `user_input_mode=mouse_and_keyboard`). Space is the dodge roll in both modes.
 - After rebuilding the DLL, run `cargo xtask deploy-client` again; the shortcut needs no changes.
 
-## Official servers (read-only, developer research only)
-**Read this first.** This mode exists for the project's own research (comparing a real session with ours). It is not supported and not endorsed. The DLL sends, alters and injects nothing in this mode, but it still **patches game code in memory** to observe (inline detours, a Vulkan hook, the `version.dll` proxy), and the game's anti-cheat may detect any injected DLL as a violation. Do not use it on an account you care about. The launcher never does this.
+## Official servers (read-only observation)
+**Read this first** (the full user guide is [official-mode.md](official-mode.md)). This mode lets you observe and log your own official sessions, for example to compare a real session with ours. The DLL sends, alters and injects nothing in this mode, but it still **patches game code in memory** to observe (inline detours, a Vulkan hook, the `version.dll` proxy), and the game's anti-cheat may detect any injected DLL as a violation. Do not use it on an account you care about. The launcher never does this.
+
+User guide for this mode (what it does and does not do, the risk, step by step): [official-mode.md](official-mode.md).
 
 1. `cargo xtask deploy-client --official`: the original gateway list goes back into `GameFiles/`, and `poe-hook.toml` gets `mode = "official"`, `login_mode = "steam"` (the client is not patched; the Steam login screen shows) and `trusted_servers = []`. The GameFiles copy must be the same build as the live game; after a patch, update GameFiles first.
 2. Start Steam, then `cargo xtask run-client` (the GameFiles copy in its own Proton prefix; the Steam install is never touched).
@@ -240,8 +242,8 @@ Comparing a session with one from our server: [../re/captures.md](../re/captures
 
 ## Unattended client tests
 With Steam running (without it the client logs `Unable to init Steam API` and exits with code 1) and the server, started with the [dev config](#developer-config), writing to `runtime/server-run.log` (`POE_CONFIG=runtime/server.dev.toml target/debug/poe-server > runtime/server-run.log 2>&1`):
-- `scripts/test-run.sh <name> [seconds]` launches the client, logs in and enters the game by itself (`auto_keys`). It first deletes `dumps/<version>/terrain/layouts/*` and `grids/*` so the run shows whether the DLL exports them again (the server waits for the layout by tile hash). It sets these environment variables for the client:
-  - `POE_HOOK_AUTO_KEYS=20000:13` (Enter at 20 s, the login; `[[ms, vk], ...]` in `auto_keys` form);
+- `scripts/test-run.sh <name> [seconds]` signs the test account in, launches the client and enters the game by itself (`auto_keys`). GameFiles must be deployed with `cargo xtask deploy-client --no-build --login-mode standalone` (the script checks). Login without typing: the script makes the account `testrun` (admin, one character; `TEST_ACCOUNT`, `TEST_CLASS`, `TEST_AREA` change it) offline with a random password in `runtime/test-accounts/<name>.pw` (git-ignored, mode 600, never printed), gets a Remember Me token for it from the web API (launcher login, then `POST /game-token`) and writes it with `cargo xtask login-token` ([above](#remember-me-token-launcher-auto-login)); the Enter at 20 s then logs in with the empty password box. The helper functions are in `scripts/lib/test-accounts.sh`; `scripts/test-mp.sh` uses them for `mp1` and `mp2`. The web API must be on (`[web] enabled`, the default). It first deletes `dumps/<version>/terrain/layouts/*` and `grids/*` so the run shows whether the DLL exports them again (the server waits for the layout by tile hash). It sets these environment variables for the client:
+  - `POE_HOOK_AUTO_KEYS=20000:13` (Enter at 20 s, press Login; `[[ms, vk], ...]` in `auto_keys` form);
   - `POE_HOOK_MOVEMENT_LOG=1` (per-frame movement log, `movement_log` in the config);
   - `POE_HOOK_FAKE_FOCUS=1` (the hooked `GetForegroundWindow` returns the game's own window, `*[0x1445d8308]`, so a client on another desktop still sends cursor reports; never while read-only);
   - `POE_HOOK_WINDOW_TITLE="PoE2 Test Client"` (the hooks on `CreateWindowExW`/`SetWindowTextW` give the game's main window (class `POEWindowClass`; message boxes and other windows keep their titles) that title, so a desktop rule can match it).

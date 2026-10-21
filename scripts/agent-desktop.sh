@@ -23,7 +23,7 @@ DBUS=(qdbus6 org.kde.KWin /VirtualDesktopManager)
 # id<TAB>name<TAB>wmclass regex
 RULES=(
   "poe-agent-game	PoE2 client -> Agents desktop	steam_app_2694490|pathofexilesteam\\.exe"
-  "poe-agent-launcher	Poe2 Launcher -> Agents desktop	poe2-launcher|poe2_launcher|com\\.distorbed\\.poe2launcher"
+  "poe-agent-launcher	Poe2 Launcher -> Agents desktop	poe2-launcher|poe2_launcher|org\\.poe2modding\\.launcher"
   "poe-agent-browser	Agent browser -> Agents desktop	poe-agent-browser"
 )
 

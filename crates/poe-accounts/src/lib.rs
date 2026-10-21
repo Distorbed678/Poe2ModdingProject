@@ -14,7 +14,7 @@ mod sqlite;
 
 use sha2::{Digest, Sha256};
 
-pub use commands::{CommandOutput, redact, run_account_command};
+pub use commands::{AccountCli, CommandOutput, PASSWORD_STDIN_FLAG, parse_account_cli, read_password_line, redact, run_account_command};
 pub use ratelimit::{ConnectionLimiter, ConnectionSlot, LoginLimiter, Locked};
 pub use sqlite::SqliteAccounts;
 /// Argon2 cost parameters (see [`SqliteAccounts::with_params`]).
@@ -169,8 +169,8 @@ pub trait AccountStore: Send + Sync {
     fn set_role(&self, username: &str, role: Role) -> Result<AccountRecord>;
     /// Disabling also revokes the account's tokens.
     fn set_disabled(&self, username: &str, disabled: bool) -> Result<AccountRecord>;
-    /// Records a login that did not go through [`authenticate`](Self::authenticate) (the dev
-    /// machine-hash login).
+    /// Records a login that did not go through [`authenticate`](Self::authenticate) (a saved-token
+    /// login).
     fn record_login(&self, id: u32) -> Result<()>;
     /// Issues a random token valid for `ttl_secs`.
     fn issue_token(&self, account_id: u32, kind: TokenKind, ttl_secs: i64) -> Result<IssuedToken>;

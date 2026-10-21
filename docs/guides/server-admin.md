@@ -59,19 +59,23 @@ Admins are accounts with the `admin` role; there is no admin list in the config.
 
 | Command | What it does |
 |---|---|
-| `account create <name> <password>` | new player account. The server hashes the password the way the client does (SHA-256 of the UTF-16LE text), then argon2id. Minimum 8 characters, username 3-64 of `A-Za-z0-9_.@+-` |
+| `account create <name> <password>` (CLI: `account create <name> --password-stdin`) | new player account. The server hashes the password the way the client does (SHA-256 of the UTF-16LE text), then argon2id. Minimum 8 characters, username 3-64 of `A-Za-z0-9_.@+-` |
 | `account role <name> <player\|admin>` | sets the role; takes effect on the next command |
 | `account disable <name>` / `account enable <name>` | a disabled account cannot log in; disabling revokes its saved logins and ends its sessions |
-| `account passwd <name> <password>` | new password; revokes the account's saved logins (Remember Me, launcher, web) |
-| `account list` | every account: id, role, state, last login (`no password (dev)` marks machine-hash accounts) |
+| `account passwd <name> <password>` (CLI: `account passwd <name> --password-stdin`) | new password; revokes the account's saved logins (Remember Me, launcher, web) |
+| `account list` | every account: id, role, state, last login (`no password (dev)` marks accounts made by the removed machine-hash login; nobody can log in to one until `account passwd`) |
 
-An admin cannot demote or disable themselves. Passwords typed in chat travel over the game connection and appear on screen: prefer the offline form for real passwords. `poe-server account ...` runs against the database, also while the server is up, and works for the first admin; it and the offline `poe-server character create|list` (test setups, `scripts/test-mp.sh`) are in [setup.md](setup.md#accounts-and-characters-offline).
+An admin cannot demote or disable themselves.
+
+**Passwords on the command line.** On the CLI give the password of `create` and `passwd` with `--password-stdin`: `poe-server account create alice --password-stdin` reads one line from standard input (e.g. `read -rs pw; printf '%s\n' "$pw" | poe-server account create alice --password-stdin`, or a pipe from a password manager). Only the trailing newline is removed (spaces stay part of the password), an empty line is refused, and the value is never echoed or logged. The flag works anywhere among the words, only with these two subcommands, and not together with a password argument. The old form `account create <name> <password>` still works but is discouraged: every program on the machine can read a command line in the process list (and your shell history keeps it). The launcher's "Host a server" setup uses the stdin form.
+
+Passwords typed in chat travel over the game connection and appear on screen: prefer the offline form for real passwords. `poe-server account ...` runs against the database, also while the server is up, and works for the first admin; it and the offline `poe-server character create|list` (test setups, `scripts/test-mp.sh`) are in [setup.md](setup.md#accounts-and-characters-offline).
 
 Password attempts are rate limited (`[security]`: 5 failures per account name and 20 per IP in 5 minutes lock the key for 5 minutes, in game and on the web; saved-token logins are not affected; a restart clears locks; details: [../architecture/accounts.md](../architecture/accounts.md#password-attempt-limits)). Set a limit to 0 to switch it off, e.g. for a test script that fails logins on purpose.
 
 A client whose exe is not a known build of `[game] version` (its `client_hash` is not in `versions/<version>.toml` `[client] hashes`) is refused at login with the client's own "There has been a patch that you need to update to" popup. `[security] allow_unknown_client = true` lets any build in (logged); a test config made without a version file checks nothing. Nothing is refused while the version file's `hashes_confirmed` is `false` ([new-game-version.md](new-game-version.md#what-the-server-does-with-the-clients-version)).
 
-A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and an existing `Exile1` was made an admin by the database migration (a fresh database promotes nobody).
+A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the removed machine-hash login (null password) cannot log in until `account passwd` gives one a password, and an existing `Exile1` was made an admin by the database migration (a fresh database promotes nobody).
 
 ## Instances
 

@@ -20,9 +20,11 @@
 #   scripts/test-mp.sh shot <n>     F8 game screenshot in client n; prints the new file
 #   scripts/test-mp.sh status       processes, memory, session lines of the server log
 #   scripts/test-mp.sh stop         kill clients, then the server (run as its own call), and put
-#                                   the deployed GameFiles back to the private steam-login state
-#   scripts/test-mp.sh restore      only the last step of stop (deploy-client --login-mode steam)
-# Environment: LAN_IP (default: the source address of the default route), MP_PASSWORD,
+#                                   the deployed GameFiles back to the private standalone-login state
+#   scripts/test-mp.sh restore      only the last step of stop (deploy-client --login-mode standalone)
+# The accounts mp1 and mp2 get random passwords in runtime/test-accounts/ (scripts/lib/test-accounts.sh;
+# git-ignored, never printed); the clients sign in with Remember Me tokens, no typing.
+# Environment: LAN_IP (default: the source address of the default route),
 # MP_RES (window size, default 1280x720), MP_BORDERLESS (true|false, borderless_windowed_fullscreen, default false), MP_AREA (character start area, default G1_town),
 # MP_CLASS (CharacterStartStates id, default DexFourDefault).
 set -e
@@ -30,7 +32,6 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 CFG=runtime/server-mp.toml
 LOG=runtime/server-mp.log
-PW=${MP_PASSWORD:-mp-test-password-1}
 RES=${MP_RES:-1280x720}
 BORDERLESS=${MP_BORDERLESS:-false}
 AREA=${MP_AREA:-G1_town}
@@ -42,14 +43,14 @@ ini_of() { echo "$(prefix_of "$1")/$DOCS/poe2_production_Config.ini"; }
 shots_of() { echo "$(prefix_of "$1")/$DOCS/Screenshots"; }
 xt() { cargo xtask --config "$CFG" "$@"; }
 srv() { POE_CONFIG=$CFG target/debug/poe-server "$@"; }
+. scripts/lib/test-accounts.sh
 slog() { sed 's/\x1b\[[0-9;]*m//g' "$LOG"; }
-api_port() { sed -n 's/^bind *= *"[0-9.]*:\([0-9]*\)".*/\1/p' <<<"$(sed -n '/^\[web\]/,/^\[/p' "$CFG")" | head -n1; }
 
 cmd_setup() {
     [ -n "$LAN_IP" ] || { echo "no LAN IP (set LAN_IP)"; exit 1; }
     cargo build -p poe-server -p xtask
     # Runtime copy of the config: the dev settings (config/server.toml is committed with safe
-    # values: loopback binds, no machine-hash login), the LAN address, and its own database (mp
+    # values: loopback binds, no developer tools), the LAN address, and its own database (mp
     # accounts stay out of the dev one).
     python3 scripts/dev-config.py --out $CFG >/dev/null
     sed -i -e "s|^public_host = .*|public_host = \"$LAN_IP\"|" \
@@ -58,7 +59,7 @@ cmd_setup() {
     grep -q "public_host = \"$LAN_IP\"" $CFG && echo "config: $CFG (public_host $LAN_IP)"
     for n in 1 2; do
         acct=mp$n
-        srv account list 2>/dev/null | grep -qw "$acct" || srv account create "$acct" "$PW"
+        ta_ensure "$acct"
         srv character list "$acct" 2>/dev/null | grep -qP "^$acct\t" || srv character create "$acct" "Mp${n}Ranger" "$CLASS" "$AREA"
     done
     srv account list | tail -1; srv character list | grep -P "^mp"
@@ -95,14 +96,8 @@ cmd_server() {
     slog | grep -iE "listen|warn|error" | head -8
 }
 
-# Fresh remember-me token for mp<n>: web API launcher login, then the game-token exchange.
-issue_token() {
-    port=$(api_port); port=${port:-8080}
-    l=$(curl -s -X POST "127.0.0.1:$port/api/v1/login" -H 'content-type: application/json' \
-        -d "{\"username\":\"mp$1\",\"password\":\"$PW\",\"kind\":\"launcher\"}" | sed -n 's/.*"token":"\([0-9a-f]*\)".*/\1/p')
-    [ -n "$l" ] || { echo "web login failed for mp$1"; exit 1; }
-    curl -s -X POST "127.0.0.1:$port/api/v1/game-token" -H "authorization: Bearer $l" | sed -n 's/.*"token":"\([0-9a-f]*\)".*/\1/p'
-}
+# Fresh remember-me token for mp<n>: web API launcher login, then the game-token exchange (ta_token).
+issue_token() { ta_token "mp$1" "$(ta_web_port "$CFG")"; }
 
 n_auth() { slog | grep -c ' authenticated' || true; }
 keys_file() { echo "GameFiles/poe-hook.$1.keys"; }
@@ -159,8 +154,8 @@ cmd_restore() {
         sed -i 's|^borderless_windowed_fullscreen=.*|borderless_windowed_fullscreen=true|' "$(ini_of 1)"
     fi
     rm -f GameFiles/poe-hook.*.keys
-    # Private deploy with the Steam login and the committed config (loopback).
-    cargo xtask deploy-client --no-build --login-mode steam
+    # Private deploy with the standalone login and the committed config (loopback).
+    cargo xtask deploy-client --no-build --login-mode standalone
 }
 
 cmd_stop() {

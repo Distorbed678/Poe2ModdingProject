@@ -45,12 +45,13 @@ async fn main() -> anyhow::Result<()> {
     let accounts: Arc<dyn poe_accounts::AccountStore> =
         Arc::new(poe_accounts::SqliteAccounts::new(store.clone(), config.cluster.id.clone()));
     // `poe-server account <create|role|disable|enable|passwd|list> [name] [value]` manages
-    // accounts offline (the first admin), then exits.
+    // accounts offline (the first admin), then exits. `create`/`passwd` take the password with
+    // `--password-stdin` (one line on standard input; it is not visible in the process list).
+    // The password as a command-line argument still works but is discouraged.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("account") {
-        let sub = args.get(1).map(String::as_str).unwrap_or("list");
-        let value = (args.len() > 3).then(|| args[3..].join(" "));
-        return match poe_accounts::run_account_command(&*accounts, None, sub, args.get(2).map(String::as_str), value.as_deref()) {
+        let cli = poe_accounts::parse_account_cli(&args[1..], &mut std::io::stdin().lock()).map_err(anyhow::Error::msg)?;
+        return match poe_accounts::run_account_command(&*accounts, None, &cli.sub, cli.name.as_deref(), cli.value.as_deref()) {
             Ok(done) => {
                 println!("{}", done.text);
                 Ok(())

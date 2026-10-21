@@ -104,6 +104,62 @@ pub fn run_account_command(
     }
 }
 
+/// The flag that takes the password from standard input instead of the command line, where
+/// other programs on the machine could read it in the process list.
+pub const PASSWORD_STDIN_FLAG: &str = "--password-stdin";
+
+/// Reads the password from `input`: one line, only the trailing newline (`\n` or `\r\n`)
+/// removed, so spaces at either end stay part of it. An empty value is refused. The value is
+/// never echoed or logged, and the error texts never contain it.
+pub fn read_password_line(input: &mut dyn std::io::BufRead) -> Result<String, String> {
+    let mut line = String::new();
+    input.read_line(&mut line).map_err(|e| format!("reading the password from standard input: {e}"))?;
+    if line.ends_with('\n') {
+        line.pop();
+        if line.ends_with('\r') {
+            line.pop();
+        }
+    }
+    if line.is_empty() {
+        return Err("the password read from standard input is empty".into());
+    }
+    Ok(line)
+}
+
+/// The words after `poe-server account`, split for [`run_account_command`]: the subcommand
+/// (default `list`), the name, and the value (everything after the name, joined by spaces).
+#[derive(Debug, PartialEq, Eq)]
+pub struct AccountCli {
+    pub sub: String,
+    pub name: Option<String>,
+    pub value: Option<String>,
+}
+
+/// Parses `args` (the words after `account`). `--password-stdin` (anywhere) is only valid for
+/// `create` and `passwd`, must not be combined with a password argument, and reads the
+/// password from `stdin`. The old form with the password as an argument still works but is
+/// discouraged (the process list shows it).
+pub fn parse_account_cli(args: &[String], stdin: &mut dyn std::io::BufRead) -> Result<AccountCli, String> {
+    let from_stdin = args.iter().any(|a| a == PASSWORD_STDIN_FLAG);
+    let words: Vec<&String> = args.iter().filter(|a| a.as_str() != PASSWORD_STDIN_FLAG).collect();
+    let sub = words.first().map_or("list", |s| s.as_str()).to_string();
+    let name = words.get(1).map(|s| s.to_string());
+    let mut value = (words.len() > 2).then(|| words[2..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" "));
+    if from_stdin {
+        if !matches!(sub.as_str(), "create" | "passwd") {
+            return Err(format!("{PASSWORD_STDIN_FLAG} only applies to `account create` and `account passwd`"));
+        }
+        if value.is_some() {
+            return Err(format!("{PASSWORD_STDIN_FLAG} replaces the password argument; give one or the other"));
+        }
+        if name.is_none() {
+            return Err(format!("account {sub}: missing <name>"));
+        }
+        value = Some(read_password_line(stdin)?);
+    }
+    Ok(AccountCli { sub, name, value })
+}
+
 /// The command line with passwords blanked, for logs and the audit file.
 pub fn redact(sub: &str, line: &str) -> String {
     if !matches!(sub, "create" | "passwd") {
@@ -157,6 +213,55 @@ mod tests {
         assert!(run(None, "list", None, None).unwrap().text.starts_with("1 accounts: alice"));
         assert!(run(None, "nope", None, None).is_err());
         assert!(run(None, "disable", Some("ghost"), None).unwrap_err().contains("no such account"));
+    }
+
+    fn cli(args: &[&str], stdin: &str) -> Result<AccountCli, String> {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        parse_account_cli(&args, &mut stdin.as_bytes())
+    }
+
+    #[test]
+    fn password_line_strips_only_the_newline() {
+        let read = |s: &str| read_password_line(&mut s.as_bytes());
+        assert_eq!(read("correct horse\n").unwrap(), "correct horse");
+        assert_eq!(read("correct horse\r\n").unwrap(), "correct horse");
+        assert_eq!(read("correct horse").unwrap(), "correct horse");
+        assert_eq!(read(" padded pw \n").unwrap(), " padded pw ");
+        // Only the first line is the password.
+        assert_eq!(read("first\nsecond\n").unwrap(), "first");
+        assert!(read("").unwrap_err().contains("empty"));
+        assert!(read("\n").unwrap_err().contains("empty"));
+        assert!(read("\r\n").unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn account_cli_password_stdin() {
+        let c = cli(&["create", "bob", "--password-stdin"], "pw from stdin\n").unwrap();
+        assert_eq!(c, AccountCli { sub: "create".into(), name: Some("bob".into()), value: Some("pw from stdin".into()) });
+        // The flag may come first or between the words.
+        assert_eq!(cli(&["--password-stdin", "passwd", "bob"], "x y z\n").unwrap().value.as_deref(), Some("x y z"));
+        assert_eq!(cli(&["create", "--password-stdin", "bob"], "x y z\n").unwrap().name.as_deref(), Some("bob"));
+        // The old argument form still works.
+        assert_eq!(cli(&["create", "bob", "my", "pw"], "").unwrap().value.as_deref(), Some("my pw"));
+        assert_eq!(cli(&[], "").unwrap(), AccountCli { sub: "list".into(), name: None, value: None });
+        // Refusals: empty value, both forms, wrong subcommand, no name.
+        assert!(cli(&["create", "bob", "--password-stdin"], "\n").unwrap_err().contains("empty"));
+        assert!(cli(&["create", "bob", "--password-stdin"], "").unwrap_err().contains("empty"));
+        assert!(cli(&["create", "bob", "pw", "--password-stdin"], "x\n").unwrap_err().contains("one or the other"));
+        assert!(cli(&["role", "bob", "--password-stdin"], "x\n").unwrap_err().contains("only applies"));
+        assert!(cli(&["create", "--password-stdin"], "x\n").unwrap_err().contains("missing <name>"));
+    }
+
+    #[test]
+    fn account_cli_value_runs_the_command() {
+        let a = accounts();
+        let c = cli(&["create", "carol", "--password-stdin"], "correct horse\n").unwrap();
+        run_account_command(&a, None, &c.sub, c.name.as_deref(), c.value.as_deref()).unwrap();
+        a.authenticate("carol", &password_digest("correct horse")).unwrap();
+        // A too-short value is still refused by the command, without echoing it.
+        let c = cli(&["passwd", "carol", "--password-stdin"], "short\n").unwrap();
+        let e = run_account_command(&a, None, &c.sub, c.name.as_deref(), c.value.as_deref()).unwrap_err();
+        assert!(e.contains("at least") && !e.contains("short"));
     }
 
     #[test]
