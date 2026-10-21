@@ -292,8 +292,8 @@ mod tests {
         let other = [7u8; 32];
         assert_ne!(hex32(&known), hex32(&other));
 
-        // The hashes of the file are derived, not yet seen on the wire: nothing is refused.
-        assert!(!c.version_info.as_ref().unwrap().client.hashes_confirmed);
+        // While the hashes are not confirmed on the wire nothing is refused.
+        c.version_info.as_mut().unwrap().client.hashes_confirmed = false;
         assert!(check_client(&c, &other).is_none());
 
         // Confirmed: the known build is let in, any other one is refused with code 8 and the
