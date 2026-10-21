@@ -287,7 +287,7 @@ Move the commands and the RE how-to into `docs/guides/setup.md` and `docs/re/REA
   - Download both into a launcher-managed directory (exe depot over content) using the **user's own Steam login** (prompted, Steam Guard supported), then verify.
   - Never read or write the Steam install.
 - **Deploy and launch:** use `poe-hook-deploy` (S3): gateway entry, DLLs, poe-hook.toml with `trusted_servers` and the token, `steam_appid.txt`. Launch natively on Windows, or through Proton on Linux with a launcher-owned prefix. Steam must be running.
-- **Mods:** install, enable/disable and order mods by the `mod.toml` spec (S4). Mod files go to the hook's `mods/` dir, never into the game files directly. Check version compatibility against the game version.
+- **Mods:** install, enable/disable and order mods by the `mod.toml` spec (S4). Mod files go to the hook's `poe-hook-mods/` dir, never into the game files directly. Check version compatibility against the game version.
 - Acceptance: on a clean directory, the launcher downloads 0.5.5e, logs in to the local cluster, launches, and the client auto-logs in.
 - The user is needed for the Steam login during the test.
 

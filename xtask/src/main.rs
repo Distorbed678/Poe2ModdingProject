@@ -24,6 +24,10 @@ mod versions;
 const CLIENT_HOOK_DIR: &str = "modules/client-hook";
 /// The client's compile target.
 const DLL_TARGET: &str = "x86_64-pc-windows-msvc";
+/// The sample mod (a cdylib in the client DLL workspace) and where it is installed from.
+const SAMPLE_MOD_PACKAGE: &str = "poe-hook-sample-mod";
+const SAMPLE_MOD_DIR: &str = "modules/client-hook/examples/sample-mod";
+const SAMPLE_MOD_DLL: &str = "sample_mod.dll";
 
 #[derive(Parser)]
 #[command(about = "PoE2 server development tasks")]
@@ -77,6 +81,27 @@ enum Cmd {
         /// Steam login, as before). Official deploys always write `steam`.
         #[arg(long, value_enum, default_value = "standalone")]
         login_mode: LoginModeArg,
+        /// Also install the sample mod (modules/client-hook/examples/sample-mod) as enabled, like
+        /// `deploy-mod`. Not with --official: the loader loads no mods in official mode.
+        #[arg(long)]
+        sample_mod: bool,
+    },
+    /// Install a mod into GameFiles/poe-hook-mods/<id>/ and enable it in state.toml (the layout
+    /// the launcher and the DLL's mod loader use, modules/client-hook/docs/mod-manifest.md).
+    /// Without a folder: the sample mod, built with the DLLs.
+    DeployMod {
+        /// Folder with the mod's mod.toml (default: the sample mod).
+        dir: Option<PathBuf>,
+        /// The built entry DLL (default for the sample mod: its build output; otherwise the file
+        /// named by `[entry] dll` inside the folder).
+        #[arg(long)]
+        dll: Option<PathBuf>,
+        /// Install the mod but leave it disabled (or disable it if it was enabled).
+        #[arg(long)]
+        disable: bool,
+        /// Skip building the DLLs first.
+        #[arg(long)]
+        no_build: bool,
     },
     /// Build and install only the debug core; a running client reloads it by itself.
     DeployCore {
@@ -202,7 +227,23 @@ fn main() -> Result<()> {
             no_build,
             official,
             login_mode,
-        } => deploy_client(&root, &config, !no_build, official, login_mode.into(), &prefix),
+            sample_mod,
+        } => {
+            if sample_mod && official {
+                bail!("--sample-mod with --official: the loader loads no mods in official mode");
+            }
+            deploy_client(&root, &config, !no_build, official, login_mode.into(), &prefix)?;
+            if sample_mod {
+                deploy_mod(&root, &config, None, None, false, false)?;
+            }
+            Ok(())
+        }
+        Cmd::DeployMod {
+            dir,
+            dll,
+            disable,
+            no_build,
+        } => deploy_mod(&root, &config, dir, dll, disable, !no_build),
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::DllData => export_dll_data(&config),
@@ -265,8 +306,9 @@ fn build_dll(root: &Path, release: bool) -> Result<PathBuf> {
     }
     let mut cmd = Command::new(&xwin);
     // When invoked directly, cargo subcommands expect their own name as the first argument.
-    // Only the two DLL crates: the workspace also holds the host-side poe-hook-deploy.
+    // Only the DLL crates (loader, core, the sample mod): the workspace also holds host-side crates.
     cmd.args(["xwin", "build", "-p", "poe-hook", "-p", "poe-hook-core"])
+        .args(["-p", SAMPLE_MOD_PACKAGE])
         .args(["--target", DLL_TARGET])
         .current_dir(&client)
         .env("XWIN_CACHE_DIR", root.join("third_party/xwin-cache"));
@@ -465,6 +507,46 @@ fn export_dll_data(config: &Config) -> Result<()> {
         dir.display(),
         stats.len(),
         actions.len()
+    );
+    Ok(())
+}
+
+/// Installs a mod through `poe-hook-deploy` (never by hand): `poe-hook-mods/<id>/` with its
+/// `mod.toml`, data and entry DLL, and the id in `state.toml`.
+fn deploy_mod(
+    root: &Path,
+    config: &Config,
+    dir: Option<PathBuf>,
+    dll: Option<PathBuf>,
+    disable: bool,
+    build: bool,
+) -> Result<()> {
+    let game = &config.game.game_dir;
+    // The loader loads no mod in official mode; installing one for it would be a trap.
+    let hook_toml = std::fs::read_to_string(game.join(poe_hook_deploy::HOOK_CONFIG)).unwrap_or_default();
+    let mode = poe_hook_deploy::hook_config::top_level_string(&hook_toml, "mode");
+    if mode.as_deref() == Some("official") {
+        bail!("GameFiles is deployed in official mode (read-only): the loader loads no mods there");
+    }
+    let sample = root.join(SAMPLE_MOD_DIR);
+    let dir = dir.map_or_else(|| sample.clone(), |d| root.join(d));
+    let dll = match dll {
+        Some(d) => Some(root.join(d)),
+        None if dir.canonicalize().ok() == sample.canonicalize().ok() => {
+            Some(dll_dir(root, build)?.join(SAMPLE_MOD_DLL))
+        }
+        None => None,
+    };
+    let m = poe_hook_deploy::install_mod(game, &dir, dll.as_deref(), !disable)?;
+    println!(
+        "installed mod {} -> {} ({})",
+        m.id,
+        m.dir.display(),
+        if m.enabled {
+            "enabled; the client loads it at its next start"
+        } else {
+            "disabled"
+        }
     );
     Ok(())
 }

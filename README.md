@@ -49,7 +49,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
 | [Launcher](#launcher) | `████████░░ 83%` | 4/6 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
-| [Modding](#modding) | `█████░░░░░ 50%` | 2/5 |
+| [Modding](#modding) | `██████░░░░ 60%` | 3/5 |
 
 ✅ done · 🟡 partial · ❌ missing · ⬜ planned. Progress counts done as 1 and partial as 0.5.
 
@@ -660,7 +660,7 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 | ✅ | [Game-token exchange for auto-login (`POST /api/v1/game-token`)](docs/architecture/web-api.md#endpoints) | launcher token -> one-off game_remember token (the game's rolling login would revoke the launcher token) |
 | 🟡 | [Install 0.5.5e from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned, args/prompts/progress tested with a stand-in; the real Steam login and download not run yet; verification values unconfirmed |
 | 🟡 | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | deploy, token file and Proton command tested with a fake Proton; real game start not run; Windows path untested |
-| ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml only; the DLL loader does not exist yet |
+| ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4) |
 
 ### Web Admin
 
@@ -685,7 +685,7 @@ Docs: [docs/guides/modding.md](docs/guides/modding.md)
 |---|---|---|
 | ✅ | Server file overrides in front of Bundles2 |  |
 | ✅ | Server command registry (one place for chat and overlay) |  |
-| 🟡 | [mod.toml manifest spec for client mods](modules/client-hook/docs/mod-manifest.md) | spec only; loader does not read it yet |
+| ✅ | [Client mod loader in the DLL (mod.toml, mod ABI 1, sample mod)](modules/client-hook/docs/mod-manifest.md) | loads enabled poe-hook-mods/<id> DLLs in state.toml order, ABI check, never in official mode; [data] overlays not applied yet |
 | ⬜ | Hook bus for server mods (poe-mod-api) |  |
 | ⬜ | Client loose-file override hook and packet hooks |  |
 <!-- tracker:end -->

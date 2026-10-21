@@ -445,7 +445,7 @@ link = "docs/guides/launcher.md#play-in-detail"
 [[subsystem.item]]
 name = "Mod install and ordering"
 status = "done"
-note = "files and poe-hook-mods/state.toml only; the DLL loader does not exist yet"
+note = "files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4)"
 link = "docs/guides/launcher.md#mods"
 
 # ---------------------------------------------------------------------------------------------
@@ -517,9 +517,9 @@ name = "Server command registry (one place for chat and overlay)"
 status = "done"
 
 [[subsystem.item]]
-name = "mod.toml manifest spec for client mods"
-status = "partial"
-note = "spec only; loader does not read it yet"
+name = "Client mod loader in the DLL (mod.toml, mod ABI 1, sample mod)"
+status = "done"
+note = "loads enabled poe-hook-mods/<id> DLLs in state.toml order, ABI check, never in official mode; [data] overlays not applied yet"
 link = "modules/client-hook/docs/mod-manifest.md"
 
 [[subsystem.item]]

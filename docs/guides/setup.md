@@ -43,7 +43,8 @@ python3 scripts/check-links.py   # relative links and #anchors in the docs, READ
 ## Run
 ```sh
 cargo run -p poe-server     # login (20481) + instance (6112) servers + web API (127.0.0.1:8080), config/server.toml (add --release for play)
-cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: read-only, official servers; --no-build)
+cargo xtask deploy-client   # builds the DLLs and installs them into GameFiles/ (--official: read-only, official servers; --no-build; --sample-mod: also install the sample mod, enabled)
+cargo xtask deploy-mod      # install a client mod (default: the sample mod) into GameFiles/poe-hook-mods/<id>/ and enable it; [dir] [--dll f] [--disable] [--no-build]
 cargo xtask deploy-core     # rebuilds and installs only the debug core; a running client reloads it within about a second (--no-build)
 cargo xtask dll-data        # rewrites only GameFiles/poe-hook-data/ (stats, action types, areas)
 cargo xtask run-client      # launches the client through Proton (Steam must be running)
@@ -68,6 +69,7 @@ cargo xtask select-gateway  # only points the remembered gateway of the prefix a
 - Sets `position_sync_port` in that file's `[features]` to `[network.instance] public_port`, so the side channel (position reports, debug link, terrain upload) goes to the instance server.
 - Resets `auto_keys` to `[]`, and the client's remembered gateway (`gateway_id` in the test prefix's `poe2_production_Config.ini`) to ours for private deploys (after an official session it stays on an official realm and the client never contacts our server).
 - Writes `steam_appid.txt`.
+- With `--sample-mod` (not with `--official`), or with `cargo xtask deploy-mod [dir]`: installs a client mod into `GameFiles/poe-hook-mods/<id>/` (`mod.toml`, data, entry DLL) and appends its id to `GameFiles/poe-hook-mods/state.toml`; the loader loads it at the next client start ([../architecture/client-dll.md](../architecture/client-dll.md#mod-loader), spec in `modules/client-hook/docs/mod-manifest.md`). `revert-client` removes the mods installed this way (not ones the launcher installed). `deploy-mod` refuses when GameFiles is deployed in official mode.
 
 `cargo xtask --prefix <dir> <command>` (global option) runs `run-client`, `login-token`, `select-gateway` and the gateway selection of `deploy-client` against another Proton prefix, for a second client (`third_party/proton-prefix-2`, a copy of the first; see [hosting.md](hosting.md#local-two-client-test)). `cargo xtask select-gateway` only writes the remembered gateway (`gateway_id`) of the chosen prefix to ours. `run-client` uses its own Proton prefix (`third_party/proton-prefix`) with `WINEDLLOVERRIDES=version=n,b`, clears `GameFiles/poe-hook.log` per launch, and moves pending crash dumps away (see [Crash reports](#crash-reports)). `build-dll` and `deploy-client` are thin wrappers over `poe-hook-deploy` ([../architecture/client-dll.md](../architecture/client-dll.md)).
 

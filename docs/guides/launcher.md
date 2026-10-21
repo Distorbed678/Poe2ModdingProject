@@ -7,7 +7,7 @@ What it does:
 - **Account:** log in or register through the web API ([../architecture/web-api.md](../architecture/web-api.md)); the token sits in the OS keyring.
 - **Install:** downloads client 0.5.5e from Steam with *your own* Steam login into the launcher's own folder, then verifies it.
 - **Play:** deploys the hook ([../architecture/client-dll.md](../architecture/client-dll.md)), signs the game in without typing a password, starts it (Proton on Linux, native on Windows).
-- **Mods:** installs, enables and orders mods by the `mod.toml` spec ([../../modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md)). The game cannot load them yet; see [Mods](#mods).
+- **Mods:** installs, enables and orders mods by the `mod.toml` spec ([../../modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md)). The hook's mod loader loads the enabled ones (never in official mode); see [Mods](#mods).
 
 ## Building and running
 
@@ -49,13 +49,13 @@ The version file is `versions/<version>.toml` of the main repo (the single defin
 
 ## Mods
 
-Mods live in `<install>/poe-hook-mods/<id>/` (never in game files), as the spec says. The launcher's side of the contract with the future loader is `poe-hook-mods/state.toml`:
+Mods live in `<install>/poe-hook-mods/<id>/` (never in game files), as the spec says. The launcher's side of the contract with the DLL's mod loader (`modules/client-hook/poe-hook/src/mods.rs`, in the game since 2026-10-21) is `poe-hook-mods/state.toml`:
 
 ```toml
 enabled = ["core-lib", "my-mod"]    # load order; the mods' own mod.toml files are never changed
 ```
 
-(The loader's name for this file in the spec is `state.toml`, so the launcher does not use another name such as `mods.toml`.) The launcher validates every rule of the spec and lists all problems, checks `game.versions` against the install (an incompatible mod needs an explicit override to be enabled) and `game.hook_api` (the launcher offers 1), enables dependencies first with a semver check, refuses conflicts and ordering cycles, and orders by dependencies and `load.after/before` with your arrangement deciding free choices (*Auto order* = the spec's ties by id). Zip and folder installs refuse escaping paths and symlinks. **The DLL loader does not exist yet**: enabling a mod only changes files.
+(The loader's name for this file in the spec is `state.toml`, so the launcher does not use another name such as `mods.toml`.) The launcher validates every rule of the spec and lists all problems, checks `game.versions` against the install (an incompatible mod needs an explicit override to be enabled) and `game.hook_api` (the launcher offers 1), enables dependencies first with a semver check, refuses conflicts and ordering cycles, and orders by dependencies and `load.after/before` with your arrangement deciding free choices (*Auto order* = the spec's ties by id). Zip and folder installs refuse escaping paths and symlinks. The launcher only changes files; the loader in `version.dll` reads `state.toml` at the client start, loads the enabled mods that have an entry DLL in that order and skips (with a log line) a mod whose `game.hook_api` is not the loader's ABI version, so a mod's *hook API* must equal the number the launcher offers (1). The loader refuses a DLL mod that states no `game.hook_api`, which the launcher still lets you enable.
 
 ## Testing the launcher against a local server
 

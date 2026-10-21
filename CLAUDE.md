@@ -18,7 +18,7 @@ Progress and the current task: the tracker in [README.md](README.md).
 ## Roadmap (details: [docs/plans/orchestration-2026-10.md](docs/plans/orchestration-2026-10.md), status: README tracker)
 Done (2026-10-20/21): foundation (restructure, dumps, repo split, docs, config, tracker); server-authoritative movement from official captures; accounts with the standalone login; remote hosting; shared instance world with two-client multiplayer; web API + web admin; launcher (end-to-end test with a depot download pending); consistency pass.
 **Current task:** terrain port to all areas, following [docs/plans/terrain-all-areas.md](docs/plans/terrain-all-areas.md).
-Open elsewhere: movement gaps #11/#12 (docs/protocol/movement.md), party/trade replies, the mod loader in the DLL.
+Open elsewhere: movement gaps #11/#12 (docs/protocol/movement.md), party/trade replies, the remote player tint (WP C2 bisect pending).
 
 ## Where things are
 - Commands, logs, unattended in-game tests: [docs/guides/setup.md](docs/guides/setup.md)
