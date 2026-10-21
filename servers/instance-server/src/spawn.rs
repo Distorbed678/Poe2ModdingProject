@@ -17,6 +17,7 @@
 use std::path::Path;
 
 use poe_config::{SpawnConfig, StartTile};
+use poe_game::movement::Walkable;
 use tracing::{info, warn};
 
 use crate::terrain_store::TerrainStore;
@@ -202,6 +203,61 @@ pub fn client_grid(config: &SpawnConfig, tile_hash: u32) -> Option<Grid> {
     std::fs::read(path).ok().and_then(|d| Grid::parse(&d))
 }
 
+/// Where a player joining an instance stands: `wanted` when no player is within `spacing`
+/// cells of it, else the walkable cell nearest to `wanted` that is at least `spacing` cells from
+/// every occupied cell. Deterministic: square rings of growing radius around `wanted`, ties
+/// broken by (y, x). Nothing found within the search radius (no free walkable cell nearby)
+/// leaves `wanted`. `spacing <= 0` turns spreading off.
+///
+/// UNVERIFIED: only the walkability grid is used, so the chosen cell can lie behind a wall from
+/// the first player; the spacing is small (a few cells) so that is rare on open ground.
+pub fn spread(
+    grid: &dyn Walkable,
+    wanted: (i32, i32),
+    occupied: &[(i32, i32)],
+    spacing: i32,
+) -> (i32, i32) {
+    if spacing <= 0 || occupied.is_empty() {
+        return wanted;
+    }
+    let limit = i64::from(spacing) * i64::from(spacing);
+    let free = |(x, y): (i32, i32)| {
+        grid.walkable(x, y)
+            && occupied.iter().all(|&(ox, oy)| {
+                let (dx, dy) = (i64::from(x - ox), i64::from(y - oy));
+                dx * dx + dy * dy >= limit
+            })
+    };
+    if free(wanted) {
+        return wanted;
+    }
+    let reach = spacing.saturating_mul(2 + occupied.len().min(64) as i32);
+    let mut best: Option<(i64, i32, i32)> = None;
+    for r in 1..=reach {
+        // A ring's nearest cells are r away: once the best is closer, no later ring beats it.
+        if best.is_some_and(|(d, _, _)| i64::from(r) * i64::from(r) > d) {
+            break;
+        }
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let p = (wanted.0 + dx, wanted.1 + dy);
+                if !free(p) {
+                    continue;
+                }
+                let d = i64::from(dx) * i64::from(dx) + i64::from(dy) * i64::from(dy);
+                let key = (d, p.1, p.0);
+                if best.is_none_or(|b| key < b) {
+                    best = Some(key);
+                }
+            }
+        }
+    }
+    best.map_or(wanted, |(_, y, x)| (x, y))
+}
+
 /// Waits for the layout of this terrain (by tile hash) in the store (written by a local DLL
 /// or uploaded by a remote one, [`crate::terrain_store`]) and picks the start position.
 pub async fn from_client_layout(
@@ -315,5 +371,61 @@ mod tests {
         assert_eq!(g.cell(0, 4, 0), 5);
         assert_eq!(g.cell(0, 3, 0), 0);
         assert_eq!(g.nearest_walkable((0, 4), 10), Some((6, 4)));
+    }
+
+    /// Walkable except for the cells `blocked` says no to.
+    struct Floor<F: Fn(i32, i32) -> bool>(F);
+
+    impl<F: Fn(i32, i32) -> bool> Walkable for Floor<F> {
+        fn walkable(&self, x: i32, y: i32) -> bool {
+            (self.0)(x, y)
+        }
+    }
+
+    fn dist2(a: (i32, i32), b: (i32, i32)) -> i32 {
+        (a.0 - b.0).pow(2) + (a.1 - b.1).pow(2)
+    }
+
+    #[test]
+    fn spreading_leaves_a_free_spawn_alone() {
+        let open = Floor(|_, _| true);
+        assert_eq!(spread(&open, (50, 50), &[], 8), (50, 50));
+        // Far enough from the other player, or spreading off.
+        assert_eq!(spread(&open, (50, 50), &[(50, 58)], 8), (50, 50));
+        assert_eq!(spread(&open, (50, 50), &[(50, 50)], 0), (50, 50));
+    }
+
+    #[test]
+    fn a_second_player_gets_the_nearest_free_cell() {
+        let open = Floor(|_, _| true);
+        let cell = spread(&open, (50, 50), &[(50, 50)], 8);
+        assert_ne!(cell, (50, 50));
+        assert!(dist2(cell, (50, 50)) >= 64, "{cell:?}");
+        // The nearest such cell: exactly 8 away on an axis (ties go to the smaller y, then x).
+        assert_eq!(cell, (50, 42));
+        // The same input always gives the same cell.
+        assert_eq!(cell, spread(&open, (50, 50), &[(50, 50)], 8));
+        // A third player keeps clear of both.
+        let third = spread(&open, (50, 50), &[(50, 50), cell], 8);
+        assert!(
+            dist2(third, (50, 50)) >= 64 && dist2(third, cell) >= 64,
+            "{third:?}"
+        );
+        assert_ne!(third, cell);
+    }
+
+    #[test]
+    fn spreading_only_picks_walkable_cells() {
+        // A strip one cell wide along y = 50 (a corridor): the only free cells are on it.
+        let corridor = Floor(|_, y| y == 50);
+        let cell = spread(&corridor, (50, 50), &[(50, 50)], 8);
+        assert_eq!(cell, (42, 50));
+        // A wall on the left side pushes the spot to the right.
+        let wall = Floor(|x, _| x >= 50);
+        let cell = spread(&wall, (50, 50), &[(50, 50)], 8);
+        assert!(cell.0 >= 50 && dist2(cell, (50, 50)) >= 64, "{cell:?}");
+        // Nothing walkable nearby: the wanted cell stays.
+        let nowhere = Floor(|x, y| (x, y) == (50, 50));
+        assert_eq!(spread(&nowhere, (50, 50), &[(50, 50)], 8), (50, 50));
     }
 }

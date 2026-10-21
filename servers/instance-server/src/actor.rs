@@ -52,7 +52,7 @@ use poe_proto::{
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
-use crate::movement::Codec;
+use crate::{movement::Codec, spawn};
 
 /// Identifies a session (one client connection) for the actor. Unique per server process; not
 /// derived from the account, the character or the client's address.
@@ -61,10 +61,9 @@ pub type SessionId = u64;
 /// Order key of `AddObject` and `RemoveObject` on official servers: after everything else in
 /// the frame.
 const AFTER_ALL: u32 = 0xffff_ffff;
-/// Player component flags of a remote player in combat stance (official remote blobs: bit 2 is
-/// the stance `+0x20c`, bit 3 set), and without it.
-const REMOTE_FLAGS_STANCE: u8 = 0x0c;
-const REMOTE_FLAGS_IDLE: u8 = 0x00;
+/// Player component flag of the combat stance `+0x20c` (official remote blobs: `0x0c`, bit 3
+/// being the always-set part the blob itself carries, [`crate::appearance::REMOTE_PLAYER_FLAGS`]).
+const PLAYER_FLAG_STANCE: u8 = 0x04;
 /// The payload of `PresenceChanged` (official: always `01 01 01 00`).
 const PRESENCE: [u8; 4] = [1, 1, 1, 0];
 
@@ -119,8 +118,10 @@ pub struct Frame {
 pub struct Appearance {
     /// The class's object type key (`Metadata/Characters/...`).
     pub type_key: u32,
-    /// The `AddObject` blob for the character's own client (entry state).
-    pub local_blob: Vec<u8>,
+    /// The `AddObject` blob for the character's own client (entry state), for the cell the
+    /// actor puts the character on (it can differ from the requested spawn, see
+    /// [`ActorInit::player_spacing`]).
+    pub local_blob: Arc<dyn Fn((i32, i32)) -> Vec<u8> + Send + Sync>,
     /// The blob for other clients, built by the session from the character; the actor patches
     /// the current cell and stance into a copy whenever it sends it.
     pub remote: PlayerBlob,
@@ -133,6 +134,8 @@ pub struct JoinRequest {
     pub session: SessionId,
     /// Character name (the instance's player list, logs).
     pub name: String,
+    /// The cell the character should start on; the actor moves it to a free cell nearby when
+    /// another player stands there.
     pub spawn: (i32, i32),
     /// Walking speed, cells per second.
     pub speed: f32,
@@ -207,6 +210,9 @@ pub struct ActorInit {
     pub idle: Duration,
     /// Build [`Frame::trace`].
     pub trace: bool,
+    /// `[spawn] player_spacing`: the smallest distance in cells between a joining player's cell
+    /// and the players already in the instance (0: spawn where requested).
+    pub player_spacing: i32,
 }
 
 struct Member {
@@ -295,9 +301,9 @@ impl Actor {
             blob.grid_x = x;
             blob.grid_y = y;
             blob.player.flags = if e.movement.in_combat_stance() {
-                REMOTE_FLAGS_STANCE
+                blob.player.flags | PLAYER_FLAG_STANCE
             } else {
-                REMOTE_FLAGS_IDLE
+                blob.player.flags & !PLAYER_FLAG_STANCE
             };
         }
         self.put(
@@ -427,9 +433,30 @@ impl Actor {
         if !self.members.is_empty() {
             self.release_pause();
         }
+        // A second player must not stand on the first: take a free walkable cell nearby.
+        let occupied: Vec<(i32, i32)> = self
+            .members
+            .iter()
+            .filter_map(|m| self.world.entity(m.entity))
+            .map(|e| e.movement.cell())
+            .collect();
+        let cell = spawn::spread(
+            self.world.grid().as_ref(),
+            req.spawn,
+            &occupied,
+            self.init.player_spacing,
+        );
+        if cell != req.spawn {
+            info!(
+                player = %req.name,
+                wanted = ?req.spawn,
+                ?cell,
+                "spawn cell taken: standing on a free cell nearby"
+            );
+        }
         let entity = self
             .world
-            .spawn_player_with_config(req.spawn, req.speed, Some(req.movement));
+            .spawn_player_with_config(cell, req.speed, Some(req.movement));
         let member = Member {
             session: req.session,
             entity,
@@ -455,7 +482,7 @@ impl Actor {
                     ..Default::default()
                 },
                 type_key: member.appearance.type_key,
-                blob: member.appearance.local_blob.clone(),
+                blob: (member.appearance.local_blob)(cell),
             },
         );
         // Everyone already here gets one AddObject for the newcomer in the next frame.
@@ -540,41 +567,66 @@ impl Actor {
     /// [`Frame`]. Sessions whose channel is closed are removed (as a `Leave`).
     pub fn tick(&mut self) {
         let events = self.world.tick();
-        let mut bytes = Vec::new();
+        // Per event: the entity, the bytes for its own client and the bytes for everybody else
+        // (they differ for stat updates that carry owner-only stats).
+        let mut segments: Vec<(u32, Vec<u8>, Vec<u8>)> = Vec::new();
         let mut trace = Vec::new();
         for e in &events {
             let Event::Movement(m) = &e.event else {
                 continue;
             };
-            match self.init.codec.encode(e.entity.0, m) {
-                Ok(out) => {
-                    for o in out {
-                        bytes.extend(o.bytes);
-                        if self.init.trace {
-                            trace.push(TraceLine {
-                                entity: e.entity.0,
-                                kind: o.trace.0,
-                                fields: o.trace.1,
-                            });
-                        }
-                    }
+            let entity = e.entity.0;
+            let (owner, others) = match (
+                self.init.codec.encode(entity, m),
+                self.init.codec.encode_for_others(entity, m),
+            ) {
+                (Ok(owner), Ok(others)) => (owner, others),
+                (Err(err), _) | (_, Err(err)) => {
+                    warn!(entity, "cannot encode a movement event: {err:#}");
+                    continue;
                 }
-                Err(err) => warn!(
-                    entity = e.entity.0,
-                    "cannot encode a movement event: {err:#}"
-                ),
+            };
+            let join = |outs: &[crate::movement::Out]| -> Vec<u8> {
+                outs.iter().flat_map(|o| o.bytes.iter().copied()).collect()
+            };
+            segments.push((entity, join(&owner), join(&others)));
+            if self.init.trace {
+                trace.extend(owner.into_iter().map(|o| TraceLine {
+                    entity,
+                    kind: o.trace.0,
+                    fields: o.trace.1,
+                }));
             }
         }
-        bytes.extend_from_slice(&self.tick_marker);
-        let events = Arc::new(bytes);
+        // What everyone but the owner gets, and the owner's own version where it differs.
+        let mut shared = Vec::new();
+        for (_, _, others) in &segments {
+            shared.extend_from_slice(others);
+        }
+        shared.extend_from_slice(&self.tick_marker);
+        let shared = Arc::new(shared);
         let trace = Arc::new(trace);
         let mut dead = Vec::new();
         for i in 0..self.members.len() {
             let own = self.own(&self.members[i]);
             let m = &mut self.members[i];
+            let entity = m.entity.0;
+            let differs = segments
+                .iter()
+                .any(|(e, full, others)| *e == entity && full != others);
+            let events = if differs {
+                let mut bytes = Vec::new();
+                for (e, full, others) in &segments {
+                    bytes.extend_from_slice(if *e == entity { full } else { others });
+                }
+                bytes.extend_from_slice(&self.tick_marker);
+                Arc::new(bytes)
+            } else {
+                shared.clone()
+            };
             let frame = Frame {
                 head: std::mem::take(&mut m.head),
-                events: events.clone(),
+                events,
                 trace: trace.clone(),
                 own,
             };

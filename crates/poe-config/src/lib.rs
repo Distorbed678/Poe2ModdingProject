@@ -301,7 +301,8 @@ fn default_chat_channel() -> u16 {
 
 /// Player start position (see `instance-server::spawn`). The layout comes from the client DLL
 /// (exported or uploaded); the server's own generator (`poe-world`) does not feed spawns yet.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct SpawnConfig {
     /// Terrain dump directory (`dumps/<version>/terrain`): the client DLL writes
     /// `layouts/terrain_layout_<tile hash>.tsv` and `grids/terrain_grid_<tile hash>.bin`
@@ -319,8 +320,24 @@ pub struct SpawnConfig {
     #[serde(default)]
     pub intro_areas: Vec<String>,
     /// Terrain uploads from client DLLs (`layout_dir` is their cache).
-    #[serde(default)]
     pub upload: UploadConfig,
+    /// Smallest distance in grid cells between a joining player's spawn cell and the players
+    /// already in the instance; a joiner whose spawn is closer than this stands on the nearest
+    /// free walkable cell instead (0 turns it off).
+    pub player_spacing: i32,
+}
+
+impl Default for SpawnConfig {
+    fn default() -> Self {
+        Self {
+            layout_dir: String::new(),
+            filler: Vec::new(),
+            start_tiles: Default::default(),
+            intro_areas: Vec::new(),
+            upload: UploadConfig::default(),
+            player_spacing: 8,
+        }
+    }
 }
 
 /// Terrain upload (WP3.4): a client DLL on a trusted server sends the layout and cell grid it
@@ -434,9 +451,11 @@ impl NetworkConfig {
         let mut out = Vec::new();
         let host = self.public_host.trim();
         let loopback = host == "localhost"
-            || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
-        let listens_beyond_loopback = !self.login.bind.ip().is_loopback()
-            || !self.instance.bind.ip().is_loopback();
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+        let listens_beyond_loopback =
+            !self.login.bind.ip().is_loopback() || !self.instance.bind.ip().is_loopback();
         if host.is_empty() {
             out.push("[network] public_host is empty: clients get no address".into());
         } else if loopback && listens_beyond_loopback {
@@ -446,8 +465,13 @@ impl NetworkConfig {
                  docs/guides/hosting.md)"
             ));
         }
-        if host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_unspecified()) {
-            out.push("[network] public_host = \"0.0.0.0\" is not an address clients can reach".into());
+        if host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_unspecified())
+        {
+            out.push(
+                "[network] public_host = \"0.0.0.0\" is not an address clients can reach".into(),
+            );
         }
         out
     }
@@ -587,6 +611,18 @@ pub struct DevConfig {
     /// Where the sweep appends `area, seed, tile hash, doodad hash` lines.
     #[serde(default = "default_sweep_results")]
     pub sweep_results: PathBuf,
+    /// Remote player blob experiments (the model other players see: `docs/protocol/entities.md`,
+    /// "Remote player look"). Parts of the official remote layout the server generates that can
+    /// be left out one by one to find which one a client reacts to: `"stat_sets"` (the weapon
+    /// set stat sets), `"derived_stats"` (full life/mana conditions, poise, recharge delay),
+    /// `"life_state"` (the pools as the official server sends them: nothing reserved, flags 1),
+    /// `"player_flags"` (Player flags bit 3). Empty: everything is sent.
+    #[serde(default)]
+    pub remote_blob_omit: Vec<String>,
+    /// Also send the class's animated object path in the remote blob (as the player's own blob
+    /// does; official blobs send none).
+    #[serde(default)]
+    pub remote_animated_path: bool,
 }
 
 impl Default for DevConfig {
@@ -600,6 +636,8 @@ impl Default for DevConfig {
             debug_link: true,
             sweep: PathBuf::new(),
             sweep_results: default_sweep_results(),
+            remote_blob_omit: Vec::new(),
+            remote_animated_path: false,
         }
     }
 }
@@ -727,9 +765,11 @@ impl Config {
         })?;
         // The version file is read relative to the working directory like every other path of
         // the config (the repository root).
-        let info = VersionFile::load(root, &config.game.version).map_err(|source| ConfigError::Version {
-            path: path.to_owned(),
-            source,
+        let info = VersionFile::load(root, &config.game.version).map_err(|source| {
+            ConfigError::Version {
+                path: path.to_owned(),
+                source,
+            }
         })?;
         if config.game.protocol_dir.as_os_str().is_empty() {
             config.game.protocol_dir = info.opcodes_dir(root);
@@ -760,7 +800,9 @@ impl Config {
         match &self.version_info {
             None => ClientCheck::Known,
             Some(v) => match v.check_client_hash(hash) {
-                ClientCheck::Unknown if self.security.allow_unknown_client => ClientCheck::UnknownAllowed,
+                ClientCheck::Unknown if self.security.allow_unknown_client => {
+                    ClientCheck::UnknownAllowed
+                }
                 other => other,
             },
         }
@@ -794,7 +836,12 @@ mod tests {
         // protocol_dir is not in the shipped config: it comes from the version file.
         assert_eq!(cfg.game.protocol_dir, root.join(&v.protocol.opcodes));
         // `{version}` is replaced in the path settings.
-        assert!(cfg.dev.known_seeds.to_string_lossy().contains(&format!("dumps/{}/", cfg.game.version)));
+        assert!(
+            cfg.dev
+                .known_seeds
+                .to_string_lossy()
+                .contains(&format!("dumps/{}/", cfg.game.version))
+        );
         assert!(!cfg.spawn.layout_dir.contains('{'));
         assert!(!cfg.dev.sweep_results.to_string_lossy().contains('{'));
 
@@ -806,7 +853,10 @@ mod tests {
         let bad = dir.join("server.toml");
         std::fs::write(&bad, text).unwrap();
         let e = Config::load_in(&bad, &root).unwrap_err().to_string();
-        assert!(e.contains("9.9.9z") && e.contains("not a supported build") && e.contains("0.5.5e"), "{e}");
+        assert!(
+            e.contains("9.9.9z") && e.contains("not a supported build") && e.contains("0.5.5e"),
+            "{e}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -838,8 +888,22 @@ mod tests {
         let d = UploadConfig::default();
         let u = &cfg.spawn.upload;
         assert_eq!(
-            (u.enabled, u.max_bytes, u.max_layout_bytes, u.max_grid_bytes, u.wait_ms, u.wait_upload_secs),
-            (d.enabled, d.max_bytes, d.max_layout_bytes, d.max_grid_bytes, d.wait_ms, d.wait_upload_secs)
+            (
+                u.enabled,
+                u.max_bytes,
+                u.max_layout_bytes,
+                u.max_grid_bytes,
+                u.wait_ms,
+                u.wait_upload_secs
+            ),
+            (
+                d.enabled,
+                d.max_bytes,
+                d.max_layout_bytes,
+                d.max_grid_bytes,
+                d.wait_ms,
+                d.wait_upload_secs
+            )
         );
     }
 
@@ -848,7 +912,10 @@ mod tests {
         let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();
         assert!(cfg.web.enabled);
         assert_eq!(cfg.web.bind.to_string(), "127.0.0.1:8080");
-        assert_eq!(cfg.web.static_dir, std::path::Path::new("modules/web-admin/dist"));
+        assert_eq!(
+            cfg.web.static_dir,
+            std::path::Path::new("modules/web-admin/dist")
+        );
         assert!(cfg.web.cors_origins.is_empty());
         assert_eq!(cfg.web.log_buffer, 2000);
     }

@@ -127,7 +127,7 @@ client B ── run_session ──Cmd──►│ instance actor (World)│─�
 ### Messages
 | Session to actor (`actor::Cmd`) | |
 |---|---|
-| `Join { request, reply }` | `JoinRequest`: session id, character name, spawn cell, speed, `MovementConfig`, grid, `Appearance` (class object type key, the local `AddObject` blob, the remote `PlayerBlob`), `want_debug`, the session's output channel. Reply: `Joined { entity, add_objects, players, own }`. |
+| `Join { request, reply }` | `JoinRequest`: session id, character name, wanted spawn cell (the actor moves it to a free walkable cell at least `[spawn] player_spacing` from the players there, `spawn::spread`), speed, `MovementConfig`, grid, `Appearance` (class object type key, the local `AddObject` blob as a function of the final cell, the remote `PlayerBlob`), `want_debug`, the session's output channel. Reply: `Joined { entity, add_objects, players, own }`. |
 | `Input { session, input }` | a `MoveInput` for the session's entity (queued, answered by the next tick) |
 | `Leave { session, reply }` | the session ends (disconnect, kick, transfer, supersede, error); the reply is the cell the entity stood on |
 | `Teleport { session, cell }` | dev/admin |
@@ -138,6 +138,7 @@ Local chat is not an actor message: `chat::deliver` sends it through `live.rs` t
 **Actor to session: encoded packets, not semantic events.** A tick's events are encoded once (`Codec`) and the same bytes go to every session in a `Frame { head, events, trace, own }`, because the official server relays each entity's simulation messages unchanged to every client (a remote player's `0x64` has the same header `(A, A, 9, 0)` as the local one, the acks `0x1ae`/`0x1af`/`0x1b1` are relayed with the remote entity id). Encoding per session would repeat the work and let the copies diverge. What differs per session is small and built where it is known:
 - `Frame::head`: lifecycle messages for this session in this frame, before the events: another player's `AddObject`, the removal sequence of one that left, the release of a pause.
 - `Joined::add_objects`: the entry batch of the joining session (the other players in the remote form, then itself in the local form).
+- `Frame::events` itself: shared by all sessions except where an event of the session's own entity has an owner-only stat (`Stats.IsParty` false, e.g. `stun_threshold_+%_final_while_performing_action` in a roll batch): the owner gets the full encoding, everybody else `Codec::encode_for_others` (the official server leaves those stats out of what it relays; [../protocol/entities.md](../protocol/entities.md#remote-roll-check-wp-c2)). The shared bytes are the others' view.
 - `Frame::own`: the session's own pose (frame, cell, exact position, optional debug state) for the drift checker, `where`, the debug link and the saved location.
 - `Frame::events` ends with the `SimulationTick` marker, so a paused world or an idle frame is still a frame.
 

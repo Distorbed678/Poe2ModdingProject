@@ -18,18 +18,43 @@ use poe_data::{GameData, Result, template::ObjectTemplate, views::CharacterClass
 /// Stat id (`Stats.Id`) -> network key, loaded once.
 pub struct StatRegistry {
     keys: HashMap<String, u32>,
+    /// Stats the server sends to the other players too (`Stats.IsParty`); the rest only go to
+    /// the entity's own client (official captures: `stun_threshold_+%_final_while_performing_action`
+    /// is in a local roll batch but never in a remote one).
+    party: std::collections::HashSet<u32>,
 }
 
 impl StatRegistry {
     pub fn load(data: &GameData) -> Result<Self> {
         let table = data.table("Stats")?;
         let mut keys = HashMap::with_capacity(table.len());
+        let mut party = std::collections::HashSet::new();
         for i in 0..table.len() {
             if let Some(row) = table.row(i) {
                 keys.insert(row.str("Id")?, i as u32 + 1);
+                if row.bool("IsParty")? {
+                    party.insert(i as u32 + 1);
+                }
             }
         }
-        Ok(Self { keys })
+        Ok(Self { keys, party })
+    }
+
+    /// A registry from explicit rows `(stat id, network key, IsParty)`, for tests and tools that
+    /// have no game files.
+    pub fn from_rows(rows: &[(&str, u32, bool)]) -> Self {
+        Self {
+            keys: rows
+                .iter()
+                .map(|&(id, key, _)| (id.to_owned(), key))
+                .collect(),
+            party: rows.iter().filter(|r| r.2).map(|r| r.1).collect(),
+        }
+    }
+
+    /// Whether other players' clients are told about this stat (`Stats.IsParty`).
+    pub fn is_party(&self, id: &str) -> bool {
+        self.key(id).is_some_and(|k| self.party.contains(&k))
     }
 
     pub fn key(&self, id: &str) -> Option<u32> {
@@ -64,6 +89,37 @@ impl Stats {
             })
             .collect()
     }
+}
+
+/// The engine's default energy shield recharge delay in milliseconds (the stat
+/// `virtual_total_energy_shield_recharge_delay_ms` of every official character without delay
+/// modifiers; 2000 with `energy_shield_delay_-%` 100). Not in any game table.
+pub const ES_RECHARGE_DELAY_MS: i32 = 4000;
+
+/// Adds the derived stats other players' clients get for a character that stands at full life,
+/// mana and energy shield with nothing equipped (the capture of an official town lists them for
+/// every player): the "on full ..." conditions, `poise_threshold` and
+/// `intermediary_poise_threshold` (= maximum life) and the energy shield recharge delay.
+/// Everything else the official server derives (armour, evasion, accuracy, regeneration, ...)
+/// needs a stat calculator and is left out.
+pub fn add_resting_state(stats: &mut Stats) {
+    for id in [
+        "virtual_on_full_life",
+        "on_full_mana",
+        "on_full_energy_shield",
+        "above_90%_mana",
+    ] {
+        stats.set(id, 1);
+    }
+    let life = stats.get("maximum_life");
+    stats.set("poise_threshold", life);
+    stats.set("intermediary_poise_threshold", life);
+    let delay_less = stats.get("energy_shield_delay_-%").max(0) as i64;
+    let delay = i64::from(ES_RECHARGE_DELAY_MS) * 100 / (100 + delay_less);
+    stats.set(
+        "virtual_total_energy_shield_recharge_delay_ms",
+        delay as i32,
+    );
 }
 
 /// Default stats of a new character of `class` at `level`.
@@ -107,6 +163,37 @@ pub fn character_defaults(template: &ObjectTemplate, class: &CharacterClass, lev
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resting_state_adds_the_town_conditions() {
+        let mut stats = Stats::default();
+        stats.set("maximum_life", 188);
+        add_resting_state(&mut stats);
+        for id in [
+            "virtual_on_full_life",
+            "on_full_mana",
+            "on_full_energy_shield",
+        ] {
+            assert_eq!(stats.get(id), 1, "{id}");
+        }
+        assert_eq!(stats.get("poise_threshold"), 188);
+        assert_eq!(stats.get("intermediary_poise_threshold"), 188);
+        // 4000 ms; 2000 with `energy_shield_delay_-%` 100 (the official Witch).
+        let delay = "virtual_total_energy_shield_recharge_delay_ms";
+        assert_eq!(stats.get(delay), 4000);
+        stats.set("energy_shield_delay_-%", 100);
+        add_resting_state(&mut stats);
+        assert_eq!(stats.get(delay), 2000);
+    }
+
+    #[test]
+    fn registry_rows_mark_public_stats() {
+        let registry = StatRegistry::from_rows(&[("a", 1, true), ("b", 2, false)]);
+        assert!(registry.is_party("a"));
+        assert!(!registry.is_party("b"));
+        assert!(!registry.is_party("missing"));
+        assert_eq!(registry.key("b"), Some(2));
+    }
 
     #[test]
     fn ranger_level_one() {

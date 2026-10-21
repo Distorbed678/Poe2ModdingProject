@@ -38,6 +38,9 @@ const MOVE_UPDATE_TRAILER: u8 = 0xf1;
 /// Maps a stat id (`Stats.Id`) to its network key (`Stats.dat` row + 1).
 pub type StatKeys = Arc<dyn Fn(&str) -> Option<u32> + Send + Sync>;
 
+/// Whether the server tells other players' clients about a stat (`Stats.IsParty`).
+pub type StatPublic = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// `0x1ca`: an action event without a body (with every roll start and when an attack ends a
 /// sprint; `ActionEvent` in `instance.toml`). The client only decrements a counter for it
 /// (Actor case `0x14214a13e`).
@@ -129,16 +132,41 @@ pub fn client_input(name: &str, r: &mut Reader<'_>) -> Result<Option<MoveInput>,
 pub struct Codec {
     pub protocol: Arc<Protocol>,
     pub stat_key: StatKeys,
+    /// Which stats other players' clients get (all of them unless set with
+    /// [`Codec::with_stat_visibility`]).
+    pub stat_public: StatPublic,
 }
 
 impl Codec {
     pub fn new(protocol: Arc<Protocol>, stat_key: StatKeys) -> Self {
-        Self { protocol, stat_key }
+        Self {
+            protocol,
+            stat_key,
+            stat_public: Arc::new(|_| true),
+        }
+    }
+
+    /// Sets which stats are sent to other players (official servers leave the owner-only ones
+    /// out of the batches they relay, see `docs/protocol/entities.md`).
+    pub fn with_stat_visibility(mut self, public: StatPublic) -> Self {
+        self.stat_public = public;
+        self
     }
 
     /// The messages for `event` of `entity`, in send order (empty for events the protocol
-    /// table cannot express yet).
+    /// table cannot express yet). This is the view of the entity's own client.
     pub fn encode(&self, entity: u32, event: &MoveEvent) -> anyhow::Result<Vec<Out>> {
+        self.encode_view(entity, event, true)
+    }
+
+    /// The same event as other players' clients get it: `StatsUpdate`s keep only the stats the
+    /// registry marks as public (nothing is sent when none is left); every other message is
+    /// identical to [`Codec::encode`].
+    pub fn encode_for_others(&self, entity: u32, event: &MoveEvent) -> anyhow::Result<Vec<Out>> {
+        self.encode_view(entity, event, false)
+    }
+
+    fn encode_view(&self, entity: u32, event: &MoveEvent, owner: bool) -> anyhow::Result<Vec<Out>> {
         let plain = SimulationHeader {
             entity_id: entity,
             ..Default::default()
@@ -208,12 +236,21 @@ impl Codec {
             MoveEvent::Stats(stats) => {
                 let mut keyed = Vec::with_capacity(stats.len());
                 for (stat, value) in stats {
+                    if !owner && !(self.stat_public)(stat.id()) {
+                        continue;
+                    }
                     match (self.stat_key)(stat.id()) {
                         Some(key) => keyed.push((key, *value)),
-                        None => warn!(stat = stat.id(), "movement stat not in Stats.dat: skipped"),
+                        None if owner => {
+                            warn!(stat = stat.id(), "movement stat not in Stats.dat: skipped");
+                        }
+                        None => {}
                     }
                 }
                 let fields = format!("{keyed:?}");
+                if keyed.is_empty() && !owner {
+                    return Ok(out);
+                }
                 out.push(self.pack(
                     &StatsUpdate {
                         header: plain,

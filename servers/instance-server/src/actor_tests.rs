@@ -181,6 +181,7 @@ pub(crate) fn actor_init(
         directory: directory.clone(),
         idle: Duration::ZERO,
         trace: true,
+        player_spacing: 0,
     }
 }
 
@@ -201,6 +202,7 @@ pub(crate) fn join_request(
         mana: 50,
         animation_sets: ["UnarmedTown".into(), "UnarmedTown".into(), "default".into()],
         skills: Vec::new(),
+        ..Default::default()
     });
     (
         JoinRequest {
@@ -212,7 +214,10 @@ pub(crate) fn join_request(
             grid: None,
             appearance: Appearance {
                 type_key: 0x1234,
-                local_blob: format!("local {name}").into_bytes(),
+                local_blob: {
+                    let blob = format!("local {name}").into_bytes();
+                    Arc::new(move |_| blob.clone())
+                },
                 remote,
             },
             want_debug: true,
@@ -228,6 +233,11 @@ impl Fixture {
     }
 
     pub fn with_first_entity(first: u32) -> Self {
+        Self::customised(first, |init| init)
+    }
+
+    /// A fixture whose actor is created from the standard test init changed by `change`.
+    pub fn customised(first: u32, change: impl FnOnce(ActorInit) -> ActorInit) -> Self {
         let protocol = protocol();
         let directory = Arc::new(MemoryInstances::default());
         let instance = directory.create(
@@ -237,10 +247,10 @@ impl Fixture {
             },
             true,
         );
-        let actor = Actor::new(ActorInit {
+        let actor = Actor::new(change(ActorInit {
             first_entity_id: first,
             ..actor_init(&protocol, &directory, instance)
-        })
+        }))
         .unwrap();
         Self {
             actor,
@@ -1012,4 +1022,117 @@ async fn an_empty_actor_ends_after_the_idle_time_and_the_next_join_starts_a_new_
     let b = w.join("Bob", (5, 5), idle).await;
     assert_eq!(b.joined.entity, FIRST_ENTITY);
     assert!(w.actors.get(w.instance).is_some());
+}
+
+/// The other players' view of a roll leaves out the stats only the owner is told about (official
+/// remote roll batches carry two of the three stun threshold stats, the local one all three).
+#[test]
+fn a_remote_roll_batch_leaves_out_owner_only_stats() {
+    use crate::replay_tests::stat_keys;
+    let owner_only = "stun_threshold_+%_final_while_performing_action";
+    let mut fx = Fixture::customised(FIRST_ENTITY, |mut init| {
+        init.codec = Codec::new(init.codec.protocol.clone(), stat_keys())
+            .with_stat_visibility(Arc::new(move |id: &str| id != owner_only));
+        init
+    });
+    let mut a = fx.join_default("Alice", (371, 1052));
+    let mut b = fx.join_default("Bob", (500, 500));
+    fx.tick();
+    a.got(&fx.protocol);
+    b.got(&fx.protocol);
+    fx.roll(&a, 15, -35);
+    fx.tick();
+    let (own, other) = (a.got(&fx.protocol), b.got(&fx.protocol));
+    let key = |id: &str| stat_keys()(id).unwrap();
+    let stats = |got: &Got| -> Vec<Vec<u32>> {
+        got.events
+            .iter()
+            .filter(|s| s.is::<StatsUpdate>())
+            .map(|s| {
+                s.decode::<StatsUpdate>()
+                    .stats
+                    .iter()
+                    .map(|&(k, _)| k)
+                    .collect()
+            })
+            .collect()
+    };
+    // Alice's own client: all three stun threshold stats; Bob's: without the owner-only one.
+    assert_eq!(
+        stats(&own),
+        [
+            vec![key("is_dodge_rolling")],
+            vec![
+                key(owner_only),
+                key("virtual_heavy_stun_threshold_+%_final"),
+                key("virtual_light_stun_threshold_+%_final")
+            ]
+        ]
+    );
+    assert_eq!(
+        stats(&other),
+        [
+            vec![key("is_dodge_rolling")],
+            vec![
+                key("virtual_heavy_stun_threshold_+%_final"),
+                key("virtual_light_stun_threshold_+%_final")
+            ]
+        ]
+    );
+    // Everything else is the same messages in the same order.
+    assert_eq!(own.names(), other.names());
+}
+
+/// A second player never stands on the first: the actor moves the joiner to a free walkable
+/// cell and builds its own blob and its entity for that cell; others see the new cell too.
+#[test]
+fn a_second_player_does_not_spawn_on_the_first() {
+    let mut fx = Fixture::customised(FIRST_ENTITY, |mut init| {
+        init.player_spacing = 8;
+        init
+    });
+    let mut a = fx.join_default("Alice", (100, 100));
+    // Bob's own blob is built for the cell the actor chose, not the requested one.
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (mut request, rx) =
+        join_request(2, "Bob", (100, 100), movement_config(&[roll_skill(None)]));
+    let log = seen.clone();
+    request.appearance.local_blob = Arc::new(move |cell| {
+        log.lock().unwrap().push(cell);
+        b"local Bob".to_vec()
+    });
+    let (reply, mut joined) = oneshot::channel();
+    fx.actor.handle(Cmd::Join {
+        request: Box::new(request),
+        reply,
+    });
+    let b = Fake {
+        session: 2,
+        entity: 0,
+        rx,
+        joined: joined.try_recv().expect("joined"),
+    }
+    .with_entity();
+    fx.next_session = 3;
+    let c = fx.join_default("Carol", (101, 99));
+    let (ca, cb, cc) = (fx.cell(&a), fx.cell(&b), fx.cell(&c));
+    assert_eq!(ca, (100, 100), "the first player keeps the requested cell");
+    let apart = |p: (i32, i32), q: (i32, i32)| (p.0 - q.0).pow(2) + (p.1 - q.1).pow(2) >= 64;
+    assert!(
+        apart(ca, cb) && apart(ca, cc) && apart(cb, cc),
+        "{ca:?} {cb:?} {cc:?}"
+    );
+    // Bob's own entry batch (the local blob is a stand-in text) and the remote form Alice
+    // gets carry the final cell, not the requested one.
+    fx.tick();
+    let got = a.got(&fx.protocol);
+    let remote: Vec<_> = got
+        .head
+        .iter()
+        .map(|s| PlayerBlob::decode(&s.decode::<AddObject>().blob).unwrap())
+        .map(|blob| (blob.grid_x, blob.grid_y))
+        .collect();
+    assert_eq!(remote, [cb, cc]);
+    assert_eq!(b.joined.own.cell, cb);
+    assert_eq!(*seen.lock().unwrap(), [cb]);
 }

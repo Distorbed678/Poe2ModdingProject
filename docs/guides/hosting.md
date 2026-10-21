@@ -92,14 +92,14 @@ The player does not need the server's `dumps/`, `GameFiles/Bundles2` copy or any
 Commands (`setup`, `server`, `clients`, `keys`, `shot`, `stop`): [setup.md](setup.md#two-client-test-lan).
 
 - **Setup details.** The second client uses its own Proton prefix and its own input file, window title ("PoE2 MP <n>") and session folder; the windows default to 1280x720 so both fit on screen. All of it and the environment variables: [setup.md](setup.md#two-client-test-lan).
-- **Characters.** One Ranger per account in `G1_town`, made offline. Both spawn on the same cell (379, 356); walk one away before looking at both.
+- **Characters.** One Ranger per account in `G1_town`, made offline. Both start on the town's start cell; since WP C2 the second one is put on the nearest free walkable cell at least `[spawn] player_spacing` (8) cells away, so they no longer stand on each other (the first run of the test, before WP C2, had both on (379, 356)).
 
 Results (2026-10-21, client 0.5.5e, two clients, one `G1_town` instance, evidence from F8 screenshots, server log and each client's `packets.jsonl`):
 
 | Item | Result | Evidence |
 |---|---|---|
 | Token login of both accounts through the LAN IP (trusted remote) | pass | `authenticated ... token_login=true`; DLL log `trusted servers: loopback, <LAN>:20481, <LAN>:6112`, no latch |
-| Both in one instance, see each other | pass | entities 12000 and 12001, `players=2`; each client received two `AddObject`s; in the F8 shots each client draws the other character (the remote one looks darker and orange; not investigated) |
+| Both in one instance, see each other | pass (the remote look: WP C2 re-check below, not run yet) | entities 12000 and 12001, `players=2`; each client received two `AddObject`s; in the F8 shots each client draws the other character (the remote one looks darker and orange; not investigated) |
 | Walk and roll of one reach the other | pass | client 2's `packets.jsonl` has `0x0064` (header `(12000, 12000, 9, 0)`), `0x02e7`, `0x01c8`, `0x01ae`, `0x01b1` with client 1's entity; the remote character is drawn at the walked position. The roll animation of the remote was not looked at frame by frame |
 | Chat | pass | `text:` + Enter in client 2: `chat from=Mp2Ranger`, the line "Mp2Ranger: hello-from-two" is on client 1's screen |
 | Transfer gives the leave sequence | pass | `POST /admin/players/Mp2Ranger/transfer {"area":"G1_1"}`: client 1 got `0x0271`, `0x01c5`, `0x01c7`, `0x02fa` for entity 12001 in one frame; Mp2Ranger entered G1_1 (alone, pause request applied, then released) |
@@ -107,12 +107,19 @@ Results (2026-10-21, client 0.5.5e, two clients, one `G1_town` instance, evidenc
 
 **Town freeze (fixed 2026-10-21).** The first runs of this test showed WASD, clicks and a roll doing nothing in town while Escape worked. The cause was not the window mode: our `InitialState` always had `flags = 7`, whose bits 0/1 start the client's world paused (`+0x868/+0x869`, entities update with `dt = 0`; the town looked frozen). In a zone the client then sends `PauseRequest(1)` and `PauseRequest(0)` itself and the server releases the pause; **in a town it sends none** (official town capture: `InitialState` flags `04`, no `PauseRequest`), so the pause was never released. The server now sends flags `04` for towns and hideouts. The earlier single-client smoke test of the instance actor had run in a zone.
 
+**WP C2 re-check (to run, not run yet).** Changes since the table above: spawn spreading, the remote blob's Life section, Player flags, derived stats and weapon set stat sets, owner-only stats left out of relayed batches ([../protocol/entities.md](../protocol/entities.md#remote-player-look-wp-c2)). Plan, with `scripts/test-mp.sh` as in the table:
+1. `setup`, `server`, `clients`; both log in as `mp1`, `mp2` in `G1_town`. Server log: `spawn cell taken: standing on a free cell nearby` for the second player, and the two `player joined` lines show two cells at least 8 apart; the F8 shots show two characters next to each other, not one.
+2. Look at the remote character in both shots (F8 on both): is it still darker or orange? Note the lighting of the local one beside it.
+3. If it is, bisect with `[dev] remote_blob_omit` in `runtime/server-mp.toml` (restart the server, re-enter the game; one change per run): `["stat_sets"]`, `["derived_stats"]`, `["life_state"]`, `["player_flags"]`, then all four, then `remote_animated_path = true`. The first run that looks right names the part; record it in entities.md and make it the default.
+4. Roll: `keys` a roll in client 1 (`indown:`/`inup:` Space, see [setup.md](setup.md#unattended-client-tests)) while client 2 watches (screenshots a few frames apart) and compare client 2's `packets.jsonl` for client 1's entity with the official remote batch ([entities.md](../protocol/entities.md#remote-roll-check-wp-c2)): `SprintState`, `StartAction`, `ActionEvent`, `StatsUpdate` (`is_dodge_rolling`), `UseSkillAck`, `StatsUpdate` with two stats (no `stun_threshold_+%_final_while_performing_action`).
+5. `stop`.
+
 ## Web API
 `[web]` is optional ([../architecture/web-api.md](../architecture/web-api.md)). The game itself never needs it, but the launcher does (account login and register, `GET /server`, `POST /game-token`), so a server for launcher users has to expose it through a TLS proxy as described in the security notes. It listens on `127.0.0.1:8080` by default.
 
 ## Not done yet
 
-- **Remote players, rough edges.** Players in one instance share one world (instance actor, WP3.6) and see each other ([Local two-client test](#local-two-client-test)). Open: two players spawn on the same cell, the remote model looks darker than the local one (not investigated), and there is no party, trade or combat sync between players yet.
+- **Remote players, rough edges.** Players in one instance share one world (instance actor, WP3.6) and see each other ([Local two-client test](#local-two-client-test)). Open: the remote model's tint (the WP C2 blob is built to the official layout, the in-game check is [planned above](#local-two-client-test)), no equipment on remote players, and no party, trade or combat sync between players yet. Players no longer spawn on one cell (`[spawn] player_spacing`).
 - **Real login crypto.** The bypass keys derive from a public value; fine on a LAN, not over the open internet ([../re/crypto.md](../re/crypto.md)). A later step: the DLL swaps the client's baked-in DSA public key for ours and keeps verification on.
 - **Bundled hook DLLs.** The launcher still needs the hook DLLs from a local build of the client hook (its settings point at them); a ready package of the hook with a `poe-hook.toml` for friends does not exist yet ([launcher.md](launcher.md#not-done)).
 - **Per-client address.** One `public_host` serves everyone; LAN players and internet players of the same server need NAT loopback or their own `server.toml` for deploy.

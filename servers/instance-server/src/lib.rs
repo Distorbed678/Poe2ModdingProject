@@ -396,10 +396,15 @@ impl InstanceServer {
             first_entity_id: self.config.instance.first_entity_id,
             movement: first.movement.clone(),
             grid: first.grid.clone(),
-            codec: movement::Codec::new(self.protocol.clone(), Arc::new(move |id: &str| stats.key(id))),
+            codec: {
+                let public = stats.clone();
+                movement::Codec::new(self.protocol.clone(), Arc::new(move |id: &str| stats.key(id)))
+                    .with_stat_visibility(Arc::new(move |id: &str| public.is_party(id)))
+            },
             directory: self.instances.clone(),
             idle: Duration::from_secs(self.config.instance.idle_minutes * 60),
             trace: self.reports.trace().is_some(),
+            player_spacing: self.config.spawn.player_spacing,
         }
     }
 

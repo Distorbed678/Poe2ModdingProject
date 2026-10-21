@@ -73,6 +73,12 @@ debug_link = true
 # (scripts/re/sweep_drive.py logs the client in again).
 sweep = ""
 sweep_results = "dumps/{version}/terrain/vectors/sweep-results.tsv"
+# Remote player blob experiments (docs/protocol/entities.md, "Remote player look"): parts of the
+# official remote layout to leave out, to find which one the client reacts to. Names: "stat_sets",
+# "derived_stats", "life_state", "player_flags". Empty = send everything.
+remote_blob_omit = []
+# Also send the class's animated object path in the remote blob (as the player's own blob does).
+remote_animated_path = false
 
 [terrain]
 # Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
@@ -199,6 +205,11 @@ filler = ["fill", "blank"]
 
 # First visit plays the washed-up opening (new characters on the Riverbank).
 intro_areas = ["G1_1"]
+
+# A player joining an instance never stands closer than this many grid cells (about a third of a
+# tile) to a player already there: a spawn that close moves to the nearest free walkable cell
+# (0 = off).
+player_spacing = 8
 
 # Start tile per area, and the start point inside it in the tile's own orientation (grid cells
 # from its corner); the spawn is then snapped to the nearest walkable cell.
