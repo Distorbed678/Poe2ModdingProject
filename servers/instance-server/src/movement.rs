@@ -39,9 +39,8 @@ const MOVE_UPDATE_TRAILER: u8 = 0xf1;
 pub type StatKeys = Arc<dyn Fn(&str) -> Option<u32> + Send + Sync>;
 
 /// `0x1ca`: an action event without a body (with every roll start and when an attack ends a
-/// sprint). It has no entry in the protocol table's `instance.toml` yet, so
-/// [`Codec::encode`] skips it until `ActionEvent = 0x01ca` is added there (the client only
-/// decrements a counter for it, Actor case `0x14214a13e`).
+/// sprint; `ActionEvent` in `instance.toml`). The client only decrements a counter for it
+/// (Actor case `0x14214a13e`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ActionEvent {
     pub header: SimulationHeader,

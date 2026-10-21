@@ -3,7 +3,7 @@
 # config/server.toml is the working dev config; a test (poe-config) parses both files.
 # Paths are relative to the working directory (the repo root when started with `cargo run`).
 # Keys marked "required" have no default and must be present; everything else may be left out.
-# Old key names (pre-2026-10) are listed in docs/guides/server-admin.md "Config migration".
+# Old key names (pre-2026-10) are listed in docs/guides/setup.md "Config migration (2026-10)".
 
 [game]
 # All keys in [game] are required.
@@ -43,6 +43,9 @@ idle_minutes = 15
 # Simulation frame interval in ms (one 0x2f4 tick marker per frame; also sent in
 # InitialState as the frame length).
 tick_ms = 33
+# First entity id of an instance's counter, shared by all its players (official: players start
+# at 12000; the area's own objects have lower ids).
+first_entity_id = 12000
 
 [movement]
 # Server-side movement simulation (crates/poe-game, docs/protocol/movement.md). Skill ids,
@@ -213,3 +216,7 @@ default_channel = 1
 [player]
 innate_skills = ["DodgeRollPlayer"]
 start_area = "G1_1"
+# Animation set names other players' clients get for a character (main hand, off hand, default;
+# official: weapon-dependent, `BowTown` ..., `UnarmedTown`, `default`). Characters have no
+# equipment yet, so all are unarmed.
+animation_sets = ["UnarmedTown", "UnarmedTown", "default"]

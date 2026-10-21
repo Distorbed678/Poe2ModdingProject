@@ -39,8 +39,8 @@ link = "docs/status/history.md"
 
 [[subsystem.item]]
 name = "Standalone email/password login screen"
-status = "partial"
-note = "RE done (WP3.1), the DLL forces it (WP3.3, `login_mode`) and the login server handles 0x0003 (WP3.2, tested with encoded packets); the in-game check is open"
+status = "done"
+note = "the DLL forces the standalone screen and skips the patcher; password and remember-me token logins verified in game"
 link = "docs/re/standalone-login.md"
 
 # ---------------------------------------------------------------------------------------------
@@ -81,14 +81,6 @@ name = "Rate limiting of password attempts"
 status = "planned"
 link = "docs/architecture/accounts.md"
 
-[[subsystem.item]]
-name = "Admin role in the database (replaces the config list)"
-status = "planned"
-
-[[subsystem.item]]
-name = "Duplicate login kicks the old session"
-status = "planned"
-
 # ---------------------------------------------------------------------------------------------
 
 [[subsystem]]
@@ -120,7 +112,7 @@ link = "docs/status/history.md"
 
 [[subsystem.item]]
 name = "Instance actor (one World per instance)"
-status = "partial"
+status = "done"
 note = "WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift) and in WP3.7 with two"
 link = "docs/architecture/instance-world.md"
 
@@ -180,8 +172,8 @@ link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
 name = "Remote client login (trusted_servers in the DLL)"
-status = "partial"
-note = "WP3.3: DLL side built and unit-tested (trusted servers are not blocked, not latched, get the crypto bypass); not yet tried against a LAN server in game"
+status = "done"
+note = "trusted servers are not blocked or latched and get the crypto bypass; verified with two clients over the LAN IP (WP3.7); a second physical machine is untested"
 link = "docs/guides/hosting.md"
 
 [[subsystem.item]]
@@ -248,7 +240,7 @@ status = "done"
 [[subsystem.item]]
 name = "Server-side generator, act 1: 25 of 33 sweep vectors match"
 status = "partial"
-note = "Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3; the per-area matrix comes later"
+note = "Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3; all areas: the Terrain matrix below"
 link = "docs/status/terrain.md"
 
 [[subsystem.item]]

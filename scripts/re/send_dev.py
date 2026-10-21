@@ -7,7 +7,7 @@ which seals and sends it (`cmd:` entry of GameFiles/poe-hook.keys, see auto_keys
 
 Usage: scripts/re/send_dev.py [auto] <command...>
 
-Examples: `area G1_1 12345` (new AreaInfo on the live connection), `teleport 1100 300`.
+Examples: `area_info G1_1 12345` (new AreaInfo on the live connection), `teleport 1100 300`.
 The leading `auto` is accepted for old habits; the client DLL always answers for its own session.
 """
 import os

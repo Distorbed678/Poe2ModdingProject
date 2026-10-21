@@ -181,7 +181,7 @@ pub struct ClientReports {
     rejected: AtomicU64,
 }
 
-/// Movement trace (dev, `[instance] movement_trace`): one TSV line per client position
+/// Movement trace (dev, `[dev] movement_trace`): one TSV line per client position
 /// report, movement input and movement reply, so a play session can be analysed afterwards.
 /// Columns: milliseconds since the trace was opened, client TCP port, kind, then fields.
 pub struct MovementTrace {

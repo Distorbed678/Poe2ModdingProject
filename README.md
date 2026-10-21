@@ -37,11 +37,11 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 
 | Subsystem | Progress | Done |
 |---|---|---|
-| [Login](#login) | `████████░░ 80%` | 3/5 |
-| [Accounts](#accounts) | `██████░░░░ 63%` | 5/8 |
-| [Instances/Transfers](#instancestransfers) | `████████░░ 75%` | 4/6 |
+| [Login](#login) | `█████████░ 90%` | 4/5 |
+| [Accounts](#accounts) | `████████░░ 83%` | 5/6 |
+| [Instances/Transfers](#instancestransfers) | `████████░░ 83%` | 5/6 |
 | [Movement](#movement) | `████░░░░░░ 43%` | 0/7 |
-| [Multiplayer](#multiplayer) | `███████░░░ 67%` | 3/6 |
+| [Multiplayer](#multiplayer) | `████████░░ 75%` | 4/6 |
 | [Chat/Commands](#chatcommands) | `██████████ 100%` | 4/4 |
 | [Terrain](#terrain) | `███░░░░░░░ 25%` | 2/14 |
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
@@ -63,7 +63,7 @@ Docs: [docs/protocol/login.md](docs/protocol/login.md)
 | ✅ | [Authenticate, leagues, character list, hand-off to the instance server](docs/protocol/login.md) |  |
 | ✅ | Character creation, selection and deletion |  |
 | 🟡 | [CharacterList entry fields and creation error codes](docs/status/history.md) | some entry fields are still unexplained; refusal codes unknown |
-| 🟡 | [Standalone email/password login screen](docs/re/standalone-login.md) | RE done (WP3.1), the DLL forces it (WP3.3, `login_mode`) and the login server handles 0x0003 (WP3.2, tested with encoded packets); the in-game check is open |
+| ✅ | [Standalone email/password login screen](docs/re/standalone-login.md) | the DLL forces the standalone screen and skips the patcher; password and remember-me token logins verified in game |
 
 ### Accounts
 
@@ -77,8 +77,6 @@ Docs: [docs/architecture/accounts.md](docs/architecture/accounts.md)
 | ✅ | [Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)](docs/architecture/accounts.md) | game tokens in use; launcher and web tokens issued by the web API (WP4.1) |
 | ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; unit-tested, not yet tried with two clients |
 | ⬜ | [Rate limiting of password attempts](docs/architecture/accounts.md) |  |
-| ⬜ | Admin role in the database (replaces the config list) |  |
-| ⬜ | Duplicate login kicks the old session |  |
 
 ### Instances/Transfers
 
@@ -91,7 +89,7 @@ Docs: [docs/architecture/instance-world.md](docs/architecture/instance-world.md)
 | ✅ | Forced topology and orientation per instance |  |
 | ✅ | Saved location (area, seed, cell) restored on login |  |
 | ❌ | [Waypoints and area transitions; transfers without character select](docs/status/history.md) | needs an official capture of a zone change |
-| 🟡 | [Instance actor (one World per instance)](docs/architecture/instance-world.md) | WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift) and in WP3.7 with two |
+| ✅ | [Instance actor (one World per instance)](docs/architecture/instance-world.md) | WP3.6: one task per instance owns the World, the entity counter and the frame clock; sessions join, send input and leave through messages; unit-tested with fake sessions (two players, join, relay, leave, supersede, pause, idle end) and checked in game with one client (spawn, walk, roll, drift) and in WP3.7 with two |
 
 ### Movement
 
@@ -113,7 +111,7 @@ Docs: [docs/guides/hosting.md](docs/guides/hosting.md)
 
 | | Item | Note |
 |---|---|---|
-| 🟡 | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | WP3.3: DLL side built and unit-tested (trusted servers are not blocked, not latched, get the crypto bypass); not yet tried against a LAN server in game |
+| ✅ | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | trusted servers are not blocked or latched and get the crypto bypass; verified with two clients over the LAN IP (WP3.7); a second physical machine is untested |
 | ✅ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](docs/guides/hosting.md) | WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine |
 | ✅ | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looks darker than the local one: not investigated) |
 | 🟡 | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); open: players spawn on one cell, no combat/party sync |
@@ -138,7 +136,7 @@ Docs: [docs/status/terrain.md](docs/status/terrain.md)
 | | Item | Note |
 |---|---|---|
 | ✅ | Client builds terrain from area and seed (any area loads) |  |
-| 🟡 | [Server-side generator, act 1: 25 of 33 sweep vectors match](docs/status/terrain.md) | Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3; the per-area matrix comes later |
+| 🟡 | [Server-side generator, act 1: 25 of 33 sweep vectors match](docs/status/terrain.md) | Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3; all areas: the Terrain matrix below |
 | 🟡 | [G1_12: grid overlap (map size 169x85 vs 174x87)](docs/status/terrain.md) | all 2385 terrain draws match; layout differs |
 | 🟡 | [G1_4: overlay phase 2 (seed 1003)](docs/status/terrain.md) | 2/3 seeds match |
 | ❌ | [G1_5: edge routing ("could not tilise edge 14")](docs/status/terrain.md) | 0/3 seeds |

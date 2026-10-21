@@ -16,12 +16,9 @@ Progress and the current task: the tracker in [README.md](README.md).
 - Ask the user for x64dbg/dynamic debugging, for official captures, and before relying on Steam being running.
 
 ## Roadmap (details: [docs/plans/orchestration-2026-10.md](docs/plans/orchestration-2026-10.md), status: README tracker)
-1. Foundation: restructure, dumps, repo split, docs, config, tracker
-2. Server-authoritative movement from official captures
-3. Accounts (per cluster, passwords) and multiplayer
-4. Web API + web admin
-5. Launcher (Tauri; installs 0.5.5e from Steam depots, mods)
-6. Consistency pass; 7. terrain port to all areas (handoff plan)
+Done (2026-10-20/21): foundation (restructure, dumps, repo split, docs, config, tracker); server-authoritative movement from official captures; accounts with the standalone login; remote hosting; shared instance world with two-client multiplayer; web API + web admin; launcher (end-to-end test with a depot download pending); consistency pass.
+**Current task:** terrain port to all areas, following [docs/plans/terrain-all-areas.md](docs/plans/terrain-all-areas.md).
+Open elsewhere: movement gaps #11/#12 (docs/protocol/movement.md), party/trade replies, the mod loader in the DLL.
 
 ## Where things are
 - Commands, logs, unattended in-game tests: [docs/guides/setup.md](docs/guides/setup.md)
