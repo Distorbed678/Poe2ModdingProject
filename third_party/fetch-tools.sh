@@ -15,6 +15,15 @@ chmod +x poe_data_tools/poe_data_tools
 echo "== dat-schema (rolling 'latest')"
 mkdir -p dat-schema
 gh release download latest -R poe-tool-dev/dat-schema -p 'schema-poe2.min.json' -p 'schema.min.json' -D dat-schema --clobber
+# The schema is a rolling download: say when it is not the file the version files were checked with.
+got=$(sha256sum dat-schema/schema-poe2.min.json | cut -d' ' -f1)
+for f in ../versions/*.toml; do
+    want=$(sed -n 's/^schema_sha256 *= *"\([0-9a-f]*\)".*/\1/p' "$f")
+    if [ -n "$want" ] && [ "$want" != "$got" ]; then
+        echo "WARNING: dat-schema sha256 $got differs from $(basename "$f") (data.schema_sha256 $want):" \
+             "run 'cargo xtask check-build GameFiles/PathOfExileSteam.exe' and update the pin" >&2
+    fi
+done
 
 echo "== LibGGPK3 ($LIBGGPK3)"
 mkdir -p LibGGPK3

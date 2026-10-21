@@ -17,7 +17,11 @@ Usage: scripts/re/export_symbols.py
 import glob
 import json
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from version import current_version, dumps_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "modules/client-hook/poe-hook-core/assets/symbols.tsv"
@@ -31,12 +35,12 @@ def clean(text: str) -> str:
 
 def main():
     names = {}
-    for path in sorted(glob.glob(str(ROOT / "dumps/0.5.5e/ghidra/ghidra_named_functions_p*.json"))):
+    for path in sorted(glob.glob(str(dumps_dir() / "ghidra/ghidra_named_functions_p*.json"))):
         outer = json.loads(Path(path).read_text())
         inner = json.loads(outer["result"]) if isinstance(outer.get("result"), str) else outer
         for f in inner.get("results", []):
             names[int(f["address"], 16)] = f["name"]
-    doc = (ROOT / "docs/re/addresses-0.5.5e.md").read_text()
+    doc = (ROOT / "docs/re" / f"addresses-{current_version()}.md").read_text()
     for line in doc.splitlines():
         m = re.match(r"^\|\s*`(0x14[0-9a-fA-F]{7})`\s*\|\s*([^|]+)\|", line)
         if m:

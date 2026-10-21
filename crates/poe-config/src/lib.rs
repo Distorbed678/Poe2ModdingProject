@@ -11,6 +11,9 @@ use std::{
 
 use serde::Deserialize;
 
+pub mod versions;
+pub use versions::{ClientCheck, VersionFile};
+
 pub const DEFAULT_PATH: &str = "config/server.toml";
 pub const ENV_PATH: &str = "POE_CONFIG";
 
@@ -25,6 +28,12 @@ pub enum ConfigError {
     Parse {
         path: PathBuf,
         source: toml::de::Error,
+    },
+    /// `[game] version` names no supported build (`versions/<version>.toml`).
+    #[error("{path}: {source}")]
+    Version {
+        path: PathBuf,
+        source: versions::VersionError,
     },
 }
 
@@ -70,6 +79,11 @@ pub struct Config {
     /// Password attempt limits of the login server and the web API.
     #[serde(default)]
     pub security: SecurityConfig,
+    /// The build `[game] version` selects (`versions/<version>.toml`). Filled by
+    /// [`Config::load`]; `None` for a config made with [`Config::parse`] (tests), which turns
+    /// the client version check off.
+    #[serde(skip)]
+    pub version_info: Option<VersionFile>,
 }
 
 /// Rate limiting of password logins (the game login `0x0003` and the web API `/login` and
@@ -97,6 +111,13 @@ pub struct SecurityConfig {
     /// control sets the header (otherwise a client can pick its own IP).
     #[serde(default)]
     pub trust_forwarded_for: bool,
+    /// Accept a client whose `client_hash` (a SHA-256 of its exe, `0x0003`/`0x0005`) is not a
+    /// known value of `[game] version` (`versions/<version>.toml`, `[client] hashes`). Off by
+    /// default: such a client is refused with the "you need to update" popup
+    /// (`BackendErrors.InvalidProtocolVersion`), because a build the server does not know
+    /// speaks messages it may misread. Turn it on to try an unlisted build.
+    #[serde(default)]
+    pub allow_unknown_client: bool,
 }
 
 impl Default for SecurityConfig {
@@ -107,6 +128,7 @@ impl Default for SecurityConfig {
             login_failure_window_secs: default_failure_window(),
             login_lockout_secs: default_lockout(),
             trust_forwarded_for: false,
+            allow_unknown_client: false,
         }
     }
 }
@@ -384,9 +406,14 @@ impl InventoriesConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GameConfig {
+    /// The supported client build: names `versions/<version>.toml` at the repository root
+    /// (`cargo xtask check-build`, docs/guides/new-game-version.md). `{version}` in other path
+    /// settings of this file is replaced by it.
     pub version: String,
     pub game_dir: PathBuf,
     pub schema: PathBuf,
+    /// Opcode tables. Default (empty): the version file's `[protocol] opcodes`.
+    #[serde(default)]
     pub protocol_dir: PathBuf,
 }
 
@@ -578,7 +605,7 @@ impl Default for DevConfig {
 }
 
 fn default_sweep_results() -> PathBuf {
-    "dumps/0.5.5e/terrain/vectors/sweep-results.tsv".into()
+    "dumps/{version}/terrain/vectors/sweep-results.tsv".into()
 }
 
 fn default_drift_interval_ms() -> u64 {
@@ -685,18 +712,58 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        Self::load_in(path, Path::new("."))
+    }
+
+    /// [`Config::load`] with the repository root that `versions/` is read from.
+    pub fn load_in(path: &Path, root: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
             path: path.to_owned(),
             source,
         })?;
-        Self::parse(&text).map_err(|source| ConfigError::Parse {
+        let mut config = Self::parse(&text).map_err(|source| ConfigError::Parse {
             path: path.to_owned(),
             source,
-        })
+        })?;
+        // The version file is read relative to the working directory like every other path of
+        // the config (the repository root).
+        let info = VersionFile::load(root, &config.game.version).map_err(|source| ConfigError::Version {
+            path: path.to_owned(),
+            source,
+        })?;
+        if config.game.protocol_dir.as_os_str().is_empty() {
+            config.game.protocol_dir = info.opcodes_dir(root);
+        }
+        config.version_info = Some(info);
+        Ok(config)
     }
 
+    /// Parses the text (no files are read: see [`Config::load`] for the version file).
+    /// `{version}` in the path settings that name a build's data is replaced by
+    /// `[game] version`.
     pub fn parse(text: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(text)
+        let mut config: Self = toml::from_str(text)?;
+        let version = config.game.version.clone();
+        let expand = |s: &str| s.replace("{version}", &version);
+        config.game.protocol_dir = expand(&config.game.protocol_dir.to_string_lossy()).into();
+        config.dev.known_seeds = expand(&config.dev.known_seeds.to_string_lossy()).into();
+        config.dev.sweep_results = expand(&config.dev.sweep_results.to_string_lossy()).into();
+        config.spawn.layout_dir = expand(&config.spawn.layout_dir);
+        Ok(config)
+    }
+
+    /// Judges a client's `client_hash` against the version's known values
+    /// (`versions/<version>.toml`): `Known`, `Unverified` (the version cannot judge yet) and
+    /// `UnknownAllowed` (`[security] allow_unknown_client`) are accepted, `Unknown` is refused. A config without a version file
+    /// (`Config::parse`, tests) accepts every hash.
+    pub fn client_check(&self, hash: &[u8; 32]) -> ClientCheck {
+        match &self.version_info {
+            None => ClientCheck::Known,
+            Some(v) => match v.check_client_hash(hash) {
+                ClientCheck::Unknown if self.security.allow_unknown_client => ClientCheck::UnknownAllowed,
+                other => other,
+            },
+        }
     }
 }
 
@@ -716,6 +783,31 @@ mod tests {
         let text = include_str!("../../../config/server.example.toml");
         let cfg = Config::parse(text).expect("config/server.example.toml must parse");
         assert!(!cfg.leagues.is_empty());
+    }
+
+    #[test]
+    fn load_selects_the_version_file_and_refuses_an_unknown_version() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let cfg = Config::load_in(&root.join("config/server.toml"), &root).unwrap();
+        let v = cfg.version_info.as_ref().expect("version file attached");
+        assert_eq!(v.version, cfg.game.version);
+        // protocol_dir is not in the shipped config: it comes from the version file.
+        assert_eq!(cfg.game.protocol_dir, root.join(&v.protocol.opcodes));
+        // `{version}` is replaced in the path settings.
+        assert!(cfg.dev.known_seeds.to_string_lossy().contains(&format!("dumps/{}/", cfg.game.version)));
+        assert!(!cfg.spawn.layout_dir.contains('{'));
+        assert!(!cfg.dev.sweep_results.to_string_lossy().contains('{'));
+
+        let dir = std::env::temp_dir().join(format!("poe-config-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = std::fs::read_to_string(root.join("config/server.toml"))
+            .unwrap()
+            .replacen("version = \"0.5.5e\"", "version = \"9.9.9z\"", 1);
+        let bad = dir.join("server.toml");
+        std::fs::write(&bad, text).unwrap();
+        let e = Config::load_in(&bad, &root).unwrap_err().to_string();
+        assert!(e.contains("9.9.9z") && e.contains("not a supported build") && e.contains("0.5.5e"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

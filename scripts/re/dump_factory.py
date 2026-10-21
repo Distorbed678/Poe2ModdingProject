@@ -1,6 +1,8 @@
 """Dump a packet factory switch: opcode -> case address, allocation size, vtable, deserializer.
 
-Usage: dump_factory.py <switch_base_opcode hex> <count hex> <table_rva hex> <default_va hex> [out.json]
+Usage: dump_factory.py <switch_base_opcode hex> <count hex> <table_rva hex> <default_va hex> [out.json] [--bytes <byte_table_rva hex>]
+`find_switches.py <func> <len>` prints the numbers (base, count, table rvas, default) of a function's
+switches. With --bytes the switch has an index table (MSVC `movzx idx, [bytes+k]; mov [dwords+idx*4]`).
 Output goes to dumps/0.5.5e/ghidra/ (git-ignored), e.g. instance_factory_s2c.json.
 For the 0.5.5e instance factory (FUN_142170380): dump_factory.py d 35f 217305c 142173040
 The vtable is the first rip-relative LEA into .rdata within the case that is stored as a
@@ -15,8 +17,14 @@ from capstone import x86
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from pe import Image
 
-base_op, count, table_rva, default = (int(x, 16) for x in sys.argv[1:5])
-out = sys.argv[5] if len(sys.argv) > 5 else None
+args = sys.argv[1:]
+bytes_rva = None
+if "--bytes" in args:
+    i = args.index("--bytes")
+    bytes_rva = int(args[i + 1], 16)
+    del args[i : i + 2]
+base_op, count, table_rva, default = (int(x, 16) for x in args[:4])
+out = args[4] if len(args) > 4 else None
 img = Image()
 rdata_lo = img.va(img.sections[".rdata"].VirtualAddress)
 rdata_hi = rdata_lo + img.sections[".rdata"].Misc_VirtualSize
@@ -24,7 +32,8 @@ md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
 md.detail = True
 rows = []
 for i in range(count):
-    rel = int.from_bytes(img.read(img.base + table_rva + 4 * i, 4), "little")
+    slot = img.read(img.base + bytes_rva + i, 1)[0] if bytes_rva is not None else i
+    rel = int.from_bytes(img.read(img.base + table_rva + 4 * slot, 4), "little")
     case = img.base + rel
     if case == default:
         continue

@@ -42,7 +42,11 @@ for idx, i in enumerate(ins):
         cases.setdefault(target, []).append(base + k)
     # The most common target is the default case.
     default = max(cases, key=lambda t: len(cases[t]))
-    print(f"switch at {i.address:#x}: base {base:#x}, {count} entries, default {default:#x}")
+    print(
+        f"switch at {i.address:#x}: base {base:#x}, {count} entries, default {default:#x}, "
+        f"dword table rva {dword_table - img.base:#x}"
+        + (f", byte table rva {byte_table - img.base:#x}" if byte_table else "")
+    )
     for target, ops in sorted(cases.items(), key=lambda kv: kv[1][0]):
         if target != default:
             print(f"  {','.join(hex(o) for o in ops)} -> {target:#x}")

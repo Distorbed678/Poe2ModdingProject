@@ -35,10 +35,22 @@ pub(crate) const MOVE_SKILL: u32 = 0x2000_2909;
 pub(crate) const ROLL_SKILL: u32 = 0x8000_0040;
 pub(crate) const ROLL_ACTION_TYPE: u16 = 60748;
 
-/// The 0.5.5e protocol tables, with `ActionEvent` added when `instance.toml` does not list it
+/// The build the official captures of these tests come from (history, not configuration: the
+/// tests replay those captures). Its opcode folder comes from `versions/<version>.toml`.
+pub(crate) const CAPTURE_VERSION: &str = "0.5.5e";
+
+/// The opcode folder of [`CAPTURE_VERSION`].
+pub(crate) fn capture_opcodes_dir() -> std::path::PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    poe_config::VersionFile::load(&root, CAPTURE_VERSION)
+        .expect("version file of the captures' build")
+        .opcodes_dir(&root)
+}
+
+/// The protocol tables of the captures' build, with `ActionEvent` added when `instance.toml` does not list it
 /// (so the tests also see the `0x1ca` messages).
 pub(crate) fn protocol() -> Arc<Protocol> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules/protocol/opcodes/0.5.5e");
+    let dir = capture_opcodes_dir();
     let mut protocol = Protocol::load(&dir).expect("protocol tables");
     if protocol
         .instance
@@ -598,10 +610,7 @@ fn non_movement_packets_are_not_consumed() {
 fn action_event_is_skipped_while_instance_toml_lacks_it() {
     use poe_game::locomotion::MoveEvent;
     let raw = Arc::new(
-        Protocol::load(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules/protocol/opcodes/0.5.5e"),
-        )
-        .unwrap(),
+        Protocol::load(&capture_opcodes_dir()).unwrap(),
     );
     let listed = raw
         .instance

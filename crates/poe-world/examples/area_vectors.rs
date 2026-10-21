@@ -8,7 +8,7 @@
 //! Result lines (`cargo xtask terrain-matrix` parses them; keep the format):
 //! `area  seed  match (natural T:O)`, `area  seed  match (forced T:O)` (T the 1-based topology
 //! index, O the orientation), `area  seed  differ  ...`, `area  seed  error  ...`,
-//! `area  seed  panic`. Keep the output in `dumps/0.5.5e/terrain/vectors/area-vectors-results.txt`.
+//! `area  seed  panic`. Keep the output in `dumps/<version>/terrain/vectors/area-vectors-results.txt`.
 
 use std::{collections::BTreeMap, path::Path};
 

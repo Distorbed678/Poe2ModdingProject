@@ -5,7 +5,7 @@
 //! generator can run at all, which `cargo xtask terrain-matrix` reads as the probe column.
 //!
 //! `cargo run --release -p poe-world --example area_probe -- [seed 1001] [area filter | all]
-//! [timeout seconds 30] > dumps/0.5.5e/terrain/vectors/probe-results.tsv`
+//! [timeout seconds 30] > dumps/<version>/terrain/vectors/probe-results.tsv`
 //! A hung attempt is abandoned (its thread keeps spinning); after eight the run stops.
 
 use std::{path::Path, sync::mpsc, time::Duration};

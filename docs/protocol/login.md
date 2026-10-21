@@ -26,7 +26,7 @@ Encodings: integers big-endian. `wstring` uses the compact per-character encodin
 |---|---|---|
 | ticket_len | u16 | |
 | flags_lo | u8 | UI language id (global `DAT_143a0c054`, 0 = English) `\| 0x40` |
-| client_hash | 32 bytes | `LoginClientHash_Get32` `0x1420e7580`: a hash (SHA-256 family, `0x1421bbdf0`) of **the file named by argv[0], the client executable**, computed once on a worker thread at start (`0x1420eb470`; the getter waits until it is done). Inferred from the code, not compared with a known digest. Our server ignores it |
+| client_hash | 32 bytes | `LoginClientHash_Get32` `0x1420e7580`: a hash (SHA-256 family, `0x1421bbdf0`) of **the file named by argv[0], the client executable**, computed once on a worker thread at start (`0x1420eb470`; the getter waits until it is done). Inferred from the code, not yet seen on the wire against the exe's SHA-256. Since WP A4 the login server judges it against `[client] hashes` of `versions/<version>.toml` and refuses an unknown build with code 8 (`InvalidProtocolVersion`) once `hashes_confirmed` is set ([../guides/new-game-version.md](../guides/new-game-version.md#what-the-server-does-with-the-clients-version)); it logs the value while unconfirmed |
 | machine_hash | 32 bytes | `0x1421c1340`: cached 32-byte machine id built by `0x1421c0d20` (fallback `0x1421c0c20` when all zero); stable per machine; only the dev machine-hash login (`[accounts] dev_machine_hash_login`) uses it as the account key |
 | flags_hi | u8 | optional login-state byte (`LoginState +0x529`, valid when `+0x52a`), 0 when unset |
 | ticket | bytes[ticket_len] | Steam encrypted app ticket (from `GetEncryptedAppTicket`). Encrypted for GGG, so the server cannot read it |

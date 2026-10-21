@@ -24,6 +24,9 @@ pub mod code {
     /// deletes its saved credentials file and shows our notice, so the next start asks for the
     /// password. (`0x62` would open the email Unlock window, `0x61` keeps the file.)
     pub const TOKEN_INVALID: u16 = be::UNEXPECTED_DISCONNECT.code;
+    /// The client is not a known build of the server's version: the client shows "There has
+    /// been a patch that you need to update to".
+    pub const CLIENT_OUT_OF_DATE: u16 = be::INVALID_PROTOCOL_VERSION.code;
     /// Database error.
     pub const DATABASE: u16 = be::DATABASE_ERROR.code;
     /// Banned: used for disabled accounts.
@@ -70,6 +73,34 @@ fn map_error(e: AccountError, token_login: bool) -> Verdict {
         other => {
             tracing::warn!(token_login, "account store: {other}");
             refused(code::DATABASE, "The account database is not available.")
+        }
+    }
+}
+
+/// Judges the `client_hash` of a `0x0003`/`0x0005` against the version the server speaks
+/// (`versions/<version>.toml` `[client] hashes`; `[security] allow_unknown_client`). Returns
+/// the refusal for a build the server does not know; accepted and not-yet-judgeable clients
+/// give `None` (the latter is logged: the hash is what `[client] hashes` must record).
+pub fn check_client(config: &poe_config::Config, client_hash: &[u8; 32]) -> Option<Verdict> {
+    use poe_config::{ClientCheck, versions::hex32};
+    let hash = hex32(client_hash);
+    match config.client_check(client_hash) {
+        ClientCheck::Known => None,
+        ClientCheck::Unverified => {
+            tracing::info!(client_hash = %hash, "client_hash cannot be checked yet (versions/<version>.toml [client] hashes_confirmed is false)");
+            None
+        }
+        ClientCheck::UnknownAllowed => {
+            tracing::warn!(client_hash = %hash, "client build is not a known one for this server (allow_unknown_client is on)");
+            None
+        }
+        ClientCheck::Unknown => {
+            let version = &config.game.version;
+            tracing::warn!(client_hash = %hash, %version, "login refused: unknown client build");
+            Some(refused(
+                code::CLIENT_OUT_OF_DATE,
+                &format!("This server runs Path of Exile 2 client {version}. Your client is a different build: install client {version} (the launcher does it)."),
+            ))
         }
     }
 }
@@ -178,7 +209,8 @@ mod tests {
     use crate::session::{ClientMessage, decode_client};
 
     fn protocol() -> Protocol {
-        Protocol::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules/protocol/opcodes/0.5.5e")).unwrap()
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        Protocol::load(&poe_config::VersionFile::latest(&root).unwrap().opcodes_dir(&root)).unwrap()
     }
 
     fn cfg() -> AccountsConfig {
@@ -238,6 +270,53 @@ mod tests {
 
     fn token_creds(name: &str, token: [u8; 32]) -> Credentials {
         Credentials { password_hash: token, save_login: 1, token_login: 1, ..password_creds(name, "", true) }
+    }
+
+    /// The shipped example config with the repository's newest version file attached, as
+    /// `Config::load` does.
+    fn config_with_version() -> poe_config::Config {
+        let mut c = poe_config::Config::parse(include_str!("../../../config/server.example.toml")).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        c.version_info = Some(poe_config::VersionFile::load(&root, &c.game.version).unwrap());
+        c
+    }
+
+    #[test]
+    fn an_unknown_client_build_is_refused_with_the_update_popup() {
+        use poe_config::versions::hex32;
+        let mut c = config_with_version();
+        let known: [u8; 32] = {
+            let h = &c.version_info.as_ref().unwrap().client.hashes[0];
+            std::array::from_fn(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())
+        };
+        let other = [7u8; 32];
+        assert_ne!(hex32(&known), hex32(&other));
+
+        // The hashes of the file are derived, not yet seen on the wire: nothing is refused.
+        assert!(!c.version_info.as_ref().unwrap().client.hashes_confirmed);
+        assert!(check_client(&c, &other).is_none());
+
+        // Confirmed: the known build is let in, any other one is refused with code 8 and the
+        // notice, through the wire like the connection sends it.
+        c.version_info.as_mut().unwrap().client.hashes_confirmed = true;
+        assert!(check_client(&c, &known).is_none());
+        let refusal = check_client(&c, &other).expect("unknown build refused");
+        assert!(matches!(&refusal, Verdict::Refused { result: 8, .. }));
+        assert_eq!(code::CLIENT_OUT_OF_DATE, 8);
+        let protocol = protocol();
+        let wire = protocol.login.encode(&reply(&c.accounts, &refusal)).unwrap();
+        assert_eq!(&wire[..2], &[0, 4]);
+        let r = AuthenticationResult::decode(&mut Reader::new(&wire[2..])).unwrap();
+        assert_eq!((r.result, r.account_id), (8, 0));
+        assert!(r.notice.contains(&c.game.version), "{}", r.notice);
+
+        // [security] allow_unknown_client lets it in (for trying an unlisted build).
+        c.security.allow_unknown_client = true;
+        assert!(check_client(&c, &other).is_none());
+        // A config without a version file (parse only) checks nothing.
+        c.version_info = None;
+        c.security.allow_unknown_client = false;
+        assert!(check_client(&c, &other).is_none());
     }
 
     #[test]

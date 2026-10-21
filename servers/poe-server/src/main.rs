@@ -21,6 +21,21 @@ async fn main() -> anyhow::Result<()> {
         .with(logs.layer())
         .init();
     tracing::info!(version = %config.game.version, "starting poe-server");
+    if let Some(v) = &config.version_info {
+        tracing::info!(
+            build_revision = %v.build_revision,
+            status = ?v.status,
+            opcodes = %config.game.protocol_dir.display(),
+            client_hashes = v.client.hashes.len(),
+            hashes_confirmed = v.client.hashes_confirmed,
+            allow_unknown_client = config.security.allow_unknown_client,
+            "client build (versions/{}.toml)",
+            v.version
+        );
+        if v.status != poe_config::versions::Status::Supported {
+            tracing::warn!("client {} is `{:?}`, not a supported build", v.version, v.status);
+        }
+    }
     for w in config.network.warnings() {
         tracing::warn!("{w}");
     }

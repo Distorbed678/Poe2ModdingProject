@@ -3575,12 +3575,18 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hex",
+ "iced-x86",
  "poe-config",
  "poe-data",
  "poe-hook-deploy",
+ "poe-hook-sig",
+ "poe-proto",
  "poe-web-api",
  "poe-world",
  "serde",
+ "serde_json",
+ "sha2",
  "toml",
 ]
 

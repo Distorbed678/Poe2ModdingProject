@@ -38,7 +38,10 @@ import struct
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CAPS = os.path.join(ROOT, "dumps", "0.5.5e", "captures")
+sys.path.insert(0, os.path.dirname(__file__))
+from version import current_version  # noqa: E402
+
+CAPS = os.path.join(ROOT, "dumps", current_version(), "captures")
 
 TICK = 0x02F4
 MOVE_SKILL = 0x20002909

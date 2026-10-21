@@ -14,8 +14,11 @@ use clap::{Parser, Subcommand};
 use poe_config::Config;
 use poe_hook_deploy::{DeployOptions, GatewayEntry, LoginMode, Mode, launch::ProtonLaunch};
 
+mod check_build;
+mod fingerprint;
 mod terrain_matrix;
 mod tracker;
+mod versions;
 
 /// The client DLL workspace (Poe2ClientHook submodule), relative to the repo root.
 const CLIENT_HOOK_DIR: &str = "modules/client-hook";
@@ -91,11 +94,42 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// What a game build breaks: scans an exe for every entry of the client DLL's signature
+    /// table, checks the build identity against versions/<version>.toml, the opcode tables
+    /// (HNC table, deserializer fingerprints), the strings the tools need and the game data the
+    /// server reads, writes dumps/<version>/check-build.md and prints a summary. Exit code 0 all
+    /// fine, 1 warnings, 2 something required is missing, ambiguous or different
+    /// (docs/guides/new-game-version.md).
+    CheckBuild {
+        /// The game executable to check (read only).
+        exe: PathBuf,
+        /// Game directory (the folder with Bundles2/) for the data checks; default `[game]
+        /// game_dir` of the config.
+        #[arg(long)]
+        bundles: Option<PathBuf>,
+        /// Version file to check against (default: the one this exe is the build of, else the
+        /// config's `[game] version`).
+        #[arg(long)]
+        version: Option<String>,
+        /// Report file (default dumps/<version>/check-build.md).
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Instead of checking, write the opcode baseline `<opcodes dir>/deserializers.tsv`
+        /// from this exe and the factory dumps in dumps/<version>/ghidra/.
+        #[arg(long)]
+        write_fingerprints: bool,
+    },
+    /// Copy versions/<version>.toml into the launcher (modules/launcher/versions/), which embeds
+    /// byte-identical copies; with --check only compare.
+    Versions {
+        #[arg(long)]
+        check: bool,
+    },
     /// Write the terrain verification matrix (area x topology x orientation -> untested/fail/match)
     /// to docs/status/terrain-matrix.tsv from the game data and the verification outputs in
-    /// dumps/0.5.5e/terrain/vectors/ (docs/plans/terrain-all-areas.md).
+    /// dumps/<version>/terrain/vectors/ (docs/plans/terrain-all-areas.md).
     TerrainMatrix {
-        /// Folder of the verification outputs (default dumps/0.5.5e/terrain/vectors).
+        /// Folder of the verification outputs (default dumps/<version>/terrain/vectors of the newest version file).
         #[arg(long)]
         dumps: Option<PathBuf>,
         /// Output file (default docs/status/terrain-matrix.tsv).
@@ -143,6 +177,20 @@ fn main() -> Result<()> {
     if let Cmd::TerrainMatrix { dumps, out } = cli.cmd {
         return terrain_matrix::run(&root, dumps, out);
     }
+    if let Cmd::Versions { check } = cli.cmd {
+        return versions::run(&root, check);
+    }
+    if let Cmd::CheckBuild { exe, bundles, version, report, write_fingerprints } = cli.cmd {
+        // The config is optional: it only supplies the game directory, the schema and the
+        // server's version.
+        let config = Config::load(&cli.config).ok();
+        let code = check_build::run(
+            &root,
+            config.as_ref(),
+            check_build::Options { exe, bundles, version, report, write_fingerprints },
+        )?;
+        std::process::exit(code);
+    }
     let prefix = cli.prefix.map(|p| root.join(p)).unwrap_or_else(|| proton_prefix(&root));
     if let Cmd::LoginToken { account, token_hex } = &cli.cmd {
         return login_token(&prefix, account, token_hex);
@@ -158,7 +206,12 @@ fn main() -> Result<()> {
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::DllData => export_dll_data(&config),
-        Cmd::Tracker { .. } | Cmd::Openapi { .. } | Cmd::LoginToken { .. } | Cmd::TerrainMatrix { .. } => {
+        Cmd::Tracker { .. }
+        | Cmd::Openapi { .. }
+        | Cmd::LoginToken { .. }
+        | Cmd::TerrainMatrix { .. }
+        | Cmd::Versions { .. }
+        | Cmd::CheckBuild { .. } => {
             unreachable!("handled before the config is loaded")
         }
         Cmd::SelectGateway => {

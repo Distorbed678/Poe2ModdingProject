@@ -29,6 +29,7 @@ sha2 = "0.10"
 rand = "0.9"
 rusqlite = { version = "0.37", features = ["bundled"] }
 hex = "0.4"
+iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "intel"] }
 argon2 = "0.5"
 
 poe-config = { path = "crates/poe-config" }
@@ -37,6 +38,8 @@ poe-net = { path = "modules/protocol/poe-net", features = ["tokio"] }
 poe-proto = { path = "modules/protocol/poe-proto" }
 # Poe2ClientHook submodule: host-side deploy library used by xtask.
 poe-hook-deploy = { path = "modules/client-hook/poe-hook-deploy" }
+# Byte-signature table of the client DLL (pure Rust): `cargo xtask check-build` scans an exe with it.
+poe-hook-sig = { path = "modules/client-hook/poe-hook-sig" }
 # Side-channel framing (HMAC, upload payload) shared with the client DLL.
 poe-hook-shared = { path = "modules/client-hook/poe-hook-shared" }
 poe-store = { path = "crates/poe-store" }
@@ -48,3 +51,11 @@ poe-game = { path = "crates/poe-game" }
 poe-world = { path = "crates/poe-world" }
 login-server = { path = "servers/login-server" }
 instance-server = { path = "servers/instance-server" }
+
+# `cargo xtask check-build` scans and fingerprints the 78 MB game image: only fast optimised.
+[profile.dev.package.iced-x86]
+opt-level = 3
+[profile.dev.package.poe-hook-sig]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

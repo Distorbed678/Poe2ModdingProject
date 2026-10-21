@@ -46,7 +46,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Terrain](#terrain) | `███░░░░░░░ 25%` | 2/14 |
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
-| [Client Hook](#client-hook) | `█████████░ 90%` | 4/5 |
+| [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
 | [Launcher](#launcher) | `████████░░ 83%` | 4/6 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `█████░░░░░ 50%` | 2/5 |
@@ -647,6 +647,7 @@ Docs: [docs/architecture/client-dll.md](docs/architecture/client-dll.md)
 | ✅ | Read-only mode on official servers (latch) |  |
 | ✅ | [Deploy and launch library (poe-hook-deploy)](docs/architecture/crates.md) |  |
 | 🟡 | [Standalone login screen, token auto-login, trusted_servers](docs/architecture/client-dll.md#login-mode-and-trusted-servers) | WP3.3: login_mode patch, shared is_trusted, `cargo xtask login-token`; in-game test plan pending |
+| 🟡 | [Game update compatibility: signature table, `cargo xtask check-build`, `versions/<version>.toml`, unknown-client refusal](docs/guides/new-game-version.md) | WP A2-A4: DLL addresses and offsets from byte signatures; check-build (signatures, offsets, opcode fingerprints, strings, game data) with report and exit codes; one version file for xtask, server and launcher; the server refuses an unknown `client_hash` once `hashes_confirmed`; the client_hash is derived from the code, the in-game check must confirm it; renumbered opcodes are not derived |
 
 ### Launcher
 

@@ -12,6 +12,7 @@ pub mod hash;
 pub mod rooms;
 mod schema;
 pub mod template;
+pub mod used;
 pub mod views;
 
 pub use dat::{Row, Table, Value};

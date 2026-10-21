@@ -400,6 +400,12 @@ status = "partial"
 note = "WP3.3: login_mode patch, shared is_trusted, `cargo xtask login-token`; in-game test plan pending"
 link = "docs/architecture/client-dll.md#login-mode-and-trusted-servers"
 
+[[subsystem.item]]
+name = "Game update compatibility: signature table, `cargo xtask check-build`, `versions/<version>.toml`, unknown-client refusal"
+status = "partial"
+note = "WP A2-A4: DLL addresses and offsets from byte signatures; check-build (signatures, offsets, opcode fingerprints, strings, game data) with report and exit codes; one version file for xtask, server and launcher; the server refuses an unknown `client_hash` once `hashes_confirmed`; the client_hash is derived from the code, the in-game check must confirm it; renumbered opcodes are not derived"
+link = "docs/guides/new-game-version.md"
+
 # ---------------------------------------------------------------------------------------------
 
 [[subsystem]]

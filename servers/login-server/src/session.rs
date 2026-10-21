@@ -258,6 +258,10 @@ async fn authenticate(
     conn: &mut Connection,
     auth: Authenticate,
 ) -> anyhow::Result<Option<Account>> {
+    if let Some(refusal) = auth::check_client(&server.config, &auth.client_hash) {
+        send_verdict(server, conn, &refusal).await?;
+        return Ok(None);
+    }
     if !server.config.accounts.dev_machine_hash_login {
         warn!("Steam login (0x0005) refused: [accounts] dev_machine_hash_login is off");
         send_refusal(server, conn, auth::code::NOT_ENABLED, "This server needs a username and password login.").await?;
@@ -302,6 +306,10 @@ async fn credentials(
     if creds.mode != 2 {
         warn!(mode = creds.mode, "0x0003 with an unexpected mode");
     }
+    if let Some(refusal) = auth::check_client(&server.config, &creds.client_hash) {
+        send_verdict(server, conn, &refusal).await?;
+        return Ok(None);
+    }
     let accounts = server.accounts.clone();
     let config = server.config.clone();
     let limiter = server.limiter.clone();
@@ -327,6 +335,13 @@ async fn credentials(
             Ok(Some(stored))
         }
     }
+}
+
+/// Sends a refusal made by [`auth`] as the `0x0004` reply.
+async fn send_verdict(server: &LoginServer, conn: &mut Connection, verdict: &auth::Verdict) -> anyhow::Result<()> {
+    let reply = auth::reply(&server.config.accounts, verdict);
+    conn.send(&server.protocol.login.encode(&reply)?).await?;
+    Ok(())
 }
 
 async fn send_refusal(
@@ -709,7 +724,8 @@ mod tests {
     use super::*;
 
     fn protocol() -> Protocol {
-        Protocol::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules/protocol/opcodes/0.5.5e")).unwrap()
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        Protocol::load(&poe_config::VersionFile::latest(&root).unwrap().opcodes_dir(&root)).unwrap()
     }
 
     fn league(id: &str) -> LeagueConfig {

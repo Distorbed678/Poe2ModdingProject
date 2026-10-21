@@ -8,6 +8,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 | [guides/setup.md](guides/setup.md) | The only place for commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, offline accounts and characters, web admin and launcher builds, two-client test, official read-only sessions, config keys and migration, crash dumps |
 | [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
 | [guides/hosting.md](guides/hosting.md) | Letting other players connect: ports, `public_host`, terrain upload, firewall, what a remote player needs, security notes, the local two-client test and its results |
+| [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
 | [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): profiles, Steam depot install, Play, mods |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
 
@@ -37,7 +38,7 @@ A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules
 |---|---|
 | [re/README.md](re/README.md) | How the client is analysed: Ghidra access, `scripts/re`, where findings go |
 | [re/addresses-0.5.5e.md](re/addresses-0.5.5e.md) | Ghidra addresses of functions and structures |
-| [re/update-compatibility.md](re/update-compatibility.md) | What breaks when GGG ships a new client build: ranked inventory (addresses, offsets, opcodes, layouts, data, versions), plus the proposed signature table and `versions/<ver>.toml` |
+| [re/update-compatibility.md](re/update-compatibility.md) | What breaks when GGG ships a new client build: ranked inventory (addresses, offsets, opcodes, layouts, data, versions), what WP A2 to A4 did, and the open items |
 | [re/standalone-login.md](re/standalone-login.md) | How the Steam exe picks the Steam vs email/password login (platform getter), the `0x0003` credentials packet, Remember Me tokens, the DLL patch to force standalone, and the fallback |
 | [re/crypto.md](re/crypto.md) | Login key exchange, Salsa20 key/IV layout, the HNC side channel, the DLL bypass |
 | [re/datamining.md](re/datamining.md) | Reading Bundles2 and `.datc64` tables, the schema, the dumps folder |

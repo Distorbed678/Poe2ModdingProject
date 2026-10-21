@@ -4,7 +4,7 @@
 //! The scope (which areas, topologies and orientations exist) is read from the game data:
 //! every `WorldAreas` row, its `Topologies` rows (the default league mode, as
 //! `poe_world::area::topology_entries` selects them) and each topology's orientation mask. The
-//! results are read from the verification outputs in `dumps/0.5.5e/terrain/vectors/` (all
+//! results are read from the verification outputs in `dumps/<version>/terrain/vectors/` (all
 //! optional; a missing file means nothing is verified from that source):
 //!
 //! | File | Written by | Gives |
@@ -26,8 +26,12 @@ use anyhow::{Context, Result, bail};
 
 /// The matrix, relative to the repo root.
 pub const MATRIX_PATH: &str = "docs/status/terrain-matrix.tsv";
-/// Verification outputs, relative to the repo root.
-pub const VECTORS_DIR: &str = "dumps/0.5.5e/terrain/vectors";
+/// Verification outputs of the newest supported build (`versions/<version>.toml`):
+/// `dumps/<version>/terrain/vectors` below the repo root.
+pub fn vectors_dir(root: &Path) -> Result<PathBuf> {
+    let v = poe_config::VersionFile::latest(root).context("reading versions/")?;
+    Ok(v.dumps_dir(root).join("terrain/vectors"))
+}
 const VECTOR_RESULTS: &str = "area-vectors-results.txt";
 const FORCED_RESULTS: &str = "forced-results.tsv";
 const PROBE_RESULTS: &str = "probe-results.tsv";
@@ -614,7 +618,10 @@ pub fn run(root: &Path, dumps: Option<PathBuf>, out: Option<PathBuf>) -> Result<
     let game_dir = root.join("GameFiles");
     let schema = root.join("third_party/dat-schema/schema-poe2.min.json");
     let scope = inventory(&game_dir, &schema)?;
-    let dir = dumps.map(|d| root.join(d)).unwrap_or_else(|| root.join(VECTORS_DIR));
+    let dir = match dumps {
+        Some(d) => root.join(d),
+        None => vectors_dir(root)?,
+    };
     let results = Results::load(&dir)?;
     let rows = build(&scope, &results);
     let path = out.map(|o| root.join(o)).unwrap_or_else(|| root.join(MATRIX_PATH));

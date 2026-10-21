@@ -1,6 +1,6 @@
 //! Recomputes the tile and doodad hashes of the client DLL's area exports with the server's
 //! code: `cargo run -p poe-world --example check_exports [<session or areas dir>...]`
-//! (default: everything under `dumps/0.5.5e/terrain/area-exports`).
+//! (default: everything under `dumps/<version>/terrain/area-exports` of the newest version folder).
 
 use std::path::{Path, PathBuf};
 
@@ -20,9 +20,22 @@ fn area_dirs(root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// `dumps/<version>/terrain/area-exports` of the last (by name) version folder that has one.
+fn default_root() -> PathBuf {
+    let mut versions: Vec<PathBuf> = std::fs::read_dir("dumps")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path().join("terrain/area-exports"))
+        .filter(|p| p.is_dir())
+        .collect();
+    versions.sort();
+    versions.pop().unwrap_or_else(|| "dumps/terrain/area-exports".into())
+}
+
 fn main() {
     let roots: Vec<PathBuf> = match std::env::args().skip(1).collect::<Vec<_>>() {
-        a if a.is_empty() => vec!["dumps/0.5.5e/terrain/area-exports".into()],
+        a if a.is_empty() => vec![default_root()],
         a => a.into_iter().map(PathBuf::from).collect(),
     };
     let mut dirs = Vec::new();

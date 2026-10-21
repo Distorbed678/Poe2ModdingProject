@@ -2,13 +2,16 @@
 # when started with `cargo run`). Override the file location with POE_CONFIG=<path>.
 
 [game]
+# The supported client build: versions/<version>.toml is its single definition (depots, exe
+# checksum, opcode folder, signature table, accepted client hashes; docs/guides/new-game-version.md).
+# `{version}` in the path settings below is replaced by it.
 version = "0.5.5e"
 # Provided copy of the client install; game data is read from <game_dir>/Bundles2.
 game_dir = "GameFiles"
 # Community .datc64 schema (third_party/fetch-tools.sh downloads it).
 schema = "third_party/dat-schema/schema-poe2.min.json"
-# Opcode tables for this client version.
-protocol_dir = "modules/protocol/opcodes/0.5.5e"
+# Opcode tables: default = the version file's [protocol] opcodes. Set only to try other tables.
+# protocol_dir = "modules/protocol/opcodes/<version>"
 
 [network]
 # Host the clients are sent to: written into gateway_list.txt by `cargo xtask deploy-client`
@@ -51,7 +54,7 @@ sprint_buff_rows = [2758, 2737, 2853]
 # Development and research tools; none are needed for normal play.
 # Terrain seeds known to generate, for picking an area's seed while the server's own generator
 # does not cover every area (poe-world, docs/status/terrain.md); some random seeds fail in the client. Extracted from a live Client.txt by scripts/re/clientlog_terrain.py.
-known_seeds = "dumps/0.5.5e/terrain/vectors/terrain-vectors.tsv"
+known_seeds = "dumps/{version}/terrain/vectors/terrain-vectors.tsv"
 # Listen for the client DLL's UDP datagrams on the instance port (position reports, overlay
 # commands). Reports are only read by the drift checker; they never move the player.
 position_sync = true
@@ -69,7 +72,7 @@ debug_link = true
 # (env POE_SWEEP overrides). Each session generates the next listed layout and ends
 # (scripts/re/sweep_drive.py logs the client in again).
 sweep = ""
-sweep_results = "dumps/0.5.5e/terrain/vectors/sweep-results.tsv"
+sweep_results = "dumps/{version}/terrain/vectors/sweep-results.tsv"
 
 [terrain]
 # Generate each new instance's terrain on the server too (poe-world) and compare its tile hash
@@ -139,6 +142,11 @@ login_failure_window_secs = 300
 login_lockout_secs = 300
 # Behind a TLS reverse proxy that sets X-Forwarded-For: use it as the web API client IP.
 trust_forwarded_for = false
+# Refuse a client whose exe is not a known build of [game] version (its client_hash, a SHA-256
+# of the exe, is not in versions/<version>.toml [client] hashes): the client shows "There has
+# been a patch that you need to update to". true = accept any build (try an unlisted one; the
+# server logs the hash). While the version file's hashes_confirmed is false nothing is refused.
+allow_unknown_client = false
 
 [gateway]
 # Entry written into GameFiles/gateway_list.txt (replaces the official list while deployed).
@@ -186,7 +194,7 @@ Flask1 = [5, 1]
 # server, uploads) the area it generated; the server does not yet use its own generated layout.
 # The player starts on the area's start tile, or else on the playable tile nearest the map centre.
 [spawn]
-layout_dir = "dumps/0.5.5e/terrain"
+layout_dir = "dumps/{version}/terrain"
 filler = ["fill", "blank"]
 
 # First visit plays the washed-up opening (new characters on the Riverbank).

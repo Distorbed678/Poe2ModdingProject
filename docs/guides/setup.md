@@ -51,6 +51,8 @@ cargo xtask revert-client   # restores GameFiles/ to the original state
 cargo xtask openapi         # writes docs/architecture/openapi.json from the web API code (--check: fail if stale)
 cargo xtask tracker         # renders docs/status/tracker.toml into the README.md status tables (--check: fail if README.md is stale)
 cargo xtask terrain-matrix  # writes docs/status/terrain-matrix.tsv (area x topology x orientation) from the game data and dumps/<version>/terrain/vectors/ (--dumps, --out)
+cargo xtask check-build <exe> # what a game build breaks: signatures, offsets, opcode drift, strings, game data, identity (report dumps/<version>/check-build.md; --bundles, --version, --report; exit 0/1/2): new-game-version.md
+cargo xtask versions        # copies versions/<version>.toml into the launcher (modules/launcher/versions/); --check only compares
 cargo xtask login-token <account> <64 hex digits>   # remember-me token for the standalone client, see below
 cargo xtask select-gateway  # only points the remembered gateway of the prefix at our server
 ```
@@ -175,6 +177,8 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | (new) `[accounts] remember_days` | lifetime of a Remember Me login (default `30`) |
 | (new) `[network.login] public_port` | port written into the gateway entry and the trusted list when it differs from the bind port (default: the bind port) |
 | (new) `[instance] first_entity_id` | first entity id of an instance's counter (default `12000`, the official value for players) |
+| (new) `[game] version` selects `versions/<version>.toml`; `[game] protocol_dir` optional | the version file is the single definition of a build (depots, exe checksum, opcode folder, signature table, accepted client hashes; [new-game-version.md](new-game-version.md)); `protocol_dir` defaults to its `[protocol] opcodes`; `{version}` in `[dev] known_seeds`, `[dev] sweep_results` and `[spawn] layout_dir` is replaced by `[game] version`; an unknown version stops the start-up |
+| (new) `[security] allow_unknown_client` | default `false`: a client whose exe hash (`client_hash`) is not a known value of the version is refused with "you need to update"; `true` accepts it (logged). Nothing is refused while the version file's `[client] hashes_confirmed` is `false` ([new-game-version.md](new-game-version.md#what-the-server-does-with-the-clients-version)) |
 | (new) `[spawn.upload]` | terrain upload from client DLLs: `enabled`, `max_bytes`, `max_layout_bytes`, `max_grid_bytes`, `wait_ms`, `wait_upload_secs` ([hosting.md](hosting.md#terrain-spawn-spawnupload)) |
 | (new) `[player] animation_sets` | the three animation set names of a remote player's blob (official, weapon dependent; the example config omits it) |
 
