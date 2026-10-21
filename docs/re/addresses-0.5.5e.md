@@ -1,5 +1,7 @@
 # RE findings: PathOfExileSteam.exe 0.5.5e
 
+> **Since WP A2 (2026-10-21) the DLL no longer uses the addresses on this page.** Every hook address, patch site and struct offset it needs is found by byte signature from `modules/client-hook/signatures/0.5.5e.toml` (85 signatures, 51 fields; each has its 0.5.5e Ghidra address in a `ghidra` key and the offsets their 0.5.5e `value`). That table is the source for what the DLL does; this page stays the knowledge base (what the functions are, evidence, names) and the starting points for a new build. When the two differ, the table was checked against the exe (`cargo run --release -p poe-hook-sig --example resolve -- GameFiles/PathOfExileSteam.exe`) and this page may be stale. See [../architecture/client-dll.md](../architecture/client-dll.md#signature-table-signaturesversiontoml) and [update-compatibility.md](update-compatibility.md).
+
 Ghidra project: `GhidraProject/Poe2ModdingProject`, program `/PathOfExileSteam.exe`, image base `0x140000000`, 115,673 functions after auto-analysis. Addresses are Ghidra addresses. The DLL converts them with `Module::from_ghidra`.
 
 | Address | Name / what | Evidence |

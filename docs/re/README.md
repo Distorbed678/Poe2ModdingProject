@@ -17,6 +17,7 @@ Run them with the project's Python environment, which `third_party/fetch-tools.s
 |---|---|
 | `disasm.py <start_va> <length>` | Disassemble a range |
 | `find_disp.py <disp> [min max]`, `find_imm.py <imm> [min max]` | Find instructions using a struct-field displacement or a 32-bit immediate |
+| `sig_gen.py <spec> [exe]` | Generates `modules/client-hook/signatures/<version>.toml` from a spec of Ghidra addresses (`sig_spec_0.5.5e.py`): unique wildcarded function prefixes, anchored site/ref patterns, struct-offset captures. Verify with `cargo run --release -p poe-hook-sig --example resolve -- <exe>` in `modules/client-hook` |
 | `find_switches.py <func_start> <length>` | List the jump-table switches in a function and the opcodes each case handles |
 | `case_strings.py <func_start> <len> [window]` | Strings referenced near each switch case |
 | `dump_factory.py <base> <count> <table_rva> <default_va> [out.json]` | Dump a packet factory (opcode → case, size, vtable, deserializer) into `dumps/0.5.5e/ghidra/`; for the 0.5.5e instance factory (`FUN_142170380`): `dump_factory.py d 35f 217305c 142173040` |
