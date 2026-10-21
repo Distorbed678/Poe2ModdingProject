@@ -21,7 +21,7 @@ use axum::{
     http::{HeaderValue, Method, header},
     routing::{get, post},
 };
-use poe_accounts::AccountStore;
+use poe_accounts::{AccountStore, LoginLimiter};
 use poe_cluster::{AdminControl, InstanceDirectory};
 use poe_config::Config;
 use poe_store::Store;
@@ -43,6 +43,8 @@ pub const WEB_TOKEN_TTL_SECS: i64 = 12 * 3600;
 pub struct WebState {
     pub config: Arc<Config>,
     pub accounts: Arc<dyn AccountStore>,
+    /// Password attempt limits (shared with the login server).
+    pub limiter: Arc<LoginLimiter>,
     pub store: Arc<dyn Store>,
     pub instances: Arc<dyn InstanceDirectory>,
     pub admin: Arc<dyn AdminControl>,
@@ -124,7 +126,12 @@ pub async fn serve(state: WebState) -> anyhow::Result<()> {
     let bind = state.config.web.bind;
     let listener = tokio::net::TcpListener::bind(bind).await?;
     info!(addr = %bind, "web api listening");
-    axum::serve(listener, router(state)).await?;
+    // Connect info gives the limiter the client's address.
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

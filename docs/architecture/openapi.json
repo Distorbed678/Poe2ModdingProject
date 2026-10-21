@@ -1175,6 +1175,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "too many failed attempts for this account or IP; see the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       }
@@ -1258,6 +1268,16 @@
           },
           "403": {
             "description": "wrong current password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many failed password attempts; see the Retry-After header",
             "content": {
               "application/json": {
                 "schema": {

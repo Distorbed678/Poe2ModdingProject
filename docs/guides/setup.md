@@ -139,7 +139,7 @@ With `login_mode = "standalone"` the client's Remember Me stores a 32-byte token
 cargo xtask login-token <account> <64 hex digits>
 ```
 
-It writes the token to `third_party/proton-prefix/pfx/drive_c/users/steamuser/Documents/My Games/Path of Exile 2/poe2_production_login.credentials` (32 raw bytes, owner-only) and sets `[LOGIN] username=<account>` and `save_login=true` in `poe2_production_Config.ini` there. Start the client with `run-client` and press **Login** with the password box empty. The client reads both files itself; the DLL has no part in it. The file name is confirmed (the file exists in the test prefix after standalone logins) (`poe_hook_deploy::LoginTokenFiles` still makes the names a parameter). A rejected token (`0x62`/`0x0f` from the server) makes the client delete the file. Library API: `poe_hook_deploy::write_login_token(prefix_or_documents_dir, account, token)`.
+It writes the token to `third_party/proton-prefix/pfx/drive_c/users/steamuser/Documents/My Games/Path of Exile 2/poe2_production_login.credentials` (32 raw bytes, owner-only) and sets `[LOGIN] username=<account>` and `save_login=true` in `poe2_production_Config.ini` there. Start the client with `run-client` and press **Login** with the password box empty. The client reads both files itself; the DLL has no part in it. The file name is confirmed (the file exists in the test prefix after standalone logins) (`poe_hook_deploy::LoginTokenFiles` still makes the names a parameter). A rejected token (stale, revoked or unknown: the server answers `0x0f` with a notice) makes the client delete the file. Library API: `poe_hook_deploy::write_login_token(prefix_or_documents_dir, account, token)`.
 
 ### `login_mode` and `trusted_servers`
 
@@ -165,7 +165,8 @@ The server no longer reads the old layout (a config with `[login]`/`[instances]`
 | the four movement-workaround keys of the old `[instance]` (turn cell, turn timing, face cursor, cursor projection) | removed with WP2.3 (the server simulates movement itself, no workarounds); `[movement]` now holds `sprint_buff_rows` only |
 | (new) | `[dev] drift_check` (default `false`) and `drift_interval_ms` (default 1000): the drift checker |
 | `[instance] known_seeds`, `position_sync`, `movement_trace`, `debug_link`, `sweep`, `sweep_results` | `[dev]` (same names) |
-| `[accounts]` (`name_prefix`, `max_characters`, `flags`, `full_access`, `stash_tabs`) | unchanged |
+| `[accounts]` (`name_prefix`, `max_characters`, `flags`, `full_access`, `stash_tabs`) | unchanged (`flags` now defaults to `[0x23, 0x03]`) |
+| (new) `[security]` | password attempt limits and `trust_forwarded_for` (WP B2; [accounts.md](../architecture/accounts.md#password-attempt-limits)) |
 | `[admin] accounts = [...]` | removed: admin is the account's role (`account role <name> admin`; the migration made `Exile1` an admin). A leftover `[admin]` section is ignored |
 | (new) `[cluster] id` | cluster identity; login tokens from another id are invalid (default `"local"`) |
 | (new) `[accounts] dev_machine_hash_login` | Steam `0x0005` login without a password, auto-creating `Exile<id>` accounts (default `false`; `config/server.toml` sets `true` for now) |

@@ -7,6 +7,7 @@ use poe_data::views::{StartState, WorldArea, league_flag_index};
 use poe_net::{Connection, DecodeError, Reader, hexdump::hexdump};
 use poe_proto::{
     Direction, Message, Protocol,
+    backend_error::{self as be, BackendError},
     login::{
         Authenticate, AuthenticationResult, Credentials, CharacterCreated, CharacterDetails, CharacterEntry,
         CharacterList, CreateCharacter, DeleteCharacter, DeleteCharacterResult, InstanceDetails,
@@ -83,7 +84,7 @@ pub(crate) fn decode_client(protocol: &Protocol, r: &mut Reader<'_>) -> Result<C
     }
 }
 
-pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<()> {
+pub async fn run(server: Arc<LoginServer>, stream: TcpStream, peer: std::net::IpAddr) -> anyhow::Result<()> {
     let mut conn = Connection::new(stream)?;
     info!("client connected");
     if !handshake::perform(&mut conn, &server.protocol).await? {
@@ -139,7 +140,7 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                 }
             }
             ClientMessage::Credentials(creds) => {
-                if let Some(a) = credentials(&server, &mut conn, creds).await? {
+                if let Some(a) = credentials(&server, &mut conn, peer, creds).await? {
                     logout = Some(server.sessions.subscribe(a.id));
                     transfers = Some(server.sessions.subscribe_transfers(a.id));
                     account = Some(a);
@@ -188,14 +189,10 @@ pub async fn run(server: Arc<LoginServer>, stream: TcpStream) -> anyhow::Result<
                     warn!("delete character before authentication");
                     continue;
                 };
-                let deleted = server.store.delete_character(account.id, &req.name)?;
-                info!(name = %req.name, deleted, unk = ?req.unk, "delete character");
-                // Result 0 closes the delete screen; the code is otherwise shown as an error.
-                // TODO: the error code for "no such character" is not known yet.
-                let result = DeleteCharacterResult {
-                    result: if deleted { 0 } else { 1 },
-                    unk: 0,
-                };
+                let outcome = delete_character(&*server.store, account.id, &req.name);
+                info!(name = %req.name, result = outcome.code(), slot = req.unk[0], "delete character");
+                // Result 0 closes the delete screen; any other code is shown as the table text.
+                let result = delete_result(outcome, account.id);
                 conn.send(&server.protocol.login.encode(&result)?).await?;
                 // The client keeps its list until it gets a new one (it does not ask).
                 send_character_list(&server, &mut conn, account.id).await?;
@@ -294,6 +291,7 @@ async fn authenticate(
 async fn credentials(
     server: &LoginServer,
     conn: &mut Connection,
+    peer: std::net::IpAddr,
     creds: Credentials,
 ) -> anyhow::Result<Option<Account>> {
     if creds.mode != 2 {
@@ -301,10 +299,11 @@ async fn credentials(
     }
     let accounts = server.accounts.clone();
     let config = server.config.clone();
+    let limiter = server.limiter.clone();
     let name = creds.account_name.clone();
     let token_login = creds.token_login != 0;
     // argon2id is deliberately slow: keep it off the async workers.
-    let verdict = tokio::task::spawn_blocking(move || auth::credentials_login(&*accounts, &config.accounts, &creds)).await?;
+    let verdict = tokio::task::spawn_blocking(move || auth::credentials_login(&*accounts, &config.accounts, &limiter, peer, &creds)).await?;
     let reply = auth::reply(&server.config.accounts, &verdict);
     match &verdict {
         auth::Verdict::Refused { result, .. } => {
@@ -331,7 +330,7 @@ async fn send_refusal(
     result: u16,
     notice: &'static str,
 ) -> anyhow::Result<()> {
-    let reply = auth::reply(&server.config.accounts, &auth::Verdict::Refused { result, notice });
+    let reply = auth::reply(&server.config.accounts, &auth::Verdict::Refused { result, notice: notice.to_owned() });
     conn.send(&server.protocol.login.encode(&reply)?).await?;
     Ok(())
 }
@@ -446,16 +445,131 @@ fn character_entry(server: &LoginServer, c: &Character) -> anyhow::Result<Charac
     })
 }
 
-/// Why a creation request was refused (logged; the client error code is still provisional).
-fn validate_name(name: &str) -> Result<(), &'static str> {
+/// Name rules of character creation: 3 to 23 characters, letters, digits and underscores.
+/// Returns the `BackendErrors` code the client shows for the first rule that fails.
+fn validate_name(name: &str) -> Result<(), BackendError> {
     let len = name.chars().count();
-    if !(3..=23).contains(&len) {
-        return Err("name must be 3-23 characters");
+    if len < 3 {
+        return Err(be::CHARACTER_NAME_TOO_SHORT);
+    }
+    if len > 23 {
+        return Err(be::CHARACTER_NAME_TOO_LONG);
     }
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err("name may only contain letters, digits and underscores");
+        return Err(be::CHARACTER_NAME_INVALID);
     }
     Ok(())
+}
+
+/// The checks of character creation that need no game data, in the order the client's own
+/// flow suggests: name, league, free slot.
+fn create_refusal(
+    name: &str,
+    league: &str,
+    leagues: &[poe_config::LeagueConfig],
+    existing: usize,
+    max_characters: usize,
+) -> Option<BackendError> {
+    if let Err(e) = validate_name(name) {
+        Some(e)
+    } else if !leagues.iter().any(|l| l.id == league) {
+        Some(be::LEAGUE_DOES_NOT_EXIST)
+    } else if existing >= max_characters {
+        Some(be::TOO_MANY_CHARACTERS)
+    } else {
+        None
+    }
+}
+
+/// The `0x0013` reply: `result` 0 or a `BackendErrors` code. `notify` stays clear (set, the
+/// client calls the official website's conversion tracking).
+fn create_result(refusal: Option<BackendError>, account_id: u32) -> CharacterCreated {
+    CharacterCreated { result: refusal.map_or(0, |e| e.code), notify: false, account_id }
+}
+
+/// How a delete ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeleteOutcome {
+    Deleted,
+    Refused(BackendError),
+}
+
+impl DeleteOutcome {
+    fn code(self) -> u16 {
+        match self {
+            DeleteOutcome::Deleted => 0,
+            DeleteOutcome::Refused(e) => e.code,
+        }
+    }
+}
+
+/// The `0x000d` reply carries the account id like the official one.
+fn delete_result(outcome: DeleteOutcome, account_id: u32) -> DeleteCharacterResult {
+    DeleteCharacterResult { result: outcome.code(), account_id }
+}
+
+fn delete_character(store: &dyn poe_store::Store, account_id: u32, name: &str) -> DeleteOutcome {
+    match store.delete_character(account_id, name) {
+        Ok(true) => DeleteOutcome::Deleted,
+        // Is the name somebody else's character?
+        Ok(false) => match store.all_characters() {
+            Ok(all) if all.iter().any(|c| c.name == name) => DeleteOutcome::Refused(be::NOT_CHARACTER_OWNER),
+            Ok(_) => DeleteOutcome::Refused(be::CHARACTER_DOES_NOT_EXIST),
+            Err(e) => {
+                warn!("delete character: {e}");
+                DeleteOutcome::Refused(be::DATABASE_ERROR)
+            }
+        },
+        Err(e) => {
+            warn!("delete character: {e}");
+            DeleteOutcome::Refused(be::DATABASE_ERROR)
+        }
+    }
+}
+
+/// Decides a creation: the new character's row, or the code to refuse with.
+fn plan_create(
+    server: &LoginServer,
+    account: &Account,
+    req: &CreateCharacter,
+) -> Result<NewCharacter, BackendError> {
+    let existing = server.store.characters(account.id).map_err(|e| {
+        warn!("create character: {e}");
+        be::DATABASE_ERROR
+    })?;
+    if let Some(refusal) = create_refusal(
+        &req.name,
+        &req.league,
+        &server.config.leagues,
+        existing.len(),
+        usize::from(server.config.accounts.max_characters),
+    ) {
+        return Err(refusal);
+    }
+    let start = match StartState::find(&server.data, &req.start_state) {
+        Ok(Some(start)) => start,
+        Ok(None) => {
+            warn!(start_state = %req.start_state, "unknown start state");
+            return Err(be::CHARACTER_INVALID_CLASS);
+        }
+        Err(e) => {
+            warn!("create character: {e}");
+            return Err(be::DATABASE_ERROR);
+        }
+    };
+    Ok(NewCharacter {
+        account_id: account.id,
+        name: req.name.clone(),
+        league: req.league.clone(),
+        class_id: start.class_id,
+        start_state: start.id.clone(),
+        level: start.level,
+        area: start
+            .hub_area
+            .clone()
+            .or_else(|| server.config.player.start_area.clone())
+            .unwrap_or_default(),
+    })
 }
 
 async fn create_character(
@@ -465,59 +579,24 @@ async fn create_character(
     req: CreateCharacter,
 ) -> anyhow::Result<()> {
     info!(name = %req.name, league = %req.league, start_state = %req.start_state, unk_50 = req.unk_50, "create character");
-    let refusal = if let Err(reason) = validate_name(&req.name) {
-        Some(reason)
-    } else if !server.config.leagues.iter().any(|l| l.id == req.league) {
-        Some("unknown league")
-    } else if server.store.characters(account.id)?.len()
-        >= server.config.accounts.max_characters as usize
-    {
-        Some("character slots full")
-    } else {
-        None
-    };
-    let start = match refusal {
-        Some(_) => None,
-        None => StartState::find(&server.data, &req.start_state)?,
-    };
-    let created = match (refusal, start) {
-        (Some(reason), _) => {
-            warn!(reason, "character creation refused");
-            None
+    let outcome = plan_create(server, account, &req).and_then(|new| match server.store.create_character(&new) {
+        Ok(Some(c)) => {
+            info!(id = c.id, start_state = %new.start_state, "character created");
+            Ok(())
         }
-        (None, None) => {
-            warn!(start_state = %req.start_state, "unknown start state");
-            None
+        Ok(None) => Err(be::CHARACTER_NAME_ALREADY_EXISTS),
+        Err(e) => {
+            warn!("create character: {e}");
+            Err(be::DATABASE_ERROR)
         }
-        (None, Some(start)) => {
-            let new = NewCharacter {
-                account_id: account.id,
-                name: req.name.clone(),
-                league: req.league.clone(),
-                class_id: start.class_id,
-                start_state: start.id.clone(),
-                level: start.level,
-                area: start
-                    .hub_area
-                    .clone()
-                    .or_else(|| server.config.player.start_area.clone())
-                    .unwrap_or_default(),
-            };
-            let created = server.store.create_character(&new)?;
-            match &created {
-                Some(c) => info!(id = c.id, class = %start.class_name, "character created"),
-                None => warn!(name = %req.name, "character name taken"),
-            }
-            created
-        }
-    };
-    let result = CharacterCreated {
-        result: if created.is_some() { 0 } else { 1 },
-        notify: false,
-        account_id: account.id,
-    };
+    });
+    if let Err(e) = outcome {
+        let text = crate::codes::text(&server.data, e.code).unwrap_or_default();
+        warn!(code = e.code, id = e.id, text, "character creation refused");
+    }
+    let result = create_result(outcome.err(), account.id);
     conn.send(&server.protocol.login.encode(&result)?).await?;
-    if created.is_some() {
+    if outcome.is_ok() {
         send_character_list(server, conn, account.id).await?;
     }
     Ok(())
@@ -616,4 +695,85 @@ async fn send_instance_details(server: &LoginServer, conn: &mut Connection, tick
     }
     conn.send(&out).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use poe_config::LeagueConfig;
+
+    use super::*;
+
+    fn protocol() -> Protocol {
+        Protocol::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules/protocol/opcodes/0.5.5e")).unwrap()
+    }
+
+    fn league(id: &str) -> LeagueConfig {
+        LeagueConfig { id: id.into(), hardcore: false, permanent: true, variant_of: None, flag: None }
+    }
+
+    #[test]
+    fn name_rules_pick_the_client_codes() {
+        assert_eq!(validate_name("Abc"), Ok(()));
+        assert_eq!(validate_name("a_b_9"), Ok(()));
+        assert_eq!(validate_name(""), Err(be::CHARACTER_NAME_TOO_SHORT));
+        assert_eq!(validate_name("ab"), Err(be::CHARACTER_NAME_TOO_SHORT));
+        assert_eq!(validate_name(&"x".repeat(23)), Ok(()));
+        assert_eq!(validate_name(&"x".repeat(24)), Err(be::CHARACTER_NAME_TOO_LONG));
+        assert_eq!(validate_name("bad name"), Err(be::CHARACTER_NAME_INVALID));
+        assert_eq!(validate_name("Exile!"), Err(be::CHARACTER_NAME_INVALID));
+        assert_eq!(be::CHARACTER_NAME_INVALID.code, 22);
+    }
+
+    #[test]
+    fn creation_refusals_in_order() {
+        let leagues = [league("Standard")];
+        let r = |name: &str, lg: &str, existing| create_refusal(name, lg, &leagues, existing, 3);
+        assert_eq!(r("Abc", "Standard", 2), None);
+        assert_eq!(r("A", "Standard", 0), Some(be::CHARACTER_NAME_TOO_SHORT));
+        assert_eq!(r("Abc", "Nope", 0), Some(be::LEAGUE_DOES_NOT_EXIST));
+        assert_eq!(r("Abc", "Standard", 3), Some(be::TOO_MANY_CHARACTERS));
+        assert_eq!(be::LEAGUE_DOES_NOT_EXIST.code, 26);
+        assert_eq!(be::TOO_MANY_CHARACTERS.code, 49);
+    }
+
+    /// The failure replies as they go over the wire (opcodes from `login.toml`).
+    #[test]
+    fn create_and_delete_failures_on_the_wire() {
+        let p = protocol();
+        let wire = |r: CharacterCreated| p.login.encode(&r).unwrap();
+        // 0x0013, result, notify 0, account id.
+        assert_eq!(wire(create_result(Some(be::CHARACTER_NAME_ALREADY_EXISTS), 9)), [0, 0x13, 0, 21, 0, 0, 0, 0, 9]);
+        assert_eq!(wire(create_result(Some(be::CHARACTER_INVALID_CLASS), 9)), [0, 0x13, 0, 25, 0, 0, 0, 0, 9]);
+        assert_eq!(wire(create_result(Some(be::DATABASE_ERROR), 9)), [0, 0x13, 0, 19, 0, 0, 0, 0, 9]);
+        assert_eq!(wire(create_result(None, 9)), [0, 0x13, 0, 0, 0, 0, 0, 0, 9]);
+
+        let del = |o| p.login.encode(&delete_result(o, 0x0102)).unwrap();
+        // 0x000d, result, account id (official replies carry it; before this it was 0).
+        assert_eq!(del(DeleteOutcome::Deleted), [0, 0x0d, 0, 0, 0, 0, 1, 2]);
+        assert_eq!(del(DeleteOutcome::Refused(be::CHARACTER_DOES_NOT_EXIST)), [0, 0x0d, 0, 16, 0, 0, 1, 2]);
+        assert_eq!(del(DeleteOutcome::Refused(be::NOT_CHARACTER_OWNER)), [0, 0x0d, 0, 17, 0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn delete_decides_between_missing_and_foreign() {
+        use poe_store::{SqliteStore, Store};
+        let store = SqliteStore::in_memory().unwrap();
+        let (a, b) = (store.create_account("a", "Exile").unwrap(), store.create_account("b", "Exile").unwrap());
+        let new = |account_id, name: &str| NewCharacter {
+            account_id,
+            name: name.into(),
+            league: "Standard".into(),
+            class_id: 2,
+            start_state: "DexFourDefault".into(),
+            level: 1,
+            area: "G1_1".into(),
+        };
+        store.create_character(&new(b.id, "Theirs")).unwrap().unwrap();
+        store.create_character(&new(a.id, "Mine")).unwrap().unwrap();
+        let refused = |e| DeleteOutcome::Refused(e);
+        assert_eq!(delete_character(&store, a.id, "Theirs"), refused(be::NOT_CHARACTER_OWNER));
+        assert_eq!(delete_character(&store, a.id, "Nobody"), refused(be::CHARACTER_DOES_NOT_EXIST));
+        assert_eq!(delete_character(&store, a.id, "Mine"), DeleteOutcome::Deleted);
+        assert_eq!(delete_character(&store, a.id, "Mine"), refused(be::CHARACTER_DOES_NOT_EXIST));
+    }
 }

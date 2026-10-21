@@ -25,9 +25,8 @@ What was built when, newest last. Detail lives in the topic docs linked from eac
 - Terrain generator: remaining areas and ports in [terrain.md](terrain.md); then server collision from the generated grid (the client's upload covers it until then). Movement gaps #11 (slow-down after a sprint without a stream) and #12 (roll heading in the first frames) are open ([../protocol/movement.md](../protocol/movement.md#gap-list)).
 - Inventory and items, monsters and skills, buffs: not started; the captures hold the sequences ([../re/captures.md](../re/captures.md)).
 - Transfers: waypoints and area transitions; transfers without the character-select step need an official capture of a zone change ([../guides/server-admin.md](../guides/server-admin.md#transfers)).
-- Login: the meaning of the remaining CharacterList entry fields, and the error codes for refused character creation ([../protocol/login.md](../protocol/login.md)).
+- Login: the meaning of the remaining CharacterList entry fields (+0x4f, tail +0x68/+0x74/+0x76; [../protocol/login.md](../protocol/login.md)). The refusal codes for character creation are implemented (WP B2), pending the in-game check.
 - NPCs: server-sent NPCs need their StateMachine and quest states ([../protocol/entities.md](../protocol/entities.md)).
 - Multiplayer: players spawn on the same cell, the remote model looks darker than the local one, no party, trade or combat sync, the real login crypto for the open internet ([../guides/hosting.md](../guides/hosting.md#not-done-yet)).
-- Accounts: rate limiting of password attempts and of the web login ([../architecture/accounts.md](../architecture/accounts.md#not-done-yet)).
 - Launcher: the Steam depot download and the Play launch have not run on a real install; the hook DLLs are not bundled ([../guides/launcher.md](../guides/launcher.md#not-done)).
 - Web admin: inventory and passive-tree panels wait for the inventory work ([../architecture/web-api.md](../architecture/web-api.md#not-done)).

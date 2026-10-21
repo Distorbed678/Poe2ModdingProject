@@ -40,7 +40,7 @@ Consequence of the client's design: the digest is a password equivalent for this
 - **Cluster id:** change `[cluster] id` to invalidate every saved login at once; a database copied between clusters keeps its accounts and passwords, but no token from the other cluster works.
 - Launcher and web tokens use the same table and trait (`TokenKind::Launcher`, `TokenKind::Web`), issued by `POST /api/v1/login` ([web-api.md](web-api.md)): web 12 hours, launcher `remember_days`. The token login of the game accepts `game_remember` and `launcher`, so a launcher-issued token could be passed for auto-login; the launcher itself uses `POST /api/v1/game-token`, which issues a separate one-off `game_remember` token because the game's rolling login would revoke the launcher token. The admin API accepts `web` only.
 
-Result codes the client gets for failures: [login.md](../protocol/login.md#authentication-results).
+Result codes the client gets for failures: [login.md](../protocol/login.md#authentication-results). A saved login that cannot be used (expired, revoked, unknown, another cluster, another user name) gets `0x0f`: the client deletes its credentials file and asks for the password at the next start.
 
 ## Login paths
 
@@ -60,6 +60,20 @@ Admin is the `admin` role. Commands (chat `!account ...`, the overlay's Commands
 
 `[accounts] open_registration` (default false) lets `POST /api/v1/register` of the web API create player accounts ([web-api.md](web-api.md)); server commands always work.
 
+## Password attempt limits
+
+`[security]` (`config/server.toml`) limits failed password attempts. One `poe_accounts::LoginLimiter` is shared by the login server (`0x0003` password logins) and the web API (`POST /login`, and the old-password check of `POST /password`), so attempts cannot be split between them. Failures are counted per account name (case-insensitive; unknown names count too, so the limit does not reveal which accounts exist) and per client IP (IPv6 per /64) in a sliding window; at the limit the key is locked and further attempts are refused before the password is checked (so a locked account does not cost argon2 time).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `login_max_failures_per_account` | 5 | failures per account name in the window before it is locked; 0 = off |
+| `login_max_failures_per_ip` | 20 | the same per client IP; 0 = off |
+| `login_failure_window_secs` | 300 | failures older than this are forgotten |
+| `login_lockout_secs` | 300 | how long a locked key stays locked (counted from the failure that locked it; refused attempts do not extend it) |
+| `trust_forwarded_for` | false | web API behind a reverse proxy: take the client IP from the first `X-Forwarded-For` entry. Only with a proxy that sets it; otherwise a client chooses its own IP |
+
+The game answers a locked attempt with result `0x49` (`LoginRateLimited`, "You have attempted to log in too often within a short time period. Try again later.") and a notice that names the wait; the web API answers `429` with `Retry-After`. A right password clears the account's count but not the IP's. Saved-token logins are neither counted nor refused (a 256-bit token cannot be guessed, and a stale file must not lock an honest player). The state is in memory: a restart clears it. Trade-off: someone who knows a name can lock that account for the lockout time by failing on purpose (the owner can still use a saved token, which is not limited). A restart clears all locks; there is no unlock command yet. Behind a proxy without `trust_forwarded_for` every web client shares the proxy's IP and one attacker locks the web login for everyone; the game login sees real client addresses.
+
 ## One session per account
 
 A new login of an account ends the old one: `LoginSessions::supersede(account)` (`poe-cluster`) closes the account's login connections and signals its instance sessions, which disconnect. It runs after a successful login, before the new connection subscribes, so the new session is not affected. The same call ends the sessions of a disabled account. A resumed session (`0x0008`, "Exit to character selection") does not supersede.
@@ -68,12 +82,11 @@ A new login of an account ends the old one: `LoginSessions::supersede(account)` 
 
 - **Storage:** accounts, characters and per-account character lists are in SQLite (`poe-store`). Character names are unique across accounts (case-insensitive). The slot limit comes from config.
 - **Tickets and sessions** (`poe-cluster`): tickets with random keys per hand-off; resume tickets (single use); login sessions per account (logout, supersede, transfers).
-- **Account settings:** `[accounts] flags`, `full_access`, `stash_tabs` are still global for every account (per-account columns come with the stash).
+- **Account settings:** `[accounts] flags` (default `[0x23, 0x03]`: no windows and no strict-unlock banner at login, [login.md](../protocol/login.md#authenticationresult-flags-and-the-suspicious-activity-popup)), `full_access`, `stash_tabs` are still global for every account (per-account columns come with the stash).
 - **Authentication limits of the Steam path:** the `0x0005` message carries the Steam encrypted app ticket. GGG's key encrypts it, so the server cannot verify it; it only identifies the machine.
 
 ## Not done yet
 
-- Rate limiting of password attempts (the client has a "too many attempts" code, `0x49`).
-- Rate limiting of the web login (`/api/v1/login` shares the missing limit).
 - Per-account settings.
-- Whether `0x0f`/`0x62` behave as inferred in the client (a rejected token has not been tried in game; the password login and remember-me token login work in game): [../re/standalone-login.md](../re/standalone-login.md) section 5.
+- An admin command to unlock an account or IP early (a restart clears the limiter now).
+- Whether `0x0f` (stale token) and `0x49` (rate limit) show what the client code says (not tried in game; the password login and remember-me token login work in game): [../re/standalone-login.md](../re/standalone-login.md) section 5.

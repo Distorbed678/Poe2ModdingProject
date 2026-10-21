@@ -31,9 +31,9 @@ Start the server and make an admin as described in [../guides/setup.md](../guide
 - Send `Authorization: Bearer <token>`. The log WebSocket also takes `?token=<token>`, because browsers cannot set headers on a WebSocket.
 - A token stops working when it is revoked (`POST /logout`, a password change or `account passwd`, disabling the account), expired, from another cluster, or its account is disabled: `401` with the reason. The role is read at every call, so a demoted admin loses access at once.
 - Wrong username and wrong password give the same `401` (names cannot be probed); a disabled account with the right password gets `403`.
-- Not done: rate limiting of login attempts (also missing in game, see [accounts.md](accounts.md)).
+- **Rate limiting:** `POST /login` and the old-password check of `POST /password` count failures per account name and per client IP (`[security]`, shared with the game login; see [accounts.md](accounts.md#password-attempt-limits)). A locked name or IP gets `429` with a `Retry-After` header (seconds) before the password is checked, also for the right password. The client IP is the socket address; with `[security] trust_forwarded_for = true` (behind your own TLS proxy) the first `X-Forwarded-For` entry.
 
-Errors are JSON, `{"error": "..."}`, with `400` bad input, `401` no or bad token, `403` not an admin (or registration closed), `404` unknown player, instance, account or character, `409` name taken.
+Errors are JSON, `{"error": "..."}`, with `400` bad input, `401` no or bad token, `403` not an admin (or registration closed), `404` unknown player, instance, account or character, `409` name taken, `429` too many failed password attempts (with `Retry-After`).
 
 ## Endpoints
 
@@ -113,7 +113,7 @@ Close, kick, disable and role changes ask for confirmation. The bearer token is 
 
 | File | |
 |---|---|
-| `crates/poe-web-api/src/lib.rs` | `WebState`, `router`, `serve` |
+| `crates/poe-web-api/src/lib.rs` | `WebState` (including the shared `LoginLimiter`), `router`, `serve` |
 | `auth.rs` | bearer extractors (`Auth`, `AdminAuth`, `WsAdminAuth`) |
 | `public.rs`, `admin.rs` | handlers (each carries its `utoipa` description) |
 | `dto.rs`, `error.rs` | request/response types, error body |
@@ -121,11 +121,10 @@ Close, kick, disable and role changes ask for confirmation. The bearer token is 
 | `openapi.rs` | the OpenAPI document |
 | `tests.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test) |
 
-Tests: register on and off, login good and bad, tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, accounts, commands reaching the registry, instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
+Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, accounts, commands reaching the registry, instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
 
 ## Not done
 
-- Rate limiting and lockout of password attempts.
 - TLS in the server itself (use a reverse proxy).
 - Inventory and passive-tree endpoints (waiting for the inventory work).
 - A registry listing endpoint (`GET /admin/commands`) for generic command forms.

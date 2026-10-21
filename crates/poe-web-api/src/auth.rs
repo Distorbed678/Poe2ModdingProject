@@ -109,3 +109,44 @@ impl FromRequestParts<WebState> for WsAdminAuth {
         authenticate(state, &token, true).map(|_| WsAdminAuth)
     }
 }
+
+/// The caller's IP for the password attempt limits: the socket address (set by `serve`), or
+/// with `[security] trust_forwarded_for` the first `X-Forwarded-For` entry. An address that
+/// cannot be determined (tests that call the router directly) counts as `0.0.0.0`.
+pub struct ClientIp(pub std::net::IpAddr);
+
+impl FromRequestParts<WebState> for ClientIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &WebState,
+    ) -> Result<Self, Self::Rejection> {
+        let socket = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip());
+        let forwarded = state
+            .config
+            .security
+            .trust_forwarded_for
+            .then(|| {
+                parts
+                    .headers
+                    .get("x-forwarded-for")?
+                    .to_str()
+                    .ok()?
+                    .split(',')
+                    .next()?
+                    .trim()
+                    .parse()
+                    .ok()
+            })
+            .flatten();
+        Ok(ClientIp(
+            forwarded
+                .or(socket)
+                .unwrap_or(std::net::IpAddr::from([0, 0, 0, 0])),
+        ))
+    }
+}

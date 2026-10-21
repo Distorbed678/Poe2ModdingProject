@@ -124,13 +124,27 @@ remember_days = 30
 # Character slots per account (sent to the client and enforced on creation).
 max_characters = 24
 # Two account flag bytes sent with the authentication result; the client splits them into
-# bits (docs/protocol/login.md). Byte 0 bits 2/3/4/7 open the terms-of-use window,
-# the cheating warning, the RMT warning and "update required" respectively: keep them clear.
-flags = [0x63, 0x03]   # default [0, 0]; these are the values the client needs for a normal session
+# bits (docs/protocol/login.md). Byte 0 bits 2/3/4/7 open the terms-of-use window, the cheating
+# warning, the RMT warning and "update required": keep them clear. Bit 6 shows the red
+# "suspicious activity" strict-unlock banner on the character select screen: keep it clear too.
+flags = [0x23, 0x03]   # default; no windows or banners at login
 # Full game access (in game: no "Get Full Access" button in the escape menu).
 full_access = true
 # Stash tabs every account has (until stashes are stored): official new accounts get "1".."4".
 stash_tabs = ["1", "2", "3", "4"]
+
+[security]
+# Rate limiting of password logins: the game login and the web API (/login, /password). Failed
+# attempts are counted per account name and per client IP in a sliding window; at the limit the
+# key is locked and further attempts are refused (game: "You have attempted to log in too
+# often", web: HTTP 429 with Retry-After) before the password is checked. 0 = limit off.
+# Saved-token logins are not counted. See docs/guides/server-admin.md.
+login_max_failures_per_account = 5     # defaults shown
+login_max_failures_per_ip = 20
+login_failure_window_secs = 300
+login_lockout_secs = 300
+# Behind a TLS reverse proxy that sets X-Forwarded-For: use it as the web API client IP.
+trust_forwarded_for = false
 
 [gateway]
 # required

@@ -52,11 +52,14 @@ async fn main() -> anyhow::Result<()> {
     let instances = Arc::new(MemoryInstances::default());
     let data = Arc::new(GameData::open(&config.game.game_dir, &config.game.schema)?);
     tracing::info!(game_dir = %config.game.game_dir.display(), "game data opened");
+    // One limiter for the login server and the web API.
+    let limiter = Arc::new(poe_accounts::LoginLimiter::from_config(&config.security));
     let login = Arc::new(LoginServer {
         config: config.clone(),
         protocol: protocol.clone(),
         store: store.clone(),
         accounts: accounts.clone(),
+        limiter: limiter.clone(),
         data: data.clone(),
         tickets: tickets.clone(),
         sessions: sessions.clone(),
@@ -85,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
     let web_state = poe_web_api::WebState {
         config: config.clone(),
         accounts: accounts.clone(),
+        limiter,
         store: store.clone(),
         instances: instances.clone(),
         admin: instance.clone(),

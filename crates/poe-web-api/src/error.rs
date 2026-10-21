@@ -19,6 +19,8 @@ pub struct ErrorBody {
 pub struct ApiError {
     pub status: StatusCode,
     pub message: String,
+    /// Seconds for the `Retry-After` header (429 answers).
+    pub retry_after: Option<u64>,
 }
 
 impl ApiError {
@@ -26,7 +28,18 @@ impl ApiError {
         Self {
             status,
             message: message.into(),
+            retry_after: None,
         }
+    }
+
+    /// 429 with `Retry-After`: too many failed password attempts (`[security]`).
+    pub fn too_many_attempts(retry_after_secs: u64) -> Self {
+        let mut e = Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("too many failed login attempts, try again in {retry_after_secs} seconds"),
+        );
+        e.retry_after = Some(retry_after_secs);
+        e
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
@@ -53,13 +66,18 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
+        let mut res = (
             self.status,
             axum::Json(ErrorBody {
                 error: self.message,
             }),
         )
-            .into_response()
+            .into_response();
+        if let Some(secs) = self.retry_after {
+            res.headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, secs.into());
+        }
+        res
     }
 }
 

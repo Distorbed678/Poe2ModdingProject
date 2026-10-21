@@ -3,12 +3,13 @@
 //! list, and hands the client off to an instance server.
 
 mod auth;
+mod codes;
 mod handshake;
 mod session;
 
 use std::sync::Arc;
 
-use poe_accounts::AccountStore;
+use poe_accounts::{AccountStore, LoginLimiter};
 use poe_cluster::TicketRegistry;
 use poe_config::Config;
 use poe_data::GameData;
@@ -24,6 +25,8 @@ pub struct LoginServer {
     pub store: Arc<dyn Store>,
     /// Usernames, passwords and login tokens.
     pub accounts: Arc<dyn AccountStore>,
+    /// Password attempt limits (shared with the web API).
+    pub limiter: Arc<LoginLimiter>,
     pub data: Arc<GameData>,
     pub tickets: Arc<dyn TicketRegistry>,
     /// Lets an instance server close an account's login connection when it leaves the game.
@@ -34,6 +37,9 @@ pub struct LoginServer {
 
 impl LoginServer {
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
+        for problem in codes::verify(&self.data) {
+            warn!("result code table: {problem} (client update? see poe_proto::backend_error)");
+        }
         let listener = TcpListener::bind(self.config.network.login.bind).await?;
         info!(addr = %self.config.network.login.bind, "login server listening");
         loop {
@@ -42,7 +48,7 @@ impl LoginServer {
             let server = self.clone();
             tokio::spawn(
                 async move {
-                    if let Err(e) = session::run(server, stream).await {
+                    if let Err(e) = session::run(server, stream, peer.ip()).await {
                         warn!("connection error: {e:#}");
                     }
                 }

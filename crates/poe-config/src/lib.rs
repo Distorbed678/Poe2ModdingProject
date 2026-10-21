@@ -67,6 +67,64 @@ pub struct Config {
     /// HTTP API and web admin (`crates/poe-web-api`).
     #[serde(default)]
     pub web: WebConfig,
+    /// Password attempt limits of the login server and the web API.
+    #[serde(default)]
+    pub security: SecurityConfig,
+}
+
+/// Rate limiting of password logins (the game login `0x0003` and the web API `/login` and
+/// `/password`; `crates/poe-accounts/src/ratelimit.rs`). Failed attempts are counted per
+/// account name and per client IP over a sliding window; at the limit the key is locked for
+/// `login_lockout_secs` and further attempts are refused **before** the password is checked.
+/// A limit of 0 turns that limit off. Saved-token logins are not counted (a token cannot be
+/// guessed), and a successful login clears the account's count.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecurityConfig {
+    /// Failed password attempts per account name within the window before it is locked.
+    #[serde(default = "default_max_failures_account")]
+    pub login_max_failures_per_account: u32,
+    /// Failed password attempts per client IP (IPv6: per /64) within the window.
+    #[serde(default = "default_max_failures_ip")]
+    pub login_max_failures_per_ip: u32,
+    /// Window in which failures are counted (seconds).
+    #[serde(default = "default_failure_window")]
+    pub login_failure_window_secs: u64,
+    /// How long a locked key stays locked (seconds).
+    #[serde(default = "default_lockout")]
+    pub login_lockout_secs: u64,
+    /// Behind a reverse proxy: take the client IP of the web API from the first entry of
+    /// `X-Forwarded-For` instead of the socket address. Only turn this on when a proxy you
+    /// control sets the header (otherwise a client can pick its own IP).
+    #[serde(default)]
+    pub trust_forwarded_for: bool,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            login_max_failures_per_account: default_max_failures_account(),
+            login_max_failures_per_ip: default_max_failures_ip(),
+            login_failure_window_secs: default_failure_window(),
+            login_lockout_secs: default_lockout(),
+            trust_forwarded_for: false,
+        }
+    }
+}
+
+fn default_max_failures_account() -> u32 {
+    5
+}
+
+fn default_max_failures_ip() -> u32 {
+    20
+}
+
+fn default_failure_window() -> u64 {
+    300
+}
+
+fn default_lockout() -> u64 {
+    300
 }
 
 /// The web API (REST and WebSocket) and the optional static web admin.
@@ -540,7 +598,9 @@ pub struct DatabaseConfig {
 pub struct AccountsConfig {
     pub name_prefix: String,
     pub max_characters: u8,
-    #[serde(default)]
+    /// The account flag bytes of the authentication result (`docs/protocol/login.md`). Default
+    /// `[0x23, 0x03]`: no terms-of-use, warning or update windows, no strict-unlock banner.
+    #[serde(default = "default_account_flags")]
     pub flags: [u8; 2],
     /// Full game access (InitialState CharacterState flags byte 1 bit 6); without it the
     /// in-game escape menu shows a "Get Full Access" button.
@@ -560,6 +620,10 @@ pub struct AccountsConfig {
     /// How long a "Remember Me" login token stays valid (days).
     #[serde(default = "default_remember_days")]
     pub remember_days: u32,
+}
+
+fn default_account_flags() -> [u8; 2] {
+    [0x23, 0x03]
 }
 
 fn default_remember_days() -> u32 {
@@ -741,6 +805,12 @@ mod tests {
             format!("{:?}", minimal.cluster)
         );
         assert_eq!(format!("{:?}", example.web), format!("{:?}", minimal.web));
+        assert_eq!(
+            format!("{:?}", example.security),
+            format!("{:?}", minimal.security)
+        );
+        assert_eq!(example.accounts.flags, minimal.accounts.flags);
+        assert_eq!(minimal.accounts.flags, [0x23, 0x03]);
         // Accounts: the example documents the defaults of the optional keys.
         let (e, m) = (&example.accounts, &minimal.accounts);
         assert_eq!(

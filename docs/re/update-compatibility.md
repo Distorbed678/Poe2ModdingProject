@@ -176,7 +176,7 @@ How to derive an operand safely (A2):
   - `sprint_buff_rows = [2758, 2737, 2853]` (`config/server.toml:48`);
   - the `Move` skill id `0x20002909` is `0x20000000 | ActionTypes key (10505)`. The constant is also written in `poe-game/src/world.rs:258` (test config), `poe-game/src/locomotion.rs:1374`, `poe-game/tests/replay.rs:20`, `instance-server/src/replay_tests.rs:34`. Production code takes it from data (`views.rs:182-189`), the tests do not.
 - `InstanceDetails` carries an area `HASH16` that must exist in `WorldAreas` (`docs/protocol/login.md:164`). A data patch that removes an area breaks any character saved there.
-- Config values copied from captures: `first_entity_id = 12000`, `animation_sets` (`config/server.toml:42,215`), the two account flag bytes `[0x63, 0x03]` (`:123`). They come from official behaviour and may change with the client.
+- Config values copied from captures: `first_entity_id = 12000`, `animation_sets` (`config/server.toml:42,215`), the two account flag bytes `[0x23, 0x03]` (`config/server.toml`, default in `poe-config`). They come from official behaviour and may change with the client.
 - Bundle paths: `Bundles2/_.index.bin`, `data/balance/<table>.datc64` (`lib.rs:29,70`). `gateway_list.txt` at the game root is written by deploy (`poe-hook-deploy/src/gateway.rs`); the client also looks at `Bundles2/gateway_list.txt` (`addresses-0.5.5e.md:7`).
 
 **Fixes:**

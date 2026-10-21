@@ -10,7 +10,7 @@ use poe_accounts::{AccountError, MIN_PASSWORD_LEN, Role, TokenKind, password_dig
 
 use crate::{
     ApiError, WEB_TOKEN_TTL_SECS, WebState,
-    auth::Auth,
+    auth::{Auth, ClientIp},
     dto::{AccountInfo, LoginRequest, LoginResponse, PasswordRequest, RegisterRequest, ServerInfo},
     error::ApiJson,
 };
@@ -38,6 +38,14 @@ fn check_password(password: &str) -> Result<(), ApiError> {
         )));
     }
     Ok(())
+}
+
+/// 429 when the account name or the IP is locked by `[security]`.
+fn check_limit(state: &WebState, name: &str, ip: std::net::IpAddr) -> Result<(), ApiError> {
+    state.limiter.check(name, ip).map_err(|locked| {
+        tracing::warn!(account = %name, %ip, "web login refused: too many failed attempts");
+        ApiError::too_many_attempts(locked.retry_after_secs)
+    })
 }
 
 fn ttl(state: &WebState, kind: TokenKind) -> i64 {
@@ -109,9 +117,11 @@ pub async fn register(
 #[utoipa::path(post, path = "/api/v1/login", tag = "public", request_body = LoginRequest,
     responses((status = 200, body = LoginResponse),
         (status = 401, description = "wrong username or password", body = crate::ErrorBody),
-        (status = 403, description = "account is disabled", body = crate::ErrorBody)))]
+        (status = 403, description = "account is disabled", body = crate::ErrorBody),
+        (status = 429, description = "too many failed attempts for this account or IP; see the Retry-After header", body = crate::ErrorBody)))]
 pub async fn login(
     State(s): State<WebState>,
+    ClientIp(ip): ClientIp,
     ApiJson(req): ApiJson<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     let kind = match req.kind.as_deref() {
@@ -123,14 +133,21 @@ pub async fn login(
             )));
         }
     };
+    // Locked names and IPs are refused before the (slow) password check.
+    check_limit(&s, &req.username, ip)?;
     let accounts = s.accounts.clone();
+    let name = req.username.clone();
     let result =
         blocking(move || accounts.authenticate(&req.username, &password_digest(&req.password)))
             .await?;
     let account = match result {
-        Ok(a) => a,
+        Ok(a) => {
+            s.limiter.success(&name);
+            a
+        }
         // One answer for both, so names cannot be probed.
         Err(AccountError::NoAccount | AccountError::WrongPassword) => {
+            s.limiter.failure(&name, ip);
             return Err(ApiError::unauthorized("invalid username or password"));
         }
         Err(e) => return Err(e.into()),
@@ -144,13 +161,17 @@ pub async fn login(
     security(("bearer" = [])),
     responses((status = 200, body = LoginResponse), (status = 400, body = crate::ErrorBody),
         (status = 401, body = crate::ErrorBody),
-        (status = 403, description = "wrong current password", body = crate::ErrorBody)))]
+        (status = 403, description = "wrong current password", body = crate::ErrorBody),
+        (status = 429, description = "too many failed password attempts; see the Retry-After header", body = crate::ErrorBody)))]
 pub async fn password(
     State(s): State<WebState>,
+    ClientIp(ip): ClientIp,
     Auth(who): Auth,
     ApiJson(req): ApiJson<PasswordRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     check_password(&req.new_password)?;
+    // The old password is a password guess too: same limits as the login.
+    check_limit(&s, &who.account.username, ip)?;
     let accounts = s.accounts.clone();
     let name = who.account.username.clone();
     let result = blocking(move || {
@@ -159,8 +180,12 @@ pub async fn password(
     })
     .await?;
     let account = match result {
-        Ok(a) => a,
+        Ok(a) => {
+            s.limiter.success(&who.account.username);
+            a
+        }
         Err(AccountError::WrongPassword) => {
+            s.limiter.failure(&who.account.username, ip);
             return Err(ApiError::forbidden("wrong current password"));
         }
         Err(e) => return Err(e.into()),

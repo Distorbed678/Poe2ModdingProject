@@ -32,15 +32,21 @@ name = "Character creation, selection and deletion"
 status = "done"
 
 [[subsystem.item]]
-name = "CharacterList entry fields and creation error codes"
+name = "Character create/delete refusal codes (BackendErrors table)"
+status = "done"
+note = "WP B2: name taken/invalid/short/long, class, league, slots, delete missing/foreign, store error; codes named once in poe-proto and checked against the table at start; in-game check of the texts pending"
+link = "docs/protocol/login.md#create-and-delete-result-codes"
+
+[[subsystem.item]]
+name = "CharacterList entry fields"
 status = "partial"
-note = "some entry fields are still unexplained; refusal codes unknown"
-link = "docs/status/history.md"
+note = "named: class/ascendancy, level, league banner, areas, portrait frame/variation, quest state; still unexplained and always 0 officially: entry +0x4f and the list tail +0x68, +0x74, +0x76 (need an official capture of a shapeshifted or supporter character, not a server change)"
+link = "docs/protocol/login.md#characterlist-entry-fields"
 
 [[subsystem.item]]
 name = "Standalone email/password login screen"
 status = "done"
-note = "the DLL forces the standalone screen and skips the patcher; password and remember-me token logins verified in game"
+note = "the DLL forces the standalone screen and skips the patcher; password and remember-me token logins verified in game. WP B2: stale saved logins answer 0x0f (not the Unlock window) and the strict-unlock banner is gone (flags 0x23); in-game check pending"
 link = "docs/re/standalone-login.md"
 
 # ---------------------------------------------------------------------------------------------
@@ -61,7 +67,7 @@ status = "done"
 [[subsystem.item]]
 name = "Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)"
 status = "done"
-note = "WP3.2; verified by tests, not yet with the real standalone screen (WP3.3)"
+note = "WP3.2; verified with the real standalone screen in game (WP3.3)"
 link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
@@ -73,12 +79,13 @@ link = "docs/architecture/accounts.md"
 [[subsystem.item]]
 name = "Duplicate login ends the old session"
 status = "done"
-note = "LoginSessions::supersede; unit-tested, not yet tried with two clients"
+note = "LoginSessions::supersede; verified with two real clients (plan 1 WP3.7, docs/guides/hosting.md)"
 link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
-name = "Rate limiting of password attempts"
-status = "planned"
+name = "Rate limiting of password attempts (game login and web API)"
+status = "done"
+note = "WP B2: [security] per account name and per IP, result 0x49 in game, HTTP 429 with Retry-After on the web; unit and login-level tests; in-game message check pending"
 link = "docs/architecture/accounts.md"
 
 # ---------------------------------------------------------------------------------------------

@@ -37,8 +37,8 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 
 | Subsystem | Progress | Done |
 |---|---|---|
-| [Login](#login) | `█████████░ 90%` | 4/5 |
-| [Accounts](#accounts) | `████████░░ 83%` | 5/6 |
+| [Login](#login) | `█████████░ 92%` | 5/6 |
+| [Accounts](#accounts) | `██████████ 100%` | 6/6 |
 | [Instances/Transfers](#instancestransfers) | `████████░░ 83%` | 5/6 |
 | [Movement](#movement) | `████░░░░░░ 43%` | 0/7 |
 | [Multiplayer](#multiplayer) | `████████░░ 75%` | 4/6 |
@@ -62,8 +62,9 @@ Docs: [docs/protocol/login.md](docs/protocol/login.md)
 | ✅ | [Key exchange and encryption (DLL crypto bypass)](docs/re/crypto.md) |  |
 | ✅ | [Authenticate, leagues, character list, hand-off to the instance server](docs/protocol/login.md) |  |
 | ✅ | Character creation, selection and deletion |  |
-| 🟡 | [CharacterList entry fields and creation error codes](docs/status/history.md) | some entry fields are still unexplained; refusal codes unknown |
-| ✅ | [Standalone email/password login screen](docs/re/standalone-login.md) | the DLL forces the standalone screen and skips the patcher; password and remember-me token logins verified in game |
+| ✅ | [Character create/delete refusal codes (BackendErrors table)](docs/protocol/login.md#create-and-delete-result-codes) | WP B2: name taken/invalid/short/long, class, league, slots, delete missing/foreign, store error; codes named once in poe-proto and checked against the table at start; in-game check of the texts pending |
+| 🟡 | [CharacterList entry fields](docs/protocol/login.md#characterlist-entry-fields) | named: class/ascendancy, level, league banner, areas, portrait frame/variation, quest state; still unexplained and always 0 officially: entry +0x4f and the list tail +0x68, +0x74, +0x76 (need an official capture of a shapeshifted or supporter character, not a server change) |
+| ✅ | [Standalone email/password login screen](docs/re/standalone-login.md) | the DLL forces the standalone screen and skips the patcher; password and remember-me token logins verified in game. WP B2: stale saved logins answer 0x0f (not the Unlock window) and the strict-unlock banner is gone (flags 0x23); in-game check pending |
 
 ### Accounts
 
@@ -73,10 +74,10 @@ Docs: [docs/architecture/accounts.md](docs/architecture/accounts.md)
 |---|---|---|
 | ✅ | [Machine-hash accounts with SQLite storage (accounts, characters, unique names)](docs/architecture/accounts.md) |  |
 | ✅ | Tickets, resume tickets and login sessions (many accounts at once) |  |
-| ✅ | [Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)](docs/architecture/accounts.md) | WP3.2; verified by tests, not yet with the real standalone screen (WP3.3) |
+| ✅ | [Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)](docs/architecture/accounts.md) | WP3.2; verified with the real standalone screen in game (WP3.3) |
 | ✅ | [Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)](docs/architecture/accounts.md) | game tokens in use; launcher and web tokens issued by the web API (WP4.1) |
-| ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; unit-tested, not yet tried with two clients |
-| ⬜ | [Rate limiting of password attempts](docs/architecture/accounts.md) |  |
+| ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; verified with two real clients (plan 1 WP3.7, docs/guides/hosting.md) |
+| ✅ | [Rate limiting of password attempts (game login and web API)](docs/architecture/accounts.md) | WP B2: [security] per account name and per IP, result 0x49 in game, HTTP 429 with Retry-After on the web; unit and login-level tests; in-game message check pending |
 
 ### Instances/Transfers
 

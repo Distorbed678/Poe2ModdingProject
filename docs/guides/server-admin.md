@@ -67,6 +67,8 @@ Admins are accounts with the `admin` role; there is no admin list in the config.
 
 An admin cannot demote or disable themselves. Passwords typed in chat travel over the game connection and appear on screen: prefer the offline form for real passwords. `poe-server account ...` runs against the database, also while the server is up, and works for the first admin; it and the offline `poe-server character create|list` (test setups, `scripts/test-mp.sh`) are in [setup.md](setup.md#accounts-and-characters-offline).
 
+Password attempts are rate limited (`[security]`: 5 failures per account name and 20 per IP in 5 minutes lock the key for 5 minutes, in game and on the web; saved-token logins are not affected; a restart clears locks; details: [../architecture/accounts.md](../architecture/accounts.md#password-attempt-limits)). Set a limit to 0 to switch it off, e.g. for a test script that fails logins on purpose.
+
 A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the machine-hash login keep working on `[accounts] dev_machine_hash_login = true` (null password; `account passwd` gives one a password), and `Exile1` was made an admin by the database migration.
 
 ## Instances

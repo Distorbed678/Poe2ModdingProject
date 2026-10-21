@@ -53,7 +53,7 @@ Answer with the same `0x0004`. With `save_login = 1` (or a token login) a succes
 
 (The 16-entry table at `0x1421ee510`, which an earlier version of this page took for the login table, belongs to the standalone patcher only. Its caller is `StandalonePatcher_Run`.)
 
-Codes the login server uses or should use (`servers/login-server/src/auth.rs`, `auth::code`; `*` = special handling in `LoginState_HandleAuthenticationError` `0x140ef63a0`):
+Codes the login server uses (`servers/login-server/src/auth.rs`, `auth::code`, which take the numbers from `poe_proto::backend_error`: one named list of the table rows the server uses, each with its `Id`; the server checks them against the real table at start and warns on a mismatch, `login-server/src/codes.rs`). `*` = special handling in `LoginState_HandleAuthenticationError` `0x140ef63a0`:
 
 | Code | `Id` | Text (English table) | Client effect |
 |---|---|---|---|
@@ -79,7 +79,10 @@ Codes the login server uses or should use (`servers/login-server/src/auth.rs`, `
 
 If `notice` is non-empty it replaces the table text in the popup (language-tagged, see the `notice` row of the `0x0004` table below); it does not change what the code does.
 
-**What our server sends today and what is wrong with it** (details: [WP B2 notes](#implementation-notes-for-wp-b2)): `0x62` for an expired or revoked token (opens the Unlock window, wrong), `0x0f` for an unknown token (right: deletes the file), `0x47` for a disabled account (right), `5`, `6`, `9`, `0x13` (right). Only `0` has been seen at runtime; the rest is read from the client code and the table.
+**What our server sends (since WP B2).** `5` no such account, `6` wrong password, `9` Steam login while `dev_machine_hash_login` is off, `0x13` store error, `0x47` disabled account, **`0x49` too many password attempts** ([rate limits](#password-attempt-limits)), **`0x0f` for every saved login that cannot be used** (expired, revoked, unknown, of another cluster, or for another user name): the client deletes its credentials file and shows our notice ("Your saved credentials are out of date. Please re-enter your password."), so the next start shows the password screen. Never `0x62` (it opens the email Unlock window) and never `0x61` (it keeps the file, so the dead token would be retried at every start). The notice is our own wording for `0x0f`, `0x47`, `0x13`, `0x49` (it carries the wait) and the same words as the table for `5`/`6`; with an empty notice the client prints the table text (the unchecked part: [standalone-login.md](../re/standalone-login.md) open item 6). Only `0` has been seen at runtime; the rest is read from the client code and the table, and the in-game check of WP B2 covers it.
+
+### Password attempt limits
+`[security]` in `config/server.toml` (`crates/poe-accounts/src/ratelimit.rs`, one `LoginLimiter` shared by the login server and the web API). Failed password attempts (wrong password, or an unknown name) are counted per account name (case-insensitive, existing or not) and per client IP (IPv6 per /64) in a sliding window `login_failure_window_secs`. At `login_max_failures_per_account` (5) or `login_max_failures_per_ip` (20) the key is locked for `login_lockout_secs`; attempts while locked are answered `0x49` before the password is checked and do not extend the lock. A right password clears the account's count (not the IP's). Token logins are not counted or refused (a token cannot be guessed). `0` turns a limit off. The `0x49` reply carries the wait in the notice ("... Try again in 10 minutes."), because the table text has none. The Steam dev path has no password and is not limited. The web API answers the same condition with HTTP 429 ([web-api.md](../architecture/web-api.md)).
 
 ### S→C `0x0004` AuthenticationResult (deserializer `0x14214da60`, handler `0x1420e829d`)
 | Field | Type | Notes |
@@ -101,8 +104,8 @@ If `notice` is non-empty it replaces the table text in the popup (language-tagge
 | byte 0 bit 2 | +0x32 | **terms of use**: opens the ToU window after login and holds the login | keep 0 |
 | byte 0 bit 3 | +0x33 | **cheating warning** popup (`LoginStateWarnAboutHacks`) | keep 0 |
 | byte 0 bit 4 | +0x34 | **RMT warning** popup (`LoginStateWarnAboutRMT`) | keep 0 |
-| byte 0 bit 5 | +0x37 | strict-unlock banner: the banner is only built when this is set on every account entry (`0x140f0f6c6` ff.), and a later update hides it again while it is set (`0x140f0f690`) | ours 1 |
-| byte 0 bit 6 | +0x38 | **strict unlocks enabled** (see below): the character-select screen shows the red "suspicious activity" banner | ours **1 (the cause of the popup)** |
+| byte 0 bit 5 | +0x37 | strict-unlock banner: the banner is only built when this is set on every account entry (`0x140f0f6c6` ff.), and a later update hides it again while it is set (`0x140f0f690`) | ours 1 (default `0x23`) |
+| byte 0 bit 6 | +0x38 | **strict unlocks enabled** (see below): the character-select screen shows the red "suspicious activity" banner | ours 0 since WP B2 (it was 1, the cause of the popup; default `0x23`) |
 | byte 0 bit 7 | +0x35 | **update required** popup (`LoginErrorGameUpdateRequired`, "There has been a patch that you need to update to...", title "Warning"); checked after the ToU, cheating and RMT flags | keep 0 |
 | byte 1 bit 0 | +0x36 | per-row hook in the select screen (`0x140f060de`, calls a list widget method for characters of the account) | ours 1, effect not seen |
 | byte 1 bit 1 | +0x39 | hides a select-screen widget (+0x6e0 of the select screen object, `0x1406c0b64`): the widget is visible only while this bit is clear. Probably an upsell button | ours 1 |
@@ -115,7 +118,7 @@ Order of the success path with no error and `+0x468 == 0` (the "unlock window is
 3. the select screen's flag `+0x4b0` is clear (set once the user has unlocked the account in this session), and
 4. for the frame to exist at all, no entry has +0x37 clear (byte 0 bit 5, mask `0x20`).
 
-Our default `[accounts] flags = [0x63, 0x03]` sets both bit 5 and bit 6. **Clearing bit 6 is enough: `flags = [0x23, 0x03]`.** Clearing bit 5 as well would also work, but bit 6 is the one that names the feature. Confidence: the chain is read from the code and the string; it has not been run (a client test after the change confirms it; no capture is needed).
+Until WP B2 the default `[accounts] flags = [0x63, 0x03]` set both bit 5 and bit 6. **The default is now `[0x23, 0x03]`** (`poe-config` default and both config files): bit 6 clear removes the banner. Bit 5 stays set; clear it too (`0x03` as byte 0) if the banner still shows. Confidence: the chain is read from the code and the string; it has not been run (the in-game check of WP B2 confirms it; no capture is needed).
 
 Related but different: the error code `0x1cf` (`LoginRequiresUnlockCodeStrict`) opens the Unlock window with the same red text in front. The server never sends it.
 
@@ -240,7 +243,7 @@ Both results go through `BackendError_GetText` (`0x1425cb780`) as described unde
 | delete: cosmetics still on items | 94 | CantDeleteWithMicrotransactions | Please remove all cosmetic effects from items on this character first. ... |
 | any: database failure | 19 | DatabaseError | An unexpected database error occurred. Try again. |
 
-Our server sends `1` for every create failure and for a failed delete. Row 1 of the table is `AccountNameAlreadyExists` ("An account with this name already exists."), a wrong text for both. The `notify` byte of CharacterCreated must stay 0: when it is non-zero the client builds a request to `https://<web host>/api/tracking-conversions/` (`0x1420e89c1`..`0x1420e8ac0`), a marketing call to the official website.
+Until WP B2 the server sent `1` for every create failure and for a failed delete (row 1 is `AccountNameAlreadyExists`, the wrong text for both). Now (`login-server/src/session.rs`): a name under 3 characters `23`, over 23 `24`, other characters than letters, digits and `_` `22` (the client's text says letters and underscores only; digits are accepted), unknown league `26`, no free slot (`[accounts] max_characters`) `49`, unknown start state `25`, name taken `21`, store error `19`; flags `27` is named but cannot occur (the create packet has no flag field). Delete: no such character `16`, a character of another account `17`, store error `19`, and the reply carries the account id in its `u32`. The `notify` byte of CharacterCreated must stay 0: when it is non-zero the client builds a request to `https://<web host>/api/tracking-conversions/` (`0x1420e89c1`..`0x1420e8ac0`), a marketing call to the official website.
 
 ## Keep-alive and resuming (verified 2026-10-14)
 - The client keeps its login connection open while in game (unless the server sends `0x0017`, below) and sends **`0x0001` KeepAlive** (no body) every 10 seconds. The server answers with an empty `0x0001` (the factory maps it to the empty class `0x143506518`).
@@ -273,18 +276,18 @@ Unknown parts of `InstanceDetails`: the connect routine (`0x14211dbb0`) uses onl
 
 **Gate G-LOGIN is not needed to implement WP B2.** The code-to-text mapping comes from the client's own table (`BackendErrors.dat`) and the callbacks that print it. A read-only official capture of a failed create (taken or invalid name) and a delete of a missing character would only confirm which code official servers pick for each case (`21`, `22` and `16` are the expected ones); ask the user for it if B2 wants to match them exactly.
 
-## Implementation notes for WP B2
-What the server sends now (`servers/login-server/src/auth.rs`, `session.rs`, `config/server.toml`) and what should change:
+## Implementation notes for WP B2 (done 2026-10-21)
+WP B1 findings and what WP B2 did with them (`servers/login-server`, `poe-proto`, `poe-config`):
 
-| # | Now | Change |
+| # | WP B1 finding | Status |
 |---|---|---|
-| 1 | `[accounts] flags = [0x63, 0x03]` (byte 0 bits 0, 1, 5, 6; byte 1 bits 0, 1) | **`[0x23, 0x03]`**: clear bit 6 (strict unlocks) to remove the "suspicious activity" banner. Update the comment in `config/server.toml` (it still says the bits give full access) and the default in `crates/poe-config`. Keep bits 2, 3, 4, 7 clear. Bits 0, 1, 5, byte 1 may stay; clear bit 5 too if the banner still shows |
-| 2 | `TOKEN_STALE = 0x62` (expired or revoked token) | `0x62` opens the **Unlock window** asking for an emailed code. Use **`0x0f`** (the client deletes the saved credentials file and shows our notice) for stale, revoked and unknown tokens, with the notice "Your saved credentials are out of date. Please re-enter your password.". `0x61` shows the same words but keeps the file, so the token is retried on the next start. Drop `0x62` from `auth::code` and from the table at the top of this page |
-| 3 | create failure: `CharacterCreated.result = 1` for every reason | map the reason to the table above: bad name `22`/`23`/`24` (empty or too short, too long, invalid characters), taken name `21`, unknown league `26`, unknown start state `25`, full slots `49`, store error `19`. `1` shows "An account with this name already exists." |
-| 4 | failed delete: `DeleteCharacterResult.result = 1`, `unk = 0` | `16` (no such character), `17` (not the owner), `19` (store error); send the **account id** in the `u32` (official), not 0 |
-| 5 | `CharacterCreated.notify = false` | keep: a non-zero byte makes the client call the official website |
-| 6 | `session_token` all zero unless Remember Me | unchanged; the notice stays empty on success (a non-empty notice shows a popup) |
-| 7 | resume answer carries the account name | the official resume answer (`0x0004`, 46 bytes) has an empty name; ours works, no change needed |
-| 8 | error texts are `&'static str` in `auth.rs` | optional: read the English text of the code from `BackendErrors.dat` through `poe-data` instead of hardcoding it; the client already prints the table text when `notice` is empty, so most refusals can send an empty notice and just the code. Keep a notice only where our wording differs (disabled account, token not valid on this cluster) |
-| 9 | CharacterList entries: `unk_44`, `unk_46`, `unk_4f` = 0, `unk_50` = 0 | fine. Rename the fields in `poe-proto` (`login.rs`) to `portrait_frame` (+0x44), `portrait_variation` (+0x46), `unk_4f`, `quest_state` (+0x50); class byte = class \| ascendancy << 5 |
-
+| 1 | account flags `[0x23, 0x03]`: bit 6 clear removes the strict-unlock banner | done: default in `poe-config`, `config/server.toml` and the example; comment fixed. In-game check pending |
+| 2 | stale, revoked and unknown tokens: `0x0f` + the "out of date" notice instead of `0x62` | done (`auth::code::TOKEN_INVALID`; `auth::code::TOKEN_STALE` removed). In-game check pending |
+| 3 | create failures use the table codes | done, see [Create and delete result codes](#create-and-delete-result-codes) |
+| 4 | failed delete `16`/`17`/`19`, account id in the reply | done (`DeleteCharacterResult.account_id`) |
+| 5 | `CharacterCreated.notify` stays 0 | kept; a test checks the bytes |
+| 6 | `session_token` all zero unless Remember Me | unchanged |
+| 7 | resume answer carries the account name | unchanged |
+| 8 | texts from `BackendErrors.dat` | partly: the codes are named once in `poe_proto::backend_error` (each with its `Id`; code = row + 1) and verified against the table at start (`codes::verify`, also a test that runs when `GameFiles/` exists); the client prints the table text for create/delete (no notice exists there). Login refusals keep short own notices (see above) |
+| 9 | CharacterEntry field names | done: `portrait_frame` (+0x44), `portrait_variation` (+0x46), `quest_state` (+0x50); `DeleteCharacterResult.unk` is `account_id` |
+| new | password attempt limits | done, [above](#password-attempt-limits) |

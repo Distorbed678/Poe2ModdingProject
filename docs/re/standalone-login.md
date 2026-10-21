@@ -134,7 +134,7 @@ Why a getter patch and not data: the value is lazily initialised under the threa
 - **No integrity check on the code was found** along these paths; the DLL already patches the exe in memory (`crypto_bypass`), so this is not a new class of risk. The one tamper-related string is the login-time `"System or game DLLs are tampered!"` report (section 5, open question 3).
 - **Official servers:** unchanged rule. The patch only changes which login packet is built; the read-only latch and the connection guard still apply. A standalone-mode client must never be pointed at an official server (the official login would reject it anyway).
 - **`gateway_list.txt`, `Bundles2/gateway_list.txt`:** loaded by `FUN_140ee79c0` for the gateway combobox, not platform-specific as far as read.
-- **Saved-token branch needs an empty password box** and an existing credentials file; with a stale file and a wrong token the server must answer `0x62` / `0x0f` or the user is stuck in a loop of failures.
+- **Saved-token branch needs an empty password box** and an existing credentials file; with a stale file and a wrong token the server must answer `0x0f` (not `0x62`, which opens the Unlock window) or the user is stuck in a loop of failures; the server does since WP B2.
 - **`mode = 2`** in `0x0003` and `flags` should be echoed by tests; the server must not assume other values.
 
 ## 7. Fallback: launcher token in the Steam packet

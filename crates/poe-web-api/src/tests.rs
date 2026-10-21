@@ -145,9 +145,11 @@ fn fixture_with(config: &str) -> Fixture {
         },
         true,
     );
+    let limiter = Arc::new(poe_accounts::LoginLimiter::from_config(&config.security));
     let state = WebState {
         config,
         accounts,
+        limiter,
         store,
         instances,
         admin: mock.clone(),
@@ -1295,4 +1297,98 @@ fn committed_openapi_document_is_current() {
         crate::openapi_json() + "\n",
         "run `cargo xtask openapi`"
     );
+}
+
+/// A login request from `ip` (socket address, as `serve` provides it) with optional headers.
+async fn login_from(
+    f: &Fixture,
+    ip: &str,
+    name: &str,
+    password: &str,
+    forwarded: Option<&str>,
+) -> (StatusCode, Option<String>, Value) {
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/login")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(x) = forwarded {
+        req = req.header("x-forwarded-for", x);
+    }
+    let mut req = req
+        .body(Body::from(
+            json!({"username": name, "password": password}).to_string(),
+        ))
+        .unwrap();
+    let addr: std::net::SocketAddr = format!("{ip}:5555").parse().unwrap();
+    req.extensions_mut().insert(axum::extract::ConnectInfo(addr));
+    let res = f.app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let retry = res
+        .headers()
+        .get(header::RETRY_AFTER)
+        .map(|v| v.to_str().unwrap().to_owned());
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (status, retry, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+async fn login_is_rate_limited_per_account_with_429() {
+    let f = fixture_with(&format!(
+        "{CONFIG}\n[security]\nlogin_max_failures_per_account = 3\nlogin_lockout_secs = 600\n"
+    ));
+    f.account("alice", "correct horse", Role::Player);
+    for _ in 0..3 {
+        let (s, retry, _) = login_from(&f, "10.0.0.1", "alice", "wrong guess", None).await;
+        assert_eq!((s, retry), (StatusCode::UNAUTHORIZED, None));
+    }
+    // Locked: 429 + Retry-After, even for the right password and from another IP.
+    let (s, retry, body) = login_from(&f, "10.0.0.2", "alice", "correct horse", None).await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(retry.as_deref(), Some("600"));
+    assert!(body["error"].as_str().unwrap().contains("too many"), "{body}");
+    // Other accounts are not affected (and the IP limit of 20 is far away).
+    f.account("bob", "correct horse", Role::Player);
+    assert_eq!(login_from(&f, "10.0.0.2", "bob", "correct horse", None).await.0, StatusCode::OK);
+    // /password counts and is limited with the same keys.
+    let token = login_from(&f, "10.0.0.2", "bob", "correct horse", None).await.2["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for _ in 0..3 {
+        let (s, _) = f
+            .call("POST", "/api/v1/password", Some(&token), Some(json!({"old_password": "nope nope", "new_password": "another horse"})))
+            .await;
+        assert_eq!(s, StatusCode::FORBIDDEN);
+    }
+    let (s, _) = f
+        .call("POST", "/api/v1/password", Some(&token), Some(json!({"old_password": "correct horse", "new_password": "another horse"})))
+        .await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn login_is_rate_limited_per_ip_and_honours_forwarded_for() {
+    let cfg = format!("{CONFIG}\n[security]\nlogin_max_failures_per_ip = 2\n");
+    let f = fixture_with(&cfg);
+    f.account("alice", "correct horse", Role::Player);
+    for name in ["ghost1", "ghost2"] {
+        assert_eq!(login_from(&f, "10.0.0.1", name, "x", None).await.0, StatusCode::UNAUTHORIZED);
+    }
+    // The IP is locked for every name; another IP is fine.
+    assert_eq!(login_from(&f, "10.0.0.1", "alice", "correct horse", None).await.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(login_from(&f, "10.0.0.2", "alice", "correct horse", None).await.0, StatusCode::OK);
+    // X-Forwarded-For is ignored unless trusted: a client cannot pick its own IP.
+    assert_eq!(
+        login_from(&f, "10.0.0.1", "alice", "correct horse", Some("10.9.9.9")).await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+
+    let f = fixture_with(&format!("{cfg}trust_forwarded_for = true\n"));
+    f.account("alice", "correct horse", Role::Player);
+    for name in ["ghost1", "ghost2"] {
+        login_from(&f, "127.0.0.1", name, "x", Some("10.0.0.1, 127.0.0.1")).await;
+    }
+    // Same proxy socket, a different forwarded client: allowed; the locked client is not.
+    assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7")).await.0, StatusCode::OK);
+    assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.1")).await.0, StatusCode::TOO_MANY_REQUESTS);
 }
