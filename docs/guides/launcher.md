@@ -3,8 +3,9 @@
 The player launcher: one small desktop program (Tauri 2 with a Svelte 5 UI) that does what `cargo xtask deploy-client` and `run-client` do for the developer ([setup.md](setup.md)), without this repository. Repo [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) (private), the submodule `modules/launcher`. Its own README covers development; this page covers using it and how it fits the server.
 
 What it does:
-- **Servers:** profiles (a name and the cluster's web API address); shows what `GET /server` reports.
+- **Servers:** profiles (a name and the cluster's web API address); shows what `GET /server` reports. Admins get an **Open web admin** button ([below](#open-web-admin)); plain `http://` to another machine needs your confirmation first ([below](#plain-http-warning)).
 - **Account:** log in or register through the web API ([../architecture/web-api.md](../architecture/web-api.md)); the token sits in the OS keyring.
+- **Host a server:** downloads the matching `poe-server` release (or takes a local package), sets it up, starts and stops it, streams its log, and adds it to Servers ([below](#host-a-server)).
 - **Install:** downloads client 0.5.5e from Steam with *your own* Steam login into the launcher's own folder, then verifies it.
 - **Play:** deploys the hook ([../architecture/client-dll.md](../architecture/client-dll.md)), signs the game in without typing a password, starts it (Proton on Linux, native on Windows).
 - **Mods:** installs, enables and orders mods by the `mod.toml` spec ([../../modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md)). The hook's mod loader loads the enabled ones (never in official mode); see [Mods](#mods).
@@ -56,6 +57,43 @@ The version file is `versions/<version>.toml` of the main repo (the single defin
 4. `deploy` writes `gateway_list.txt` (one entry for this server), installs `version.dll` and `poe_hook_core.dll`, sets `poe-hook.toml` (`mode = "private"`, `login_mode = "standalone"`, `trusted_servers` = the server's login and instance `host:port`) and writes `steam_appid.txt`. Always private mode: official servers are never touched.
 5. Start: Linux `proton run PathOfExileSteam.exe --success-event 0` with the launcher's own prefix (`<data>/proton-prefix`, created with `proton run wineboot -u` on first use; crash dumps are set aside as in `run-client`); Windows runs the exe directly. Output goes to `<data>/logs/game-<time>.log`.
 
+## Host a server
+
+The **Host a server** page runs a private server on the machine you play on. It is WP F2 of [../plans/orchestration-2026-10b.md](../plans/orchestration-2026-10b.md); the package it uses is made by the server release CI ([releasing-server.md](releasing-server.md)). Hosting works on Linux and Windows. Everything the page does is also listed, with the code, in the launcher README.
+
+1. **Server program.** *Download the latest release* asks the GitHub releases of `Distorbed678/Poe2ModdingProject` for tags `server-v*` and takes the newest stable release whose package is named `poe-server-v<ver>-game-<your game version>-<linux|windows>-x86_64.tar.gz` (Linux) or `.zip` (Windows). The `.sha256` file of the release is read first, the archive is downloaded, and its SHA-256 must match or the download is deleted and nothing is installed. Until the repository is public GitHub answers 404 for a release list: the page then says so and points to the alternative. *Use a package file...* or *Use a package folder...* takes a package you have: an archive (checked against a `.sha256` file next to it when there is one, otherwise installed with a note that it was not checked) or an unpacked package folder (copied). Both routes check the package itself: `release.json` must say your OS and the game version your launcher installs, and the files the server needs from its own folder must be there. Archives are unpacked with path, link and size checks. The package lands in `<data>/poe2-launcher/server/packages/<name>`; an older package is removed after a newer one is installed, the database stays (it lives in `<data>/poe2-launcher/server/data/`). No game files are in a package.
+2. **Set up.** The form asks for:
+   - the **server name** (shown to players, and the name of the profile that is added to Servers) and the **cluster id** (login tokens are bound to it);
+   - the three **ports**: login (TCP), game (TCP and UDP, the client hook's side channel uses the same number) and web (TCP, the web API and the web admin). The page refuses ports that something else already uses;
+   - the **public host**, the address players use to reach this computer: *Use my LAN address* fills in the address of the interface your default route uses (nothing is sent to find it); *Look up my public IP* asks `api.ipify.org` and happens **only when you press that button**. The page lists the ports to forward in a router for players outside your network and links to [hosting.md](hosting.md);
+   - **open registration** (anyone can create an account) and whether the **web API is reachable from other computers** (binds `0.0.0.0` instead of loopback; it is plain http, see [hosting.md](hosting.md#tls-reverse-proxy-for-the-web-api));
+   - the **admin account**: a name and a password (at least 8 characters, typed twice).
+
+   *Set up and start* writes `config/server.toml` into the package folder from the package's own `config/server.example.toml` (only these keys change: `game_dir` = the launcher's installed game, `[network]` and the two binds, `[cluster] id`, `[gateway] display_name`, `[web]` enabled, bind and `static_dir = "web-admin"`, `[accounts] open_registration` and `dev_machine_hash_login = false`, `[database] path` below the launcher's folder; every comment and other key stays), then creates the admin, starts the server, waits until its web API answers, adds the profile `http://127.0.0.1:<web port>` to Servers and logs in with the new account. The game must be installed first (Install page): the server reads its data from there. Later the same form is *Apply settings* (the server must be stopped); an empty password keeps the accounts as they are.
+3. **The admin account.** `poe-server account create <name> <password>` takes the password only as an argument, and a password must never be on a command line (any user of the machine can read it there). So the launcher starts the server once, privately (a config of its own, `server.setup.toml`, with all binds on loopback and registration open; it is deleted afterwards), creates the account over the loopback web API (`POST /register`; the password travels in the request body to `127.0.0.1` and is wiped from the launcher's memory afterwards), stops that private start, and then runs `poe-server account role <name> admin`, which carries no secret. If the name already exists it is just promoted and its password stays. The password is not stored, not in the config, not in the log, not in an environment variable, and not in the process list.
+4. **Run.** *Start* and *Stop* (a stop is SIGTERM on Linux, with a hard kill if the server has not ended after 8 seconds; on Windows it is a hard stop), the state (starting while the game data loads, running when the web API answers, the number of players online), *Start this server when the launcher starts* (autostart), and the **server log**: the process's standard output and error, shown live (the last 2000 lines), also written to `<data>/poe2-launcher/server/server.log` (replaced at each start). **The server runs while the launcher is open; closing the launcher stops it.** A server that ends by itself is shown as stopped unexpectedly with its exit code and the last log lines.
+
+Players outside your network add your server as `<public host>:<web port>` (use https if you put a TLS proxy in front), install the game with their own launcher and play ([hosting.md](hosting.md#what-a-remote-player-needs)).
+
+Settings are kept in `<config>/poe2-launcher/host.json` (no secrets).
+
+## Open web admin
+
+On a server profile whose logged-in account is an **admin** (the Servers page shows an *admin* badge and the button, the Account page the role and the button; the Host page has one too), **Open web admin** opens the server's web admin in your system browser already signed in, without typing the password again.
+
+- The role comes from the login (`POST /login` returns the account with its role) and is re-read with `GET /api/v1/me` when you press *Check*, when the launcher starts, and every time you press the button, so a promotion or demotion shows without logging in again.
+- The button asks `POST /api/v1/web-token` (launcher token of an admin only; the server answers with a single-use token valid for `[web] web_token_ttl_secs`, 60 seconds by default) and then opens `<server address>/#/token-login?t=<token>` with the Tauri opener. The token travels in the URL fragment, which the browser never sends to the server; the web admin removes it from the address bar and redeems it once ([../architecture/web-api.md](../architecture/web-api.md#opening-the-web-admin-from-the-launcher)).
+- The launcher checks that the link the server returned is exactly that form, with the token it was just given, before it opens anything; it never logs the link. A player account, an old server without the endpoint, a refused request and a missing browser each give their own message and open nothing.
+
+## Plain http warning
+
+A password or login token sent over `http://` can be read by anyone on the way (audit finding S-03, [../plans/public-release-audit.md](../plans/public-release-audit.md)).
+
+- To **this computer** (`localhost`, `127.0.0.1`, `::1`) plain http is fine and needs nothing.
+- To **any other address** the launcher shows a warning when you add or edit the server (a checkbox *I understand* is required before it saves) and, for a server that was added earlier, a notice on the Servers and Account pages with *I understand, allow plain http for this server*. Until you agree for that address the launcher sends nothing there: no log in, no register, no token for Play or the web admin. The backend enforces this, not just the UI. The agreement is per address: changing the address withdraws it.
+- A bare `host:port` you type gets `http://` when it is this computer or a local network address (192.168.x.x, 10.x.x.x, 172.16-31.x.x, `*.local`, single-label names) and `https://` for everything else. An explicit `http://` is kept.
+- The server you host from the launcher uses plain http on loopback. If you open its web API to other computers, put TLS in front ([hosting.md](hosting.md#tls-reverse-proxy-for-the-web-api)) and use the `https://` address in the players' launchers.
+
 ## Releasing
 
 A release is a pushed tag; `.github/workflows/release.yml` of Poe2Launcher does the rest.
@@ -90,7 +128,18 @@ enabled = ["core-lib", "my-mod"]    # load order; the mods' own mod.toml files a
 
 The real-server test needs a scratch server config (shifted ports, `open_registration = true`, an account made offline); commands: [setup.md](setup.md#launcher-build-and-test), config: [setup.md](setup.md#web-api).
 
-The launcher's own tests already cover profiles with a mock keyring, login/logout/register and the whole Play preparation against a mock web API and a fake Proton; an ignored test downloads and starts the pinned DepotDownloader (never logs in).
+The launcher's own tests already cover profiles with a mock keyring, login/logout/register and the whole Play preparation against a mock web API and a fake Proton; the plain-http guard and Open web admin against a mock web API (the browser is a recorder, nothing is opened); finding, downloading, verifying and unpacking server packages against a mock GitHub API; an ignored test downloads and starts the pinned DepotDownloader (never logs in).
+
+**Hosting against a real server package** (an ignored test, no game client involved): build a package as in [releasing-server.md](releasing-server.md#checking-a-package-locally), then
+
+```sh
+cd modules/launcher/src-tauri
+POE2_TEST_SERVER_PACKAGE=<out dir>/poe-server-v<ver>-game-0.5.5e-linux-x86_64.tar.gz \
+POE2_TEST_GAME_DIR=<a game install, read only; the GameFiles/ copy works> \
+  cargo test --test host_flow real_package -- --ignored --nocapture
+```
+
+It installs the package (checksum verified), sets it up in a temp launcher folder with ports 29500-29502 and a temp database, starts it, waits for the web API, checks status, the log tail and `curl /api/v1/server`, logs in as the new admin (role `admin`), asks the real server for a web sign-in link (recorded, never opened), stops it and checks that the ports are free and the password is in no file. It takes about 15 seconds.
 
 ## End-to-end test on a real machine
 
@@ -103,6 +152,7 @@ The launcher's own tests already cover profiles with a mock keyring, login/logou
 ## Not done
 
 - Bundling the hook DLLs; downloading them from a release.
+- Host a server: the real GitHub download has not run (the repository is private, the page shows the 404 explanation); the Windows paths (zip, `taskkill`, no console window) compile but have not run; the in-app page has not been clicked through on a desktop, its logic is covered by unit tests and the backend by the tests above. `poe-server account create` takes the password only as an argument, hence the private start for the admin account; a `--password-stdin`/environment option on the server would make that step simpler.
 - The Windows launch path is written but untested (no Windows machine); `cargo check` runs in CI.
 - Verification reference values are unconfirmed (above); the Steam download and the Play launch have not been run by a real install yet.
 - Mod loader (DLL side); mod signatures and packaging beyond a zip.
