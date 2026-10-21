@@ -86,7 +86,7 @@ Implemented 2026-10-21: `cargo xtask check-build` (`xtask/src/check_build.rs`, `
 - The server refuses an unknown client: the login server judges the `client_hash` of `0x0003` and `0x0005` (a SHA-256 of the exe, read off `LoginClientHash_Get32`/`Sha256_Bytes32`) against `[client] hashes`; an unknown one gets code 8 (`InvalidProtocolVersion`, the client's "you need to update" popup) and a notice. `[security] allow_unknown_client` (default `false`) lets it in.
 
 **Not done (still open)**
-- **The `client_hash` is derived, not observed**: local captures redact `0x0003`/`0x0005`, so the recorded value is the exe's sha256 and `hashes_confirmed = false` (nothing is refused). The in-game check must read the logged value, compare it, and set the flag (guide, step 6).
+- **The `client_hash` is the exe's sha256 (confirmed in game, 2026-10-21)**: local captures redact `0x0003`/`0x0005`, so the value was derived from the code; the login server then saw the same value on a real standalone login (0.5.5e) and `hashes_confirmed = true` is set. The refusal (code 8 popup) and `allow_unknown_client` were checked in game too (guide, step 6).
 - Renumbered opcodes and client-to-server layouts are not derived from the exe; the factory is not found by the `Unable to deserialise packet` string (its address and switch numbers come from Ghidra and `find_switches.py`).
 - Row 11's "ids instead of rows" in config and code; row 14's format-version checks (`.tgr` and others); a pinned schema download; `symbols.tsv` per build; the DLL selecting its opcode tables by the resolved build (it still uses `poe_proto::opcodes::v0_5_5e`); a side-channel hello that carries the DLL's resolved build (option 1 of S5; only the login channel is protected).
 - `cargo xtask sig-gen` (the generator stays `scripts/re/sig_gen.py`).
@@ -405,7 +405,7 @@ Consumers:
 
 **Letting the server know the client's version.** The client sends no version string. Two options for A4:
 1. The DLL knows the build (header fields and `build_revision`). Private mode needs the DLL anyway. Have the DLL say so in the side-channel hello, and make the server drop a session from an unsupported build with a clear log line. The side channel starts after login, so this protects the instance part only.
-2. Check whether `client_hash` (32 bytes in `0x0003`/`0x0005`, `LoginClientHash_Get32` `0x1420e7580`, global `0x1445d5f50`) is stable per build. It is filled asynchronously, which suggests a hash of the executable or a build signature. If it is, the login server can map it to a version before any message is answered. I did not verify this. It needs one `0x0003` log of the 0.5.5e value (the server does not log it today; no code reads `client_hash`), then the same on the next build.
+2. Check whether `client_hash` (32 bytes in `0x0003`/`0x0005`, `LoginClientHash_Get32` `0x1420e7580`, global `0x1445d5f50`) is stable per build. It is filled asynchronously, which suggests a hash of the executable or a build signature. If it is, the login server can map it to a version before any message is answered. This was verified for 0.5.5e on 2026-10-21 (see the A4 note above: the value is the exe's SHA-256); the next build still has to be checked the same way.
 
 ## 11. Proposed `cargo xtask check-build` report (A3 input)
 Each block reports found / ambiguous / missing (or OK / drift / fail):

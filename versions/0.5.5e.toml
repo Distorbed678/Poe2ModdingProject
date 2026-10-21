@@ -89,13 +89,14 @@ required_features = [
 # What the server learns about the client. The client sends no version string; the 32-byte
 # `client_hash` of 0x0003/0x0005 is a SHA-256 of the executable file (LoginClientHash_Get32
 # 0x1420e7580 reads the whole file named by argv[0] and hashes it with Sha256_Bytes32). Known
-# values of that hash for this build: the exe's SHA-256, read off the code, NOT yet seen on the
-# wire. Until the in-game check has confirmed it (set `hashes_confirmed = true`), a client with
-# another hash is logged and accepted; once confirmed, it is refused
-# ([security] allow_unknown_client = false) with BackendErrors `InvalidProtocolVersion`.
+# values of that hash for this build: the exe's SHA-256, confirmed on the wire (in-game check
+# of 2026-10-21: a standalone login with this value was accepted as known). While
+# `hashes_confirmed` is false a client with another hash is only logged and accepted; once
+# confirmed (now), it is refused ([security] allow_unknown_client = false) with BackendErrors
+# `InvalidProtocolVersion`.
 [client]
 hashes = ["7157984534da1b146e9b0be342aa9fd24272915b6f478aadef9830fc7873f89f"]
-hashes_confirmed = false
+hashes_confirmed = true
 # Strings `check-build` must find in the exe (ASCII or UTF-16LE): command-line options, file
 # names and log lines that tools and the DLL depend on.
 strings = [
