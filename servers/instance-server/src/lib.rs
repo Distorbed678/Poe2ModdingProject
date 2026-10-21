@@ -9,12 +9,14 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use poe_cluster::{Ticket, TicketCharacter, TicketRegistry};
+use poe_cluster::{Ticket, TicketRegistry};
 use poe_config::Config;
 use poe_game::stats::StatRegistry;
 use poe_store::Store;
 
+pub mod actor;
 mod admin;
+mod appearance;
 pub mod chat;
 pub mod commands;
 mod exec;
@@ -25,6 +27,8 @@ pub mod seeds;
 mod spawn;
 pub mod sync;
 pub mod terrain_store;
+#[cfg(test)]
+mod actor_tests;
 #[cfg(test)]
 mod replay_tests;
 use poe_data::{
@@ -69,6 +73,8 @@ pub struct InstanceServer {
     pub live: Arc<live::Live>,
     /// Terrain layouts and grids: the cache in `[spawn] layout_dir`, fed by client uploads.
     pub terrain: Arc<terrain_store::TerrainStore>,
+    /// The instance actors (one per instance with players, started by the first join).
+    pub actors: Arc<actor::Actors>,
 }
 
 impl InstanceServer {
@@ -287,13 +293,10 @@ impl InstanceServer {
             }
             info!(?cell, "restoring saved position");
         }
-        let mut player = self.new_player(&ticket, cell, grid)?;
-        self.enter_world(&mut conn, &ticket, &player).await?;
-
+        let Some(instance_id) = instance else {
+            anyhow::bail!("no instance for the session");
+        };
         let name = ticket.character.name.clone();
-        if let Some(id) = instance {
-            self.instances.join(id, &name);
-        }
         let account = self
             .store
             .account_by_id(ticket.account_id)
@@ -301,6 +304,42 @@ impl InstanceServer {
             .flatten()
             .map(|a| a.name)
             .unwrap_or_else(|| format!("account {}", ticket.account_id));
+        // Join the instance's actor. The saved or start cell is the spawn; the session's
+        // entity id comes from the instance's counter.
+        let session = self.actors.next_session();
+        let setup = self.new_player(&ticket)?;
+        let Some(class) = CharacterClass::by_integer_id(&self.data, ticket.character.class_id)?
+        else {
+            anyhow::bail!("unknown class id {}", ticket.character.class_id);
+        };
+        // New characters wash up on their first visit to an intro area.
+        let washed_up =
+            !ticket.character.intro_done && self.config.spawn.intro_areas.contains(&ticket.area);
+        let appearance = self.appearance(&ticket.character, &class, cell, &setup.skills, washed_up)?;
+        let (frames_tx, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let grid: Option<Arc<dyn poe_game::grid::GridSource>> = grid.map(|g| Arc::new(g) as _);
+        let request = actor::JoinRequest {
+            session,
+            name: name.clone(),
+            spawn: cell,
+            speed: setup.speed,
+            movement: setup.movement.clone(),
+            grid,
+            appearance,
+            want_debug: self.config.dev.drift_check || self.config.dev.debug_link,
+            out: frames_tx,
+        };
+        let (handle, joined) = self
+            .actors
+            .join(&*self.instances, instance_id, |r| self.actor_init(&ticket, instance_id, r), request)
+            .await?;
+        // From here on the player leaves the instance however the session ends (also on `?`).
+        let mut player = player::Player::new(session, handle, joined.entity, setup.skills, joined.own.clone());
+        if washed_up {
+            self.store.set_intro_done(ticket.character.id)?;
+        }
+        self.enter_world(&mut conn, &ticket, &class, washed_up, &joined, &player).await?;
+
         let ctx = exec::SessionCtx {
             ticket: &ticket,
             admin: self.is_admin(&account),
@@ -313,21 +352,28 @@ impl InstanceServer {
         };
         // Another login of the account (or disabling it) ends this session.
         let superseded = self.sessions.subscribe_superseded(ticket.account_id);
-        let registration = self.live.register(ticket.account_id, &account, &name, instance, &ticket.area, client_port);
+        let registration = self.live.register(ticket.account_id, &account, &name, instance, &ticket.area, session);
         self.send_registry(&ctx);
-        let closed = instance.and_then(|id| self.instances.closed(id));
+        let closed = self.instances.closed(instance_id);
         let result = self
-            .run_session(&mut conn, &mut hnc, &ctx, &mut player, closed, registration, superseded)
+            .run_session(
+                &mut conn,
+                &mut hnc,
+                &ctx,
+                &mut player,
+                &mut frames,
+                Stops { closed, superseded, kicked: registration.kicked },
+                registration.chat,
+            )
             .await;
-        self.live.unregister(&name, client_port);
-        if let Some(id) = instance {
-            self.instances.leave(id, &name);
-        }
+        self.live.unregister(&name, session);
+        // Leaving tells the other players in the instance (removal sequence) and returns the
+        // cell the character stood on.
+        let (x, y) = player.leave().await;
         if let Some(t) = self.reports.trace() {
             t.flush();
         }
         // Save where the character is, however the session ended.
-        let (x, y) = player.cell();
         let location = poe_store::Location { seed, x, y };
         match self
             .store
@@ -339,24 +385,39 @@ impl InstanceServer {
         result
     }
 
-    /// The in-game loop: client messages and simulation frames until the session ends.
+    /// What the actor of `instance` is created with (the first join's character supplies the
+    /// default movement configuration and the grid).
+    fn actor_init(&self, ticket: &Ticket, instance: u32, first: &actor::JoinRequest) -> actor::ActorInit {
+        let stats = self.stats.clone();
+        actor::ActorInit {
+            instance,
+            area: ticket.area.clone(),
+            tick_ms: self.config.instance.tick_ms.max(1) as u32,
+            first_entity_id: self.config.instance.first_entity_id,
+            movement: first.movement.clone(),
+            grid: first.grid.clone(),
+            codec: movement::Codec::new(self.protocol.clone(), Arc::new(move |id: &str| stats.key(id))),
+            directory: self.instances.clone(),
+            idle: Duration::from_secs(self.config.instance.idle_minutes * 60),
+            trace: self.reports.trace().is_some(),
+        }
+    }
+
+    /// The in-game loop: client messages and the instance actor's frames until the session
+    /// ends. The session is a pipe: it forwards client input to the actor and writes the frames
+    /// the actor sends (`head`, then the events and the `SimulationTick` marker).
+    #[allow(clippy::too_many_arguments)]
     async fn run_session(
         &self,
         conn: &mut Connection,
         hnc: &mut poe_net::Salsa20Stream,
         ctx: &exec::SessionCtx<'_>,
         player: &mut player::Player,
-        mut closed: Option<tokio::sync::watch::Receiver<bool>>,
-        registration: live::Registration,
-        mut superseded: tokio::sync::watch::Receiver<u64>,
+        frames: &mut tokio::sync::mpsc::UnboundedReceiver<actor::Frame>,
+        mut stops: Stops,
+        mut chat_in: tokio::sync::mpsc::UnboundedReceiver<live::ChatOut>,
     ) -> anyhow::Result<()> {
         let client_port = ctx.port;
-        let live::Registration { mut kicked, chat: mut chat_in } = registration;
-        // Simulation frames: each tick marker closes a frame of `tick_ms` (InitialState).
-        let tick = self.protocol.instance.encode(&SimulationTick)?;
-        let mut ticker =
-            tokio::time::interval(Duration::from_millis(self.config.instance.tick_ms.max(1)));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // Drift checker (dev): server position against the client's reports, logged only.
         let mut drift = self.config.dev.drift_check.then(|| {
             sync::DriftCheck::new(Duration::from_millis(self.config.dev.drift_interval_ms.max(1)))
@@ -367,16 +428,12 @@ impl InstanceServer {
         // Not decoded yet: log the client's decrypted messages (heartbeat 0x1c is skipped).
         loop {
             tokio::select! {
-                () = instance_closed(&mut closed) => {
-                    info!("instance closed: disconnecting the player");
-                    return Ok(());
-                }
-                Ok(()) = superseded.changed() => {
-                    info!("account logged in again or was disabled: disconnecting the player");
-                    return Ok(());
-                }
-                () = was_kicked(&mut kicked) => {
-                    info!("kicked: disconnecting the player");
+                stop = stops.wait() => {
+                    match stop {
+                        Stop::InstanceClosed => info!("instance closed: disconnecting the player"),
+                        Stop::Superseded => info!("account logged in again or was disabled: disconnecting the player"),
+                        Stop::Kicked => info!("kicked: disconnecting the player"),
+                    }
                     return Ok(());
                 }
                 Some(line) = chat_in.recv() => {
@@ -405,17 +462,25 @@ impl InstanceServer {
                         }
                     }
                 }
-                _ = ticker.tick() => {
-                    let frame = std::time::Instant::now();
+                frame = frames.recv() => {
+                    // The actor ended (instance closed or idle): so does the session.
+                    let Some(frame) = frame else {
+                        info!("instance ended: disconnecting the player");
+                        return Ok(());
+                    };
+                    let started = std::time::Instant::now();
                     ticks += 1;
+                    player.apply(frame.own.clone());
                     if let Some(t) = self.reports.trace() {
                         t.line(client_port, "tick", format_args!("{ticks}"));
                         if ticks.is_multiple_of(30) {
                             t.flush();
                         }
+                        // Only this player's own messages, as before.
+                        for line in frame.trace.iter().filter(|l| l.entity == player.entity_id) {
+                            t.line(client_port, line.kind, format_args!("{}", line.fields));
+                        }
                     }
-                    // The simulation answers the inputs received since the last tick.
-                    let sim_out = player.tick()?;
                     if let Some(check) = drift.as_mut() {
                         let report = self.reports.fresh(ctx.side);
                         report_seen |= report.is_some();
@@ -427,7 +492,7 @@ impl InstanceServer {
                                  (poe-hook position_sync, [dev] position_sync)"
                             );
                         }
-                        if let Some(l) = check.sample(player.position(), || format!("{:?}", player.state()), report.as_ref()) {
+                        if let Some(l) = check.sample(player.position(), || player.state().to_string(), report.as_ref()) {
                             info!(
                                 server = format_args!("{:.2},{:.2}", l.server.0, l.server.1),
                                 client = ?l.client.map(|c| format!("{:.2},{:.2}", c.0, c.1)),
@@ -440,7 +505,7 @@ impl InstanceServer {
                         }
                     }
                     let mut leave = false;
-                    let mut extra = Vec::new();
+                    let mut out = Vec::new();
                     if self.config.dev.debug_link {
                         // Overlay commands: the same registry as chat commands.
                         for command in self.reports.take_commands(ctx.side) {
@@ -448,13 +513,13 @@ impl InstanceServer {
                                 self.send_registry(ctx);
                                 continue;
                             }
-                            let out = self.run_command(ctx, player, &command);
-                            extra.extend(out.raw);
-                            leave |= out.leave;
-                            let status = if out.ok { "ok" } else { "error" };
+                            let cmd = self.run_command(ctx, player, &command);
+                            out.extend(cmd.raw);
+                            leave |= cmd.leave;
+                            let status = if cmd.ok { "ok" } else { "error" };
                             self.reports.send_debug(
                                 ctx.side,
-                                &format!("ack\t{command}\t{status}: {}\n", out.text.replace(['\t', '\n'], " ")),
+                                &format!("ack\t{command}\t{status}: {}\n", cmd.text.replace(['\t', '\n'], " ")),
                             );
                         }
                         if ticks.is_multiple_of(30) {
@@ -470,20 +535,16 @@ impl InstanceServer {
                             );
                         }
                     }
-                    let mut out = extra;
-                    for message in sim_out {
-                        self.trace(client_port, message.trace.0, format_args!("{}", message.trace.1));
-                        out.extend(message.bytes);
-                    }
-                    out.extend_from_slice(&tick);
+                    out.extend_from_slice(&frame.head);
+                    out.extend_from_slice(&frame.events);
                     conn.send(&out).await?;
                     if leave {
                         info!("handing the client to another instance: ending this session");
                         return Ok(());
                     }
-                    let took = frame.elapsed();
+                    let took = started.elapsed();
                     if took.as_millis() as u64 > self.config.instance.tick_ms / 2 {
-                        warn!(?took, "slow simulation frame");
+                        warn!(?took, "slow session frame");
                     }
                 }
             }
@@ -709,9 +770,44 @@ impl InstanceServer {
     }
 }
 
+/// The ways an in-game session is ended from outside.
+pub(crate) struct Stops {
+    /// The instance is closed in the directory (admin `close`, idle expiry).
+    pub closed: Option<tokio::sync::watch::Receiver<bool>>,
+    /// The account logged in again or was disabled ([`poe_cluster::LoginSessions::supersede`]).
+    pub superseded: tokio::sync::watch::Receiver<u64>,
+    /// An admin kicked the session ([`live::Live::kick`]).
+    pub kicked: tokio::sync::watch::Receiver<bool>,
+}
+
+/// Which of the [`Stops`] fired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stop {
+    InstanceClosed,
+    Superseded,
+    Kicked,
+}
+
+impl Stops {
+    pub async fn wait(&mut self) -> Stop {
+        tokio::select! {
+            () = instance_closed(&mut self.closed) => Stop::InstanceClosed,
+            () = account_superseded(&mut self.superseded) => Stop::Superseded,
+            () = was_kicked(&mut self.kicked) => Stop::Kicked,
+        }
+    }
+}
+
 /// Resolves when the session is kicked.
 async fn was_kicked(rx: &mut tokio::sync::watch::Receiver<bool>) {
     if rx.wait_for(|k| *k).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Resolves when the account's sessions are superseded; never when the registry is gone.
+async fn account_superseded(rx: &mut tokio::sync::watch::Receiver<u64>) {
+    if rx.changed().await.is_err() {
         std::future::pending::<()>().await;
     }
 }
@@ -725,9 +821,6 @@ async fn instance_closed(rx: &mut Option<tokio::sync::watch::Receiver<bool>>) {
     }
     std::future::pending().await
 }
-
-/// Entity id of the (only) player in an instance.
-const PLAYER_ENTITY: u32 = 1;
 
 /// RE experiment: `POE_NPC=<metadata path>` adds that object as entity 2 next to the player
 /// with a zero blob (Positioned first). Objects with a StateMachine need their shared states
@@ -851,15 +944,17 @@ impl InstanceServer {
                 let req = UpdateSkillTargetEntity::decode(r)?;
                 debug!(?req, "skill target entity (no entities yet)");
             }
-            // Escape menu in a solo game: confirm with SetPause, which pauses the client's
-            // world; the server simulation pauses with it.
+            // Escape menu: in a solo game confirm with SetPause, which pauses the client's
+            // world; the simulation pauses with it. With other players in the instance the
+            // actor refuses (the world keeps running) and the client is told "not paused".
             PauseRequest::NAME => {
                 let req = PauseRequest::decode(r)?;
-                info!(paused = req.paused, "pause request");
-                player.set_paused(req.paused);
+                let applied = player.set_paused(req.paused).await;
+                info!(paused = req.paused, applied, "pause request");
+                let paused = req.paused && applied;
                 let reply = SetPause {
-                    paused: req.paused,
-                    flag_869: req.paused,
+                    paused,
+                    flag_869: paused,
                     ..Default::default()
                 };
                 conn.send(&table.encode(&reply)?).await?;
@@ -901,9 +996,7 @@ impl InstanceServer {
                     req.channel
                 };
                 info!(kind = req.kind, channel, "chat join");
-                if let Some(name) = self.live.name_on_port(port) {
-                    self.live.set_channel(&name, req.kind != 0, channel);
-                }
+                self.live.set_channel(&ctx.ticket.character.name, req.kind != 0, channel);
                 let reply = ChatJoined {
                     unk_10: req.unk_0,
                     channel,
@@ -949,15 +1042,10 @@ impl InstanceServer {
         Ok(Handled::Continue)
     }
 
-    /// The player's server-side state: position, walking speed (class template
-    /// `Pathfinding.base_speed`, cells per second) and the innate skills
-    /// (`[player] innate_skills`).
-    fn new_player(
-        &self,
-        ticket: &Ticket,
-        spawn: (i32, i32),
-        grid: Option<spawn::Grid>,
-    ) -> anyhow::Result<player::Player> {
+    /// The character's server-side state: walking speed (class template
+    /// `Pathfinding.base_speed`, cells per second), the innate skills (`[player]
+    /// innate_skills`) and the movement configuration they and the class give.
+    fn new_player(&self, ticket: &Ticket) -> anyhow::Result<PlayerSetup> {
         let Some(class) = CharacterClass::by_integer_id(&self.data, ticket.character.class_id)?
         else {
             anyhow::bail!("unknown class id {}", ticket.character.class_id);
@@ -1027,32 +1115,20 @@ impl InstanceServer {
             speed,
             sprint_bonus,
         );
-        let grid: Arc<dyn poe_game::grid::GridSource> = match grid {
-            Some(g) => Arc::new(g),
-            None => Arc::new(poe_game::movement::Open),
-        };
-        let stats = self.stats.clone();
-        Ok(player::Player::new(player::PlayerInit {
-            entity_id: PLAYER_ENTITY,
-            cell: spawn,
-            speed,
-            skills,
-            movement,
-            tick_ms: self.config.instance.tick_ms as u32,
-            grid,
-            codec: movement::Codec::new(
-                self.protocol.clone(),
-                Arc::new(move |id: &str| stats.key(id)),
-            ),
-        }))
+        Ok(PlayerSetup { skills, speed, movement })
     }
 
-    /// After the client generated the area: local player, inventories, the player entity,
-    /// then InitialState (see docs/protocol/instance.md).
+    /// After the client generated the area and the actor accepted the session: local player,
+    /// the player entity (`0x24`), inventories, the entities (`joined.add_objects`: the other
+    /// players first, then this one), then InitialState (see docs/protocol/instance.md and
+    /// docs/protocol/entities.md).
     async fn enter_world(
         &self,
         conn: &mut Connection,
         ticket: &Ticket,
+        class: &CharacterClass,
+        washed_up: bool,
+        joined: &actor::Joined,
         player: &player::Player,
     ) -> anyhow::Result<()> {
         let table = &self.protocol.instance;
@@ -1109,35 +1185,10 @@ impl InstanceServer {
         }
         conn.send(&out).await?;
 
-        // Local player 0 controls entity 1, which is added with the class's object type and
-        // its initial state (layout: poe_proto::entity).
-        let Some(class) = CharacterClass::by_integer_id(&self.data, character.class_id)? else {
-            anyhow::bail!("unknown class id {}", character.class_id);
-        };
-        // New characters wash up on their first visit to an intro area.
-        let washed_up =
-            !character.intro_done && self.config.spawn.intro_areas.contains(&ticket.area);
-        if washed_up {
-            self.store.set_intro_done(character.id)?;
-        }
-        let entity_id = player.entity_id;
-        let mut out = Vec::new();
-        out.extend(table.encode(&AddObject {
-            header: SimulationHeader {
-                entity_id,
-                // Ordering within the frame: +0x14 = 0 (before entity updates), component
-                // +0x18 = 0xff. InitialState starts the world, which applies every queued packet
-                // without advancing the queue cursor; a nested flush during that apply (starting
-                // the WashedUp action from the Player reader) applies queued packets whose
-                // ordering matches the current position (0, 0, 0). With 0 here the player was
-                // added twice ("Replacing awake object") and the client crashed. Official servers
-                // send (0xffffffff, 0, 0): after everything else in the frame.
-                unk_14: 0xffff_ffff,
-                ..Default::default()
-            },
-            type_key: class.object_type_key(),
-            blob: self.player_blob(character, &class, player, washed_up)?,
-        })?);
+        // The entities: the other players (remote form), then this player's own AddObject, all
+        // built by the actor with the entity ids of its counter (layout: poe_proto::entity,
+        // poe_proto::player_blob).
+        let mut out = joined.add_objects.clone();
         if let Ok(path) = std::env::var("POE_NPC") {
             out.extend(npc_experiment(table, &path, spawn)?);
         }
@@ -1167,7 +1218,9 @@ impl InstanceServer {
                 ..Default::default()
             }],
             players: vec![PlayerState {
-                player_id: 1,
+                // The client matches it against the entity id of `0x24` (the capture's
+                // first zone has 0x5b in both, the town 12013).
+                player_id: player.entity_id,
                 // Character 0, bit 6 (entry +7).
                 character: 0x40,
                 flags: 0x07,
@@ -1180,68 +1233,11 @@ impl InstanceServer {
             class = %class.metadata_id,
             ?spawn,
             washed_up,
+            entity = player.entity_id,
+            players = joined.players,
             "player entered the world"
         );
         Ok(())
-    }
-
-    /// Initial state of the player character (components of its object template): the
-    /// class's object type with the template's default stats, class base stats and level.
-    fn player_blob(
-        &self,
-        character: &TicketCharacter,
-        class: &CharacterClass,
-        player: &player::Player,
-        washed_up: bool,
-    ) -> anyhow::Result<Vec<u8>> {
-        use poe_proto::entity::{Actor, Component, Life, Player, Positioned, Stats};
-        let (grid_x, grid_y) = player.cell();
-        let template = ObjectTemplate::load(&self.data, &class.metadata_id)?;
-        let stats = poe_game::stats::character_defaults(&template, class, character.level);
-        let team = template
-            .component("Positioned")
-            .iter()
-            .find(|(k, _)| k == "team")
-            .and_then(|(_, v)| v.parse().ok())
-            .unwrap_or(0);
-        let pool = |id: &str| stats.get(id).max(1) as u32;
-        info!(
-            class = %class.name,
-            level = character.level,
-            maximum_life = stats.get("maximum_life"),
-            maximum_mana = stats.get("maximum_mana"),
-            stats = stats.0.len(),
-            "player stats"
-        );
-        Ok(entity::initial_state_blob(
-            entity::ENTITY_IN_WAKE_ZONE,
-            &[
-                Component::Positioned(Positioned {
-                    grid_x,
-                    grid_y,
-                    // Team (low 15 bits), from the template's Positioned section.
-                    unk_1e0: team,
-                    ..Default::default()
-                }),
-                Component::Stats(Stats {
-                    stats: stats.to_network(&self.stats),
-                    ..Default::default()
-                }),
-                Component::Buffs,
-                Component::Life(Life::character(pool("maximum_life"), pool("maximum_mana"))),
-                Component::Animated(Some(class.ao_file.clone())),
-                Component::Player(Player {
-                    name: character.name.clone(),
-                    class: class.integer_id as u8,
-                    washed_up,
-                    ..Default::default()
-                }),
-                Component::Inventories,
-                Component::Actor(Actor {
-                    skills: player.actor_skills(),
-                }),
-            ],
-        ))
     }
 }
 
@@ -1278,6 +1274,14 @@ fn sweep_list(configured: &std::path::Path) -> Option<Vec<(String, u32)>> {
         list.extend((0..count).map(|i| (area.to_string(), seed.wrapping_add(i))));
     }
     Some(list)
+}
+
+/// What the session knows about its character before it joins the instance.
+struct PlayerSetup {
+    skills: Vec<player::OwnedSkill>,
+    /// Walking speed, cells per second.
+    speed: f32,
+    movement: poe_game::locomotion::MovementConfig,
 }
 
 /// The local player index the server gives the character (official servers use 1).

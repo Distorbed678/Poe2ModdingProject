@@ -10,7 +10,7 @@
 use std::{path::Path, sync::Arc};
 
 use poe_data::views::GrantedSkill;
-use poe_game::{locomotion::MoveStat, movement::Open};
+use poe_game::locomotion::MoveStat;
 use poe_net::Reader;
 use poe_proto::{
     Direction, Message, OpcodeTable, Protocol,
@@ -26,17 +26,18 @@ use poe_proto::{
 use serde_json::Value;
 
 use crate::{
+    actor_tests::{Fake, Fixture, Sent},
     movement::{ActionEvent, Codec, StatKeys, client_input},
-    player::{OwnedSkill, Player, PlayerInit, sim_config},
+    player::{OwnedSkill, sim_config},
 };
 
-const MOVE_SKILL: u32 = 0x2000_2909;
-const ROLL_SKILL: u32 = 0x8000_0040;
-const ROLL_ACTION_TYPE: u16 = 60748;
+pub(crate) const MOVE_SKILL: u32 = 0x2000_2909;
+pub(crate) const ROLL_SKILL: u32 = 0x8000_0040;
+pub(crate) const ROLL_ACTION_TYPE: u16 = 60748;
 
 /// The 0.5.5e protocol tables, with `ActionEvent` added when `instance.toml` does not list it
 /// (so the tests also see the `0x1ca` messages).
-fn protocol() -> Arc<Protocol> {
+pub(crate) fn protocol() -> Arc<Protocol> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../modules/protocol/opcodes/0.5.5e");
     let mut protocol = Protocol::load(&dir).expect("protocol tables");
     if protocol
@@ -66,7 +67,7 @@ const STAT_IDS: [MoveStat; 11] = [
 ];
 
 /// Stand-in for the `Stats.dat` keys: position in [`STAT_IDS`] plus 100.
-fn stat_keys() -> StatKeys {
+pub(crate) fn stat_keys() -> StatKeys {
     Arc::new(|id: &str| {
         STAT_IDS
             .iter()
@@ -90,7 +91,7 @@ fn granted(action_type: Option<u16>, constants: Vec<(String, i64)>) -> GrantedSk
     }
 }
 
-fn roll_skill(distance: Option<i64>) -> OwnedSkill {
+pub(crate) fn roll_skill(distance: Option<i64>) -> OwnedSkill {
     OwnedSkill {
         id: ROLL_SKILL,
         granted: granted(
@@ -104,100 +105,48 @@ fn roll_skill(distance: Option<i64>) -> OwnedSkill {
     }
 }
 
-fn player_at(cell: (i32, i32), skills: Vec<OwnedSkill>) -> (Player, Arc<Protocol>) {
-    let protocol = protocol();
-    let config = sim_config(
+/// The simulation configuration of a test character (37 cells/s, default sprint).
+pub(crate) fn movement_config(skills: &[OwnedSkill]) -> poe_game::locomotion::MovementConfig {
+    sim_config(
         &poe_config::MovementConfig::default(),
-        &skills,
+        skills,
         Some(MOVE_SKILL),
         Some(ROLL_ACTION_TYPE),
         37.0,
         None,
-    );
-    let player = Player::new(PlayerInit {
-        entity_id: 1,
-        cell,
-        speed: 37.0,
-        skills,
-        movement: config,
-        tick_ms: 33,
-        grid: Arc::new(Open),
-        codec: Codec::new(protocol.clone(), stat_keys()),
-    });
-    (player, protocol)
+    )
 }
 
-/// A client talking to a [`Player`]: encodes packets, decodes what the server sends per tick.
+/// A client talking to an instance actor through the test harness: encodes packets, decodes
+/// what the actor sends per tick.
 struct Session {
-    player: Player,
-    protocol: Arc<Protocol>,
-}
-
-/// One decoded server message of a batch.
-struct Sent {
-    name: &'static str,
-    bytes: Vec<u8>,
-}
-
-impl Sent {
-    fn is<M: Message>(&self) -> bool {
-        self.name == M::NAME
-    }
-
-    fn decode<M: Message>(&self) -> M {
-        assert!(self.is::<M>(), "{} is not a {}", self.name, M::NAME);
-        let mut r = Reader::new(&self.bytes[2..]);
-        let m = M::decode(&mut r).unwrap();
-        assert!(r.is_empty(), "trailing bytes in {}", self.name);
-        m
-    }
+    fx: Fixture,
+    me: Fake,
 }
 
 impl Session {
     fn new(cell: (i32, i32)) -> Self {
-        let (player, protocol) = player_at(cell, vec![roll_skill(None)]);
-        Self { player, protocol }
+        // The fixtures are official captures of a solo zone: the player is entity 1.
+        let mut fx = Fixture::with_first_entity(1);
+        let me = fx.join("Alice", cell, movement_config(&[roll_skill(None)]));
+        Self { fx, me }
     }
 
     /// Sends a client packet through the same path as the server: opcode to name through the
     /// table, then [`client_input`].
     fn send<M: Message>(&mut self, message: &M) {
-        let bytes = self.protocol.instance.encode(message).unwrap();
-        let op = u16::from_be_bytes([bytes[0], bytes[1]]);
-        let name = self
-            .protocol
-            .instance
-            .name(Direction::Client, op)
-            .expect("client opcode");
-        assert_eq!(name, M::NAME);
-        let mut r = Reader::new(&bytes[2..]);
-        let input = client_input(name, &mut r)
-            .unwrap()
-            .unwrap_or_else(|| panic!("{name} is not movement input"));
-        assert!(r.is_empty());
-        self.player.input(input);
+        self.fx.send(&self.me, message);
     }
 
-    /// One server frame: the messages of the batch, decoded back from their bytes.
+    /// One server frame: the messages of the batch (without the tick marker), decoded back from
+    /// their bytes.
     fn tick(&mut self) -> Vec<Sent> {
-        self.player
-            .tick()
-            .unwrap()
-            .into_iter()
-            .map(|o| {
-                let op = u16::from_be_bytes([o.bytes[0], o.bytes[1]]);
-                let name = self
-                    .protocol
-                    .instance
-                    .name(Direction::Server, op)
-                    .expect("server opcode");
-                assert_eq!(name, o.name);
-                Sent {
-                    name: o.name,
-                    bytes: o.bytes,
-                }
-            })
-            .collect()
+        self.fx.tick();
+        self.me.take(&self.fx.protocol)
+    }
+
+    fn cell(&self) -> (i32, i32) {
+        self.fx.cell(&self.me)
     }
 
     fn names(&mut self) -> Vec<&'static str> {
@@ -382,8 +331,7 @@ fn replay(name: &str) {
         fx["start_cell"][0].as_i64().unwrap() as i32,
         fx["start_cell"][1].as_i64().unwrap() as i32,
     );
-    let (player, protocol) = player_at(start, vec![roll_skill(None)]);
-    let mut s = Session { player, protocol };
+    let mut s = Session::new(start);
     let inputs = fx["inputs"].as_array().unwrap();
     let expect = fx["expect"].as_array().unwrap();
     let last = expect
@@ -490,7 +438,7 @@ fn wasd_is_answered_in_the_next_tick_with_the_servers_cell() {
     let m = s.tick()[0].decode::<MoveDirectionUpdate>();
     assert_eq!((m.dir_x, m.dir_y, m.grid_y), (0, 0, 100));
     assert!(m.grid_x > 105, "the server walked on: {}", m.grid_x);
-    assert_eq!(s.player.cell().0, m.grid_x);
+    assert_eq!(s.cell().0, m.grid_x);
 }
 
 #[test]
@@ -589,25 +537,25 @@ fn a_move_click_starts_the_move_action_and_acks_the_request() {
     for _ in 0..200 {
         s.tick();
     }
-    assert_eq!(s.player.cell(), (110, 95));
+    assert_eq!(s.cell(), (110, 95));
 }
 
 #[test]
 fn pause_holds_inputs_until_resumed() {
     let mut s = Session::new((100, 100));
-    s.player.set_paused(true);
+    s.fx.actor.set_paused(s.me.session, true);
     s.walk(180, 0);
     assert!(s.tick().is_empty());
     assert!(s.tick().is_empty());
-    assert_eq!(s.player.cell(), (100, 100));
-    s.player.set_paused(false);
+    assert_eq!(s.cell(), (100, 100));
+    s.fx.actor.set_paused(s.me.session, false);
     assert_eq!(s.names(), ["MoveDirectionUpdate"]);
 }
 
 #[test]
 fn teleport_is_a_direction_and_a_stop_with_the_new_cell() {
     let mut s = Session::new((100, 100));
-    s.player.teleport((300, 400));
+    s.fx.teleport(&s.me, (300, 400));
     let batch = s.tick();
     assert_eq!(batch.len(), 2);
     let a = batch[0].decode::<MoveDirectionUpdate>();
@@ -620,7 +568,7 @@ fn teleport_is_a_direction_and_a_stop_with_the_new_cell() {
         ((b.dir_x, b.dir_y), (b.grid_x, b.grid_y)),
         ((0, 0), (300, 400))
     );
-    assert_eq!(s.player.cell(), (300, 400));
+    assert_eq!(s.cell(), (300, 400));
 }
 
 #[test]

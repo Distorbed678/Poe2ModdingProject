@@ -1,27 +1,24 @@
-//! The player's session state in an instance: the skills the server gave the character and a
-//! handle to the movement simulation.
+//! The session's side of its player: the skills the server gave the character and a handle to
+//! the instance actor that owns its entity.
 //!
 //! Movement is not computed here. The client runs in lockstep (docs/protocol/movement.md): it
 //! starts a movement only when the server says so, and the server answers each input with the
-//! official messages. That logic is `poe_game::world::World` / `Locomotion`; this file only
-//! owns the World for now (one per session) behind [`Sim`], so that it can later move into an
-//! instance actor without changing the packet mapping ([`crate::movement`]):
+//! official messages. That logic is `poe_game::world::World` / `Locomotion`, owned by the
+//! instance's actor ([`crate::actor`]) together with every other player of the instance:
 //!
-//! - client packet -> [`crate::movement::client_input`] -> [`Player::input`]
-//! - the session's frame tick -> [`Player::tick`] -> encoded messages, followed by the
-//!   `SimulationTick` marker.
-
-use std::sync::Arc;
+//! - client packet -> [`crate::movement::client_input`] -> [`Player::input`] -> actor
+//! - actor frame -> [`crate::actor::Frame`] -> the session writes it -> [`Player::apply`] keeps
+//!   the latest [`Own`] pose for `cell`/`position`/`debug_state`.
+//!
+//! Dropping a `Player` leaves the instance (so every way a session can end removes the entity
+//! and tells the others); [`Player::leave`] does the same and returns the final cell.
 
 use poe_data::views::GrantedSkill;
-use poe_game::{
-    grid::GridSource,
-    locomotion::{MoveInput, MovementConfig as SimConfig, SkillIds},
-    world::{EntityId, Event, World, WorldConfig},
-};
+use poe_game::locomotion::{MoveInput, MovementConfig as SimConfig, SkillIds};
 use poe_proto::entity::Skill;
+use tokio::sync::oneshot;
 
-use crate::movement::{Codec, Out};
+use crate::actor::{ActorHandle, Cmd, Own, SessionId};
 
 /// A skill the server gave the character.
 pub struct OwnedSkill {
@@ -74,54 +71,38 @@ pub fn sim_config(
     cfg
 }
 
-/// What a [`Player`] needs to be created.
-pub struct PlayerInit {
-    /// Entity id of the player (the first id of its world).
-    pub entity_id: u32,
-    pub cell: (i32, i32),
-    /// Walking speed, cells per second.
-    pub speed: f32,
-    pub skills: Vec<OwnedSkill>,
-    pub movement: SimConfig,
-    /// Milliseconds per simulation frame.
-    pub tick_ms: u32,
-    pub grid: Arc<dyn GridSource>,
-    pub codec: Codec,
-}
-
-/// The session's handle to the movement simulation. Today it owns a `World` with the one player
-/// in it; an instance actor would own the World and this would send it the inputs and receive
-/// this entity's events.
-struct Sim {
-    world: World,
-    entity: EntityId,
-}
-
+/// The session's handle to its entity in the instance actor.
 pub struct Player {
     pub entity_id: u32,
     pub skills: Vec<OwnedSkill>,
-    sim: Sim,
-    codec: Codec,
+    session: SessionId,
+    actor: ActorHandle,
+    own: Own,
+    left: bool,
 }
 
 impl Player {
-    pub fn new(init: PlayerInit) -> Self {
-        let mut config = WorldConfig::new(init.movement);
-        config.tick_ms = init.tick_ms;
-        config.first_entity_id = init.entity_id;
-        let mut world = World::new(config, init.grid);
-        let entity = world.spawn_player_with_speed(init.cell, init.speed);
+    /// `own` is the pose the actor reported with the join.
+    pub fn new(
+        session: SessionId,
+        actor: ActorHandle,
+        entity_id: u32,
+        skills: Vec<OwnedSkill>,
+        own: Own,
+    ) -> Self {
         Self {
-            entity_id: entity.0,
-            skills: init.skills,
-            sim: Sim { world, entity },
-            codec: init.codec,
+            entity_id,
+            skills,
+            session,
+            actor,
+            own,
+            left: false,
         }
     }
 
     /// The skills to list in the player entity's Actor component.
-    pub fn actor_skills(&self) -> Vec<Skill> {
-        self.skills
+    pub fn actor_skills(skills: &[OwnedSkill]) -> Vec<Skill> {
+        skills
             .iter()
             .map(|s| Skill {
                 id: s.id,
@@ -132,69 +113,73 @@ impl Player {
             .collect()
     }
 
-    /// Client input; answered by the next [`tick`](Self::tick).
-    pub fn input(&mut self, input: MoveInput) {
-        self.sim.world.input(self.sim.entity, input);
+    /// Client input; answered by the actor's next tick.
+    pub fn input(&self, input: MoveInput) {
+        self.actor.send(Cmd::Input {
+            session: self.session,
+            input,
+        });
     }
 
-    /// One simulation frame: the messages for the client, in order (the caller sends the
-    /// `SimulationTick` marker after them).
-    pub fn tick(&mut self) -> anyhow::Result<Vec<Out>> {
-        let mut out = Vec::new();
-        for e in self.sim.world.tick() {
-            if e.entity != self.sim.entity {
-                continue;
-            }
-            let Event::Movement(m) = &e.event else {
-                continue;
-            };
-            out.extend(self.codec.encode(self.entity_id, m)?);
-        }
-        Ok(out)
+    /// The escape menu: `true` when the world is now paused (or running again after
+    /// `paused = false`), `false` when the request was refused (other players in the instance;
+    /// see [`crate::actor::Actor::set_paused`]) or the actor is gone.
+    pub async fn set_paused(&self, paused: bool) -> bool {
+        let (reply, answer) = oneshot::channel();
+        let sent = self.actor.send(Cmd::SetPaused {
+            session: self.session,
+            paused,
+            reply,
+        });
+        sent && answer.await.unwrap_or(false)
     }
 
-    /// Escape menu in a solo game: nothing moves or is answered while paused.
-    pub fn set_paused(&mut self, paused: bool) {
-        self.sim.world.set_paused(paused);
+    /// Dev command: put the player on `cell` (reported by the next frame).
+    pub fn teleport(&self, cell: (i32, i32)) {
+        self.actor.send(Cmd::Teleport {
+            session: self.session,
+            cell,
+        });
     }
 
-    /// Dev command: put the player on `cell` (reported by the next tick).
-    pub fn teleport(&mut self, cell: (i32, i32)) {
-        self.sim.world.teleport(self.sim.entity, cell);
+    /// Takes the pose of the latest frame.
+    pub fn apply(&mut self, own: Own) {
+        self.own = own;
     }
 
-    /// The grid cell the server has the player in.
+    /// The grid cell of the latest frame.
     pub fn cell(&self) -> (i32, i32) {
-        self.loco().cell()
+        self.own.cell
     }
 
-    /// The server's exact position in cells.
+    /// The server's exact position in cells at the latest frame.
     pub fn position(&self) -> (f32, f32) {
-        self.loco().position()
+        self.own.position
     }
 
-    pub fn state(&self) -> &poe_game::locomotion::MoveState {
-        self.loco().state()
+    /// `Debug` of the movement state at the latest frame (empty without `want_debug`).
+    pub fn state(&self) -> &str {
+        self.own.debug.as_ref().map_or("", |d| d.state.as_str())
     }
 
-    /// Frames ticked so far.
-    pub fn frame(&self) -> u64 {
-        self.sim.world.frame()
-    }
-
-    fn loco(&self) -> &poe_game::locomotion::Locomotion {
-        &self
-            .sim
-            .world
-            .entity(self.sim.entity)
-            .expect("the player entity lives as long as the session")
-            .movement
+    /// Leaves the instance and returns the cell the entity was in (the latest frame's when the
+    /// actor is gone).
+    pub async fn leave(mut self) -> (i32, i32) {
+        self.left = true;
+        let (reply, cell) = oneshot::channel();
+        let sent = self.actor.send(Cmd::Leave {
+            session: self.session,
+            reply: Some(reply),
+        });
+        if sent && let Ok(Some(cell)) = cell.await {
+            return cell;
+        }
+        self.own.cell
     }
 
     /// The simulation state for the client DLL's debug link, as `key\tvalue` lines.
     pub fn debug_state(&self, report: Option<&crate::sync::ClientReport>) -> String {
-        let l = self.loco();
-        let (x, y) = l.position();
+        let (x, y) = self.own.position;
         let mut s = String::new();
         let mut kv = |k: &str, v: String| {
             s.push_str(k);
@@ -202,13 +187,15 @@ impl Player {
             s.push_str(&v);
             s.push('\n');
         };
-        kv("frame", self.frame().to_string());
+        kv("frame", self.own.frame.to_string());
         kv("server_pos", format!("{x:.3} {y:.3}"));
-        kv("state", format!("{:?}", l.state()));
-        kv("wasd", format!("{} {}", l.wasd().0, l.wasd().1));
-        kv("sprint_held", l.sprint_held().to_string());
-        kv("combat_stance", l.in_combat_stance().to_string());
-        kv("paused", self.sim.world.paused().to_string());
+        if let Some(d) = &self.own.debug {
+            kv("state", d.state.clone());
+            kv("wasd", format!("{} {}", d.wasd.0, d.wasd.1));
+            kv("sprint_held", d.sprint_held.to_string());
+            kv("combat_stance", d.combat_stance.to_string());
+            kv("paused", d.paused.to_string());
+        }
         kv(
             "skills",
             self.skills
@@ -230,5 +217,16 @@ impl Player {
             );
         }
         s
+    }
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        if !self.left {
+            self.actor.send(Cmd::Leave {
+                session: self.session,
+                reply: None,
+            });
+        }
     }
 }

@@ -53,6 +53,9 @@ pub struct Entity {
     /// Next free buff index of this entity (shared by all components that add buffs).
     pub next_buff: u16,
     pub movement: Locomotion,
+    /// This entity's own movement configuration (a character class with other sprint values
+    /// than the world's default); `None`: the world's.
+    pub config: Option<MovementConfig>,
 }
 
 /// Something that happened to an entity this frame and that clients must be told.
@@ -142,6 +145,19 @@ impl World {
     /// Like [`spawn_player`](Self::spawn_player) with an explicit speed (cells per second,
     /// from the character's stats).
     pub fn spawn_player_with_speed(&mut self, cell: Cell, speed: f32) -> EntityId {
+        self.spawn_player_with_config(cell, speed, None)
+    }
+
+    /// Like [`spawn_player_with_speed`](Self::spawn_player_with_speed) with the entity's own
+    /// movement configuration (`None`: the world's). Players of different classes share one
+    /// world, so the class-dependent values (sprint bonus, roll distance, walking speed) live
+    /// on the entity.
+    pub fn spawn_player_with_config(
+        &mut self,
+        cell: Cell,
+        speed: f32,
+        config: Option<MovementConfig>,
+    ) -> EntityId {
         let id = EntityId(self.next_entity);
         self.next_entity += 1;
         self.entities.insert(
@@ -150,6 +166,7 @@ impl World {
                 id,
                 next_buff: 0,
                 movement: Locomotion::new(cell, speed),
+                config,
             },
         );
         id
@@ -208,7 +225,7 @@ impl World {
                 frame: self.frame,
                 dt,
                 terrain: &*self.grid,
-                config: &self.config.movement,
+                config: e.config.as_ref().unwrap_or(&self.config.movement),
                 next_action: &mut self.next_action,
                 next_buff: &mut e.next_buff,
             };
@@ -359,6 +376,28 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, [32768, 32769]);
+    }
+
+    #[test]
+    fn an_entity_can_carry_its_own_movement_config() {
+        use crate::locomotion::ActionKind;
+        let mut w = world();
+        let a = w.spawn_player((0, 0));
+        // This entity does not know the roll skill: the same request is a generic action.
+        let mut other = w.config().movement.clone();
+        other.skills.roll_skill = 0x8000_0041;
+        let b = w.spawn_player_with_config((50, 50), 37.0, Some(other));
+        w.input(a, roll());
+        w.input(b, roll());
+        let kinds: Vec<(EntityId, ActionKind)> = w
+            .tick()
+            .iter()
+            .filter_map(|e| match e.movement() {
+                Some(MoveEvent::ActionStart { kind, .. }) => Some((e.entity, *kind)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, [(a, ActionKind::Roll), (b, ActionKind::Other)]);
     }
 
     #[test]

@@ -138,13 +138,15 @@ impl InstanceServer {
                 let rows: Vec<String> = list
                     .iter()
                     .map(|i| {
+                        // The player list is written by the instance's actor.
                         format!(
-                            "#{} {} seed {} topo {} orient {} players [{}]",
+                            "#{} {} seed {} topo {} orient {} players {} [{}]",
                             i.id,
                             i.spec.area,
                             i.spec.seed.map_or("-".into(), |s| s.to_string()),
                             i.spec.topology.map_or("natural".into(), |t| t.to_string()),
                             i.spec.orientation.map_or("natural".into(), |o| o.to_string()),
+                            self.actors.players(i.id).unwrap_or(i.players.len()),
                             i.players.join(", ")
                         )
                     })

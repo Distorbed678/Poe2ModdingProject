@@ -15,7 +15,7 @@ login-server ──(ticket + instance address)──► client ──► instanc
 
 - Crates, servers and submodules, with the role of each: [crates.md](crates.md).
 - The client DLLs: [client-dll.md](client-dll.md).
-- Accounts and identity: [accounts.md](accounts.md). Instances and the simulation: [instance-world.md](instance-world.md). Web administration: [web-api.md](web-api.md).
+- Accounts and identity: [accounts.md](accounts.md). Instances, the instance actor and the simulation: [instance-world.md](instance-world.md). Web administration: [web-api.md](web-api.md).
 - Wire formats: [../protocol/](../protocol/framing.md). Reverse-engineering notes: [../re/README.md](../re/README.md).
 - Commands, logs and tests: [../guides/setup.md](../guides/setup.md); the rules: [../../CLAUDE.md](../../CLAUDE.md).
 

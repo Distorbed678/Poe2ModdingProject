@@ -92,8 +92,10 @@ seed, forced topology and orientation, the players in it and since when it is em
   areas join the area's newest open instance, else get a new one.
 - The first player decides an instance's seed (spec seed, else saved location, known seeds,
   random); later players get the same one.
-- Empty instances close after `[instance] idle_minutes` (towns and hideouts stay).
+- Empty instances close after `[instance] idle_minutes` (towns and hideouts stay in the directory; their simulation (the instance actor) also ends after that time and restarts with the next player).
 - A closed instance disconnects its players.
+- All players in an instance share one simulation and see each other ([instance-world.md](../architecture/instance-world.md#the-instance-actor-wp36)). The escape menu pauses the world only for a lone player.
+- `instances` shows each instance's player count and names (written by its actor).
 
 ## Transfers
 

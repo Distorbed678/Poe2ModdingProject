@@ -15,7 +15,7 @@
 | `crates/poe-world` | Terrain generation (the client's generator, ported; see [../status/terrain.md](../status/terrain.md)). |
 | `crates/poe-game` | Simulation: the instance `World` (entities, frame clock), `GridSource` terrain grids (client dump `Grid`, `VecGrid`), the server-authoritative movement component `Locomotion` (typed inputs and events, no opcodes; built from [../protocol/movement.md](../protocol/movement.md)), `Mover` and A* pathfinding, character stats. Design: [instance-world.md](instance-world.md). Replay tests use fixtures under `tests/fixtures/` derived by `scripts/re/movement_fixtures.py`. |
 | `servers/login-server` | Login protocol: auth, leagues, characters, hand-off and transfers to instances. |
-| `servers/instance-server` | Instance protocol: areas, player, movement, chat, server commands (`commands.rs`, `exec.rs`), live sessions. |
+| `servers/instance-server` | Instance protocol: areas, the instance actor (`actor.rs`: one task per instance owns the `World` and serves all its sessions), character blobs (`appearance.rs`), player handle, movement glue, chat, server commands (`commands.rs`, `exec.rs`), live sessions. |
 | `servers/poe-server` | Development launcher that runs the login server, the instance server and the web API in one process. |
 | `xtask` | `cargo xtask` (commands: [../guides/setup.md](../guides/setup.md)): thin wrappers over `poe-hook-deploy` plus the DLL name tables. |
 | `modules/client-hook` | Poe2ClientHook submodule (own Cargo workspace): the client DLLs (Windows target: loader, debug core, shared config/ABI) and `poe-hook-deploy`, the host-side library behind `cargo xtask deploy-client`/`revert-client`/`deploy-core`/`run-client`. Nested submodule `protocol/` = Poe2Protocol. |

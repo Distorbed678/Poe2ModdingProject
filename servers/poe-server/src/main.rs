@@ -75,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
         sessions,
         instances: instances.clone(),
         live: Default::default(),
+        actors: Default::default(),
     });
 
     let web_state = poe_web_api::WebState {

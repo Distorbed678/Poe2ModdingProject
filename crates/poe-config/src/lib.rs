@@ -167,7 +167,7 @@ fn default_command_prefix() -> String {
 }
 
 /// Player characters.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PlayerConfig {
     /// Granted effects (`GrantedEffects.Id`) every character has, e.g. `DodgeRollPlayer`.
     #[serde(default)]
@@ -175,6 +175,27 @@ pub struct PlayerConfig {
     /// Area (`WorldAreas.Id`) for new characters whose start state names no hub area.
     #[serde(default)]
     pub start_area: Option<String>,
+    /// The three animation set names (the Actor component's weapon-pose strings) other players'
+    /// clients get for a character, in the official order: main hand set, off hand set,
+    /// default. The official values depend on the equipped weapons (`BowTown`,
+    /// `WandSpiritShieldTown`, ...), `UnarmedTown`, `default`; characters have no equipment
+    /// yet, so everyone is unarmed.
+    #[serde(default = "default_animation_sets")]
+    pub animation_sets: [String; 3],
+}
+
+impl Default for PlayerConfig {
+    fn default() -> Self {
+        Self {
+            innate_skills: Vec::new(),
+            start_area: None,
+            animation_sets: default_animation_sets(),
+        }
+    }
+}
+
+fn default_animation_sets() -> [String; 3] {
+    ["UnarmedTown".into(), "UnarmedTown".into(), "default".into()]
 }
 
 /// Chat channels: join requests get the requested channel number (this one for "any"); the
@@ -386,6 +407,11 @@ pub struct InstanceConfig {
     /// Simulation frame interval: a tick marker (0x2f4) is sent this often.
     #[serde(default = "default_tick_ms")]
     pub tick_ms: u64,
+    /// First entity id an instance hands out (one counter per instance, shared by all
+    /// players): official 0.5.5e instances give players 12000 and up (areas' own objects have
+    /// lower ids).
+    #[serde(default = "default_first_entity_id")]
+    pub first_entity_id: u32,
 }
 
 impl Default for InstanceConfig {
@@ -393,8 +419,13 @@ impl Default for InstanceConfig {
         Self {
             idle_minutes: default_idle_minutes(),
             tick_ms: default_tick_ms(),
+            first_entity_id: default_first_entity_id(),
         }
     }
+}
+
+fn default_first_entity_id() -> u32 {
+    12000
 }
 
 fn default_idle_minutes() -> u64 {

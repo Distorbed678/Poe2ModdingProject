@@ -22,8 +22,9 @@ pub struct LiveSession {
     pub character: String,
     pub instance: Option<u32>,
     pub area: String,
-    /// The client's TCP port (debug link key).
-    pub port: u16,
+    /// The session (one connection; [`crate::actor::SessionId`]). Not the client's address:
+    /// clients on different machines can share a port.
+    pub session: u64,
     /// Joined global and trade channel numbers (ChatJoinRequest).
     pub global: Option<u16>,
     pub trade: Option<u16>,
@@ -54,7 +55,7 @@ pub struct Online {
 }
 
 impl Live {
-    pub fn register(&self, account_id: u32, account: &str, character: &str, instance: Option<u32>, area: &str, port: u16) -> Registration {
+    pub fn register(&self, account_id: u32, account: &str, character: &str, instance: Option<u32>, area: &str, session: u64) -> Registration {
         let (kick, kicked) = watch::channel(false);
         let (chat, rx) = mpsc::unbounded_channel();
         self.sessions.lock().unwrap().insert(
@@ -65,7 +66,7 @@ impl Live {
                 character: character.to_owned(),
                 instance,
                 area: area.to_owned(),
-                port,
+                session,
                 global: None,
                 trade: None,
                 kick,
@@ -75,11 +76,11 @@ impl Live {
         Registration { kicked, chat: rx }
     }
 
-    /// Removes a session (only if it is still the one on `port`: a newer session of the same
+    /// Removes a session (only if it is still `session`: a newer session of the same
     /// character may have replaced it).
-    pub fn unregister(&self, character: &str, port: u16) {
+    pub fn unregister(&self, character: &str, session: u64) {
         let mut map = self.sessions.lock().unwrap();
-        if map.get(&character.to_lowercase()).is_some_and(|s| s.port == port) {
+        if map.get(&character.to_lowercase()).is_some_and(|s| s.session == session) {
             map.remove(&character.to_lowercase());
         }
     }
@@ -94,11 +95,6 @@ impl Live {
             .collect();
         out.sort_by(|a, b| a.character.cmp(&b.character));
         out
-    }
-
-    /// The character on a client port.
-    pub fn name_on_port(&self, port: u16) -> Option<String> {
-        self.sessions.lock().unwrap().values().find(|s| s.port == port).map(|s| s.character.clone())
     }
 
     /// The account id and exact name of an online character.
