@@ -24,7 +24,7 @@ For a new orchestrator that continues [orchestration-2026-10b.md](orchestration-
 | C3 party and trade | verified with two clients (invite/cancel, trade request/cancel; crash "Invalid inventory id" fixed with the two trade AddInventory). Accept/decline only logged: gate G-PARTY | 93a2d18 |
 | D1 audit | done: [public-release-audit.md](public-release-audit.md), questions 1-15 for the user | ab89ae4 |
 | D2 code fixes | done for everything that needs no user answer (S-01 safe committed config + `scripts/dev-config.py`, S-02 pre-auth limits, S-07, ...) | 61f1603 |
-| D2 history scrub | **user gate**: answers to the audit questions, then fresh mirror clones, filter-repo, backups, push only after confirmation | |
+| D2 history scrub | done: rewritten main history in a NEW repo `Poe2ModdingProject`; old repo renamed `Poe2ModdingProject-private-backup` (private); modules needed no rewrite | new history head a0f1456 |
 | D3 hygiene | done: CONTRIBUTING, SECURITY, licences, templates, disclaimers, client guide, hosting guide, main CI (server job skipped while private). CI checkout secrets switch when public | 61f1603, launcher b70a3c5 |
 | D4 go public | **user gate** | |
 | E1/E2 release CI, updater | done, workflow never run. Signing key in `~/.tauri/poe2-launcher.key{,.pub,.password}`; user must create `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` | launcher a02901d, main 5237edb |
