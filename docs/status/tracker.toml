@@ -198,8 +198,14 @@ link = "docs/architecture/instance-world.md"
 [[subsystem.item]]
 name = "Shared world: players in one instance see each other"
 status = "partial"
-note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat/party sync"
+note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat sync"
 link = "docs/architecture/instance-world.md"
+
+[[subsystem.item]]
+name = "Party and trade requests (invite, cancel)"
+status = "partial"
+note = "WP C3: party invite and cancel, trade request and cancel between two sessions (invitee/target side derived from the client's handlers, UNVERIFIED in game); accept, decline, timeouts and joined members are not implemented: gate G-PARTY (needs an official capture where a friend answers)"
+link = "docs/protocol/entities.md#party-and-trade-flows-wp-c3"
 
 [[subsystem.item]]
 name = "Two-client local test harness"

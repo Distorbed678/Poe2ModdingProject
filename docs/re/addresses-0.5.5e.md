@@ -267,6 +267,22 @@ Layouts: [../protocol/entities.md](../protocol/entities.md#other-players-add-act
 | `0x141f45090` | | deserializer of `0x0271` (`u8 × 4`); handler not found |
 | `0x142156320` | | `0x00c8` PartyUpdate reader (`0x1421560b0` ctor); `0x1421574b0` `0x00d9` TradeState reader; `0x141f43e80` `0x00c9`; `0x141f38d80` `0x00da`; `0x141f38ce0` serializer of `0x00d2`/`0x00c9`; `0x141f3cd50` `0x00e0`; `0x142150da0` `0x0019` |
 
+### Party invitation and trade request, receiving side (WP C3, 2026-10-21)
+Layouts and the flow: [../protocol/entities.md](../protocol/entities.md#party-and-trade-flows-wp-c3). Renamed in Ghidra.
+
+| Address | Ghidra name | What |
+|---|---|---|
+| `0x142106a30` | `Session_HandleAccountMessage` | the big message handler of the account session (switch on the opcode); case `0xc8` PartyUpdate (member roles: 2 leader, 1 member, 0 invited; own state from `members[+0x76]`), `0xc9` PartyEnded (current party id at session `+0x2278`, else the invitation record is erased), `0xd9` TradeState, `0xda` TradeAck, `0xdd`/`0xe0` inventory events |
+| `0x1421063f0` | | member role byte to state: 0 → 1 (invited), 1 → 2 (member), 2 → 0 (leader), else 3 |
+| `0x14210b630` | `Social_AddPartyInvitation` | adds an invitation record (`0xa0` bytes + flag `+0x2b0`, keyed by party id, vector at session `+0x7620`); raises the event list at `+0x5850` when the leader's social entry was found (flag set by `0x14210b740`) |
+| `0x140feb9c0` | `PartyInvite_OnReceived_ShowPopup` | listener of that list: builds the popup (`0x140c75310`) and raises `FourSocialPartyReceive`; registered in `0x140fd7800` |
+| `0x140febbe0` | | listener of the list at `+0x58d0` (member joined): raises `FourSocialPartyAccept` |
+| `0x140c9ef70` | `PartyInvitePopup_Accept` | the popup's accept button: sends C→S `0x00b8` (`u8 local` from session `+0x181`, `u32` the popup's party id) with the generic `u8 + u32` class `0x1430a2fa0` |
+| `0x140c9eee0` | `PartyInvitePopup_Decline` | decline button: raises `FourSocialPartyDecline`, calls `Social_SendPartyDecline` |
+| `0x142110ab0` | `Social_SendPartyDecline` | sends C→S `0x00b9` (same class) unless the id is the party already joined with 2+ members |
+| `0x1402c3fb0` | `TradeInvite_ShowPopup` | builds the popup with the string `TradeInviteFrom;` (`0x142fa5b00`) and the trade record; its result callback is `0x1402c3c30` (writes a bool into a promise) |
+| `0x1402c3cb0` | `TradeInvite_OnTradeState` | listener of the `0xd9` event: popup only if trade id ≠ 0, record flags `+0x30` bit 1 set and bit 0 clear, and the character is in the social list (`0x142129580`, lookup by character name, case-insensitive) |
+
 ## Login results, flags, create and delete (WP B1, 2026-10-21)
 Details and decoded fields: [../protocol/login.md](../protocol/login.md). Names are set in Ghidra.
 

@@ -43,6 +43,8 @@ pub struct Live {
     sessions: Mutex<HashMap<String, LiveSession>>,
     /// Muted characters (lower case) and until when (`None`: until unmuted).
     muted: Mutex<HashMap<String, Option<Instant>>>,
+    /// Party invitations and trade requests between the sessions.
+    pub social: crate::social::Social,
 }
 
 /// One `who` row.

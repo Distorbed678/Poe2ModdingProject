@@ -146,6 +146,43 @@ Opcodes and decoders: `remote.rs`; all frames below are in the capture's frame n
 4. One frame later S→C: `0x0019` NoticeMessage (id `0x00e1`), `0x00da` TradeAck (echo of the cancel), `0x00e0` TradeEvent `{ local, kind 1, value 2 }` and `{ 1, 1 }`.
 5. Not captured: the other player declining, accepting or a timeout (the other player's client is silent for us until a decline would arrive). Whisper delivery failures use `NoticeMessage` id `0x010e`.
 
+## Party and trade flows (WP C3)
+Built in `servers/instance-server/src/social.rs` (`Social`, held by `Live`; architecture: [../architecture/instance-world.md](../architecture/instance-world.md#party-and-trade-wp-c3)). The messages are account-session messages like chat: a session writes them to its client the moment they arrive, outside the actor's frames, and they work across instances (a party invite is by character name; a trade target is an entity id in the requester's instance). Names below are the placeholders of the tests.
+
+**What is implemented**
+| Step | Client sends | Server sends to the requester A | Server sends to B | Source |
+|---|---|---|---|---|
+| Party invite A to B | `0x00b6` `PartyInvite` (name) | `SocialEntry` (A), `PartyUpdate` ×2 (A alone), `SocialEntry` (B), `PartyUpdate` (A leader, B invited) | `SocialEntry` (A), `PartyUpdate` (same list, B's index 1) | A: official bytes (the tests compare them). B: derived, UNVERIFIED |
+| Party cancel by A | `0x00b7` `PartyInviteCancel` (name) | `PartyUpdate` (`state` 1, the remaining members), `SocialRemove` (B's account), `PartyEnded` reason 4 when nobody is left | `PartyEnded` reason 4 | A: official bytes. B: UNVERIFIED (the popup may need more to go away) |
+| Trade request A to B | `0x00db` `TradeRequest` (B's entity) | `TradeState` (`unk_c` `0x31`, B's name) | `SocialEntry` (A), `TradeState` (`unk_c` `0x32`, A's name) | A: official bytes. B: derived, UNVERIFIED |
+| Trade cancel by either | `0x00d2` `TradeCancel` (trade id) | the canceller: `NoticeMessage` `0xe1`, `TradeAck`, `TradeEvent` (1, 2), (1, 1) | the other: `TradeAck`, the two events | the canceller: official bytes; the other: UNVERIFIED |
+
+A session that ends (or is replaced) cancels what it had open: an invitee that leaves is a cancel for the inviter, a leader that leaves ends every invitation, a trade partner that leaves closes the trade. Party ids and trade ids count up from `Social::starting_at` (the tests start at the capture's `0xcfc43` and 1). Refusals (not online, yourself, already invited or trading, no such trade) come back as a server chat line.
+
+**How the invitee's side was derived (static RE, `docs/re/addresses-0.5.5e.md`)**
+- `PartyUpdate` is handled by `Session_HandleAccountMessage` (`0x142106a30`) case `0xc8`. The member roles map to a state: role 2 = leader, 1 = member, 0 = **invited**, other = none (`0x1421063f0`). The client takes its own state from `members[unk_0]` (`unk_0` = the local player's index in the list, `0xff` = none; the capture's inviter is at 0). A new `PartyUpdate` whose own state is "invited" and whose party id is not the current party creates an **invitation record** (`Social_AddPartyInvitation` `0x14210b630`, keyed by party id, kept in a list at session `+0x7620`), which raises the UI event "party invitation received" (`FourSocialPartyReceive`, listener `0x140feb9c0` builds the popup). The record carries the leader's social entry, looked up by name in the session's social list (`+0x27d8`, case-insensitive), so the server sends the leader's `SocialEntry` first; without character data on the entry no popup is shown (`0x14210b740`).
+- When the own state becomes "member" (role 1) the record is removed and `FourSocialPartyAccept` is raised; `PartyEnded` for an id that is not the current party removes the record (`0xc9`: the id is compared with session `+0x2278`, the party the player is in). Whether an open popup closes by itself is not known.
+- `TradeState` (`0xd9`) copies its fields into the session's trade record (`+0x7a28`) and raises an event; `TradeInvite_OnTradeState` (`0x1402c3cb0`) opens the popup string `TradeInviteFrom;` only if the trade id is not 0, record flag byte (`unk_c`) has **bit 1 set and bit 0 clear**, and the other character's `SocialEntry` is in the social list (looked up by the name in the state). The requester's `0x31` has bit 0 set, so the client does not show a popup for its own request; the target's value is presumably `0x32`. `TradeAck` (`0xda`) clears the record and raises its event; `0xe0` (the two `TradeEvent`s) is the inventory handler of the client (clear the trade-window inventories 2 and 1).
+
+**Gate G-PARTY: accept and decline are not implemented**
+- Party **accept** and **decline** are *decoded from the client's code but never seen on the wire*: C→S `0x00b8` `PartyAccept` and `0x00b9` `PartyDecline`, both `u8 local, u32 party id` (the invite popup's callbacks `PartyInvitePopup_Accept` `0x140c9ef70` and `PartyInvitePopup_Decline` `0x140c9eee0` -> `Social_SendPartyDecline` `0x142110ab0`). They are registered in `instance.toml` and `poe-proto` (`PartyAccept`, `PartyDecline`), the server **only logs** them: `party answer not implemented: needs capture G-PARTY`. The server-side effect of an accept is probably a `PartyUpdate` with the invitee's role 1 (member) for everyone, which the client turns into `FourSocialPartyAccept`; nothing else is known (the `PartyUpdate` `unk_1`, `unk_2`, `state`, what a member's `tail` means, the party list for 3+ members, the reason code for "declined" or "timed out" in `PartyEnded`).
+- Trade **accept** and **decline**: not found. The trade popup (`TradeInvite_ShowPopup` `0x1402c3fb0`) returns a bool through a promise object (`0x1402c3c30`) and the sender was not traced; a decline may well be `TradeCancel` and an accept a `TradeRequest` back to the requester (PoE1 style), but nothing is known, so the server logs those client messages as unknown (`received` + hex dump, batch skipped) if they are anything else.
+- **What the official capture must contain** (a second human answering; the user's client is the one that logs; read-only on the official server, [the capture how-to](../re/captures.md)): play with a friend in the same town and do these in this order, a few seconds apart, **once with the user as the inviter and once with the user as the invitee**:
+  1. Friend invites the user to a party; the user **accepts** (popup button). Then leave the party (the social panel or `/leave`), and kick/let the friend leave once if easy.
+  2. Friend invites the user; the user **declines**.
+  3. User invites the friend; the friend **accepts**, then leaves; user invites again and the friend **declines**.
+  4. User invites the friend and nobody answers for about two minutes (timeout; note the time).
+  5. Friend requests a trade with the user; the user **accepts** (the trade window opens: put one item in and cancel at the end, or finish the trade). Friend requests again; the user **declines**. User requests; friend accepts and declines once each. One request left unanswered until it times out.
+  6. Write down the order and the rough minute of each step, and the (fake) names in use; names and chat are anonymised before anything is committed.
+  The capture then shows: the **invitee's** `PartyUpdate`/`SocialEntry`/`PartyEnded` batches (settles the UNVERIFIED rows above), the accept/decline opcodes of both flows, the member list with 2+ joined members, and the timeout and decline reasons.
+
+**In-game check (planned, not run):** `scripts/test-mp.sh setup`, `server`, `clients` (both characters in `G1_town`). Then, one step at a time with an F8 shot (`shot <n>`) of each client and the server log (`party invite`, `trade request` lines in `runtime/server-mp.log`):
+1. Client 1 types the chat command (`keys 1 0x0d text:/invite_Mp2Ranger 0x0d`, with a space for the underscore): client 2 must show the party invitation popup with Mp1Ranger's name. Look at client 1's party panel too (it must list Mp2Ranger as invited).
+2. Client 1 cancels (`/cancel Mp2Ranger` or the party panel's cancel; the client sends `0x00b7`): client 1's panel clears and client 2's popup should go away (UNVERIFIED: if it stays, note it, the client may need a different message).
+3. Client 1 right-clicks Mp2Ranger in the town and picks "Trade" (or `/trade Mp2Ranger`): client 1 shows "waiting", client 2 must show the `TradeInviteFrom` popup. Client 1 cancels the request: both clients' trade states clear (chat notice on client 1).
+4. Client 2 presses accept/decline on either popup: nothing happens in the game; the server log must show `party answer not implemented: needs capture G-PARTY` for a party popup (the trade popup's buttons send unknown opcodes, logged as `received` + hex: copy the bytes into the G-PARTY notes, they would answer the trade accept/decline question).
+5. Close client 2 while the invitation is pending: client 1's panel clears.
+
 ## Opcode table
 | Opcode | Dir | Name (`remote.rs` unless noted) | Role |
 |---|---|---|---|
@@ -159,6 +196,7 @@ Opcodes and decoders: `remote.rs`; all frames below are in the capture's frame n
 | `0x00c4` | S→C | `SetPartyInvitationCode` | `u8 local, u32 code`, 0 at every entry |
 | `0x00b6` | C→S | `PartyInvite` | invite a character by name |
 | `0x00b7` | C→S | `PartyInviteCancel` | cancel the invitation |
+| `0x00b8` `0x00b9` | C→S | `PartyAccept`, `PartyDecline` | answer an invitation: `u8 local, u32 party id` (from the client's code, never captured: [G-PARTY](#party-and-trade-flows-wp-c3)) |
 | `0x00c6` | S→C | `SocialEntry` | social list entry (self, invitee, area changes) |
 | `0x00c7` | S→C | `SocialRemove` | social entry removed (account) |
 | `0x00c8` | S→C | `PartyUpdate` | party members and state |
@@ -181,7 +219,7 @@ What other players need to see player **A** (the instance actor implements it, s
 4. **Interact / skills.** `0x1c8` with the skill and target entity (flags `0x490` for interactions), plus the object's own updates.
 5. **Chat.** `ChatMessage` with sender `#A` to every session in the channel; whisper: `ChatMessage` with sender `@name` to both, `NoticeMessage` `0x10e` when the target is not online.
 6. **Leave.** Same frame to every remaining session: `PresenceChanged` (`01 01 01 00`), `DestroyEntity` (A and its children) and `EntitySleep` at key 0, `RemoveObject` at key `0xffffffff` (the last alone is enough for the client). Optionally a `SocialEntry` with the new area for friends.
-7. **Party and trade** (later): invite, cancel, party and trade state via the account-session messages above; accept, decline and timeout need a new capture with a second human answering.
+7. **Party and trade** (WP C3, [below](#party-and-trade-flows-wp-c3)): invite, cancel, party and trade state via the account-session messages above; accept, decline and timeout need a new capture with a second human answering (gate G-PARTY).
 8. **Frame clock.** One `0x02f4` per tick closes the frame for every session; a session starts receiving a new entity's messages after its `AddObject` in the same or an earlier frame.
 
 Open: the late-join `AddObject` (never captured; the header and blob are assumed to be the same as for entry), whether the client needs the optional blob parts for remote players, party accept/decline/timeout, the meaning of `0x0271`, `0x023d` (`01 55` sent once before a flag-word delta) and the link keys.

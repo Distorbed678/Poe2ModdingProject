@@ -24,6 +24,7 @@ pub mod live;
 mod movement;
 mod player;
 pub mod seeds;
+pub mod social;
 mod spawn;
 pub mod sync;
 pub mod terrain_store;
@@ -45,6 +46,7 @@ use poe_proto::{
         LocalPlayers, PauseRequest, PingReply, PlayerEntity, PlayerState, SetPause,
         SimulationHeader, SimulationTick, StashTab, TerrainHashes, UpdateSkillTargetEntity,
     },
+    remote::{PartyAccept, PartyDecline, PartyInvite, PartyInviteCancel, TradeCancel, TradeRequest},
 };
 use rand::RngCore;
 use tokio::net::{TcpListener, TcpStream};
@@ -353,6 +355,7 @@ impl InstanceServer {
         // Another login of the account (or disabling it) ends this session.
         let superseded = self.sessions.subscribe_superseded(ticket.account_id);
         let registration = self.live.register(ticket.account_id, &account, &name, instance, &ticket.area, session);
+        let social_in = self.live.social.register(self.social_person(&ticket, &account, instance_id, player.entity_id, session));
         self.send_registry(&ctx);
         let closed = self.instances.closed(instance_id);
         let result = self
@@ -364,9 +367,11 @@ impl InstanceServer {
                 &mut frames,
                 Stops { closed, superseded, kicked: registration.kicked },
                 registration.chat,
+                social_in,
             )
             .await;
         self.live.unregister(&name, session);
+        self.live.social.unregister(&name, session);
         // Leaving tells the other players in the instance (removal sequence) and returns the
         // cell the character stood on.
         let (x, y) = player.leave().await;
@@ -421,6 +426,7 @@ impl InstanceServer {
         frames: &mut tokio::sync::mpsc::UnboundedReceiver<actor::Frame>,
         mut stops: Stops,
         mut chat_in: tokio::sync::mpsc::UnboundedReceiver<live::ChatOut>,
+        mut social_in: tokio::sync::mpsc::UnboundedReceiver<social::SocialOut>,
     ) -> anyhow::Result<()> {
         let client_port = ctx.port;
         // Drift checker (dev): server position against the client's reports, logged only.
@@ -443,6 +449,10 @@ impl InstanceServer {
                 }
                 Some(line) = chat_in.recv() => {
                     conn.send(&self.protocol.instance.encode(&chat_line(&line))?).await?;
+                }
+                // Party and trade messages of other players' requests (docs/protocol/entities.md).
+                Some(out) = social_in.recv() => {
+                    conn.send(&out.encode(&self.protocol.instance)?).await?;
                 }
                 n = conn.read_more() => {
                     if n? == 0 {
@@ -992,6 +1002,46 @@ impl InstanceServer {
                     }
                 }
             }
+            // Party and trade requests (WP C3): invite and cancel of a party, request and cancel
+            // of a trade. Accepting and declining are not decoded (gate G-PARTY).
+            PartyInvite::NAME => {
+                let req = PartyInvite::decode(r)?;
+                info!(from = %ctx.ticket.character.name, to = %req.name, "party invite");
+                let result = self.live.social.invite(&ctx.ticket.character.name, &req.name);
+                self.social_reply(conn, result).await?;
+            }
+            PartyInviteCancel::NAME => {
+                let req = PartyInviteCancel::decode(r)?;
+                info!(from = %ctx.ticket.character.name, to = %req.name, "party invite cancel");
+                let result = self.live.social.cancel_invite(&ctx.ticket.character.name, &req.name);
+                self.social_reply(conn, result).await?;
+            }
+            TradeRequest::NAME => {
+                let req = TradeRequest::decode(r)?;
+                info!(from = %ctx.ticket.character.name, target = req.target, "trade request");
+                let result = self.live.social.trade_request(&ctx.ticket.character.name, req.target);
+                self.social_reply(conn, result).await?;
+            }
+            TradeCancel::NAME => {
+                let req = TradeCancel::decode(r)?;
+                info!(from = %ctx.ticket.character.name, trade = req.trade, "trade cancel");
+                let result = self.live.social.trade_cancel(&ctx.ticket.character.name, req.trade);
+                self.social_reply(conn, result).await?;
+            }
+            // Read from the client's popup callbacks, never captured: not answered.
+            PartyAccept::NAME | PartyDecline::NAME => {
+                let (accept, party) = if name == PartyAccept::NAME {
+                    (true, PartyAccept::decode(r)?.party)
+                } else {
+                    (false, PartyDecline::decode(r)?.party)
+                };
+                warn!(
+                    from = %ctx.ticket.character.name,
+                    party,
+                    accept,
+                    "party answer not implemented: needs capture G-PARTY (docs/protocol/entities.md#party-and-trade-flows-wp-c3)"
+                );
+            }
             // Chat channels: the requested number (or `[chat] default_channel` for "any").
             ChatJoinRequest::NAME => {
                 let req = ChatJoinRequest::decode(r)?;
@@ -1045,6 +1095,33 @@ impl InstanceServer {
             },
         }
         Ok(Handled::Continue)
+    }
+
+    /// What the party and trade code needs to know about a session's character.
+    fn social_person(&self, ticket: &Ticket, account: &str, instance: u32, entity: u32, session: u64) -> social::Person {
+        let area = WorldArea::find(&self.data, &ticket.area).ok().flatten();
+        social::Person {
+            character: ticket.character.name.clone(),
+            account: account.to_owned(),
+            level: ticket.character.level.min(255) as u8,
+            class: ticket.character.class_id.min(255) as u8,
+            area: area.as_ref().map_or(0, |a| a.hash16),
+            is_town: area.as_ref().is_some_and(|a| a.is_town),
+            league: ticket.character.league.clone(),
+            instance: Some(instance),
+            entity,
+            local_index: LOCAL_PLAYER,
+            session,
+        }
+    }
+
+    /// A request's refusal goes to the player as a server chat line.
+    async fn social_reply(&self, conn: &mut Connection, result: Result<(), String>) -> anyhow::Result<()> {
+        if let Err(text) = result {
+            let line = live::ChatOut { sender: exec::SERVER_NAME.into(), text };
+            conn.send(&self.protocol.instance.encode(&chat_line(&line))?).await?;
+        }
+        Ok(())
     }
 
     /// The character's server-side state: walking speed (class template
