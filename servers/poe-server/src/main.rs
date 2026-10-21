@@ -43,6 +43,10 @@ async fn main() -> anyhow::Result<()> {
             Err(e) => anyhow::bail!(e),
         };
     }
+    // `poe-server character <create|list> ...` manages characters offline (test setup), then exits.
+    if args.first().map(String::as_str) == Some("character") {
+        return character_command(&config, &store, &*accounts, &args[1..]);
+    }
     let tickets = Arc::new(MemoryTickets::new(std::time::Duration::from_secs(60)));
     let sessions = Arc::new(MemorySessions::default());
     let instances = Arc::new(MemoryInstances::default());
@@ -97,4 +101,77 @@ async fn main() -> anyhow::Result<()> {
     };
     tokio::try_join!(login.run(), instance.run(), web)?;
     Ok(())
+}
+
+const CHARACTER_USAGE: &str = "usage: poe-server character create <account> <name> <start_state> [area] [league]\n       poe-server character list [account]\n  start_state: a CharacterStartStates id (e.g. DexFourDefault); area: a WorldAreas id (default: the start state's hub area, else [player] start_area); league default: the first [[leagues]] entry. A character created with an explicit town/hideout area counts as having played the intro.";
+
+/// Offline character management for test setups: `character create` makes a character the way
+/// the character creation screen does (same slot limit, name rules and start-state lookup).
+fn character_command(
+    config: &Config,
+    store: &Arc<SqliteStore>,
+    accounts: &dyn poe_accounts::AccountStore,
+    args: &[String],
+) -> anyhow::Result<()> {
+    use poe_store::{NewCharacter, Store};
+    match args.first().map(String::as_str) {
+        Some("list") => {
+            let all = store.all_characters()?;
+            for c in all {
+                let owner = accounts.find_by_id(c.account_id)?.map(|a| a.username).unwrap_or_default();
+                if args.get(1).is_some_and(|a| *a != owner) {
+                    continue;
+                }
+                println!("{owner}\t{}\t{}\t{}\t{}\t{}\tlevel {}", c.id, c.name, c.start_state, c.league, c.area, c.level);
+            }
+            Ok(())
+        }
+        Some("create") if args.len() >= 4 => {
+            let (account, name, start_state) = (&args[1], &args[2], &args[3]);
+            let Some(owner) = accounts.find(account)? else {
+                anyhow::bail!("no account {account:?}");
+            };
+            let data = GameData::open(&config.game.game_dir, &config.game.schema)?;
+            let Some(start) = poe_data::views::StartState::find(&data, start_state)? else {
+                anyhow::bail!("unknown start state {start_state:?}");
+            };
+            let explicit_area = args.get(4).cloned();
+            let area = explicit_area
+                .clone()
+                .or_else(|| start.hub_area.clone())
+                .or_else(|| config.player.start_area.clone())
+                .unwrap_or_default();
+            let Some(world_area) = poe_data::views::WorldArea::find(&data, &area)? else {
+                anyhow::bail!("unknown area {area:?}");
+            };
+            let league = match args.get(5) {
+                Some(l) => l.clone(),
+                None => config.leagues.first().map(|l| l.id.clone()).unwrap_or_default(),
+            };
+            if !config.leagues.iter().any(|l| l.id == league) {
+                anyhow::bail!("unknown league {league:?}");
+            }
+            if store.characters(owner.id)?.len() >= config.accounts.max_characters as usize {
+                anyhow::bail!("character slots full");
+            }
+            let created = store.create_character(&NewCharacter {
+                account_id: owner.id,
+                name: name.clone(),
+                league,
+                class_id: start.class_id,
+                start_state: start.id.clone(),
+                level: start.level,
+                area,
+            })?;
+            let Some(c) = created else {
+                anyhow::bail!("character name {name:?} is taken");
+            };
+            if explicit_area.is_some() && (world_area.is_town || world_area.is_hideout) {
+                store.set_intro_done(c.id)?;
+            }
+            println!("created {} (id {}, {}, {}, area {}) for {account}", c.name, c.id, start.class_name, c.league, c.area);
+            Ok(())
+        }
+        _ => anyhow::bail!(CHARACTER_USAGE),
+    }
 }

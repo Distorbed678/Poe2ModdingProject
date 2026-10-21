@@ -27,6 +27,12 @@ struct Cli {
     /// Server config to read ports/hosts from.
     #[arg(long, default_value = poe_config::DEFAULT_PATH)]
     config: PathBuf,
+    /// Proton prefix for `run-client`, `login-token`, `select-gateway` and the gateway selection
+    /// of `deploy-client` (default `third_party/proton-prefix`; a second client of the local
+    /// two-client test uses `third_party/proton-prefix-2`, see scripts/test-mp.sh). Never the
+    /// Steam install's compatdata.
+    #[arg(long, global = true)]
+    prefix: Option<PathBuf>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -100,6 +106,9 @@ enum Cmd {
         /// The token as 64 hex digits (`session_token` of the login server).
         token_hex: String,
     },
+    /// Point the prefix's remembered gateway (`gateway_id` in `poe2_production_Config.ini`) at
+    /// our server's gateway entry (`deploy-client` does it for the default prefix only).
+    SelectGateway,
     /// Launch the client through Proton with a dedicated prefix (Steam must be running).
     RunClient {
         /// Proton installation to use (folder name under steamapps/common).
@@ -119,8 +128,9 @@ fn main() -> Result<()> {
     if let Cmd::Openapi { check } = cli.cmd {
         return openapi(&root, check);
     }
+    let prefix = cli.prefix.map(|p| root.join(p)).unwrap_or_else(|| proton_prefix(&root));
     if let Cmd::LoginToken { account, token_hex } = &cli.cmd {
-        return login_token(&root, account, token_hex);
+        return login_token(&prefix, account, token_hex);
     }
     let config = Config::load(&cli.config)?;
     match cli.cmd {
@@ -129,14 +139,20 @@ fn main() -> Result<()> {
             no_build,
             official,
             login_mode,
-        } => deploy_client(&root, &config, !no_build, official, login_mode.into()),
+        } => deploy_client(&root, &config, !no_build, official, login_mode.into(), &prefix),
         Cmd::DeployCore { no_build } => deploy_core(&root, &config, !no_build),
         Cmd::RevertClient => revert_client(&config),
         Cmd::DllData => export_dll_data(&config),
         Cmd::Tracker { .. } | Cmd::Openapi { .. } | Cmd::LoginToken { .. } => {
             unreachable!("handled before the config is loaded")
         }
-        Cmd::RunClient { proton } => run_client(&root, &config, &proton),
+        Cmd::SelectGateway => {
+            let name = &config.gateway.display_name;
+            let changed = poe_hook_deploy::gateway::select_gateway_in_prefix(&prefix, name)?;
+            println!("{}: gateway selection -> {name} ({})", prefix.display(), if changed { "changed" } else { "no config file yet" });
+            Ok(())
+        }
+        Cmd::RunClient { proton } => run_client(&config, &proton, &prefix),
     }
 }
 
@@ -217,6 +233,7 @@ fn deploy_client(
     build: bool,
     official: bool,
     login_mode: LoginMode,
+    prefix: &Path,
 ) -> Result<()> {
     let game = &config.game.game_dir;
     let dlls = dll_dir(root, build)?;
@@ -265,7 +282,7 @@ fn deploy_client(
     }
     if !official
         && poe_hook_deploy::gateway::select_gateway_in_prefix(
-            &proton_prefix(root),
+            prefix,
             &config.gateway.display_name,
         )?
     {
@@ -300,9 +317,9 @@ fn trusted_servers(config: &Config) -> Vec<String> {
 }
 
 /// `cargo xtask login-token <account> <hex32>`: remember-me token for the standalone client.
-fn login_token(root: &Path, account: &str, token_hex: &str) -> Result<()> {
+fn login_token(prefix: &Path, account: &str, token_hex: &str) -> Result<()> {
     let token = poe_hook_deploy::login_token::parse_token_hex(token_hex)?;
-    let report = poe_hook_deploy::write_login_token(&proton_prefix(root), account, token)?;
+    let report = poe_hook_deploy::write_login_token(prefix, account, token)?;
     println!("token -> {}", report.credentials.display());
     println!(
         "[LOGIN] username={account}, save_login=true -> {}",
@@ -401,11 +418,12 @@ fn revert_client(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn run_client(root: &Path, config: &Config, proton: &str) -> Result<()> {
+fn run_client(config: &Config, proton: &str, prefix: &Path) -> Result<()> {
+    let root = repo_root();
     ProtonLaunch {
         steam_root: poe_hook_deploy::launch::default_steam_root()?,
         proton: proton.to_owned(),
-        prefix_dir: proton_prefix(root),
+        prefix_dir: prefix.to_path_buf(),
         game_dir: config.game.game_dir.clone(),
         // Moved so nothing is uploaded; kept for our own debugging (git-ignored).
         crash_dump_dir: Some(root.join("runtime/crash-dumps")),
