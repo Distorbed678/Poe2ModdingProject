@@ -1,6 +1,6 @@
 # Server modding at the level of client modding: analysis and plan
 
-Status: analysis only (read-only WP, 2026-10-22). Nothing here is built. It answers the request: mods are classified client, server or both; a server tells the launcher which mods a player needs; the launcher downloads and switches them (with a setting); and server-side modding is brought to the level of client modding.
+Status: analysis (read-only WP, 2026-10-22); the foundation work package is built (see "Status per work package" in section 7), the rest is not. It answers the request: mods are classified client, server or both; a server tells the launcher which mods a player needs; the launcher downloads and switches them (with a setting); and server-side modding is brought to the level of client modding.
 
 Sources read: [../guides/modding.md](../guides/modding.md), [../../modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md), the client-hook crates (`poe-hook-mod-api`, `poe-hook-mods`, `poe-hook-deploy`, `examples/sample-mod`), the launcher (`src-tauri/src/mods.rs`, `Mods.svelte`, [../guides/launcher.md](../guides/launcher.md)), the server crates and [../architecture/instance-world.md](../architecture/instance-world.md).
 
@@ -370,6 +370,23 @@ Sequencing note: other work is currently editing `modules/client-hook`, `modules
 | **WP-S6 Admin surface** | S | Web API list/enable/disable/reorder, web-admin Mods page, launcher *Host a server* page installs into the hosted server; reload by restart. | `crates/poe-web-api`, `modules/web-admin`, `modules/launcher` (host page) | API tests, vitest, admin role checks. |
 | **WP-J Joint acceptance** | both | Server with the sample `both` mod advertises it; the launcher prompts, downloads, verifies, switches; the client log shows `mods: loaded` and the server log shows the server half receiving `player_login`. Unattended in-game test on the Agents desktop (no official server). | `docs/guides/setup.md`, tracker | Recorded run; a negative test with a wrong hash. |
 | **Later** | | hot reload (WASM); `enforce_client_mods` report from the hook; ed25519 signatures and a trusted-key list; mod index repository; Lua runtime; server events for NPCs, monsters and loot when those systems exist; client `[data]` overlays (asset override hook) to make table mods of kind `both` real. | | |
+
+### Status per work package (updated 2026-10-22)
+
+The decisions changed the plan: the code tier is native Rust (no WASM), and a new SDK repository exists. "WP-F" is the foundation work package that came out of that; it delivers WP-0 (spec), the parser half of WP-M1, the package tooling and the ABI/SDK half of WP-S3/S5. Later rows still read as written (S3/S4 become native-library loading instead of wasmtime).
+
+| WP | Status |
+|---|---|
+| WP-0 Spec | **Done in WP-F**: manifest v2 and package format specified in `modules/client-hook/docs/mod-manifest.md`; the server API in the SDK's `poe-mod-api` and `docs/abi-stability.md`; guide `docs/guides/modding.md`. Advertisement schema, sync states and `[mods]` config keys are still as in sections 5.6 and 5.7 (frozen when WP-M2/M3 start). |
+| WP-F Foundation (this) | **Done**: manifest v2 in the shared parser (`side`, `[client]`, `[server]` with per-platform libraries, `[[commands]]`, fail-closed v1 readers, cross-side dependencies and conflicts); client loader refuses server-only mods and ignores the server half; `deploy-mod` honours `side`; package format, `verify_package` (poe-hook-mods) and the reproducible packer (`poe-mod pack`); new public repo **Poe2ModSDK** with `poe-mod-api` (server ABI 1), `poe-mod-sdk`, `poe-mod`, three examples, docs and CI (Linux and Windows). |
+| WP-M1 Shared manifest | **Parser done** (WP-F). Open: the launcher drops its own parser and uses `poe-hook-mods`, shows a `side` badge and refuses to install a pure server mod into the client store. |
+| WP-M2 Advertisement | Open. Uses `verify_package` for the sha256/size of served zips. |
+| WP-M3 / M4 Launcher sync and UI | Open. Needs the hook release's offered ABI in `release.json`; uses `verify_package` before installing. |
+| WP-S1 Server mod store and plan | Open. `poe-hook-mods` already has the plan logic (`check_server_api`, `Plan`, `LoadSet::add_foreign`) to generalise over the side; the server needs `crates/poe-mod-host` and `mods/state.toml`. |
+| WP-S2 Data tier | Open (`push_override` wiring, `config_defaults` layering, dynamic command registry and `[[commands]]`). |
+| WP-S3 / S4 Server API and loader | **ABI and SDK done** (WP-F: `poe-mod-api`, `ServerMod`, tested against the real built example through a fake host). Open: the loader in the server (`libloading`, version/game-version checks, `register_command` into the dynamic registry, event dispatch, command-queue application on the actor task, failure isolation, replay tests byte-identical with a no-op mod). |
+| WP-S5 SDK, sample, packaging | **Done in WP-F** (SDK repo, templates, examples, packer); a deploy-to-server command comes with S1. |
+| WP-S6 Admin surface, WP-J Joint acceptance | Open. |
 
 Parallelism: WP-M1 and WP-S1 can start together after WP-0 (M1 is in the client-hook and launcher repos, S1 in this repo); WP-M2 needs only the `[mods]` config and a directory scan, not the loader; WP-M3/M4 can be built against a mock server before WP-M2 exists; WP-S2 and WP-S3 are independent of M. Effort (agent sessions, rough): WP-0 S, M1 M, M2 M, M3 L, M4 M, S1 M, S2 M, S3 L, S4 M, S5 M, S6 M, J S.
 
