@@ -7,10 +7,15 @@ is in [../re/terrain/](../re/terrain/README.md). The matrix this plan is built o
 
 ## Where things stand
 
-- The port (`modules/server/crates/poe-world`, 24 modules) reproduces the client's tile hash for 25 of 33 act 1
-  vectors: Town, `G1_1`, `G1_2`, `G1_3`, `G1_6`, `G1_7`, `G1_8`, `G1_9` (3/3 each), `G1_4` (2/3).
-  `G1_5`, `G1_11`, `G1_12` give 0 matches and `G1_13`-`G1_15` have no client trace yet.
-- Nothing outside act 1 has been compared with a client hash. A first probe (below) shows that
+- The port (`modules/server/crates/poe-world`, 24 modules) reproduces the client's tile hash for 26 of 33 act 1
+  vectors: Town, `G1_1`, `G1_2`, `G1_3`, `G1_6`, `G1_7`, `G1_8`, `G1_9` (3/3 each), `G1_4` (2/3),
+  `G1_12` (1/1, fixed 2026-10-22, WP7.4). `G1_5` and `G1_11` give 0 matches and `G1_13`-`G1_15`
+  have no client trace yet.
+- Update 2026-10-22 (WP7.2): the bulk run over the play-log vectors (1973 distinct vectors, 260 areas)
+  matches 365 of them in 59 areas, so areas outside act 1 do match (towns, `G2_13`, `Abyss_Hub`,
+  18 `Map*` areas; 107 of the 128 matched combinations only through older builds' vectors).
+  The numbers below this line are the 2026-10-21 baseline, before that run.
+- Nothing outside act 1 had been compared with a client hash. A first probe (below) shows that
   the generator already runs to the end for many other areas, but a run is not a match.
 - Doodads, the doodad hash and the collision grid are not ported at all.
 - The server can force a topology and orientation in AreaInfo (`map_force_topology`,
@@ -100,20 +105,28 @@ area_vectors evidence`; `cargo xtask tracker` renders it, so the tracker needs n
 | `forced-results.tsv` | forced-layout client traces (section 2) | `area seed topology orientation match\|fail detail`; the only source of `fail` for a known combination |
 | `probe-results.tsv` | `area_probe` example | `ok`/`error`/`panic`/`timeout` per topology at its first allowed orientation: the generator runs, no hash check |
 
-A combination is `match` when any result reproduced a client hash with it (a fail on another seed
-is kept as "also failed" evidence), `fail` when a forced trace did not, else `untested`. The
-current inputs are the 33 sweep vectors (25 matches on 18 combinations), one forced fail
-(`G1_12`, seed 1001, topology 2, orientation 7: map 169x85 against the client's 174x87) and the
-probe. Rerun the three producers and the matrix after every generator change:
+Since 2026-10-22 a combination keeps its seeds: `seeds` is matched/tested (one result per seed; a
+match from any source beats a fail on the same seed), the status is `match` when every tested seed
+matched, `partial` when some did, `fail` when none did (only forced results give a fail: a vector
+that does not match has no known combination) and `untested` without a seed; `old` counts matched
+seeds vouched for only by an older build's vector. The inputs of 2026-10-22: the 1973 play-log and
+sweep vectors (365 matches, 128 combinations), the forced result for `G1_12` (match) and the probe
+(3 seeds, all orientations).
+Rerun the three producers and the matrix after every generator change:
 
 ```
-cargo run --release -p poe-world --example area_vectors -- dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv all \
-  > dumps/0.5.5e/terrain/vectors/area-vectors-results.txt
-cargo run --release -p poe-world --example area_probe -- 1001 all 30 \
-  > dumps/0.5.5e/terrain/vectors/probe-results.tsv        # about 10 minutes
+V=dumps/0.5.5e/terrain/vectors            # in the hub, so GameFiles/ and dumps/ resolve
+cargo run --release --manifest-path modules/server/Cargo.toml -p poe-world --example area_probe -- \
+  --seeds 1001,1002,1003 --orientations all > $V/probe-results.tsv      # about 15 minutes
+cat $V/sweep-vectors.tsv $V/terrain_vectors.tsv | sort -u > runtime/all-vectors.tsv
+POE_VECTOR_BUDGET=180 cargo run --release --manifest-path modules/server/Cargo.toml -p poe-world --example area_vectors -- \
+  runtime/all-vectors.tsv all --hints $V/area-vectors-results.txt --probe $V/probe-results.tsv --runnable-only \
+  > runtime/avr.txt && mv runtime/avr.txt $V/area-vectors-results.txt   # about 7 minutes
 cargo xtask terrain-matrix && cargo xtask tracker
 python3 scripts/re/probe_classes.py --areas              # errors grouped by unported system
 ```
+(`--hints` reads the earlier results, so write to a new file first; `forced-results.tsv` comes
+from `forced_verify`, see WP7.16.)
 
 **First probe findings** (seed 1001, first allowed orientation, no hash check; the generator stops
 at the first error, so the counts are lower bounds): 701 of 1141 topologies run to the end, 440 stop
@@ -346,7 +359,7 @@ packages' files):
 | 3 | WP7.8, WP7.9, WP7.10a-d | all touch `dungeon.rs`/`dungeon_tiles.rs`: run one after the other after WP7.5 |
 | 4 | WP7.13, WP7.14, WP7.15 | WP7.15 needs the user and finishes the plan |
 
-**WP7.2 Bulk vectors and a better probe** (small, offline).
+**WP7.2 Bulk vectors and a better probe** (small, offline). **Done 2026-10-22** (see [../status/terrain.md](../status/terrain.md#verification-at-scale-2026-10-22-wp72-and-the-port-side-of-wp716)).
 - `area_vectors`: run the failing-vector forced search on threads, add `POE_VECTOR_BUDGET=<seconds>`
   per vector, a build filter (`area_vectors <tsv> <build|all|>=N> [area]`) and a `natural only` mode;
   keep the output format (the matrix parses it).
@@ -374,7 +387,7 @@ packages' files):
   `forced-results.tsv` and the matrix hold the result; fails have a stored trace or export
   and are listed in `terrain.md`.
 
-**WP7.4 G1_12 grid overlap** (small, offline). Section 3 first blocker.
+**WP7.4 G1_12 grid overlap** (small, offline). Section 3 first blocker. **Done 2026-10-22**: `RoomOverlap` read from the master; 174x87, hash 3369045138 equals the client's ([../status/terrain.md](../status/terrain.md)).
 - Acceptance: `area_trace G1_12 1001 ... 2:7` reports map size 174x87 (or the next difference with
   its first differing cell named in `terrain.md`); the 25 vector matches stay; if the tile hash
   equals 3369045138, `G1_12` is `match` in the matrix and `terrain.md`.
@@ -478,9 +491,10 @@ mode; x64dbg allowed). Added 2026-10-22, see Decisions.
   tile_hash doodad_hash width height ms detail`), exports layout, doodads and grid of a job only
   on request (the fails). `scripts/re/terrain_batch.py` plans every combination x 50 random seeds
   (seed list recorded), starts the client, resumes after a crash, skips finished jobs.
-- Port side: `forced_verify` reads `batch-results.tsv`, generates every row with the same forced
-  choice on threads and writes `forced-results.tsv`; `terrain-matrix` gets the seed count per
-  combination (`match 50/50`, `partial N/50`, `fail`).
+- Port side (done 2026-10-22, tested on a hand-made batch): `forced_verify` reads `batch-results.tsv`,
+  generates every row with the same forced choice on threads and writes `forced-results.tsv`;
+  `terrain-matrix` has the seed count per combination (`seeds` matched/tested, status `match`,
+  `partial`, `fail`, `untested`).
 - Acceptance: the batch's hashes equal the login sweep's for `G1_8 1001 1:3`, `G1_6 1001 2:7`,
   `G1_2 1001 15:0` and the 25 known vectors; act 1 x 50 seeds runs unattended; the measured time
   per layout and the projected full-run time are in `docs/status/terrain.md`.

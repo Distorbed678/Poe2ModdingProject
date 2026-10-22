@@ -251,15 +251,15 @@ name = "Client builds terrain from area and seed (any area loads)"
 status = "done"
 
 [[subsystem.item]]
-name = "Server-side generator, act 1: 25 of 33 sweep vectors match"
+name = "Server-side generator, act 1: 26 of 33 sweep vectors match"
 status = "partial"
-note = "Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3; all areas: the Terrain matrix below"
+note = "Town and G1_1, 2, 3, 6, 7, 8, 9 match 3/3, G1_12 1/1; 365 of 1973 play-log and sweep vectors match over 59 areas; all areas: the Terrain matrix below"
 link = "docs/status/terrain.md"
 
 [[subsystem.item]]
-name = "G1_12: grid overlap (map size 169x85 vs 174x87)"
-status = "partial"
-note = "all 2385 terrain draws match; layout differs"
+name = "G1_12: grid overlap (RoomOverlap read from the master .tsi)"
+status = "done"
+note = "2026-10-22: map 174x87, all 15138 cells and the tile hash equal the client's (seed 1001, topology 2, orientation 7)"
 link = "docs/status/terrain.md"
 
 [[subsystem.item]]
@@ -300,13 +300,13 @@ link = "docs/status/terrain.md"
 [[subsystem.item]]
 name = "Per-area x topology x orientation matrix (cargo xtask terrain-matrix)"
 status = "done"
-note = "2026-10-21: 442 WorldAreas rows (10 without topologies), 1141 topologies, 4508 combinations: 18 match, 1 fail, 4489 untested; generator probe: 701 of 1141 topologies run at seed 1001, 284 of 432 areas run for every topology (no hash check); table below the Terrain items"
+note = "2026-10-22: 442 WorldAreas rows (10 without topologies), 1141 topologies, 4508 combinations: 128 match (283 of 283 tested seeds, 107 combinations only from older builds' vectors), 4380 untested; generator probe: 701 of 1141 topologies run at seed 1001 (first orientation), 588 run for all orientations and seeds 1001-1003; table below the Terrain items"
 link = "docs/plans/terrain-all-areas.md"
 
 [[subsystem.item]]
-name = "Verification at scale: forced-layout sweeps and bulk vectors (WP7.2, WP7.3)"
-status = "planned"
-note = "every topology once is about 1141 client layouts at 20 s each; needs unattended client runs"
+name = "Verification at scale: bulk vectors (WP7.2, done), forced-layout sweeps (WP7.3) and the client batch (WP7.16)"
+status = "partial"
+note = "bulk vectors, multi-seed probe and forced_verify (the port side of the batch) are done; the client side needs the client: 4508 combinations x 50 seeds"
 link = "docs/plans/terrain-all-areas.md#2-verification-at-scale"
 
 [[subsystem.item]]

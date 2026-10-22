@@ -14,8 +14,18 @@ The tools (`area_trace`, `area_vectors`, `wiggle_check`, debug switches) are lis
   - loads the graph (`0x141fa9590`), runs the pruning/existence passes (`0x141fea2e0`,
     `0x141fea420`, `0x141ff03e0`, `0x141fea890`, `0x141fe8d70`), `0x141fff900`;
   - region size: graph width × (master +0x149 − master +0x14b) + master +0x14b, same for height.
-    Master +0x149 is `RoomUnitSize` (G1_3: 9), +0x14b the shared border (1). G1_3 (5×6 units):
-    41×49 tiles, 51×59 with `OuterBufferSize 5`;
+    Master +0x149 is `RoomUnitSize` (G1_3: 9), +0x14b the shared border, the `.tsi` key
+    `RoomOverlap` (default 1; G1_3 has no such key, G1_6/7/8/9, `G1_13_1` and `G3_5` say 1,
+    G1_12 (unit 29) and `G2_1` (unit 3) say 0). G1_3 (5×6 units): 41×49 tiles, 51×59 with
+    `OuterBufferSize 5`. The master parser is `0x1429285e0`: it compares the key text, parses the
+    number into a parse struct (`RoomUnitSize` -> byte +0x1c, `RoomOverlap` -> byte +0x1e, from
+    the `.tsi` key's own value, not from a room's `.arm`) whose constructor `0x14292e190` sets
+    the defaults (the dword at +0x1c is 0x10000: unit 0, overlap 1); `0x141f941d0` copies the
+    parse struct into the master (+0x149 / +0x14b). The port reads the key in `area.rs` and
+    passes it to `dungeon::layout`; before 2026-10-22 it took the first room's `.arm`
+    dimension, which was 1 for every tested area and wrong for G1_12 (map 169×85 instead of
+    174×87; with the key the `G1_12` seed 1001 layout at `2:7` equals the client's in all 15138
+    cells and the tile hash 3369045138 matches);
   - builds the dungeon context (`0x1420ad1a0`) and the **dungeon grid** (0x70 bytes):
     +0x20 generator, +0x28/+0x2c width/height in units, +0x30 room unit size, +0x34 border,
     +0x38 failed flag, +0x40 `u32` state per unit cell, +0x58 placed rooms (0x60 bytes each);

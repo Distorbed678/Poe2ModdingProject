@@ -1,6 +1,6 @@
 # Terrain generator: status and next steps
 
-Last updated 2026-10-21 (the G1_12 work stopped on 2026-10-16, results consolidated 2026-10-20, matrix added 2026-10-21). This is the only place
+Last updated 2026-10-22 (G1_12 and bulk verification tools 2026-10-22, matrix 2026-10-21, results consolidated 2026-10-20). This is the only place
 for terrain status and the resume point for the server-side terrain generator (`modules/server/crates/poe-world`).
 How the client's generator works, and the tools used below, are in
 [../re/terrain/](../re/terrain/README.md): [README](../re/terrain/README.md#tools) (tools),
@@ -8,7 +8,7 @@ How the client's generator works, and the tools used below, are in
 [shared-passes.md](../re/terrain/shared-passes.md).
 The plan for the remaining areas (scope matrix, verification at scale, blockers, work packages) is
 [../plans/terrain-all-areas.md](../plans/terrain-all-areas.md).
-The per-area coverage (every area x topology x orientation: match, fail or untested, plus the generator probe) is the generated table [terrain-matrix.tsv](terrain-matrix.tsv) (`cargo xtask terrain-matrix`, [../guides/setup.md](../guides/setup.md#run)); its totals are in the README tracker. At the time of writing only act 1 has been compared with client hashes.
+The per-area coverage (every area x topology x orientation: match, fail or untested, plus the generator probe) is the generated table [terrain-matrix.tsv](terrain-matrix.tsv) (`cargo xtask terrain-matrix`, [../guides/setup.md](../guides/setup.md#run)); its totals are in the README tracker. The play-log vectors of every area now feed it too (see "Bulk vectors" below); the planned target is 50 random seeds per combination from the client batch (WP7.16).
 
 ## Goal
 
@@ -23,7 +23,7 @@ regardless of our generator. The server's copy is what has to match.
 
 ## Current results
 
-Measured with the `area_vectors` example on `dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv` (tools: [../re/terrain/README.md](../re/terrain/README.md#tools)); 25 of 33 vectors match.
+Measured with the `area_vectors` example on `dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv` (tools: [../re/terrain/README.md](../re/terrain/README.md#tools)); 26 of 33 vectors match.
 
 | Area | Matching seeds (1001–1003) | Blocker |
 |---|---|---|
@@ -32,7 +32,7 @@ Measured with the `area_vectors` example on `dumps/0.5.5e/terrain/vectors/sweep-
 | G1_4 | 2/3 | seed 1003: overlay placement after the fill (phase 2, `overlay.rs`) |
 | G1_5 | 0/3 | edge routing: "could not tilise edge 14" |
 | G1_11 | 0/3 | height-change (cliff) edge types: chirality of `woodscliff_height.et` (`0x141d047b0`) |
-| G1_12 | 0/1 | in progress, see below |
+| G1_12 | 1/1 | — (forced topology 2, orientation 7; fixed 2026-10-22: `RoomOverlap` from the master, see below) |
 | G1_13–15 | — | no client traces recorded yet |
 
 G1_6 and G1_8 match only with forced topologies (e.g. G1_8 `1:3` / `11:3` / `4:1`, G1_6 `2:7` /
@@ -69,26 +69,78 @@ generator trace; the examples are listed in [../re/terrain/README.md](../re/terr
 - Fill-room, overlay and lattice work for these areas is in
   [../re/terrain/shared-passes.md](../re/terrain/shared-passes.md).
 
-## Where I stopped: G1_12 seed 1001
+## G1_12 seed 1001 (done 2026-10-22)
 
 - Forced topology `2:7`, `CanopyE_S.dgr`. The main graph is two `graph` nodes (3×3 units of 29
   tiles each): `_CanopyE_S.dgr` (`canopy_master.tsi`) and `Trees_Subscene.dgr`
   (`subscene_master.tsi`).
-- All 2385 terrain draws match the client.
-- Our map is 169×85; the client's is 174×87. G1_12's `master.tsi` has `RoomOverlap 0` (unit
-  29), but the grid overlap (`Grid::overlap`, master +0x14b) looks like it defaults to 1.
-  **Next step:** find where `dungeon::layout` reads the overlap, fix it, then compare the layout
-  (`POE_LAYOUT_DIFFS=50`).
-- New and only checked for "no regression" so far: the subgraph region now sits inside its
-  master's `OuterBufferSize` margins (10 units × 6 + 1 = 61 tiles + 13 per side = 87), and each
-  subgraph's outer fill and margin strips run on its block (`outer_buffer_window`,
-  `TileMap::window`).
+- The map was 169×85 against the client's 174×87 because the grid overlap came from the first
+  room's `.arm` dimension (1) instead of the master's `RoomOverlap` (0 for G1_12, unit 29).
+  Master +0x14b is that key (default 1; parser `0x1429285e0`, defaults in `0x14292e190`, see
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md)). `area.rs` now reads `RoomOverlap` from
+  the `.tsi` and passes it to `dungeon::layout`.
+- Result: `area_trace G1_12 1001 dumps/0.5.5e/terrain/traces/act1_traces/G1_12_1001 2:7` gives
+  174×87, all 15138 cells equal the client's layout, tile hash 3369045138 (the client's), 2385
+  draws in step; `area_vectors` finds it as `match (forced 2:7)`. The 25 earlier vector matches
+  are unchanged (26 of 33 now), and the probe is unchanged (701 of 1141 topologies at seed 1001).
+- The subgraph region sits inside its master's `OuterBufferSize` margins (10 units × 6 + 1 = 61
+  tiles + 13 per side = 87), and each subgraph's outer fill and margin strips run on its block
+  (`outer_buffer_window`, `TileMap::window`); this was already in place and is now confirmed by
+  the equal layout.
 
-Compare with the `area_trace` example: `G1_12 1001 dumps/0.5.5e/terrain/traces/act1_traces/G1_12_1001 2:7`.
+## Verification at scale (2026-10-22, WP7.2 and the port side of WP7.16)
+
+**Tools** (all in `modules/server/crates/poe-world/examples/`, usage in each header and in
+[../re/terrain/README.md](../re/terrain/README.md#tools)):
+- `area_vectors` runs on threads (`--threads N`), takes a build filter (`all`, `N`, `>=N`),
+  `--natural`, `POE_VECTOR_BUDGET=<seconds>` per (area, seed) (`skipped (budget)` when out),
+  and orders the forced search with `--hints <earlier results>` and `--probe <probe results>
+  [--runnable-only]`. Vectors with the same area and seed share one search. Every result line now
+  ends with `build=N` so the matrix can tell matches of older client builds from current ones.
+- `area_probe` runs on threads with `--seeds a,b,c`, `--orientations first|all|N`; one TSV line
+  per attempt, in job order, with the seed as the last column.
+- `forced_verify <batch-results.tsv> [--out forced-results.tsv]` replays the client batch of
+  WP7.16 (columns `area seed topology orientation status tile_hash doodad_hash width height ms
+  detail`) with the same forced choice and writes `forced-results.tsv`. Tested on a hand-made
+  batch from known vectors (matches, a wrong hash, a wrong map size, a generator error, a client
+  status that is not `ok`, a duplicate row); the client's real batch file does not exist yet.
+  The doodad hash is not compared until the port has a doodad pass: matches say `doodads not
+  ported`.
+- Speed: the bundle reader behind `GameFiles` decompresses under one lock, which made parallel
+  generation no faster than serial (an attempt took 14 s on 16 threads). `generate::CachedFiles`
+  caches the files a run reads (`area::generate_with_files`); the tools share one, after which
+  an attempt takes tens of milliseconds. The probe of 13,524 attempts takes 15 minutes
+  (the first 4 minutes fill the cache), the bulk vector run 7 minutes.
+- The matrix (`cargo xtask terrain-matrix`) now keeps the seeds per combination: `seeds`
+  (matched/tested), status `match` (all tested seeds matched), `partial`, `fail` (forced results
+  only: a vector that does not match gives no combination), `untested`; `old` counts matched
+  seeds that only an older build's vector vouches for. The probe cell covers every probed seed
+  and orientation (`ok 6/6`, `error (4/6 ok): ...`).
+
+**Bulk vectors.** `terrain_vectors.tsv` (play-log) plus `sweep-vectors.tsv`, 1973 distinct
+vectors of 260 areas, `area_vectors ... all --hints ... --probe probe-results.tsv
+--runnable-only` (budget 180 s, no vector skipped): 365 match (261 natural, 104 forced) in 59
+areas, 983 differ, 625 error. Beyond act 1: the town hubs (`G2_town`, `G4_town`, `P1_Town`,
+`P2_Town`, `P3_Town`, `G_Endgame_Town`, ...), `G2_13` (29 vectors), `Abyss_Hub` (55), `G3_2_2`,
+`P2_5`, and one or more vectors of 18 `Map*` areas. 107 of the 128 matched combinations are
+vouched for only by older builds' vectors (the hash is of the generated output, so the match is
+valid, but a different build might behave differently on mismatches). `--runnable-only` skips
+topologies whose probe failed at every attempt, so a vector that matches only through a topology
+that failed at the probed seeds is not found; rerun without it for a specific area.
+
+**Probe** (seeds 1001, 1002, 1003, every allowed orientation, 4508 combinations = 13,524
+attempts, 30 s timeout): 8147 ok, 5377 error, no panic or timeout. 745 of 1141 topologies run in
+at least one attempt, 588 in all of theirs (254 of 432 areas run in all). The comparable run
+(seed 1001, first orientation) gives the same 701 of 1141 as before and no topology went from
+`ok` to `error`.
+
+**Matrix (2026-10-22):** 442 areas (10 without topologies), 1141 topologies, 4508 combinations:
+128 match (283 of 283 tested seeds), 0 partial, 0 fail, 4380 untested (act 1: 76, act 2: 10,
+act 3: 3, act 4: 3, act 6: 5, act 10: 31).
 
 ## To do, in order
 
-1. Finish G1_12.
+1. G1_12 is done (2026-10-22).
 2. G1_4 seed 1003: overlay phase 2.
 3. G1_5: edge routing.
 4. G1_11: height-change edges.
