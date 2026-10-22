@@ -1534,7 +1534,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "poe-config"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "thiserror",
@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "poe-data"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bytes",
  "poe_data_tools",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "poe-world"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "poe-data",
  "poe_data_tools",
