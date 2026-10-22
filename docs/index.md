@@ -15,7 +15,8 @@ Contributing, security reports and the legal notice: [../CONTRIBUTING.md](../CON
 | [guides/releasing-server.md](guides/releasing-server.md) | Releasing the server: tagging `server-v*`, what the release workflow builds and packages, the secrets it needs, checking a package locally |
 | [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
 | [guides/releasing-hook.md](guides/releasing-hook.md) | Releasing the client hook (Poe2ClientHook): tagging `hook-v*`, what the workflow builds, the package and its `release.json`, what the launcher checks before it uses a download |
-| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, profiles, Steam depot install, Play, hosting a server from the launcher, Open web admin, the plain-http warning, mods, releasing (tags, signing secrets and key) |
+| [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, the Home/Servers/Host/Library/Settings layout, Home news and the server's message of the day, the public server browser, profiles and accounts, Steam depot install (pause/resume, speed, disk space), logs and crash dumps, Play, hosting a server from the launcher (restart supervision, database backups), Open web admin, the plain-http warning, mods, releasing (tags, signing secrets and key) |
+| [server-list-template/README.md](server-list-template/README.md) | Initial content of the public server list repository `Poe2ServerList` (how a host lists a server by pull request, the `servers.json` schema, a validation script): create the repository from this folder |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
 
 ## Architecture

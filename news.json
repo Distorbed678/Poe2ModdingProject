@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "welcome",
+      "date": "2026-10-22",
+      "title": "Welcome to the Poe2 launcher",
+      "body": "This is **Home**: your server, the setup checklist and the news.\n\n- **Servers > Browse** lists public servers; add one with a click.\n- **Host** runs a server on this computer, with backups of its database.\n- **Library** has the game install, the client hook, mods and the logs.\n\nThe news come from this file in the project repository and from the release notes of the launcher, the server and the client hook.",
+      "link": "https://github.com/Distorbed678/Poe2ModdingProject"
+    }
+  ]
+}

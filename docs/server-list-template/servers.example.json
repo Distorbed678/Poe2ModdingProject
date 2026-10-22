@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "servers": [
+    {
+      "id": "example-realm",
+      "name": "Example Realm",
+      "address": "https://play.example.org",
+      "description": "A relaxed co-op realm with weekly events. Beginners welcome.",
+      "region": "EU",
+      "game_version": "0.5.5e",
+      "tags": ["pve", "friendly"],
+      "contact": "https://discord.gg/example",
+      "mods": [
+        { "id": "core-lib", "version": "^1.2", "url": "https://example.org/mods/core-lib.zip" }
+      ]
+    }
+  ]
+}
