@@ -1,13 +1,15 @@
 # Launcher
 
-The player launcher: one small desktop program (Tauri 2 with a Svelte 5 UI) that does what `cargo xtask deploy-client` and `run-client` do for the developer ([setup.md](setup.md)), without this repository. Repo [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) (private), the submodule `modules/launcher`. Its own README covers development; this page covers using it and how it fits the server.
+The player launcher: one small desktop program (Tauri 2 with a Svelte 5 UI) that does what `cargo xtask deploy-client` and `run-client` do for the developer ([setup.md](setup.md)), without this repository. Repo [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) (public), the submodule `modules/launcher`. Its own README covers development; this page covers using it and how it fits the server.
 
-What it does:
+What it does (the screens are a sidebar with the pages, a title bar with the **game version dropdown**, and a Play bar at the bottom):
+- **Game version dropdown (top of the window):** *Official (read-only)* at the top, then every private-server version this launcher supports, newest first. The choice drives the install folder and depots, file verification, the hook deploy, Play, the server-release filter of Host a server and the compatibility of the servers in the list ([below](#game-versions-and-the-official-mode)).
 - **Servers:** profiles (a name and the cluster's web API address); shows what `GET /server` reports. Admins get an **Open web admin** button ([below](#open-web-admin)); plain `http://` to another machine needs your confirmation first ([below](#plain-http-warning)).
 - **Account:** log in or register through the web API ([../architecture/web-api.md](../architecture/web-api.md)); the token sits in the OS keyring.
 - **Host a server:** downloads the matching `poe-server` release (or takes a local package), sets it up, starts and stops it, streams its log, and adds it to Servers ([below](#host-a-server)).
-- **Install:** downloads client 0.5.5e from Steam with *your own* Steam login into the launcher's own folder, then verifies it.
+- **Install:** downloads the selected client (a pinned private version such as 0.5.5e, or the current official build) from Steam with *your own* Steam login into the launcher's own folder, then verifies it.
 - **Play:** deploys the hook ([../architecture/client-dll.md](../architecture/client-dll.md)), signs the game in without typing a password, starts it (Proton on Linux, native on Windows).
+- **Settings:** per-version install folder, hook DLL folder, Proton, **Log out of Steam**, theme, window frame, *Minimize the launcher while the game is running*, the desktop entry (Linux AppImage) and launcher updates. **About:** version, supported game versions, disclaimer.
 - **Mods:** installs, enables and orders mods by the `mod.toml` spec ([../../modules/client-hook/docs/mod-manifest.md](../../modules/client-hook/docs/mod-manifest.md)). The hook's mod loader loads the enabled ones (never in official mode); see [Mods](#mods).
 
 ## Download, install and update
@@ -40,14 +42,44 @@ Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; D
 3. **Install:** your Steam account name and password, optionally *Remember the Steam login*. A Steam Guard code is typed into the launcher when Steam asks. The download is about 150 GB.
 4. **Play** (footer, for the selected server) once the game is installed and you are logged in.
 
+## Game versions and the official mode
+
+The version dropdown in the title bar lists every target the launcher can work with. The list comes from the embedded `versions/<version>.toml` files (one per supported client build, copies of the main repo's files, [new-game-version.md](new-game-version.md#the-launcher-and-the-version-dropdown)), so a second supported build appears as a second entry without any UI change. The choice is saved in the launcher's `settings.json` (`game_version`; empty or a version this build no longer knows means the newest) and survives restarts. It cannot be changed while the game is being downloaded, starting or running, or while the hosted server runs.
+
+What follows the selection:
+
+| Part | Private version `<v>` | Official (read-only) |
+|---|---|---|
+| Install folder | `<data>/game/<v>` or the folder set for that version in Settings (each version has its own) | `<data>/game/official`, separate from every private version |
+| Download | the depots with the pinned manifests of `versions/<v>.toml` | the same depots **without manifests**: the current official build |
+| Verify | file counts, key file sizes and the exe checksum of that version file | the main files exist and the size floors (the build is not pinned) |
+| Play | the selected server profile, auto-login token, `mode = "private"` | no server, no token, `mode = "official"` ([below](#official-read-only)) |
+| Servers, Account, Host a server, Mods | available; a server that reports another client version is marked *incompatible* | hidden (these are for private versions) |
+| Host a server | downloads the `poe-server` package whose name carries this game version | not possible |
+
+**Server compatibility.** *Check* (and a quiet check at start) reads `GET /server`. A server whose client version equals the selection is *compatible*. A server that reports another version this launcher supports shows *needs client X* with a one-click *Switch to X*, and Play is blocked for it. A server reporting a version the launcher does not know is marked *incompatible* with a warning; Play is not blocked then (the check can be wrong).
+
+### Official (read-only)
+
+For observing a session on the official servers, exactly what `cargo xtask deploy-client --official` does for a developer ([official-mode.md](official-mode.md)); read that page's risk section first. Selecting it and pressing Play:
+
+1. asks once for the warning to be accepted (the risk text of official-mode.md and an "I understand" box; saved as `official_ack`; the backend refuses to start without it too);
+2. deploys the hook with `mode = "official"`, `login_mode = "steam"`, an **empty** `trusted_servers`, the original `gateway_list.txt` put back from `gateway_list.txt.orig`, no position sync port and no output folder. The launcher never writes a trusted server or a private gateway for this mode, and the hook's read-only latch is not touched;
+3. starts the game without the standalone-login argument, with its own Steam login (Linux: through Proton in a **separate** prefix `<data>/proton-prefix-official`, so no private login or realm choice leaks into it; Steam must be running). The launcher sends nothing to any server and logs in nowhere.
+
+If the game was updated and the hook's signature table does not match the new build, the hook switches its features off by itself (the log line says `NOT verified`): expected, the game just runs without the observer. The unit tests cover the deploy files (official versus private) with a temporary game folder; it has not been played against the official servers from the launcher.
+
+The Steam download for the official build is the same *Install* page; *Download again* updates to whatever Steam currently serves, *Repair* re-checks files.
+
 ### Install in detail
 
-The version file is `versions/<version>.toml` of the main repo (the single definition of a supported build; the launcher embeds a byte-identical copy that `cargo xtask versions` keeps, see [new-game-version.md](new-game-version.md)). For 0.5.5e: app 2694490, depot 2694491 manifest 7366357142270402355 (content), depot 2694492 manifest 246779027001700092 (Windows exe), in that order into one directory (exe over content).
+The version file (the selected version's) is `versions/<version>.toml` of the main repo (the single definition of a supported build; the launcher embeds a byte-identical copy that `cargo xtask versions` keeps, see [new-game-version.md](new-game-version.md)). For 0.5.5e: app 2694490, depot 2694491 manifest 7366357142270402355 (content), depot 2694492 manifest 246779027001700092 (Windows exe), in that order into one directory (exe over content).
 
 - **DepotDownloader 3.4.0**, the self-contained release (no .NET), is fetched from its GitHub release into the launcher's data directory, pinned by version and SHA-256 (`versions/depotdownloader.toml`); a mismatch deletes the download.
 - It runs **once for both depots** (`-app 2694490 -depot 2694491 -manifest ... -depot 2694492 -manifest ... -username U -dir DIR`), so the Steam login and Steam Guard code are asked once. `-no-mobile` is added by default so a typed code is requested instead of the mobile-app confirmation (Settings). `-remember-password` is added only if you tick the box (then DepotDownloader keeps its own login token; the launcher still never stores the password).
+- **Remembered Steam login and *Log out of Steam* (Settings).** DepotDownloader 3.4.0 keeps the token in `account.config`, in .NET's isolated storage (`<local data>/IsolatedStorage/<id>/<id>/Url.<hash>/AssemFiles/account.config`). On Linux the launcher starts it with `XDG_DATA_HOME=<data>/steam-login`, so that file lives in the launcher's own data folder; *Log out of Steam* (with a confirmation) deletes it and clears the saved account name and the *remember* switch. The Settings card says *Logged in as X* or *Not logged in*. On Windows .NET asks the system for the folder (no environment override), so the file is under `%LOCALAPPDATA%\IsolatedStorage` and only files named `account.config` at the isolated-storage depth are removed (that also logs out any other DepotDownloader the same Windows user runs). Never the Steam client or its files. A login remembered by an older launcher version sits in the shared `~/.local/share/IsolatedStorage` and is not used any more (type the password once; delete that old file by hand if you want).
 - **The Steam password** is typed in the launcher, written once to the downloader's standard input when it asks for it, then wiped from memory. It is not on a command line, not logged, not saved. Steam Guard prompts are detected in the output (they have no line end) and shown as a code box.
-- **Never the Steam install.** The launcher does not read or write `~/.local/share/Steam/steamapps/common/Path of Exile 2` or `compatdata/2694490`; an install directory inside any Steam library is refused. The default is `<data>/poe2-launcher/game/0.5.5e` (`~/.local/share/poe2-launcher/...`).
+- **Never the Steam install.** The launcher does not read or write `~/.local/share/Steam/steamapps/common/Path of Exile 2` or `compatdata/2694490`; an install directory inside any Steam library is refused. The default is `<data>/poe2-launcher/game/<version>` (`~/.local/share/poe2-launcher/...`), one folder per game version.
 - **Verification** afterwards (and on *Verify files*): file count and total size floors, key files with exact sizes, SHA-256 of `PathOfExileSteam.exe`. **The reference values were measured on the `GameFiles/` copy in this repository, not on a launcher download**, so they are unconfirmed: the executable checksum is a warning (not a failure) until `exe_sha256_enforce = true` is set after the first real install matched. *Repair* re-runs the download with `-validate`.
 
 ### Play in detail
@@ -55,8 +87,15 @@ The version file is `versions/<version>.toml` of the main repo (the single defin
 1. `GET /server` gives `login_host`, `login_port` (the public one), `instance_port` and `gateway_region`. If the server still advertises loopback while the launcher reached it elsewhere, the address the launcher used is taken.
 2. `POST /api/v1/game-token` exchanges the launcher token for a one-off `game_remember` token. The launcher token itself is **not** written for the game: the game's login retires a token when it uses it (rolling tokens, [../architecture/accounts.md](../architecture/accounts.md#tokens)), which would log the launcher out.
 3. `write_login_token` puts the 32-byte token and `[LOGIN] username=<account>, save_login=true` where the client reads its Remember Me ([../re/standalone-login.md](../re/standalone-login.md), section 4). The client logs in on its own when it starts.
-4. `deploy` writes `gateway_list.txt` (one entry for this server), installs `version.dll` and `poe_hook_core.dll`, sets `poe-hook.toml` (`mode = "private"`, `login_mode = "standalone"`, `trusted_servers` = the server's login and instance `host:port`) and writes `steam_appid.txt`. Always private mode: official servers are never touched.
+4. `deploy` writes `gateway_list.txt` (one entry for this server), installs `version.dll` and `poe_hook_core.dll`, sets `poe-hook.toml` (`mode = "private"`, `login_mode = "standalone"`, `trusted_servers` = the server's login and instance `host:port`) and writes `steam_appid.txt`. Private mode for a private version; the official mode has its own deploy ([above](#official-read-only)).
 5. Start: Linux `proton run PathOfExileSteam.exe --success-event 0` with the launcher's own prefix (`<data>/proton-prefix`, created with `proton run wineboot -u` on first use; crash dumps are set aside as in `run-client`); Windows runs the exe directly. Output goes to `<data>/logs/game-<time>.log`.
+6. **Minimize while playing** (Settings, off by default): when on, the launcher window minimizes when the game process starts and is shown and focused again when it ends (only if the launcher was the one that minimized it).
+
+## Window, icon and desktop entry
+
+- **Frame.** The window has no system decorations: the launcher draws its own title bar (icon, name, the version dropdown, update badge, minimize / maximize-restore / close; drag the bar to move, double-click to maximize) and eight resize handles on the edges. It is square with a 1 px border: a transparent window with rounded corners was tried and did not paint reliably under WebKitGTK on Wayland (parts of the page stayed empty), so it is not used. Settings, *Use the launcher's own window frame*, switches to the system title bar and borders if the custom frame misbehaves on your desktop.
+- **Icon.** An original mark (a glowing doorway under an arch with a keystone rune; source `modules/launcher/assets/icon.svg`, generated sizes in `src-tauri/icons/` with `npx tauri icon assets/icon.svg`). Windows uses `icon.ico`. It contains nothing of Path of Exile or Grinding Gear Games.
+- **Linux/Wayland: the icon comes from a `.desktop` file.** A Wayland compositor shows the icon of the `.desktop` file that matches the window's `app_id`, and the launcher's `app_id` is its identifier `org.poe2modding.launcher` (the program name is set to it before GTK starts). The `.deb`/`.rpm` packages install a matching entry. The **AppImage** has none on your system (its own `.desktop` file, with `StartupWMClass=org.poe2modding.launcher` and the icons, is inside the image for AppImageLauncher and similar tools). Either use such a tool, or open **Settings, Desktop entry, Install desktop entry**: it writes `~/.local/share/applications/org.poe2modding.launcher.desktop` (`Exec` = the AppImage file, found through `$APPIMAGE`, or the running binary) and the icon to `~/.local/share/icons/hicolor/{32x32,128x128,256x256,512x512}/apps/` and `scalable/apps/`; *Remove* deletes those files again. If you move the AppImage the card says the entry points elsewhere: press *Update desktop entry*.
 
 ## Host a server
 
@@ -160,6 +199,7 @@ It installs the package (checksum verified), sets it up in a temp launcher folde
 
 ## Not done
 
+- The custom window frame, the version dropdown, the official mode, the Steam log-out, the minimize option and the desktop entry have been built and unit-tested; the frame and the app id were checked in a real KWin Wayland session (window class `org.poe2modding.launcher`, no server-side decoration), but resizing by dragging, the minimize/restore around a running game and the official Play have not been exercised by hand, and none of it has run on Windows.
 - Bundling the hook DLLs; downloading them from a release.
 - Host a server: the real GitHub download has not run against a published `server-v*` release (none exists yet); the Windows paths (zip, `taskkill`, no console window) compile but have not run; the in-app page has not been clicked through on a desktop, its logic is covered by unit tests and the backend by the tests above.
 - The Windows launch path is written but untested (no Windows machine); `cargo check` runs in CI.

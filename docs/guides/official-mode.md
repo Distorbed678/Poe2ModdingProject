@@ -25,7 +25,7 @@ In official mode the DLL sets its **read-only latch** at start and the latch nev
 - **Your account is what is at risk**: a warning, a temporary or a permanent ban are possible. Do not use official mode on an account you care about, on an account with purchases, or on one you cannot afford to lose. A throw-away account is the safer choice, although the terms apply to it too.
 - **Captures contain your play.** They hold what the server sent you: your character's data, inventory, chat and the names of other players near you. The login messages are redacted, nothing else is. Do not post a capture or log anywhere without reading it, and never attach one to a public issue.
 - **The hook is built for one client build.** With an unverified build (the game was patched and the signature tables do not match) only the pure observers start. Use the build the repository names (`versions/0.5.5e.toml`) and update your `GameFiles/` copy first when the game is patched.
-- The **launcher never offers this mode.** It is only available by hand, with `cargo xtask`.
+- The launcher offers this mode only as the explicit **Official (read-only)** entry of its game version dropdown, after the warning above is accepted ([From the launcher](#from-the-launcher)); it never uses it by itself.
 
 If any of that is not acceptable to you, stop here: playing the game on the official servers through Steam's own, untouched install is unaffected by this project.
 
@@ -56,6 +56,16 @@ If any of that is not acceptable to you, stop here: playing the game on the offi
    cargo xtask revert-client      # or: take the hook out of the copy altogether
    ```
    `deploy-client` without `--official` points the copy at the private server again (and resets the remembered realm for it); `revert-client` restores the original files and removes the hook ([client.md](client.md#going-back-to-the-official-game)).
+
+## From the launcher
+
+The [launcher](launcher.md#official-read-only) has the same mode for players who are not developers: choose **Official (read-only)** at the top of the game version dropdown. Then:
+
+- **Install** downloads the *current* official build from Steam with your own Steam login (DepotDownloader without pinned manifests) into its own folder `<data>/game/official`, separate from every private-server version; *Download again* updates it, *Repair* re-checks it. The official servers need the latest client, so the build is not the pinned one of `versions/<version>.toml`.
+- **Play** asks once for the risk section above to be accepted, then deploys exactly what `deploy-client --official` deploys (`mode = "official"`, `login_mode = "steam"`, empty `trusted_servers`, the original `gateway_list.txt`, no position sync, no output folder) and starts the game as shipped: the Steam login happens in the game, the launcher sends no token and logs in nowhere. Linux uses a separate Proton prefix (`<data>/proton-prefix-official`); Steam must be running.
+- **Servers, Account, Host a server and Mods are hidden** while it is selected: they are for private versions.
+- **A newer official build than the hook knows:** the hook's signature table is for one client build. If the game was patched, the hook switches its features off by itself (`NOT verified` in `poe-hook.log`). That is expected; the game runs, there is just no observer until a hook release for the new build.
+- The read-only latch is not touched by any of this, and the launcher never writes a trusted server or a private gateway for this mode. It has not been played against the official servers from the launcher; the deploy files are covered by unit tests (official versus private, temporary game folder).
 
 ## Settings that matter
 

@@ -7,7 +7,7 @@ Progress and the current task: the tracker in [README.md](README.md).
 ## Hard rules
 - **Never touch the Steam install** (`~/.local/share/Steam/steamapps/common/Path of Exile 2`) or its Proton prefix (`compatdata/2694490`). Use only `GameFiles/`, the provided copy.
 - `GameFiles/` changes only through `cargo xtask deploy-client` / `revert-client` / `deploy-core` (they back files up first). Never hand-edit it.
-- **Official servers: read-only.** The DLL may observe and log official sessions the user plays (GameFiles copy, `deploy-client --official`); it never sends, alters or injects anything there (read-only latch). Claude never logs in to official servers; captures are the user's.
+- **Official servers: read-only.** The DLL may observe and log official sessions the user plays (GameFiles copy with `deploy-client --official`, or the launcher's "Official (read-only)" version entry, which deploys the same config); it never sends, alters or injects anything there (read-only latch). Claude never logs in to official servers; captures are the user's.
 - The user's live `Client.txt` in the Steam install is a read-only reference: never modify it, never commit its contents (copy excerpts into `runtime/`).
 - No hardcoding: opcodes in `modules/protocol/opcodes/<version>/*.toml`; ports, leagues, start areas in `config/server.toml`; classes, areas, items from game data (`poe-data`); subsystems behind traits.
 - External tools go in `third_party/` (`third_party/fetch-tools.sh`); generated/datamined data in git-ignored `dumps/<version>/`; local runtime files in `runtime/`.

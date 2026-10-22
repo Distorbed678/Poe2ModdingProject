@@ -67,6 +67,12 @@ If every signature already resolves, the shortcut is to copy the old table, chan
 4. Set `version = "<new>"` in `config/server.toml` (and the example) and move `dumps/<old>` aside if the generated data of the old build must not mix with the new one (`known_seeds`, `layout_dir`, `sweep_results` follow `{version}`).
 5. Not configuration, and left alone on purpose: `0.5.5e` in the history of docs, in comments with Ghidra addresses, `docs/re/addresses-<version>.md`, the captures' build in `servers/instance-server/src/replay_tests.rs` (`CAPTURE_VERSION`: the tests replay the official captures of that build), the launcher's test fixtures and `poe_proto::opcodes::v0_5_5e` (kept for the DLL; it selects by name today).
 
+### The launcher and the version dropdown
+
+The launcher's `build.rs` embeds **every** `modules/launcher/versions/<version>.toml` that has a `version` and a `build_revision` (oldest revision first; `depotdownloader.toml` is skipped), so a second supported build needs no launcher code: `cargo xtask versions` copies the new file, a rebuild embeds it, and the version dropdown in the title bar lists it (newest first, below *Official (read-only)*). The newest revision is the default for a user who never picked one. Everything version-dependent in the launcher reads the selected file: install folder (`<data>/game/<version>`, or the per-version folder in Settings), depots and manifests, verification, the hook deploy, Play, the mods' compatibility check, the server-package filter of Host a server (`poe-server-v<ver>-game-<version>-...`), and the "needs client X" marks on the server list. The old single `install_dir` setting is moved to the oldest supported version when the settings file is read.
+
+To check it: add the file, `cargo test` in `modules/launcher/src-tauri` (the `every_embedded_version_is_selectable` test walks all versions), `npm run dev` and open `http://localhost:1420/?mock&versions` for a browser preview with a second version. "Official (read-only)" is not a version file: it reuses the newest file's depots **without** manifests (the current official build), see [launcher.md](launcher.md#game-versions-and-the-official-mode).
+
 ## 5. Tests
 
 ```
