@@ -291,7 +291,7 @@ impl InstanceServer {
     }
 
     /// Appends an admin command to `[commands] audit_log`.
-    fn audit(&self, account: &str, command: &str, result: &str) {
+    pub(crate) fn audit(&self, account: &str, command: &str, result: &str) {
         use std::io::Write;
         let path = &self.config.commands.audit_log;
         if path.as_os_str().is_empty() {

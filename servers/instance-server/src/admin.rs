@@ -130,4 +130,10 @@ impl AdminControl for InstanceServer {
         };
         outcome(self.finish(&Self::web_label(actor), &parsed, &line, result))
     }
+
+    fn record(&self, actor: &str, action: &str, result: &str) {
+        let label = Self::web_label(actor);
+        tracing::info!(account = %label, command = %action, ok = true, result = %result, "command");
+        self.audit(&label, action, result);
+    }
 }

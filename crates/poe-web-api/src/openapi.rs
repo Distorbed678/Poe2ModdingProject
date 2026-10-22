@@ -7,7 +7,7 @@ use utoipa::{
     openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
 };
 
-use crate::{admin, dto, error, logs, public};
+use crate::{admin, dto, error, lifecycle, logs, public};
 
 struct BearerAuth;
 
@@ -38,6 +38,7 @@ impl Modify for BearerAuth {
         public::game_token, public::me, public::web_token, public::redeem_web_token,
         admin::sessions, admin::instances, admin::create_instance, admin::close_instance,
         admin::kick, admin::mute, admin::unmute, admin::transfer, admin::announce,
+        admin::server_stop, admin::server_restart, admin::server_cancel, admin::server_shutdown,
         admin::accounts, admin::disable_account, admin::enable_account, admin::set_role,
         admin::characters, admin::character, admin::logs_ws_ticket, admin::logs_ws,
     ),
@@ -46,6 +47,7 @@ impl Modify for BearerAuth {
         dto::LoginResponse, dto::WsTicketResponse, dto::WebTokenResponse, dto::WebTokenRedeemRequest, dto::PasswordRequest, dto::OnlinePlayerInfo, dto::InstanceView,
         dto::NewInstanceRequest, dto::CreatedInstance, dto::TransferRequest, dto::MuteRequest,
         dto::AnnounceRequest, dto::RoleRequest, dto::CommandResult, dto::LocationInfo,
+        dto::ShutdownRequest, dto::ShutdownStatus, lifecycle::PendingShutdown, lifecycle::ShutdownKind,
         dto::CharacterInfo, logs::LogEvent, logs::LogFilter, logs::LogLevel,
     )),
     modifiers(&BearerAuth),

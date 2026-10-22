@@ -76,6 +76,9 @@ pub struct Config {
     /// HTTP API and web admin (`crates/poe-web-api`).
     #[serde(default)]
     pub web: WebConfig,
+    /// Process lifecycle: what an admin's "restart" does (`POST /api/v1/admin/server/restart`).
+    #[serde(default)]
+    pub server: ServerConfig,
     /// Password attempt limits of the login server and the web API.
     #[serde(default)]
     pub security: SecurityConfig,
@@ -147,6 +150,31 @@ fn default_failure_window() -> u64 {
 
 fn default_lockout() -> u64 {
     300
+}
+
+/// Exit code of `poe-server` after an admin's restart request when `[server] restart_mode =
+/// "exit"` (`EX_TEMPFAIL` from `sysexits.h`): a supervisor (systemd, the launcher's "Host a
+/// server") starts the server again on this code. A stop request exits with 0.
+pub const RESTART_EXIT_CODE: i32 = 75;
+
+/// How a restart request brings the server back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RestartMode {
+    /// The process starts itself again after the graceful shutdown: the same binary, arguments,
+    /// environment and working directory (`exec` on Unix, a new process on Windows).
+    #[default]
+    Exec,
+    /// The process exits with [`RESTART_EXIT_CODE`] and leaves the start to a supervisor.
+    Exit,
+}
+
+/// `[server]`: the process lifecycle.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ServerConfig {
+    /// What a restart request does (see [`RestartMode`]); a stop request always just exits.
+    #[serde(default)]
+    pub restart_mode: RestartMode,
 }
 
 /// The web API (REST and WebSocket) and the optional static web admin.
@@ -1004,10 +1032,14 @@ mod tests {
         // `{version}` is replaced in the path settings.
         // `{version}` is replaced in the path settings (known_seeds is empty in the safe
         // committed config; the dev config sets a path with the placeholder).
-        let dev = Config::parse(&std::fs::read_to_string(root.join("config/server.toml")).unwrap().replace(
-            "known_seeds = \"\"",
-            "known_seeds = \"dumps/{version}/terrain/seeds.tsv\"",
-        ))
+        let dev = Config::parse(
+            &std::fs::read_to_string(root.join("config/server.toml"))
+                .unwrap()
+                .replace(
+                    "known_seeds = \"\"",
+                    "known_seeds = \"dumps/{version}/terrain/seeds.tsv\"",
+                ),
+        )
         .unwrap();
         assert_eq!(
             dev.dev.known_seeds,
@@ -1076,7 +1108,11 @@ mod tests {
         // The pre-login limits are on.
         let l = &cfg.network.login;
         assert!(l.pre_auth_read_timeout_secs > 0 && l.pre_auth_login_timeout_secs > 0);
-        assert!(l.pre_auth_max_buffer > 0 && l.max_pre_auth_connections > 0 && l.max_pre_auth_per_ip > 0);
+        assert!(
+            l.pre_auth_max_buffer > 0
+                && l.max_pre_auth_connections > 0
+                && l.max_pre_auth_per_ip > 0
+        );
         let i = &cfg.network.instance;
         assert!(i.pre_auth_read_timeout_secs > 0 && i.pre_auth_max_buffer > 0);
         assert!(i.max_pre_auth_connections > 0 && i.max_pre_auth_per_ip > 0);
@@ -1175,6 +1211,21 @@ mod tests {
         assert_eq!(cfg.web.web_token_ttl_secs, 60);
     }
 
+    #[test]
+    fn restart_mode_parses_and_rejects_unknown() {
+        let base = |extra: &str| {
+            format!(
+                "{extra}\n[game]\nversion = \"x\"\ngame_dir = \"g\"\nschema = \"s\"\nprotocol_dir = \"p\"\n[network]\npublic_host = \"h\"\n[network.login]\nbind = \"0.0.0.0:1\"\n[network.instance]\nbind = \"0.0.0.0:2\"\npublic_port = 2\n[database]\npath = \"d\"\n[accounts]\nname_prefix = \"Exile\"\nmax_characters = 1\n[gateway]\nregion = \"r\"\ndisplay_name = \"n\"\n"
+            )
+        };
+        // `[server]` must come before the other tables only because of this helper's layout.
+        let default = Config::parse(&base("")).unwrap();
+        assert_eq!(default.server.restart_mode, RestartMode::Exec);
+        let exit = Config::parse(&base("[server]\nrestart_mode = \"exit\"")).unwrap();
+        assert_eq!(exit.server.restart_mode, RestartMode::Exit);
+        assert!(Config::parse(&base("[server]\nrestart_mode = \"reboot\"")).is_err());
+    }
+
     /// The example documents the defaults: a config with only the required keys must equal it
     /// for every defaulted section.
     #[test]
@@ -1219,6 +1270,10 @@ mod tests {
             format!("{:?}", minimal.cluster)
         );
         assert_eq!(format!("{:?}", example.web), format!("{:?}", minimal.web));
+        assert_eq!(
+            format!("{:?}", example.server),
+            format!("{:?}", minimal.server)
+        );
         assert_eq!(
             format!("{:?}", example.security),
             format!("{:?}", minimal.security)

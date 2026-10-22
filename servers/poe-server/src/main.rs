@@ -1,3 +1,5 @@
+mod lifecycle;
+
 use std::sync::Arc;
 
 use login_server::LoginServer;
@@ -10,6 +12,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    lifecycle::wait_for_parent().await;
     let config = Arc::new(Config::load_default()?);
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(&config.logging.filter));
@@ -101,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
         actors: Default::default(),
     });
 
+    let (web_lifecycle, mut shutdown_requests) = poe_web_api::Lifecycle::new();
     let web_state = poe_web_api::WebState {
         config: config.clone(),
         accounts: accounts.clone(),
@@ -111,18 +115,53 @@ async fn main() -> anyhow::Result<()> {
         logs: logs.clone(),
         web_tokens: Default::default(),
         ws_tickets: Default::default(),
+        lifecycle: web_lifecycle,
         started: std::time::Instant::now(),
     };
+    let web_enabled = config.web.enabled;
     let web = async move {
-        if config.web.enabled {
+        if web_enabled {
             poe_web_api::serve(web_state).await
         } else {
             tracing::info!("web api disabled ([web] enabled = false)");
             std::future::pending().await
         }
     };
-    tokio::try_join!(login.run(), instance.run(), web)?;
-    Ok(())
+    // Runs until a failure or until a stop or restart is requested: by an admin (web API,
+    // after its countdown) or by SIGINT/SIGTERM (at once).
+    let kind = {
+        let run = async { tokio::try_join!(login.clone().run(), instance.clone().run(), web) };
+        tokio::select! {
+            r = run => {
+                r?;
+                return Ok(());
+            }
+            k = shutdown_requests.recv() => k.unwrap_or(poe_web_api::ShutdownKind::Stop),
+            () = lifecycle::signal() => poe_web_api::ShutdownKind::Stop,
+        }
+    };
+    tracing::info!(action = kind.as_str(), "shutting down: disconnecting players");
+    drain(&instance).await;
+    let action = lifecycle::decide(kind, config.server.restart_mode, lifecycle::HAS_EXEC);
+    tracing::info!(?action, "shutdown complete");
+    lifecycle::perform(action)
+}
+
+/// Disconnects every player and waits (a few seconds at most) until their sessions have ended:
+/// a session saves its character when it ends. The database commits every write at once, so
+/// nothing else is pending afterwards.
+async fn drain(instance: &instance_server::InstanceServer) {
+    for p in instance.live.online() {
+        instance.live.kick(&p.character);
+    }
+    let end = tokio::time::Instant::now() + lifecycle::DRAIN_TIMEOUT;
+    while !instance.live.online().is_empty() && tokio::time::Instant::now() < end {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let left = instance.live.online().len();
+    if left > 0 {
+        tracing::warn!(left, "sessions still open after the drain timeout");
+    }
 }
 
 const CHARACTER_USAGE: &str = "usage: poe-server character create <account> <name> <start_state> [area] [league]\n       poe-server character list [account]\n  start_state: a CharacterStartStates id (e.g. DexFourDefault); area: a WorldAreas id (default: the start state's hub area, else [player] start_area); league default: the first [[leagues]] entry. A character created with an explicit town/hideout area counts as having played the intro.";

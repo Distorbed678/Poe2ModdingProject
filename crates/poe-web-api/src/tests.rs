@@ -111,12 +111,21 @@ impl AdminControl for MockAdmin {
             .push(format!("{actor}: transfer {character} {target:?}"));
         AdminOutcome::ok("moving")
     }
+
+    fn record(&self, actor: &str, action: &str, result: &str) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("{actor}: record {action} [{result}]"));
+    }
 }
 
 struct Fixture {
     app: Router,
     state: WebState,
     mock: Arc<MockAdmin>,
+    /// What the process would receive when a shutdown countdown ends.
+    shutdown: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::ShutdownKind>>,
 }
 
 fn fixture_with(config: &str) -> Fixture {
@@ -146,6 +155,7 @@ fn fixture_with(config: &str) -> Fixture {
         true,
     );
     let limiter = Arc::new(poe_accounts::LoginLimiter::from_config(&config.security));
+    let (lifecycle, shutdown) = crate::Lifecycle::new();
     let state = WebState {
         config,
         accounts,
@@ -156,12 +166,14 @@ fn fixture_with(config: &str) -> Fixture {
         logs: LogBuffer::new(50),
         web_tokens: Default::default(),
         ws_tickets: Default::default(),
+        lifecycle,
         started: Instant::now(),
     };
     Fixture {
         app: crate::router(state.clone()),
         state,
         mock,
+        shutdown: tokio::sync::Mutex::new(shutdown),
     }
 }
 
@@ -492,7 +504,11 @@ async fn game_token_exchange_gives_the_client_a_token_the_launcher_keeps() {
     let (status, _) = f
         .call("POST", "/api/v1/game-token", Some(&launcher), None)
         .await;
-    assert_eq!(status, StatusCode::OK, "the launcher token survives game logins");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the launcher token survives game logins"
+    );
     // Not for web tokens, nor without a token, nor for the game token itself.
     let web = f.login("alice", "correct horse").await;
     let (status, _) = f.call("POST", "/api/v1/game-token", Some(&web), None).await;
@@ -523,6 +539,10 @@ async fn tokens_are_required() {
         ("GET", "/api/v1/admin/logs/ws"),
         ("POST", "/api/v1/admin/logs/ws-ticket"),
         ("POST", "/api/v1/admin/announce"),
+        ("POST", "/api/v1/admin/server/stop"),
+        ("POST", "/api/v1/admin/server/restart"),
+        ("POST", "/api/v1/admin/server/cancel"),
+        ("GET", "/api/v1/admin/server/shutdown"),
     ] {
         let (status, body) = f.call(method, uri, None, None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}: {body}");
@@ -554,6 +574,14 @@ async fn players_are_forbidden_from_admin_endpoints() {
         ("GET", "/api/v1/admin/accounts", None),
         ("GET", "/api/v1/admin/characters/1", None),
         ("POST", "/api/v1/admin/players/Bob/kick", None),
+        ("POST", "/api/v1/admin/server/stop", None),
+        (
+            "POST",
+            "/api/v1/admin/server/restart",
+            Some(json!({"delay_secs": 1})),
+        ),
+        ("POST", "/api/v1/admin/server/cancel", None),
+        ("GET", "/api/v1/admin/server/shutdown", None),
         (
             "POST",
             "/api/v1/admin/announce",
@@ -615,6 +643,7 @@ async fn a_token_from_another_cluster_is_refused() {
             app: crate::router(state.clone()),
             state,
             mock: f.mock.clone(),
+            shutdown: tokio::sync::Mutex::new(crate::Lifecycle::new().1),
         }
     };
     let (status, _) = other
@@ -1180,22 +1209,37 @@ async fn log_websocket_needs_an_admin_token_or_a_ticket() {
     let admin = f.login("root", "correct horse").await;
     // The bearer header: a player is refused, an admin gets past authentication (and then
     // fails the upgrade: this is not a WebSocket).
-    let (status, _) = f.call("GET", "/api/v1/admin/logs/ws", Some(&player), None).await;
+    let (status, _) = f
+        .call("GET", "/api/v1/admin/logs/ws", Some(&player), None)
+        .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = f.call("GET", "/api/v1/admin/logs/ws", Some(&admin), None).await;
+    let (status, _) = f
+        .call("GET", "/api/v1/admin/logs/ws", Some(&admin), None)
+        .await;
     assert_ne!(status, StatusCode::UNAUTHORIZED);
     assert_ne!(status, StatusCode::FORBIDDEN);
     // The web token is not accepted in the URL any more (it would end up in proxy logs).
     let (status, _) = f
-        .call("GET", &format!("/api/v1/admin/logs/ws?token={admin}"), None, None)
+        .call(
+            "GET",
+            &format!("/api/v1/admin/logs/ws?token={admin}"),
+            None,
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     // Tickets: only admins mint them.
-    let (status, _) = f.call("POST", "/api/v1/admin/logs/ws-ticket", Some(&player), None).await;
+    let (status, _) = f
+        .call("POST", "/api/v1/admin/logs/ws-ticket", Some(&player), None)
+        .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = f.call("POST", "/api/v1/admin/logs/ws-ticket", None, None).await;
+    let (status, _) = f
+        .call("POST", "/api/v1/admin/logs/ws-ticket", None, None)
+        .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, body) = f.call("POST", "/api/v1/admin/logs/ws-ticket", Some(&admin), None).await;
+    let (status, body) = f
+        .call("POST", "/api/v1/admin/logs/ws-ticket", Some(&admin), None)
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["expires_in_secs"], 60);
     let ticket = body["ticket"].as_str().unwrap().to_owned();
@@ -1210,11 +1254,18 @@ async fn log_websocket_needs_an_admin_token_or_a_ticket() {
     let (status, _) = f.call("GET", &uri, None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "single use");
     // A ticket of an account that lost the admin role is refused.
-    let (_, body) = f.call("POST", "/api/v1/admin/logs/ws-ticket", Some(&admin), None).await;
+    let (_, body) = f
+        .call("POST", "/api/v1/admin/logs/ws-ticket", Some(&admin), None)
+        .await;
     let ticket = body["ticket"].as_str().unwrap().to_owned();
     f.state.accounts.set_role("root", Role::Player).unwrap();
     let (status, _) = f
-        .call("GET", &format!("/api/v1/admin/logs/ws?ticket={ticket}"), None, None)
+        .call(
+            "GET",
+            &format!("/api/v1/admin/logs/ws?ticket={ticket}"),
+            None,
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     // Events pushed to the buffer reach a subscriber.
@@ -1228,16 +1279,25 @@ async fn log_websocket_needs_an_admin_token_or_a_ticket() {
 #[tokio::test]
 async fn responses_carry_security_headers() {
     let f = fixture();
-    let req = Request::builder().uri("/api/v1/server").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/v1/server")
+        .body(Body::empty())
+        .unwrap();
     let res = f.app.clone().oneshot(req).await.unwrap();
     let h = res.headers();
     assert_eq!(h["x-content-type-options"], "nosniff");
     assert_eq!(h["referrer-policy"], "no-referrer");
     assert_eq!(h["x-frame-options"], "DENY");
     let csp = h["content-security-policy"].to_str().unwrap();
-    assert!(csp.contains("default-src 'self'") && csp.contains("frame-ancestors 'none'"), "{csp}");
+    assert!(
+        csp.contains("default-src 'self'") && csp.contains("frame-ancestors 'none'"),
+        "{csp}"
+    );
     // Errors too.
-    let req = Request::builder().uri("/api/v1/nope").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/v1/nope")
+        .body(Body::empty())
+        .unwrap();
     let res = f.app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     assert_eq!(res.headers()["x-content-type-options"], "nosniff");
@@ -1371,7 +1431,8 @@ async fn login_from(
         ))
         .unwrap();
     let addr: std::net::SocketAddr = format!("{ip}:5555").parse().unwrap();
-    req.extensions_mut().insert(axum::extract::ConnectInfo(addr));
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(addr));
     let res = f.app.clone().oneshot(req).await.unwrap();
     let status = res.status();
     let retry = res
@@ -1396,23 +1457,43 @@ async fn login_is_rate_limited_per_account_with_429() {
     let (s, retry, body) = login_from(&f, "10.0.0.2", "alice", "correct horse", None).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(retry.as_deref(), Some("600"));
-    assert!(body["error"].as_str().unwrap().contains("too many"), "{body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("too many"),
+        "{body}"
+    );
     // Other accounts are not affected (and the IP limit of 20 is far away).
     f.account("bob", "correct horse", Role::Player);
-    assert_eq!(login_from(&f, "10.0.0.2", "bob", "correct horse", None).await.0, StatusCode::OK);
+    assert_eq!(
+        login_from(&f, "10.0.0.2", "bob", "correct horse", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
     // /password counts and is limited with the same keys.
-    let token = login_from(&f, "10.0.0.2", "bob", "correct horse", None).await.2["token"]
+    let token = login_from(&f, "10.0.0.2", "bob", "correct horse", None)
+        .await
+        .2["token"]
         .as_str()
         .unwrap()
         .to_owned();
     for _ in 0..3 {
         let (s, _) = f
-            .call("POST", "/api/v1/password", Some(&token), Some(json!({"old_password": "nope nope", "new_password": "another horse"})))
+            .call(
+                "POST",
+                "/api/v1/password",
+                Some(&token),
+                Some(json!({"old_password": "nope nope", "new_password": "another horse"})),
+            )
             .await;
         assert_eq!(s, StatusCode::FORBIDDEN);
     }
     let (s, _) = f
-        .call("POST", "/api/v1/password", Some(&token), Some(json!({"old_password": "correct horse", "new_password": "another horse"})))
+        .call(
+            "POST",
+            "/api/v1/password",
+            Some(&token),
+            Some(json!({"old_password": "correct horse", "new_password": "another horse"})),
+        )
         .await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
 }
@@ -1423,14 +1504,29 @@ async fn login_is_rate_limited_per_ip_and_honours_forwarded_for() {
     let f = fixture_with(&cfg);
     f.account("alice", "correct horse", Role::Player);
     for name in ["ghost1", "ghost2"] {
-        assert_eq!(login_from(&f, "10.0.0.1", name, "x", None).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            login_from(&f, "10.0.0.1", name, "x", None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
     }
     // The IP is locked for every name; another IP is fine.
-    assert_eq!(login_from(&f, "10.0.0.1", "alice", "correct horse", None).await.0, StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(login_from(&f, "10.0.0.2", "alice", "correct horse", None).await.0, StatusCode::OK);
+    assert_eq!(
+        login_from(&f, "10.0.0.1", "alice", "correct horse", None)
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        login_from(&f, "10.0.0.2", "alice", "correct horse", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
     // X-Forwarded-For is ignored unless trusted: a client cannot pick its own IP.
     assert_eq!(
-        login_from(&f, "10.0.0.1", "alice", "correct horse", Some("10.9.9.9")).await.0,
+        login_from(&f, "10.0.0.1", "alice", "correct horse", Some("10.9.9.9"))
+            .await
+            .0,
         StatusCode::TOO_MANY_REQUESTS
     );
 
@@ -1442,10 +1538,31 @@ async fn login_is_rate_limited_per_ip_and_honours_forwarded_for() {
         login_from(&f, "127.0.0.1", name, "x", Some("10.9.9.9, 10.0.0.1")).await;
     }
     // Same proxy socket, a different forwarded client: allowed; the locked client is not.
-    assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7")).await.0, StatusCode::OK);
-    assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.1")).await.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7"))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.1"))
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
     // Spoofed leading entries do not choose the IP the limiter sees.
-    assert_eq!(login_from(&f, "127.0.0.1", "alice", "correct horse", Some("10.0.0.7, 10.0.0.1")).await.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        login_from(
+            &f,
+            "127.0.0.1",
+            "alice",
+            "correct horse",
+            Some("10.0.0.7, 10.0.0.1")
+        )
+        .await
+        .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
 }
 
 /// A launcher token for the account (the launcher's login).
@@ -1463,7 +1580,8 @@ async fn launcher_login(f: &Fixture, name: &str, password: &str) -> String {
 }
 
 async fn mint_web_token(f: &Fixture, launcher: &str) -> (StatusCode, Value) {
-    f.call("POST", "/api/v1/web-token", Some(launcher), None).await
+    f.call("POST", "/api/v1/web-token", Some(launcher), None)
+        .await
 }
 
 async fn redeem(f: &Fixture, token: &str) -> (StatusCode, Value) {
@@ -1484,16 +1602,25 @@ async fn me_returns_the_callers_account_for_both_token_kinds() {
     let launcher = launcher_login(&f, "alice", "correct horse").await;
     let (status, body) = f.call("GET", "/api/v1/me", Some(&launcher), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!((body["username"].as_str(), body["role"].as_str()), (Some("alice"), Some("admin")));
+    assert_eq!(
+        (body["username"].as_str(), body["role"].as_str()),
+        (Some("alice"), Some("admin"))
+    );
     assert!(body.get("password_hash").is_none());
     let web = f.login("bobby", "correct horse").await;
     let (status, body) = f.call("GET", "/api/v1/me", Some(&web), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["role"], "player");
-    assert_eq!(f.call("GET", "/api/v1/me", None, None).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        f.call("GET", "/api/v1/me", None, None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
     // A role change shows at once.
     f.state.accounts.set_role("bobby", Role::Admin).unwrap();
-    assert_eq!(f.call("GET", "/api/v1/me", Some(&web), None).await.1["role"], "admin");
+    assert_eq!(
+        f.call("GET", "/api/v1/me", Some(&web), None).await.1["role"],
+        "admin"
+    );
 }
 
 #[tokio::test]
@@ -1512,15 +1639,22 @@ async fn web_token_is_single_use_and_gives_a_web_session() {
     assert_eq!(status, StatusCode::OK, "{session}");
     assert_eq!(session["kind"], "web");
     assert_eq!(session["account"]["username"], "alice");
-    assert_ne!(session["token"], body["token"], "a new token, not the hand-off one");
+    assert_ne!(
+        session["token"], body["token"],
+        "a new token, not the hand-off one"
+    );
     // The session works on the admin API; the hand-off token and the launcher token do not.
     let web = session["token"].as_str().unwrap();
     assert_eq!(
-        f.call("GET", "/api/v1/admin/accounts", Some(web), None).await.0,
+        f.call("GET", "/api/v1/admin/accounts", Some(web), None)
+            .await
+            .0,
         StatusCode::OK
     );
     assert_eq!(
-        f.call("GET", "/api/v1/admin/accounts", Some(&token), None).await.0,
+        f.call("GET", "/api/v1/admin/accounts", Some(&token), None)
+            .await
+            .0,
         StatusCode::UNAUTHORIZED,
         "the hand-off token is not a bearer token"
     );
@@ -1529,7 +1663,10 @@ async fn web_token_is_single_use_and_gives_a_web_session() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(redeem(&f, &"0".repeat(64)).await.1, again);
     // The launcher token is untouched.
-    assert_eq!(f.call("GET", "/api/v1/me", Some(&launcher), None).await.0, StatusCode::OK);
+    assert_eq!(
+        f.call("GET", "/api/v1/me", Some(&launcher), None).await.0,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]
@@ -1547,7 +1684,10 @@ async fn web_token_needs_an_admins_launcher_token() {
     f.account("alice", "correct horse", Role::Admin);
     f.account("bobby", "correct horse", Role::Player);
     // No token, a web token (even an admin's), a player's launcher token.
-    assert_eq!(f.call("POST", "/api/v1/web-token", None, None).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        f.call("POST", "/api/v1/web-token", None, None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
     let web = f.login("alice", "correct horse").await;
     assert_eq!(mint_web_token(&f, &web).await.0, StatusCode::FORBIDDEN);
     let player = launcher_login(&f, "bobby", "correct horse").await;
@@ -1555,7 +1695,10 @@ async fn web_token_needs_an_admins_launcher_token() {
     assert!(f.state.web_tokens.is_empty(), "nothing was minted");
     // A game token is not a launcher token.
     let launcher = launcher_login(&f, "alice", "correct horse").await;
-    let game = f.call("POST", "/api/v1/game-token", Some(&launcher), None).await.1["token"]
+    let game = f
+        .call("POST", "/api/v1/game-token", Some(&launcher), None)
+        .await
+        .1["token"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -1567,8 +1710,14 @@ async fn a_new_web_token_replaces_the_previous_one() {
     let f = fixture();
     f.account("alice", "correct horse", Role::Admin);
     let launcher = launcher_login(&f, "alice", "correct horse").await;
-    let first = mint_web_token(&f, &launcher).await.1["token"].as_str().unwrap().to_owned();
-    let second = mint_web_token(&f, &launcher).await.1["token"].as_str().unwrap().to_owned();
+    let first = mint_web_token(&f, &launcher).await.1["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let second = mint_web_token(&f, &launcher).await.1["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_eq!(redeem(&f, &first).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(redeem(&f, &second).await.0, StatusCode::OK);
 }
@@ -1578,7 +1727,10 @@ async fn a_web_token_for_a_disabled_account_is_refused() {
     let f = fixture();
     f.account("alice", "correct horse", Role::Admin);
     let launcher = launcher_login(&f, "alice", "correct horse").await;
-    let token = mint_web_token(&f, &launcher).await.1["token"].as_str().unwrap().to_owned();
+    let token = mint_web_token(&f, &launcher).await.1["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     f.state.accounts.set_disabled("alice", true).unwrap();
     assert_eq!(redeem(&f, &token).await.0, StatusCode::FORBIDDEN);
     // It was consumed by the attempt.
@@ -1588,7 +1740,9 @@ async fn a_web_token_for_a_disabled_account_is_refused() {
 
 #[tokio::test]
 async fn web_token_responses_are_not_cacheable_and_bad_redeems_are_rate_limited() {
-    let f = fixture_with(&format!("{CONFIG}\n[security]\nlogin_max_failures_per_account = 3\nlogin_lockout_secs = 600\n"));
+    let f = fixture_with(&format!(
+        "{CONFIG}\n[security]\nlogin_max_failures_per_account = 3\nlogin_lockout_secs = 600\n"
+    ));
     f.account("alice", "correct horse", Role::Admin);
     let launcher = launcher_login(&f, "alice", "correct horse").await;
     let res = f
@@ -1604,9 +1758,15 @@ async fn web_token_responses_are_not_cacheable_and_bad_redeems_are_rate_limited(
         )
         .await
         .unwrap();
-    assert_eq!(res.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+    assert_eq!(
+        res.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    let good = serde_json::from_slice::<Value>(&bytes).unwrap()["token"].as_str().unwrap().to_owned();
+    let good = serde_json::from_slice::<Value>(&bytes).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
 
     // Malformed and unknown tokens count; after 3 the client is locked, even for the real token.
     for bad in ["nothex", &"ab".repeat(32), &"cd".repeat(32)] {
@@ -1622,10 +1782,175 @@ async fn web_token_responses_are_not_cacheable_and_bad_redeems_are_rate_limited(
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({"token": good}).to_string()))
         .unwrap();
-    req.extensions_mut()
-        .insert(axum::extract::ConnectInfo("10.0.0.9:5555".parse::<std::net::SocketAddr>().unwrap()));
+    req.extensions_mut().insert(axum::extract::ConnectInfo(
+        "10.0.0.9:5555".parse::<std::net::SocketAddr>().unwrap(),
+    ));
     let res = f.app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(res.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
-    assert_eq!(login_from(&f, "10.0.0.1", "alice", "correct horse", None).await.0, StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    assert_eq!(
+        login_from(&f, "10.0.0.1", "alice", "correct horse", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
+// --- stop and restart ----------------------------------------------------------------------
+
+async fn admin_token(f: &Fixture) -> String {
+    f.account("root", "correct horse", Role::Admin);
+    f.login("root", "correct horse").await
+}
+
+#[tokio::test]
+async fn shutdown_requests_are_validated() {
+    let f = fixture();
+    let t = admin_token(&f).await;
+    let t = Some(t.as_str());
+    for (body, what) in [
+        (json!({"delay_secs": 3601}), "delay above the limit"),
+        (json!({"delay_secs": -1}), "negative delay"),
+        (json!({"delay_secs": "soon"}), "delay is no number"),
+        (json!({"message": "x".repeat(201)}), "message too long"),
+    ] {
+        for kind in ["stop", "restart"] {
+            let uri = format!("/api/v1/admin/server/{kind}");
+            let (status, _) = f.call("POST", &uri, t, Some(body.clone())).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{kind}: {what}");
+        }
+    }
+    let (_, status) = f
+        .call("GET", "/api/v1/admin/server/shutdown", t, None)
+        .await;
+    assert_eq!(status["pending"], Value::Null, "nothing was accepted");
+    assert!(f.calls().is_empty(), "nothing was announced or audited");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_counts_down_announces_and_hands_over() {
+    let f = fixture();
+    let t = admin_token(&f).await;
+    let t = Some(t.as_str());
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/admin/server/restart",
+            t,
+            Some(json!({"delay_secs": 12, "message": "  new  build "})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(body["action"], "restart");
+    assert_eq!(body["remaining_secs"], 12);
+    assert_eq!(body["delay_secs"], 12);
+    assert_eq!(body["message"], "new build");
+    assert_eq!(body["requested_by"], "root");
+    assert_eq!(body["cancellable"], true);
+    // A second request while one is pending is refused, whatever its kind.
+    for kind in ["stop", "restart"] {
+        let (status, body) = f
+            .call("POST", &format!("/api/v1/admin/server/{kind}"), t, None)
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+    let (_, st) = f
+        .call("GET", "/api/v1/admin/server/shutdown", t, None)
+        .await;
+    assert_eq!(st["pending"]["action"], "restart");
+
+    // Time passes (paused clock): the receiver gets the request after the countdown.
+    let got = f.shutdown.lock().await.recv().await;
+    assert_eq!(got, Some(crate::ShutdownKind::Restart));
+    let calls = f.calls();
+    assert_eq!(
+        calls,
+        [
+            "root: record server restart [in 12 s: new build]",
+            "root: announce Server restarting in 12 s: new build",
+            "root: announce Server restarting in 10 s: new build",
+            "root: announce Server restarting in 5 s: new build",
+            "root: announce Server restarting now: new build",
+        ]
+    );
+    // Past the point of no return.
+    let (_, st) = f
+        .call("GET", "/api/v1/admin/server/shutdown", t, None)
+        .await;
+    assert_eq!(st["pending"]["cancellable"], false);
+    assert_eq!(st["pending"]["remaining_secs"], 0);
+    let (status, _) = f.call("POST", "/api/v1/admin/server/cancel", t, None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_without_a_body_goes_at_once() {
+    let f = fixture();
+    let t = admin_token(&f).await;
+    let (status, body) = f
+        .call("POST", "/api/v1/admin/server/stop", Some(&t), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(body["action"], "stop");
+    assert_eq!(body["delay_secs"], 0);
+    assert_eq!(
+        f.shutdown.lock().await.recv().await,
+        Some(crate::ShutdownKind::Stop)
+    );
+    assert_eq!(
+        f.calls(),
+        [
+            "root: record server stop [in 0 s]",
+            "root: announce Server stopping now"
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_countdown_can_be_cancelled() {
+    let f = fixture();
+    let t = admin_token(&f).await;
+    let t = Some(t.as_str());
+    let (status, _) = f.call("POST", "/api/v1/admin/server/cancel", t, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "nothing to cancel");
+    let (status, _) = f
+        .call(
+            "POST",
+            "/api/v1/admin/server/stop",
+            t,
+            Some(json!({"delay_secs": 60})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (status, body) = f.call("POST", "/api/v1/admin/server/cancel", t, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, st) = f
+        .call("GET", "/api/v1/admin/server/shutdown", t, None)
+        .await;
+    assert_eq!(st["pending"], Value::Null);
+    // Well past the countdown nothing arrives, and a new request is accepted again.
+    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+    assert!(f.shutdown.lock().await.try_recv().is_err());
+    let (status, _) = f.call("POST", "/api/v1/admin/server/stop", t, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let calls = f.calls();
+    let cancelled = calls
+        .iter()
+        .position(|c| c == "root: announce Server stop cancelled")
+        .expect("the cancellation is announced");
+    assert_eq!(
+        calls[cancelled - 1],
+        "root: record server cancel [server stop cancelled]"
+    );
+    // Nothing of the cancelled countdown was announced after its first line.
+    assert!(
+        calls[..cancelled]
+            .iter()
+            .filter(|c| c.contains("Server stopping"))
+            .count()
+            <= 1
+    );
 }

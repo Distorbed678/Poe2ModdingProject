@@ -20,10 +20,11 @@ use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    ApiError, LogBuffer, LogEvent, LogFilter, WebState,
+    ApiError, LogBuffer, LogEvent, LogFilter, PendingShutdown, ShutdownKind, WebState,
     auth::{AdminAuth, WsAdminAuth},
     dto::*,
     error::ApiJson,
+    lifecycle,
     public::blocking,
 };
 
@@ -221,6 +222,121 @@ pub async fn announce(
         s.admin
             .run_command(&who.account.username, &format!("announce {message}")),
     )
+}
+
+/// Reads the optional body of a shutdown request: the countdown and the message.
+fn shutdown_args(body: &[u8]) -> Result<(u32, Option<String>), ApiError> {
+    let req: ShutdownRequest = if body.iter().all(u8::is_ascii_whitespace) {
+        ShutdownRequest::default()
+    } else {
+        serde_json::from_slice(body)
+            .map_err(|e| ApiError::bad_request(format!("bad JSON body: {e}")))?
+    };
+    let delay = req.delay_secs.unwrap_or(0);
+    if delay > lifecycle::MAX_DELAY_SECS {
+        return Err(ApiError::bad_request(format!(
+            "delay_secs is at most {}",
+            lifecycle::MAX_DELAY_SECS
+        )));
+    }
+    let message = lifecycle::normalize(req.message.as_deref()).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "message is at most {} characters",
+            lifecycle::MAX_MESSAGE_CHARS
+        ))
+    })?;
+    Ok((delay, message))
+}
+
+async fn request_shutdown(
+    s: WebState,
+    who: &str,
+    kind: ShutdownKind,
+    body: &[u8],
+) -> Result<(StatusCode, Json<PendingShutdown>), ApiError> {
+    let (delay, message) = shutdown_args(body)?;
+    match s
+        .lifecycle
+        .request(s.admin.clone(), who, kind, delay, message.clone())
+    {
+        Ok(pending) => {
+            let detail = format!(
+                "in {delay} s{}",
+                message.map(|m| format!(": {m}")).unwrap_or_default()
+            );
+            s.admin
+                .record(who, &format!("server {}", kind.as_str()), &detail);
+            Ok((StatusCode::ACCEPTED, Json(pending)))
+        }
+        Err(lifecycle::Refused::Busy(p)) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "a {} requested by {} is already pending",
+                p.action.as_str(),
+                p.requested_by
+            ),
+        )),
+        Err(_) => Err(ApiError::internal("shutdown refused")),
+    }
+}
+
+/// Stops the server: the players are warned (`delay_secs`, `message`), disconnected, and the
+/// process exits with code 0. Answers 202 at once; the countdown runs on the server.
+#[utoipa::path(post, path = "/api/v1/admin/server/stop", tag = "admin", security(("bearer" = [])),
+    request_body(content = ShutdownRequest, description = "optional"),
+    responses((status = 202, body = PendingShutdown), (status = 400, body = crate::ErrorBody), (status = 409, description = "a shutdown is already pending", body = crate::ErrorBody), (status = 401, body = crate::ErrorBody), (status = 403, body = crate::ErrorBody)))]
+pub async fn server_stop(
+    State(s): State<WebState>,
+    AdminAuth(who): AdminAuth,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<PendingShutdown>), ApiError> {
+    request_shutdown(s, &who.account.username, ShutdownKind::Stop, &body).await
+}
+
+/// Restarts the server: like stop, then the server starts again (`[server] restart_mode`:
+/// the process starts itself, or exits with code 75 for a supervisor). Web sessions stay valid.
+#[utoipa::path(post, path = "/api/v1/admin/server/restart", tag = "admin", security(("bearer" = [])),
+    request_body(content = ShutdownRequest, description = "optional"),
+    responses((status = 202, body = PendingShutdown), (status = 400, body = crate::ErrorBody), (status = 409, description = "a shutdown is already pending", body = crate::ErrorBody), (status = 401, body = crate::ErrorBody), (status = 403, body = crate::ErrorBody)))]
+pub async fn server_restart(
+    State(s): State<WebState>,
+    AdminAuth(who): AdminAuth,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<PendingShutdown>), ApiError> {
+    request_shutdown(s, &who.account.username, ShutdownKind::Restart, &body).await
+}
+
+/// Cancels a pending stop or restart while its countdown runs.
+#[utoipa::path(post, path = "/api/v1/admin/server/cancel", tag = "admin", security(("bearer" = [])),
+    responses((status = 200, body = CommandResult), (status = 404, description = "nothing pending", body = crate::ErrorBody), (status = 409, description = "too late: the players were already disconnected", body = crate::ErrorBody), (status = 401, body = crate::ErrorBody), (status = 403, body = crate::ErrorBody)))]
+pub async fn server_cancel(
+    State(s): State<WebState>,
+    AdminAuth(who): AdminAuth,
+) -> Result<Json<CommandResult>, ApiError> {
+    match s.lifecycle.cancel() {
+        Ok(p) => {
+            let text = format!("server {} cancelled", p.action.as_str());
+            s.admin
+                .record(&who.account.username, "server cancel", &text);
+            let line = format!("announce Server {} cancelled", p.action.as_str());
+            let _ = s.admin.run_command(&who.account.username, &line);
+            Ok(Json(CommandResult { message: text }))
+        }
+        Err(lifecycle::Refused::Nothing) => Err(ApiError::not_found("no shutdown is pending")),
+        Err(_) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "too late to cancel: the server is going down",
+        )),
+    }
+}
+
+/// The pending stop or restart, if any (with the seconds left).
+#[utoipa::path(get, path = "/api/v1/admin/server/shutdown", tag = "admin", security(("bearer" = [])),
+    responses((status = 200, body = ShutdownStatus), (status = 401, body = crate::ErrorBody), (status = 403, body = crate::ErrorBody)))]
+pub async fn server_shutdown(State(s): State<WebState>, _: AdminAuth) -> Json<ShutdownStatus> {
+    Json(ShutdownStatus {
+        pending: s.lifecycle.status(),
+    })
 }
 
 /// Every account.
@@ -505,7 +621,13 @@ pub struct WsQuery {
 pub async fn logs_ws_ticket(
     State(s): State<WebState>,
     AdminAuth(who): AdminAuth,
-) -> Result<([(axum::http::HeaderName, &'static str); 1], Json<WsTicketResponse>), ApiError> {
+) -> Result<
+    (
+        [(axum::http::HeaderName, &'static str); 1],
+        Json<WsTicketResponse>,
+    ),
+    ApiError,
+> {
     let ttl = s.config.web.web_token_ttl_secs.max(1);
     let ticket = s
         .ws_tickets

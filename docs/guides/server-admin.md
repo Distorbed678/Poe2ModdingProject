@@ -47,9 +47,26 @@ The same commands are available over HTTP for the web admin site: `kick`, `mute`
 
 ## Web admin
 
-A browser UI for the same commands: dashboard, live logs, players online (kick, mute, transfer), instances, accounts, characters and an announce dialog. It is the Svelte app in the submodule `modules/web-admin` (repo Poe2WebAdmin); how it is built is in [../architecture/web-api.md](../architecture/web-api.md#the-web-admin-spa).
+A browser UI for the same commands in the launcher's look (dark or light theme, sidebar navigation, a bottom tab bar on narrow screens): dashboard with the server control, live logs, players online (kick, mute, transfer), instances, accounts, characters and an announce dialog. It is the Svelte app in the submodule `modules/web-admin` (repo Poe2WebAdmin); how it is built is in [../architecture/web-api.md](../architecture/web-api.md#the-web-admin-spa).
 
-Build it, point `[web] static_dir` at `modules/web-admin/dist`, restart `poe-server` and open <http://127.0.0.1:8080> (the `[web] bind` address): [setup.md](setup.md#web-admin-build). Only accounts with the `admin` role get in (make one offline, [setup.md](setup.md#accounts-and-characters-offline)); the session lasts 12 hours.
+Build it, point `[web] static_dir` at `modules/web-admin/dist`, restart `poe-server` and open <http://127.0.0.1:8080> (the `[web] bind` address): [setup.md](setup.md#web-admin-build). Only accounts with the `admin` role get in (make one offline, [setup.md](setup.md#accounts-and-characters-offline)); the session lasts 12 hours. The moon/sun button in the top bar switches the theme (saved in the browser; the system preference decides until you choose).
+
+### Stop and restart the server
+
+The dashboard's **Server** card has **Restart** and **Stop** buttons (admins only, like the whole site). Each opens a confirmation dialog with an optional message for the players and a countdown in seconds (0 to 3600; quick choices Now, 30 s, 1 min, 5 min, 10 min). The players in game get a `<Server>` chat line when the countdown starts and again at 10 min, 5 min, 2 min, 1 min, 30 s, 10 s and 5 s before the end, and a last one at the end, each with your message; then they are disconnected (their characters are saved) and the server stops or restarts. A banner under the top bar of every page shows the countdown with a **Cancel** button (the players are told) until the last announcement. After a restart the page notices that the server is back, keeps you signed in (the session is in the database) and says so. A stop leaves the server off: the page shows "The server has stopped" and reconnects by itself if somebody starts it again. The same endpoints work with `curl` (`POST /api/v1/admin/server/stop` and `/restart`, body `{"delay_secs": 60, "message": "new build"}`, [../architecture/web-api.md](../architecture/web-api.md#stop-and-restart)); every request, cancellation and announcement is in the audit file as `<admin> (web)`.
+
+Ctrl+C and SIGTERM (systemd stop, the launcher's Stop) shut the server down the same way, at once and without announcements: players are disconnected, sessions saved, exit code 0.
+
+**How a restart brings the server back** (`[server] restart_mode` in `config/server.toml`):
+
+| `restart_mode` | After the shutdown | Use it |
+|---|---|---|
+| `"exec"` (default) | the process starts itself again with the same binary, arguments, environment and working directory (Unix: `exec`, the pid stays; Windows: a new process is started and the old one exits) | `cargo run`, a terminal, tmux, a systemd unit without special settings on Linux |
+| `"exit"` | the process exits with **code 75** and something else starts it again | systemd (`RestartForceExitStatus=75`, [hosting.md](hosting.md#running-it-permanently)), the launcher's Host a server page (see below), any supervisor that restarts on an exit code |
+
+A stop exits with 0, so a supervisor that restarts only on failure leaves a stopped server stopped. A supervisor that restarts on every exit (`Restart=always`) also restarts a stop; use `on-failure` as in the hosting guide. Without a supervisor and with `"exit"` a restart request simply ends the process.
+
+**Hosted through the launcher:** the launcher starts `poe-server` as a child process. On Linux and macOS the default `exec` mode works unchanged (same pid, same pipes). On Windows `exec` mode makes the launcher see an exit, so the launcher should write `restart_mode = "exit"` into the config it generates and start the server again when it exits with code 75. That launcher change is not done yet: until then, with a launcher-hosted server on Windows a restart from the web admin ends the server (the launcher shows it as exited) and the host page's Start brings it back.
 
 The log page shows what the server's `[logging] filter` lets through (to see `debug` events, enable them there). For development the Vite dev server proxies `/api` to `[web] bind` ([setup.md](setup.md#web-admin-build)).
 

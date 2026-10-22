@@ -75,4 +75,8 @@ pub trait AdminControl: Send + Sync {
     /// else). Same role check and audit as [`run_command`](Self::run_command).
     fn transfer_player(&self, actor: &str, character: &str, target: TransferTarget)
     -> AdminOutcome;
+    /// Logs an admin action that is not a registry command (a server stop or restart) and
+    /// appends it to the audit file, like [`run_command`](Self::run_command) does for commands.
+    /// The default does nothing (mocks).
+    fn record(&self, _actor: &str, _action: &str, _result: &str) {}
 }

@@ -1088,6 +1088,272 @@
         ]
       }
     },
+    "/api/v1/admin/server/cancel": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Cancels a pending stop or restart while its countdown runs.",
+        "operationId": "server_cancel",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "nothing pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "too late: the players were already disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/server/restart": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Restarts the server: like stop, then the server starts again (`[server] restart_mode`:\nthe process starts itself, or exits with code 75 for a supervisor). Web sessions stay valid.",
+        "operationId": "server_restart",
+        "requestBody": {
+          "description": "optional",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShutdownRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingShutdown"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "a shutdown is already pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/server/shutdown": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The pending stop or restart, if any (with the seconds left).",
+        "operationId": "server_shutdown",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShutdownStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/server/stop": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Stops the server: the players are warned (`delay_secs`, `message`), disconnected, and the\nprocess exits with code 0. Answers 202 at once; the countdown runs on the server.",
+        "operationId": "server_stop",
+        "requestBody": {
+          "description": "optional",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShutdownRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingShutdown"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "a shutdown is already pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/sessions": {
       "get": {
         "tags": [
@@ -2097,6 +2363,49 @@
           }
         }
       },
+      "PendingShutdown": {
+        "type": "object",
+        "description": "A shutdown that was requested and has not happened yet.",
+        "required": [
+          "action",
+          "remaining_secs",
+          "delay_secs",
+          "requested_by",
+          "cancellable"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ShutdownKind"
+          },
+          "cancellable": {
+            "type": "boolean",
+            "description": "`false` once the final announcement is out: it can no longer be cancelled."
+          },
+          "delay_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The countdown the request asked for.",
+            "minimum": 0
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The admin's message to the players."
+          },
+          "remaining_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until the players are disconnected (0 once the final announcement is out).",
+            "minimum": 0
+          },
+          "requested_by": {
+            "type": "string",
+            "description": "The admin account that asked."
+          }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "description": "`POST /register`.",
@@ -2187,6 +2496,53 @@
           "version": {
             "type": "string",
             "description": "The game client version this server speaks."
+          }
+        }
+      },
+      "ShutdownKind": {
+        "type": "string",
+        "description": "What the process does once the countdown is over.",
+        "enum": [
+          "stop",
+          "restart"
+        ]
+      },
+      "ShutdownRequest": {
+        "type": "object",
+        "description": "`POST /admin/server/stop` and `/admin/server/restart` (the body is optional).",
+        "properties": {
+          "delay_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Countdown in seconds (0..=3600, default 0): announced to the players in game, then the\nserver shuts down.",
+            "minimum": 0
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Added to every announcement (at most 200 characters)."
+          }
+        }
+      },
+      "ShutdownStatus": {
+        "type": "object",
+        "description": "`GET /admin/server/shutdown`.",
+        "properties": {
+          "pending": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingShutdown",
+                "description": "The requested shutdown that has not happened yet, if any."
+              }
+            ]
           }
         }
       },

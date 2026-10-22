@@ -24,6 +24,7 @@ tracing-subscriber.workspace = true
 utoipa = { version = "5", features = ["axum_extras"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.29"

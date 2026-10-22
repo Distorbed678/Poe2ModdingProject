@@ -138,6 +138,15 @@ prefix = "!"
 # Every admin command is appended here (time, account, command, result). Empty = off.
 audit_log = ""   # default: empty (off); the dev config writes runtime/admin-audit.log
 
+[server]
+# What an admin's "restart" (web admin, POST /api/v1/admin/server/restart) does after the
+# graceful shutdown (docs/guides/server-admin.md):
+#   "exec" = the process starts itself again (same binary, arguments and working directory);
+#   "exit" = the process exits with code 75 and a supervisor restarts it (systemd with
+#            RestartForceExitStatus=75, the launcher's "Host a server"; docs/guides/hosting.md).
+# A stop request always exits with code 0.
+restart_mode = "exec"   # default
+
 [web]
 # HTTP API and web admin (docs/architecture/web-api.md). Passwords travel in request bodies:
 # keep the bind on loopback, or put a TLS reverse proxy in front.

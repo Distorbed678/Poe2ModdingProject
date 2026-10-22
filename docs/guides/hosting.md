@@ -113,7 +113,7 @@ Create the players' accounts on the server: the offline `account create <name> -
 
 ## Running it permanently
 
-The server is one process with no daemon mode; stop it with Ctrl+C or SIGTERM (sessions end, the database is consistent after every write). Run it from the package folder.
+The server is one process with no daemon mode; stop it with Ctrl+C or SIGTERM (players are disconnected and their sessions saved, the database is consistent after every write, exit code 0). Admins can also stop and restart it from the web admin's dashboard, with a countdown announced in game ([server-admin.md](server-admin.md#stop-and-restart-the-server)). Run it from the package folder.
 
 **Linux (systemd).** A unit for a dedicated user, saved as `/etc/systemd/system/poe-server.service` (adapt the paths):
 
@@ -128,8 +128,13 @@ User=poe
 WorkingDirectory=/opt/poe-server
 ExecStart=/opt/poe-server/poe-server
 Environment=RUST_LOG=info
+# A crash restarts the server. The web admin's "Restart" (with `[server] restart_mode = "exit"`
+# in config/server.toml) exits with code 75: count it as a normal exit and restart on it.
+# The web admin's "Stop" and `systemctl stop` exit 0 and stay stopped.
 Restart=on-failure
-RestartSec=5
+RestartForceExitStatus=75
+SuccessExitStatus=75
+RestartSec=2
 # Optional hardening: the server only writes below runtime/ and (terrain cache) dumps/.
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -140,9 +145,9 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-`systemctl daemon-reload && systemctl enable --now poe-server`; the log is `journalctl -u poe-server -f`. Create accounts with the service stopped or running (`sudo -u poe /opt/poe-server/poe-server account create ...` from the same folder; the commands work against the database directly).
+`systemctl daemon-reload && systemctl enable --now poe-server`; the log is `journalctl -u poe-server -f`. Set `restart_mode = "exit"` in `[server]` so the web admin's Restart button hands the restart to systemd (exit code 75, `RestartForceExitStatus=75` above); with the default `"exec"` the server restarts itself inside the same service (the pid stays, so systemd does not notice), which works too. `systemctl restart poe-server` is a plain SIGTERM stop (graceful, 5 s drain) and start. Create accounts with the service stopped or running (`sudo -u poe /opt/poe-server/poe-server account create ...` from the same folder; the commands work against the database directly).
 
-**Windows.** Run `poe-server.exe` from the package folder in a terminal, or register it as a scheduled task that starts at boot with "Start in" set to the folder (`schtasks /Create /TN poe-server /SC ONSTART /RU <user> /TR "cmd /c cd /d C:\poe-server && poe-server.exe >> runtime\server.log 2>&1"`). A service wrapper such as NSSM works the same way (application folder as the working directory).
+**Windows.** Run `poe-server.exe` from the package folder in a terminal, or register it as a scheduled task that starts at boot with "Start in" set to the folder (`schtasks /Create /TN poe-server /SC ONSTART /RU <user> /TR "cmd /c cd /d C:\poe-server && poe-server.exe >> runtime\server.log 2>&1"`). A service wrapper such as NSSM works the same way (application folder as the working directory); with a wrapper or task that restarts the program when it exits, set `[server] restart_mode = "exit"` (code 75) so the web admin's Restart is handled by it, because Windows has no `exec` and the default mode starts a new process and exits 0.
 
 **Anywhere.** `tmux`/`screen` is fine for a few friends. Whatever you use, the working directory must be the folder with `config/`, `versions/` and `modules/`.
 

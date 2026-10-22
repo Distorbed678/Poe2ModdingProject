@@ -10,6 +10,7 @@ mod admin;
 mod auth;
 mod dto;
 mod error;
+pub mod lifecycle;
 pub mod logs;
 mod openapi;
 mod public;
@@ -33,6 +34,7 @@ use tower_http::{
 use tracing::{info, warn};
 
 pub use error::{ApiError, ErrorBody};
+pub use lifecycle::{Lifecycle, PendingShutdown, ShutdownKind};
 pub use logs::{LogBuffer, LogEvent, LogFilter, LogLayer, LogLevel};
 pub use openapi::{openapi, openapi_json};
 pub use webtoken::WebTokens;
@@ -56,6 +58,9 @@ pub struct WebState {
     /// Single-use tickets for the log WebSocket (`POST /admin/logs/ws-ticket`): a browser
     /// cannot send headers on a WebSocket, and a ticket in the URL is worthless once used.
     pub ws_tickets: Arc<WebTokens>,
+    /// Stop and restart requests (`/admin/server/...`); the process waits on the receiver of
+    /// [`Lifecycle::new`].
+    pub lifecycle: Arc<Lifecycle>,
     pub started: Instant,
 }
 
@@ -84,6 +89,10 @@ pub fn router(state: WebState) -> Router {
         .route("/admin/players/{name}/unmute", post(admin::unmute))
         .route("/admin/players/{name}/transfer", post(admin::transfer))
         .route("/admin/announce", post(admin::announce))
+        .route("/admin/server/stop", post(admin::server_stop))
+        .route("/admin/server/restart", post(admin::server_restart))
+        .route("/admin/server/cancel", post(admin::server_cancel))
+        .route("/admin/server/shutdown", get(admin::server_shutdown))
         .route("/admin/accounts", get(admin::accounts))
         .route(
             "/admin/accounts/{name}/disable",

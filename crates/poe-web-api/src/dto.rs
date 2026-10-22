@@ -222,6 +222,23 @@ pub struct AnnounceRequest {
     pub message: String,
 }
 
+/// `POST /admin/server/stop` and `/admin/server/restart` (the body is optional).
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct ShutdownRequest {
+    /// Countdown in seconds (0..=3600, default 0): announced to the players in game, then the
+    /// server shuts down.
+    pub delay_secs: Option<u32>,
+    /// Added to every announcement (at most 200 characters).
+    pub message: Option<String>,
+}
+
+/// `GET /admin/server/shutdown`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ShutdownStatus {
+    /// The requested shutdown that has not happened yet, if any.
+    pub pending: Option<crate::lifecycle::PendingShutdown>,
+}
+
 /// `POST /admin/accounts/{name}/role`.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RoleRequest {

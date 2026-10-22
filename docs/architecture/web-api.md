@@ -77,6 +77,10 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 | `POST /admin/players/{name}/mute` `{minutes?}` / `.../unmute` | admin | chat mute |
 | `POST /admin/players/{name}/transfer` `{instance}` or `{area, seed?, topology?, orientation?}` | admin | moves a character into an existing or a new instance |
 | `POST /admin/announce` `{message}` | admin | a `<Server>` chat line to everyone |
+| `POST /admin/server/stop` `{delay_secs?, message?}` | admin | stops the server: `202` with the pending shutdown at once, then the countdown runs on the server (see [Stop and restart](#stop-and-restart)). `400` for a delay above 3600 s or a message above 200 characters, `409` when a stop or restart is already pending. The body is optional (no delay) |
+| `POST /admin/server/restart` `{delay_secs?, message?}` | admin | the same, then the server starts again (`[server] restart_mode`) |
+| `POST /admin/server/cancel` | admin | cancels the pending stop or restart while its countdown runs (`404` nothing pending, `409` too late) |
+| `GET /admin/server/shutdown` | admin | `{pending: null}` or `{pending: {action, remaining_secs, delay_secs, message, requested_by, cancellable}}` |
 | `GET /admin/accounts` | admin | every account (never the password hash) |
 | `POST /admin/accounts/{name}/disable` / `enable` | admin | returns the account; disabling revokes its tokens and ends its sessions |
 | `POST /admin/accounts/{name}/role` `{role}` | admin | `player` or `admin`; not on yourself |
@@ -95,6 +99,8 @@ They do not reimplement anything. `poe_cluster::AdminControl` (`crates/poe-clust
 - `run_command(actor, line)`: parses `line` with the command registry (`commands.rs`), checks the actor's admin role now, and runs the session-free commands (`who`, `kick`, `mute`, `unmute`, `announce`, `instances`, `instance_new`, `close`, `account ...`) through the same code as chat (`exec.rs`: `run_global`/`execute_global`). Commands that need the caller's own game session (`where`, `join`, `teleport`, `terrain`, `area_info`) are refused. The call is logged and appended to the audit file as `<admin> (web)`, with passwords redacted.
 - `create_instance(actor, ...)` and `transfer_player(actor, character, target)`: `instance_new`, and the `transfer` command applied to another player. A transfer hands the account's login connection a ticket for the instance and then ends the player's instance session; the client falls back to character selection and receives the pending `InstanceDetails` ([../guides/server-admin.md](../guides/server-admin.md#transfers)).
 
+- `record(actor, action, result)`: logs an admin action that is not a registry command (a server stop, restart or cancel) and appends it to the audit file, as `<admin> (web)`.
+
 Instance listing reads `InstanceDirectory` directly; characters come from `poe-store` (`Store::all_characters`, `character_by_id`); accounts from `AccountStore`. The crate depends on those traits only, so the tests run it against an in-memory database and a mock `AdminControl`.
 
 ### Live log: `GET /admin/logs/ws`
@@ -109,6 +115,22 @@ Protocol (JSON text frames), after the upgrade:
 4. The client may send a new filter at any time; the server answers `{"type":"reset"}` and replays the history under the new filter.
 5. `{"type":"lagged","missed":n}` when the client reads too slowly; `{"type":"error","message":...}` for a bad filter.
 
+### Stop and restart
+
+`crates/poe-web-api/src/lifecycle.rs` owns the request, `servers/poe-server/src/lifecycle.rs` the end of the process.
+
+1. `POST /admin/server/stop|restart` validates the body (`delay_secs` 0 to 3600, `message` up to 200 characters, whitespace normalised), refuses a second request with `409`, audits `server stop|restart` and answers `202`. A countdown task starts.
+2. The task announces through the `announce` command (a `<Server>` chat line, audited like every announce): at the start (`Server restarting in 1 min 30 s: <message>`), then at each of 10 min, 5 min, 2 min, 1 min, 30 s, 10 s, 5 s below the delay, and `Server restarting now` at the end. Until that last line the request can be cancelled (`POST /admin/server/cancel` announces the cancellation).
+3. 1.5 s after the last line the task hands the request over a channel (`Lifecycle::new` returns the receiver) to `poe-server`. The process stops the login and instance servers, kicks every session and waits up to 5 s for them to end (a session saves its character when it ends; the database commits every write at once, so nothing else is pending), then ends according to `[server] restart_mode`:
+
+| Request | `restart_mode` | The process |
+|---|---|---|
+| stop (also SIGTERM and Ctrl+C, which skip the countdown) | any | exits with code 0 |
+| restart | `exec` (default) | starts itself again: Unix `exec` of the same binary with the same arguments, environment and working directory (same pid, so a parent that waits for the process, like the launcher's Host page or a systemd unit, keeps seeing it; every socket is closed by the exec); Windows has no `exec`: it spawns the new process (which waits 2 s for the ports, `POE_SERVER_RESTART_WAIT_MS`) and exits 0, so a parent sees an exit |
+| restart | `exit` | exits with code **75** (`poe_config::RESTART_EXIT_CODE`, `EX_TEMPFAIL`) and leaves the start to a supervisor |
+
+A binary that was replaced while running (an upgrade) is found again at its path (Linux reports `<path> (deleted)`). If the restart itself fails (exec error), the process logs it and exits 75. Web sessions are rows in the database, so they survive a restart; the SPA polls `GET /server` and `GET /admin/server/shutdown`, shows the countdown and "restarting" in a banner, and signs nobody out. Under a supervisor use `restart_mode = "exit"` ([../guides/hosting.md](../guides/hosting.md#running-it-permanently)).
+
 ## Serving the web admin
 
 Every response (API and static files) carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a `Content-Security-Policy` that allows only the app's own scripts, styles, images and connections (`default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`); a reverse proxy that sets the same headers wins. The server has no TLS of its own: put a TLS proxy in front ([../guides/hosting.md](../guides/hosting.md#tls-reverse-proxy-for-the-web-api)).
@@ -117,13 +139,14 @@ With `[web] static_dir` set to the SPA build (`modules/web-admin/dist`), the sam
 
 ## The web admin SPA
 
-Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the submodule `modules/web-admin`. Svelte 5 + Vite + TypeScript, plain CSS (dark by default, light by `prefers-color-scheme`). Build and run: [../guides/setup.md](../guides/setup.md#web-admin-build); usage: [../guides/server-admin.md](../guides/server-admin.md#web-admin); the repo's own README covers development.
+Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the submodule `modules/web-admin`. Svelte 5 + Vite + TypeScript, plain CSS in the launcher's design language (the same tokens, sidebar, cards, chips, dialogs and toasts; dark by default, a light theme, the system preference until the user toggles it; animations stop under `prefers-reduced-motion`; icon rail on narrow windows, bottom tab bar on phones). Build and run: [../guides/setup.md](../guides/setup.md#web-admin-build); usage: [../guides/server-admin.md](../guides/server-admin.md#web-admin); the repo's own README covers development.
 
 | Page (hash route) | Uses |
 |---|---|
 | Login | `POST /login` with `kind: "web"`; accounts that are not admins are refused and their token revoked |
 | `#/token-login?t=<token>` | the launcher's one-time sign-in link: strips the token from the URL, redeems it with `POST /web-token/redeem`, then behaves like a login (same admin check); failures land on the login page with a notice |
-| `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s |
+| `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s; the **server control** card: Restart and Stop each open a confirmation dialog (optional message to the players, countdown in seconds) and call `POST /admin/server/restart|stop`; a running countdown shows with a Cancel button (`POST /admin/server/cancel`) |
+| every page | a banner under the top bar from `GET /server` and `GET /admin/server/shutdown` (every 5 s, every 1.5 s while a shutdown is pending or the server does not answer): countdown, restarting, stopped, unreachable; when the server answers again the page checks the session (`GET /me`), toasts and reloads the dashboard |
 | `#/logs` | `POST /admin/logs/ws-ticket`, then `GET /admin/logs/ws?ticket=...` for every connection attempt: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
 | `#/sessions` | `GET /admin/sessions`; kick, mute (minutes or until unmuted), unmute, transfer (instance id or area/seed/topology/orientation) |
 | `#/instances` | `GET /admin/instances`; close, create |
@@ -138,7 +161,8 @@ Close, kick, disable and role changes ask for confirmation. The bearer token is 
 
 | File | |
 |---|---|
-| `crates/poe-web-api/src/lib.rs` | `WebState` (including the shared `LoginLimiter`), `router`, `serve` |
+| `crates/poe-web-api/src/lib.rs` | `WebState` (including the shared `LoginLimiter` and the `Lifecycle`), `router`, `serve` |
+| `lifecycle.rs` | stop and restart requests: validation helpers, the countdown task, the pending state |
 | `auth.rs` | bearer extractors (`Auth`, `AdminAuth`, `WsAdminAuth`) |
 | `webtoken.rs` | `WebTokens`: the in-memory store of single-use sign-in tokens |
 | `public.rs`, `admin.rs` | handlers (each carries its `utoipa` description) |
@@ -147,7 +171,7 @@ Close, kick, disable and role changes ask for confirmation. The bearer token is 
 | `openapi.rs` | the OpenAPI document |
 | `tests.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test) |
 
-Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, `/me`, web token mint/redeem (single use, lifetime from the config, launcher-admin only, replacement, disabled account, `no-store`, rate limit per IP), accounts, commands reaching the registry, instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
+Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, `/me`, web token mint/redeem (single use, lifetime from the config, launcher-admin only, replacement, disabled account, `no-store`, rate limit per IP), accounts, commands reaching the registry, stop and restart (validation, countdown with a paused clock, announcements, 409, cancel, auth and the admin role), instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
 
 ## Not done
 
