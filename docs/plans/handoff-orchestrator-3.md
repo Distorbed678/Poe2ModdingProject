@@ -41,6 +41,7 @@ Nested submodules stay (each repo builds alone); bump them together with the top
 - SDK **v0.1.0**.
 
 ## What is left
+The current list (with the items/entities deferral of 2026-10-22) is [open-items.md](open-items.md).
 1. Release process for later releases (launcher example): bump tauri.conf.json, package.json, src-tauri/Cargo.toml and the lockfiles, CHANGELOG Unreleased -> version, commit, tag `v<ver>`, watch the workflow. Server: bump modules/server Cargo.toml workspace version, tag `server-v<ver>` in Poe2Server. Hook: bump the client-hook workspace version, tag `hook-v<ver>`. Then bump the pointers in the hub.
 2. **F acceptance: the user's end-to-end test** (user): clean launcher profile, install the game (Steam depot), get the hook, Host a server (now from Poe2Server), Play, Open web admin, Restart from the web admin. Steps were given in the conversation; the short form is in [docs/guides/launcher.md](../guides/launcher.md). Expect fixes (first real DepotDownloader run, pause/resume, icon/frame on Wayland, Play with a downloaded hook).
 3. **Gate G-PARTY and movement problem 5** (user capture, after the e2e test): before it: no test running, `cargo xtask deploy-client --official` (the Agents rules are already off); afterwards deploy-client back to private. Then implement party/trade accept and decline ([entities.md](../protocol/entities.md), "Party and trade flows (WP C3)") and the sprint end with W held ([movement.md](../protocol/movement.md), problem 5).
