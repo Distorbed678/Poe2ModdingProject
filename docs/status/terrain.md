@@ -162,7 +162,17 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   4,429; blank special rooms 3,600; fill orientation masks 3,198; tgr routing retries 2,644; node
   tiles 4,204; no RoomSet 2,100; no border tile 1,714; no root key 1,571; failed to connect 1,411;
   `//` path 1,781; room overlap 1,004.
-- Open: the client checks the forced topology against the unfiltered topology list (all league
+- **Wave 2 (2026-10-22, agents A, B, C, merged into Poe2Server `612667e`):** 72,718 of 218,705
+  client layouts match (from 37,380), 0 lost on the full replay; combinations 747 match, 980
+  partial, 2742 fail. Fixes: league mechanic rolls before the topology draw (`0x141ffcad0`, every
+  map area), `.dgr` node offset ranges and axis flags turned with the graph, junction explode with
+  room exits, room-only `.gt` flags, post-unique tile pass, overlay phase 2 and SizeOrder, routing
+  retries, off-map ends of virtual dead ends, fill-room tile height, `RoomOverlap`, `//` paths,
+  `EnvironmentOverride`, container graphs, non-key room roots. Biggest gains: MapCrimsonShores,
+  MapWoodland, MapHeadland, G1_12, MapSump, MapBloodwood, MapWetlands, MapMire, MapDeforestation.
+  Open items per class and the client traces taken for them (`batch/b1`, `b2`, `b3`, `c1`, `a1`,
+  `a2`): [../re/terrain/dungeon.md](../re/terrain/dungeon.md), [../re/terrain/tgr.md](../re/terrain/tgr.md).
+- Settled (agent C): the client checks the forced topology against the unfiltered topology list (all league
   modes); the matrix counts the mode 1 list. The 11 areas with other-mode topologies need a check.
 
 ## To do, in order

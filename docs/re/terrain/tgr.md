@@ -272,3 +272,65 @@ ordering `0x1420c6860`, node split `0x1420c5ee0`, and logical links. The split u
 `+0x4c` first number (the right ground's corner height in tile keys), `+0x4d` hashed crossings
 (`0x1421969e0`; 0 for every Riverbank type). The DLL traces tile keys (`tile_key`, with caller)
 and dumps these bytes with each graph edge.
+
+## Findings from the 50-seed batch (2026-10-22, terrain-b)
+
+Each item was found by comparing the port with client exports or traces of failing batch jobs
+(`dumps/.../batch/fails1`, `b1`, `act1_traces`); code in `modules/server/crates/poe-world`.
+
+- **League mechanic rolls before the topology choice** (`phase_cad0` `0x141ffcad0`, `league.rs`).
+  Map areas draw `below(100)` for up to four mechanics before `phase_c360` (the topology draw), so
+  every later draw is shifted. Mechanic index 0, 2, 9 and 0xb (indices into the client's
+  mechanics table, rows of 0xee bytes from `FUN_142659480`) are rolled in that order. The chance
+  comes from the area's `WorldAreaLeagueChances` row (`WorldAreas.LeagueChances`; columns at row
+  offsets `+8 + 4(c-1)`: index 0 `+0x24` with a second chance at `+0x28`, index 2 `+0x40`,
+  index 9 `+0x64`, index 0xb `+0x68`). `0x141e22dd0` rolls one: a chance up to 100 draws once
+  (`below(100) < chance`), a larger one adds `chance / 100` and rolls the remainder; then, while
+  the second chance is set, it rolls that and keeps going on a hit (up to the mechanic's maximum,
+  `+0x8a` of the mechanics row). With success the client adds encounter requests
+  (`BrequelExpandingEncounter`, `StoneCircle`, `IncursionEncounter` via `0x141fef180`); their
+  effect on the layout is not ported (the traces of MapWoodland and MapDeforestation match
+  without it). Skipped by the client when `bVar18`: row flag `+0x14` or `+0x12a`, area kind
+  `0xf 0x20 0x21 0x23 0x13` or `0x27`, or a special stat; the port rolls only for `IsMapArea` areas
+  (acts show no such draws). Stat conditions of `0x141e22c40` / `0x141e223d0` are skipped (no
+  area stats).
+- **Axis constraint flags turn with the region** (`region.rs`): node values 9 and 10 (x and y
+  constraint flags) swap for odd orientations. Without it every area with a constrained node
+  (`G1_1` orientation 7, ...) differed from the first repulsion on.
+- **Junction explode sees the exits** (`0x1420c9970` cuts the rooms' edges at their exits before
+  `0x1420cb200` explodes junctions): the side of a junction edge (`0x1420d1220`) is taken towards
+  the first internal point or, without one, the other end, which for a room edge is the exit
+  position, not the room node (`PlacedGraph.ends`). This gave `G1_5` "could not tilise edge".
+- **`.gt` flags of room-only grounds**: grounds named only by a room (`arenamud.gt`) have their
+  real flags in the lattice passes (`TileMap::use_room_grounds`); the default 0x0f let the border
+  flood run through them.
+- **Post-unique tiles** (`0x141ff2090` per region after the de-repetition, `0x141ff2920`
+  chooses an orientation; `postunique.rs`): `.tst` entries whose `.tdt` feature is exactly
+  `postunique` are not in the tile-set index (`0x141d09ab0` puts them on a separate list at
+  tile-set `+0x80`, with their rotation mask). Per entry: every region cell that is the origin
+  of a featureless tile with one corner whose lattice flag 8 is clear, and whose turned index key
+  equals the entry's key in some allowed orientation, is a candidate with an orientation drawn by
+  `below(n)` among the equal ones; then `below(count)` picks the cell and the entry replaces that
+  tile (G1_5's `T2_WeaponDrop_01..10`). No candidate throws.
+- **Overlay phase 2** (`0x141fa23e0` with `param_3` set, `overlay.rs`): before the overlay room is
+  placed the tiles under it are recorded in a map keyed by `x * 0x10000 + y` (`0x141fa9e40`: sorted
+  by x then y, a later insert overwrites) cell by cell over each tile's whole footprint, then
+  removed; after the room (`0x141f8e6c0`) every recorded cell in that order that is empty again
+  is filled like the fill pass (`0x141f8f930`, ground of its corner, walkable when that ground is
+  none or has `.gt` flag 4). A cell now holding `OverlayBlank` (`SpecialTiles` row 2,
+  `0x141d08fe0` / `0x141633960`, `Metadata/Terrain/overlay_blank.tdt`) gets its old tile back when
+  that was 1x1 with only wildcard edges (`0x141f9e2e0`), otherwise the blank goes and the cell is
+  filled; any other tile stays. The overlay context (`0x141fa0ac0`) is built once, the two phases
+  run `0x141fa1a70`.
+- **Fill rooms, `k` slots of one ground**: the cell first tries the ground's fill group (as the
+  fill pass does); when no entry fits it is placed from the tile set by its key like any other
+  slot (`G1_4` seed 1003: two failed picks of `below(2)`, `below(1)`, then the key lookup).
+- **Routing retries** (`0x1420cdc30`): edges whose search fails keep their reservation and are
+  tried again after the others; a round that routes none throws "Could not permute edges".
+- **Off-map ends of virtual dead ends** (`0x1420ba340`, run for both ends of every virtual edge by
+  the first lambda of `0x1420bc400`, `0x1420da240`): a dead end (one edge) on the map border
+  without virtual end points gets them on the border, a random half width `below(max-min+1)+min`
+  either side of the node (`split.rs::off_map_end`; corners use both borders with a 2-tile
+  correction). The two banks then run off the map instead of meeting in a node that no tile
+  fits. The nodes the splits make join the tile list of the tile stage unless fixed, so these dead
+  ends are pushed one cell off the map (`MapCrimsonShores`).

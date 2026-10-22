@@ -300,7 +300,7 @@ link = "docs/status/terrain.md"
 [[subsystem.item]]
 name = "Per-area x topology x orientation matrix (cargo xtask terrain-matrix)"
 status = "done"
-note = "2026-10-22, after the 50-seed client batch: 442 WorldAreas rows (10 without topologies), 1141 topologies, 4508 combinations: 501 match (50/50 seeds), 508 partial, 3460 fail, 39 untested; 37663 of 218988 seeds match; generator probe: 701 of 1141 topologies run at seed 1001 (first orientation), 588 run for all orientations and seeds 1001-1003; table below the Terrain items"
+note = "2026-10-22, after wave 2 on the 50-seed client batch: 442 WorldAreas rows (10 without topologies), 1141 topologies, 4508 combinations: 747 match (all seeds), 980 partial, 2742 fail, 39 untested; 73001 of 218988 seeds match (37663 after the first batch); generator probe: 701 of 1141 topologies run at seed 1001 (first orientation), 588 run for all orientations and seeds 1001-1003; table below the Terrain items"
 link = "docs/plans/terrain-all-areas.md"
 
 [[subsystem.item]]
