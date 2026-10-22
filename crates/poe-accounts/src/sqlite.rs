@@ -11,8 +11,8 @@ use rand::RngCore;
 use rusqlite::{OptionalExtension, Row, params};
 
 use crate::{
-    AccountError, AccountRecord, AccountStore, IssuedToken, Result, Role, TokenKind, token_hash,
-    validate_username,
+    AccountError, AccountRecord, AccountStore, BanKind, BanRecord, IssuedToken, Result, Role, TokenKind,
+    clean_reason, parse_ip, token_hash, validate_username,
 };
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -38,6 +38,26 @@ impl From<rusqlite::Error> for AccountError {
 }
 
 const COLUMNS: &str = "id, name, role, created_at, last_login, disabled, password_hash IS NOT NULL";
+
+const BAN_SELECT: &str = "SELECT b.id, b.kind, b.account_id, a.name, b.ip, b.reason, b.created_by, b.created_at, b.expires_at, b.lifted_at, b.lifted_by
+     FROM bans b LEFT JOIN accounts a ON a.id = b.account_id";
+
+fn ban_record(r: &Row<'_>) -> rusqlite::Result<BanRecord> {
+    let kind: String = r.get(1)?;
+    Ok(BanRecord {
+        id: r.get(0)?,
+        kind: BanKind::parse(&kind).unwrap_or(BanKind::Account),
+        account_id: r.get(2)?,
+        account: r.get(3)?,
+        ip: r.get(4)?,
+        reason: r.get(5)?,
+        created_by: r.get(6)?,
+        created_at: r.get(7)?,
+        expires_at: r.get(8)?,
+        lifted_at: r.get(9)?,
+        lifted_by: r.get(10)?,
+    })
+}
 
 fn record(r: &Row<'_>) -> rusqlite::Result<AccountRecord> {
     let role: String = r.get(2)?;
@@ -105,6 +125,38 @@ impl SqliteAccounts {
         if let Ok(parsed) = PasswordHash::new(decoy) {
             let _ = self.argon.verify_password(digest, &parsed);
         }
+    }
+
+    /// Refuses an account that is banned now.
+    fn check_not_banned(&self, account_id: u32) -> Result<()> {
+        match self.active_account_ban(account_id)? {
+            Some(b) => Err(AccountError::Banned { reason: b.reason, until: b.expires_at }),
+            None => Ok(()),
+        }
+    }
+
+    fn insert_ban(&self, kind: BanKind, account_id: Option<u32>, ip: Option<&str>, reason: &str, by: &str, expires_at: Option<i64>) -> Result<BanRecord> {
+        let reason = clean_reason(reason).ok_or(AccountError::InvalidBan("the reason is too long"))?;
+        let now = self.now();
+        if expires_at.is_some_and(|e| e <= now) {
+            return Err(AccountError::InvalidBan("the expiry must be in the future"));
+        }
+        let id = self.store.with_connection(|c| -> rusqlite::Result<i64> {
+            c.execute(
+                "INSERT INTO bans (kind, account_id, ip, reason, created_by, created_at, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![kind.as_str(), account_id, ip, reason, by, now, expires_at],
+            )?;
+            Ok(c.last_insert_rowid())
+        })?;
+        self.ban(id as u32)
+    }
+
+    fn ban(&self, id: u32) -> Result<BanRecord> {
+        let found = self.store.with_connection(|c| {
+            c.query_row(&format!("{BAN_SELECT} WHERE b.id = ?1"), params![id], ban_record).optional()
+        })?;
+        found.ok_or(AccountError::NoBan)
     }
 
     fn by_name(&self, name: &str) -> Result<AccountRecord> {
@@ -183,6 +235,8 @@ impl AccountStore for SqliteAccounts {
         if account.disabled {
             return Err(AccountError::Disabled);
         }
+        // After the password: a wrong password never learns whether the account is banned.
+        self.check_not_banned(id)?;
         self.record_login(id)?;
         Ok(AccountRecord { last_login: Some(self.now()), ..account })
     }
@@ -265,6 +319,7 @@ impl AccountStore for SqliteAccounts {
         if account.disabled {
             return Err(AccountError::Disabled);
         }
+        self.check_not_banned(account_id)?;
         self.store.with_connection(|c| c.execute("UPDATE account_tokens SET last_used = ?2 WHERE id = ?1", params![token_id, now]))?;
         self.record_login(account_id)?;
         Ok(AccountRecord { last_login: Some(now), ..account })
@@ -286,6 +341,69 @@ impl AccountStore for SqliteAccounts {
             )
         })?)
     }
+    fn ban_account(&self, account_id: u32, reason: &str, by: &str, expires_at: Option<i64>) -> Result<BanRecord> {
+        self.find_by_id(account_id)?.ok_or(AccountError::NoAccount)?;
+        if self.active_account_ban(account_id)?.is_some() {
+            return Err(AccountError::AlreadyBanned);
+        }
+        let ban = self.insert_ban(BanKind::Account, Some(account_id), None, reason, by, expires_at)?;
+        // Saved logins (game Remember Me, launcher, web) stop working at once.
+        self.revoke_tokens(account_id, None)?;
+        Ok(ban)
+    }
+
+    fn ban_ip(&self, ip: &str, reason: &str, by: &str, expires_at: Option<i64>) -> Result<BanRecord> {
+        let ip = parse_ip(ip).ok_or(AccountError::InvalidBan("not an IP address"))?;
+        if self.active_ip_ban(&ip)?.is_some() {
+            return Err(AccountError::AlreadyBanned);
+        }
+        self.insert_ban(BanKind::Ip, None, Some(&ip), reason, by, expires_at)
+    }
+
+    fn lift_ban(&self, id: u32, by: &str) -> Result<BanRecord> {
+        let ban = self.ban(id)?;
+        let now = self.now();
+        if !ban.is_active(now) {
+            return Err(AccountError::BanNotActive);
+        }
+        self.store.with_connection(|c| {
+            c.execute("UPDATE bans SET lifted_at = ?2, lifted_by = ?3 WHERE id = ?1", params![id, now, by])
+        })?;
+        self.ban(id)
+    }
+
+    fn active_account_ban(&self, account_id: u32) -> Result<Option<BanRecord>> {
+        let now = self.now();
+        Ok(self.store.with_connection(|c| {
+            c.query_row(
+                &format!("{BAN_SELECT} WHERE b.account_id = ?1 AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?2) ORDER BY b.id DESC LIMIT 1"),
+                params![account_id, now],
+                ban_record,
+            )
+            .optional()
+        })?)
+    }
+
+    fn active_ip_ban(&self, ip: &str) -> Result<Option<BanRecord>> {
+        let now = self.now();
+        Ok(self.store.with_connection(|c| {
+            c.query_row(
+                &format!("{BAN_SELECT} WHERE b.ip = ?1 AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?2) ORDER BY b.id DESC LIMIT 1"),
+                params![ip, now],
+                ban_record,
+            )
+            .optional()
+        })?)
+    }
+
+    fn bans(&self, active_only: bool) -> Result<Vec<BanRecord>> {
+        let now = self.now();
+        Ok(self.store.with_connection(|c| -> rusqlite::Result<_> {
+            let filter = if active_only { "WHERE b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?1)" } else { "WHERE ?1 = ?1" };
+            let mut st = c.prepare(&format!("{BAN_SELECT} {filter} ORDER BY b.id DESC"))?;
+            st.query_map(params![now], ban_record)?.collect()
+        })?)
+    }
 }
 
 #[cfg(test)]
@@ -293,7 +411,7 @@ mod tests {
     use std::sync::atomic::{AtomicI64, Ordering};
 
     use super::*;
-    use crate::password_digest;
+    use crate::{BanKind, password_digest};
 
     fn cheap() -> argon2::Params {
         argon2::Params::new(8, 1, 1, None).unwrap()
@@ -414,5 +532,64 @@ mod tests {
         one.authenticate_token(&t.token, &[TokenKind::GameRemember]).unwrap();
         // Same database (e.g. restored from a backup into another cluster), other cluster id.
         assert_eq!(two.authenticate_token(&t.token, &[TokenKind::GameRemember]).unwrap_err(), AccountError::TokenWrongCluster);
+    }
+
+    #[test]
+    fn a_banned_account_is_refused_until_the_ban_ends() {
+        let (a, time) = accounts("c1");
+        let d = password_digest("hunter22");
+        let alice = a.create_account("alice", &d, Role::Player).unwrap();
+        let token = a.issue_token(alice.id, TokenKind::GameRemember, 10_000).unwrap();
+        // Bad inputs.
+        assert_eq!(a.ban_account(99, "x", "root", None).unwrap_err(), AccountError::NoAccount);
+        assert!(matches!(a.ban_account(alice.id, "x", "root", Some(1_000_000)), Err(AccountError::InvalidBan(_))), "expiry now is not the future");
+        assert!(matches!(a.ban_account(alice.id, &"x".repeat(201), "root", None), Err(AccountError::InvalidBan(_))));
+        assert!(a.active_account_ban(alice.id).unwrap().is_none());
+
+        let ban = a.ban_account(alice.id, "  cheating \n here ", "root", Some(1_003_600)).unwrap();
+        assert_eq!((ban.kind, ban.reason.as_str(), ban.account.as_deref(), ban.created_by.as_str()), (BanKind::Account, "cheating here", Some("alice"), "root"));
+        assert_eq!(a.ban_account(alice.id, "again", "root", None).unwrap_err(), AccountError::AlreadyBanned);
+        // Password and token logins say so, the right password only.
+        let banned = a.authenticate("alice", &d).unwrap_err();
+        assert_eq!(banned, AccountError::Banned { reason: "cheating here".into(), until: Some(1_003_600) });
+        assert_eq!(banned.to_string(), "account is banned until 1970-01-12 14:46 UTC. Reason: cheating here.");
+        assert_eq!(a.authenticate("alice", &password_digest("wrong-pw")).unwrap_err(), AccountError::WrongPassword);
+        assert_eq!(a.authenticate_token(&token.token, &[TokenKind::GameRemember]).unwrap_err(), AccountError::TokenRevoked, "tokens are revoked by the ban");
+        assert_eq!(a.bans(true).unwrap().len(), 1);
+
+        // It ends by itself.
+        time.store(1_003_600, Ordering::SeqCst);
+        assert!(a.active_account_ban(alice.id).unwrap().is_none());
+        a.authenticate("alice", &d).unwrap();
+        let all = a.bans(false).unwrap();
+        assert_eq!((all.len(), all[0].status(1_003_600), a.bans(true).unwrap().len()), (1, "expired", 0));
+        assert_eq!(a.lift_ban(ban.id, "root").unwrap_err(), AccountError::BanNotActive);
+
+        // A permanent one is lifted by hand; the history keeps both.
+        let second = a.ban_account(alice.id, "", "root", None).unwrap();
+        assert!(matches!(a.authenticate("alice", &d), Err(AccountError::Banned { until: None, .. })));
+        let lifted = a.lift_ban(second.id, "mod").unwrap();
+        assert_eq!((lifted.lifted_by.as_deref(), lifted.status(1_003_600)), (Some("mod"), "lifted"));
+        a.authenticate("alice", &d).unwrap();
+        assert_eq!(a.lift_ban(second.id, "mod").unwrap_err(), AccountError::BanNotActive);
+        assert_eq!(a.lift_ban(77, "mod").unwrap_err(), AccountError::NoBan);
+        assert_eq!(a.bans(false).unwrap().iter().map(|b| b.id).collect::<Vec<_>>(), vec![second.id, ban.id], "newest first");
+    }
+
+    #[test]
+    fn ip_bans_match_the_canonical_address() {
+        let (a, time) = accounts("c1");
+        assert!(matches!(a.ban_ip("nonsense", "", "root", None), Err(AccountError::InvalidBan(_))));
+        let ban = a.ban_ip("::ffff:10.1.2.3", "spam", "root", Some(1_000_100)).unwrap();
+        assert_eq!((ban.kind, ban.ip.as_deref(), ban.account_id), (BanKind::Ip, Some("10.1.2.3"), None));
+        assert!(a.active_ip_ban("10.1.2.3").unwrap().is_some());
+        assert!(a.active_ip_ban("10.1.2.4").unwrap().is_none());
+        assert_eq!(a.ban_ip("10.1.2.3", "", "root", None).unwrap_err(), AccountError::AlreadyBanned);
+        time.store(1_000_100, Ordering::SeqCst);
+        assert!(a.active_ip_ban("10.1.2.3").unwrap().is_none(), "expired");
+        // Banned again after expiry; lifted by hand.
+        let again = a.ban_ip("10.1.2.3", "", "root", None).unwrap();
+        a.lift_ban(again.id, "root").unwrap();
+        assert!(a.active_ip_ban("10.1.2.3").unwrap().is_none());
     }
 }

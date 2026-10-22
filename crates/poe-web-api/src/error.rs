@@ -95,6 +95,13 @@ impl From<AccountError> for ApiError {
             AccountError::InvalidName(_) | AccountError::WeakPassword => {
                 Self::bad_request(e.to_string())
             }
+            // The text carries the ban's expiry and reason.
+            AccountError::Banned { .. } => Self::forbidden(e.to_string()),
+            AccountError::NoBan => Self::not_found(e.to_string()),
+            AccountError::AlreadyBanned | AccountError::BanNotActive => {
+                Self::new(StatusCode::CONFLICT, e.to_string())
+            }
+            AccountError::InvalidBan(_) => Self::bad_request(e.to_string()),
             AccountError::Db(_) => Self::internal(e),
         }
     }

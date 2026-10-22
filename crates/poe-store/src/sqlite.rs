@@ -12,6 +12,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_character_intro.sql"),
     include_str!("../migrations/0005_character_location.sql"),
     include_str!("../migrations/0006_accounts_auth.sql"),
+    include_str!("../migrations/0007_bans.sql"),
+    include_str!("../migrations/0008_scheduled_tasks.sql"),
 ];
 
 pub struct SqliteStore {
@@ -286,6 +288,36 @@ mod tests {
         assert_eq!(rows[0], ("Exile1".into(), None, "admin".into(), false));
         assert_eq!(rows[1], ("Exile2".into(), None, "player".into(), false));
         assert_eq!(store.account_by_login_key("bb").unwrap().unwrap().name, "Exile2");
+    }
+
+    /// 0007 and 0008 on a database that stopped at 0006 (an existing install): the new tables
+    /// appear, existing rows stay and the version moves to 8.
+    #[test]
+    fn migrations_0007_and_0008_upgrade_an_existing_database() {
+        use crate::TaskStore;
+        let conn = Connection::open_in_memory().unwrap();
+        for (i, sql) in MIGRATIONS.iter().take(6).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", i + 1).unwrap();
+        }
+        conn.execute("INSERT INTO accounts (login_key, name) VALUES ('k', 'Alice')", []).unwrap();
+        let store = SqliteStore::from_connection(conn).unwrap();
+        let version: usize = store.with_connection(|c| c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap());
+        assert_eq!(version, MIGRATIONS.len());
+        assert_eq!(store.account_by_login_key("k").unwrap().unwrap().name, "Alice");
+        assert!(store.tasks().unwrap().is_empty());
+        store.with_connection(|c| {
+            // The ban table accepts an account ban and an IP ban, and refuses a mixed row.
+            let alice: i64 = c.query_row("SELECT id FROM accounts", [], |r| r.get(0)).unwrap();
+            c.execute("INSERT INTO bans (kind, account_id, created_by, created_at) VALUES ('account', ?1, 'root', 1)", [alice]).unwrap();
+            c.execute("INSERT INTO bans (kind, ip, created_by, created_at) VALUES ('ip', '10.0.0.1', 'root', 1)", []).unwrap();
+            assert!(c.execute("INSERT INTO bans (kind, account_id, ip, created_by, created_at) VALUES ('ip', ?1, '10.0.0.2', 'root', 1)", [alice]).is_err());
+            assert!(c.execute("INSERT INTO bans (kind, created_by, created_at) VALUES ('account', 'root', 1)", []).is_err());
+            // Deleting the account removes its bans.
+            c.execute("DELETE FROM accounts WHERE id = ?1", [alice]).unwrap();
+            let left: i64 = c.query_row("SELECT count(*) FROM bans", [], |r| r.get(0)).unwrap();
+            assert_eq!(left, 1);
+        });
     }
 
     #[test]

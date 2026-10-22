@@ -48,6 +48,19 @@ fn check_password(password: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// 403 with the ban's text when the address is banned (`POST /admin/bans`).
+async fn check_ip_ban(state: &WebState, ip: std::net::IpAddr) -> Result<(), ApiError> {
+    let accounts = state.accounts.clone();
+    let canonical = poe_accounts::canonical_ip(ip);
+    match blocking(move || accounts.active_ip_ban(&canonical)).await?? {
+        Some(ban) => {
+            tracing::warn!(%ip, ban = ban.id, "web request refused: banned address");
+            Err(ApiError::forbidden(ban.notice()))
+        }
+        None => Ok(()),
+    }
+}
+
 /// 429 when the account name or the IP is locked by `[security]`.
 fn check_limit(state: &WebState, name: &str, ip: std::net::IpAddr) -> Result<(), ApiError> {
     state.limiter.check(name, ip).map_err(|locked| {
@@ -96,6 +109,7 @@ pub async fn server(State(s): State<WebState>) -> Json<ServerInfo> {
         instance_port: c.network.instance.public_port,
         gateway_region: c.gateway.region.clone(),
         uptime_secs: s.started.elapsed().as_secs(),
+        motd: Some(s.motd.get()).filter(|m| !m.is_empty()),
     })
 }
 
@@ -106,11 +120,13 @@ pub async fn server(State(s): State<WebState>) -> Json<ServerInfo> {
         (status = 409, description = "name taken", body = crate::ErrorBody)))]
 pub async fn register(
     State(s): State<WebState>,
+    ClientIp(ip): ClientIp,
     ApiJson(req): ApiJson<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AccountInfo>), ApiError> {
     if !s.config.accounts.open_registration {
         return Err(ApiError::forbidden("registration is closed"));
     }
+    check_ip_ban(&s, ip).await?;
     check_password(&req.password)?;
     let accounts = s.accounts.clone();
     let account = blocking(move || {
@@ -141,7 +157,8 @@ pub async fn login(
             )));
         }
     };
-    // Locked names and IPs are refused before the (slow) password check.
+    // A banned address and locked names and IPs are refused before the (slow) password check.
+    check_ip_ban(&s, ip).await?;
     check_limit(&s, &req.username, ip)?;
     let accounts = s.accounts.clone();
     let name = req.username.clone();
@@ -331,6 +348,11 @@ pub async fn redeem_web_token(
         .ok_or_else(invalid)?;
     if account.disabled {
         return Err(AccountError::Disabled.into());
+    }
+    check_ip_ban(&s, ip).await?;
+    let accounts = s.accounts.clone();
+    if let Some(ban) = blocking(move || accounts.active_account_ban(account_id)).await?? {
+        return Err(ApiError::forbidden(ban.notice()));
     }
     tracing::info!(account = %account.username, "web sign-in token redeemed");
     Ok(([NO_STORE], Json(issue(&s, account, TokenKind::Web).await?)))

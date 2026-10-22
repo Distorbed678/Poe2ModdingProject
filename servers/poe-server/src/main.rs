@@ -105,6 +105,36 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let (web_lifecycle, mut shutdown_requests) = poe_web_api::Lifecycle::new();
+    // Dashboard charts: a sampler fills the ring buffer (players, instances, frame time of the
+    // instance actors, memory and CPU of this process).
+    let metrics = Arc::new(poe_cluster::Metrics::new(
+        config.metrics.interval_secs,
+        config.metrics.retention_hours * 3600,
+    ));
+    if config.metrics.enabled {
+        poe_cluster::metrics::spawn_sampler(Arc::new(poe_cluster::Sampler::new(
+            metrics.clone(),
+            instance.actors.ticks.clone(),
+            instance.clone(),
+            instances.clone(),
+            Arc::new(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as i64)
+            }),
+        )));
+    }
+    // Scheduled tasks (scheduled restarts), in the server's local time zone.
+    let scheduler = Arc::new(poe_web_api::scheduler::Scheduler::new(
+        store.clone(),
+        instance.clone(),
+        web_lifecycle.clone(),
+        accounts.clone(),
+        Arc::new(poe_web_api::SystemClock),
+        jiff::tz::TimeZone::system(),
+        &config.scheduler,
+    ));
+    tokio::spawn(scheduler.clone().run());
     let web_state = poe_web_api::WebState {
         config: config.clone(),
         accounts: accounts.clone(),
@@ -116,6 +146,10 @@ async fn main() -> anyhow::Result<()> {
         web_tokens: Default::default(),
         ws_tickets: Default::default(),
         lifecycle: web_lifecycle,
+        metrics,
+        scheduler,
+        motd: Arc::new(poe_web_api::Motd::new(&config.server.motd)),
+        config_root: std::path::PathBuf::from("."),
         started: std::time::Instant::now(),
     };
     let web_enabled = config.web.enabled;

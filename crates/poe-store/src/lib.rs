@@ -1,8 +1,10 @@
 //! Persistence behind the [`Store`] trait, so the backend can be swapped (SQLite now).
 
 mod sqlite;
+mod tasks;
 
 pub use sqlite::SqliteStore;
+pub use tasks::{NewRun, RUN_MESSAGE_MAX, RunRow, TaskRow, TaskSpec, TaskStore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

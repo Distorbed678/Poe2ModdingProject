@@ -11,11 +11,62 @@ use std::{
 
 use serde::Deserialize;
 
+pub mod edit;
+pub mod schema;
 pub mod versions;
 pub use versions::{ClientCheck, VersionFile};
 
 pub const DEFAULT_PATH: &str = "config/server.toml";
 pub const ENV_PATH: &str = "POE_CONFIG";
+
+/// A problem [`Config::check_text`] found in config text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigIssue {
+    pub message: String,
+    /// 1-based line and column of the offending text, when known.
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+}
+
+/// Result of [`Config::check_text`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigCheck {
+    pub error: Option<ConfigIssue>,
+    /// Dangerous but allowed settings (only for valid text).
+    pub warnings: Vec<String>,
+}
+
+/// 1-based line and column (in characters) of a byte offset.
+fn position(text: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(text.len());
+    let before = &text.as_bytes()[..offset];
+    let line = before.iter().filter(|b| **b == b'\n').count() + 1;
+    let start = before.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+    let column = String::from_utf8_lossy(&before[start..]).chars().count() + 1;
+    (line, column)
+}
+
+/// Where `key = ...` stands inside `[section]` (1-based line and column of the key), for
+/// errors the TOML parser has no span for.
+fn find_key(text: &str, section: &str, key: &str) -> Option<(usize, usize)> {
+    let mut current = String::new();
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        if let Some(h) = t.strip_prefix('[').and_then(|h| h.split(']').next()) {
+            if !t.starts_with("[[") {
+                current = h.trim().to_owned();
+            }
+            continue;
+        }
+        if current == section
+            && t.strip_prefix(key)
+                .is_some_and(|rest| rest.trim_start().starts_with('='))
+        {
+            return Some((i + 1, line.len() - t.len() + 1));
+        }
+    }
+    None
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -82,11 +133,22 @@ pub struct Config {
     /// Password attempt limits of the login server and the web API.
     #[serde(default)]
     pub security: SecurityConfig,
+    /// The metrics sampler behind the web admin's dashboard charts.
+    #[serde(default)]
+    pub metrics: MetricsConfig,
+    /// The task scheduler (scheduled restarts).
+    #[serde(default)]
+    pub scheduler: SchedulerConfig,
     /// The build `[game] version` selects (`versions/<version>.toml`). Filled by
     /// [`Config::load`]; `None` for a config made with [`Config::parse`] (tests), which turns
     /// the client version check off.
     #[serde(skip)]
     pub version_info: Option<VersionFile>,
+    /// The file this config was loaded from (absolute when it could be resolved). Filled by
+    /// [`Config::load`]; `None` for a config made with [`Config::parse`]. The web admin's
+    /// config editor writes exactly this file.
+    #[serde(skip)]
+    pub source_path: Option<PathBuf>,
 }
 
 /// Rate limiting of password logins (the game login `0x0003` and the web API `/login` and
@@ -175,6 +237,120 @@ pub struct ServerConfig {
     /// What a restart request does (see [`RestartMode`]); a stop request always just exits.
     #[serde(default)]
     pub restart_mode: RestartMode,
+    /// Message of the day: plain text of at most [`MOTD_MAX_CHARS`] characters, shown by the
+    /// launcher's Home page (`GET /api/v1/server`, field `motd`). Empty = none. Editable from
+    /// the web admin without a restart.
+    #[serde(default, deserialize_with = "de_motd")]
+    pub motd: String,
+}
+
+/// Longest message of the day (characters).
+pub const MOTD_MAX_CHARS: usize = 280;
+
+/// Checks a message of the day: at most [`MOTD_MAX_CHARS`] characters, no control characters
+/// other than line breaks. Returns it trimmed (`\r\n` as `\n`).
+pub fn check_motd(text: &str) -> Result<String, String> {
+    let text = text.replace("\r\n", "\n");
+    let text = text.trim();
+    if text.chars().count() > MOTD_MAX_CHARS {
+        return Err(format!("the message of the day is at most {MOTD_MAX_CHARS} characters"));
+    }
+    if text.chars().any(|c| c.is_control() && c != '\n') {
+        return Err("the message of the day is plain text without control characters".into());
+    }
+    Ok(text.to_owned())
+}
+
+fn de_motd<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let text = String::deserialize(d)?;
+    check_motd(&text).map_err(serde::de::Error::custom)
+}
+
+/// `[metrics]`: the sampler behind the dashboard charts (`GET /api/v1/admin/metrics`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MetricsConfig {
+    /// Sample the server (players, instances, tick time, memory, CPU).
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Seconds between samples (1 to 3600).
+    #[serde(default = "default_metrics_interval", deserialize_with = "de_metrics_interval")]
+    pub interval_secs: u64,
+    /// How many hours of samples are kept in memory (1 to 168). A day at 5 s is 17 280 samples,
+    /// a few MB.
+    #[serde(default = "default_metrics_retention", deserialize_with = "de_metrics_retention")]
+    pub retention_hours: u64,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: default_metrics_interval(),
+            retention_hours: default_metrics_retention(),
+        }
+    }
+}
+
+fn default_metrics_interval() -> u64 {
+    5
+}
+
+fn default_metrics_retention() -> u64 {
+    24
+}
+
+fn ranged<'de, D: serde::Deserializer<'de>>(d: D, key: &str, lo: u64, hi: u64) -> Result<u64, D::Error> {
+    let v = u64::deserialize(d)?;
+    if (lo..=hi).contains(&v) {
+        Ok(v)
+    } else {
+        Err(serde::de::Error::custom(format!("{key} must be between {lo} and {hi}")))
+    }
+}
+
+fn de_metrics_interval<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    ranged(d, "[metrics] interval_secs", 1, 3600)
+}
+
+fn de_metrics_retention<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    ranged(d, "[metrics] retention_hours", 1, 168)
+}
+
+/// `[scheduler]`: tasks stored in the database and run on a schedule (scheduled restarts).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchedulerConfig {
+    /// Run scheduled tasks. Off: the page still lists them, nothing runs.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Runs kept in each task's history.
+    #[serde(default = "default_history_keep")]
+    pub history_keep: u32,
+    /// A run that is due but found later than this many seconds (the machine slept, the process
+    /// was frozen) is skipped and recorded as missed, not run late.
+    #[serde(default = "default_missed_grace", deserialize_with = "de_missed_grace")]
+    pub missed_grace_secs: u64,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            history_keep: default_history_keep(),
+            missed_grace_secs: default_missed_grace(),
+        }
+    }
+}
+
+fn default_history_keep() -> u32 {
+    100
+}
+
+fn default_missed_grace() -> u64 {
+    120
+}
+
+fn de_missed_grace<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    ranged(d, "[scheduler] missed_grace_secs", 1, 86_400)
 }
 
 /// The web API (REST and WebSocket) and the optional static web admin.
@@ -201,6 +377,17 @@ pub struct WebConfig {
     /// web admin") can be redeemed, in seconds. Must be at least 1.
     #[serde(default = "default_web_token_ttl")]
     pub web_token_ttl_secs: u64,
+    /// The web admin's config editor (`/api/v1/admin/config`): view and save this server's
+    /// config file. Off: the endpoints answer 403 and the message of the day is held in memory
+    /// only.
+    #[serde(default = "yes")]
+    pub config_editor: bool,
+    /// Where the editor puts the previous file on every save (`server.toml.<timestamp>`).
+    #[serde(default = "default_config_backup_dir")]
+    pub config_backup_dir: PathBuf,
+    /// How many backups are kept (the oldest are deleted); at least 1.
+    #[serde(default = "default_config_backup_keep")]
+    pub config_backup_keep: usize,
 }
 
 impl Default for WebConfig {
@@ -212,8 +399,19 @@ impl Default for WebConfig {
             cors_origins: Vec::new(),
             log_buffer: default_log_buffer(),
             web_token_ttl_secs: default_web_token_ttl(),
+            config_editor: true,
+            config_backup_dir: default_config_backup_dir(),
+            config_backup_keep: default_config_backup_keep(),
         }
     }
+}
+
+fn default_config_backup_dir() -> PathBuf {
+    PathBuf::from("runtime/config-backups")
+}
+
+fn default_config_backup_keep() -> usize {
+    20
 }
 
 fn default_web_bind() -> std::net::SocketAddr {
@@ -969,6 +1167,7 @@ impl Config {
             config.game.protocol_dir = info.opcodes_dir(root);
         }
         config.version_info = Some(info);
+        config.source_path = Some(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned()));
         Ok(config)
     }
 
@@ -984,6 +1183,43 @@ impl Config {
         config.dev.sweep_results = expand(&config.dev.sweep_results.to_string_lossy()).into();
         config.spawn.layout_dir = expand(&config.spawn.layout_dir);
         Ok(config)
+    }
+
+    /// Checks config text the way [`Config::load_in`] would read it, without a file: TOML
+    /// syntax, the typed sections (unknown values, wrong types, out-of-range numbers), the
+    /// `[game] version` file under `root`, and then the warnings of a valid config
+    /// ([`Config::security_warnings`], [`NetworkConfig::warnings`]). The first problem wins; it
+    /// carries line and column when the TOML parser knows them.
+    pub fn check_text(text: &str, root: &Path) -> ConfigCheck {
+        let issue = |e: &toml::de::Error| {
+            let (line, column) = match e.span() {
+                Some(span) => {
+                    let (l, c) = position(text, span.start);
+                    (Some(l), Some(c))
+                }
+                None => (None, None),
+            };
+            ConfigIssue { message: e.message().trim().to_owned(), line, column }
+        };
+        if let Err(e) = toml::from_str::<toml::Table>(text) {
+            return ConfigCheck { error: Some(issue(&e)), warnings: Vec::new() };
+        }
+        let config = match Self::parse(text) {
+            Ok(c) => c,
+            Err(e) => return ConfigCheck { error: Some(issue(&e)), warnings: Vec::new() },
+        };
+        if let Err(e) = VersionFile::load(root, &config.game.version) {
+            let message = format!("[game] version: {e}");
+            let (line, column) = find_key(text, "game", "version")
+                .map_or((None, None), |(l, c)| (Some(l), Some(c)));
+            return ConfigCheck { error: Some(ConfigIssue { message, line, column }), warnings: Vec::new() };
+        }
+        let warnings = config
+            .security_warnings()
+            .into_iter()
+            .chain(config.network.warnings())
+            .collect();
+        ConfigCheck { error: None, warnings }
     }
 
     /// Judges a client's `client_hash` against the version's known values
@@ -1286,5 +1522,73 @@ mod tests {
             (e.open_registration, e.remember_days),
             (m.open_registration, m.remember_days)
         );
+    }
+
+    #[test]
+    fn check_text_reports_line_and_column() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let good = include_str!("../../../config/server.toml");
+        let ok = Config::check_text(good, &root);
+        assert_eq!(ok, ConfigCheck::default(), "the committed config is valid and has no warnings");
+
+        // Syntax error: the line of the broken value.
+        let broken = good.replace("tick_ms = 33", "tick_ms = = 33");
+        let c = Config::check_text(&broken, &root);
+        let e = c.error.expect("syntax error");
+        assert_eq!(e.line, broken.lines().position(|l| l.starts_with("tick_ms")).map(|i| i + 1));
+        assert!(e.column.is_some() && !e.message.is_empty());
+
+        // Wrong type.
+        let c = Config::check_text(&good.replace("log_buffer = 2000", "log_buffer = \"many\""), &root);
+        let e = c.error.expect("type error");
+        assert!(e.line.is_some(), "{e:?}");
+
+        // Out of range of a ranged key.
+        let c = Config::check_text(&good.replace("interval_secs = 5 ", "interval_secs = 0 "), &root);
+        let e = c.error.expect("range error");
+        assert!(e.message.contains("interval_secs"), "{e:?}");
+
+        // Unknown game version: the version file is missing; points at the key.
+        let c = Config::check_text(&good.replace("version = \"0.5.5e\"", "version = \"9.9.9\""), &root);
+        let e = c.error.expect("version error");
+        assert!(e.message.contains("version") && e.line.is_some(), "{e:?}");
+
+        // Valid but dangerous: warnings, no error.
+        let c = Config::check_text(&good.replace("bind = \"127.0.0.1:8080\"", "bind = \"0.0.0.0:8080\""), &root);
+        assert!(c.error.is_none());
+        assert!(c.warnings.iter().any(|w| w.contains("not loopback")), "{:?}", c.warnings);
+    }
+
+    #[test]
+    fn motd_and_new_sections_parse() {
+        let base = |extra: &str| {
+            format!(
+                "{extra}\n[game]\nversion = \"x\"\ngame_dir = \"g\"\nschema = \"s\"\nprotocol_dir = \"p\"\n[network]\npublic_host = \"h\"\n[network.login]\nbind = \"0.0.0.0:1\"\n[network.instance]\nbind = \"0.0.0.0:2\"\npublic_port = 2\n[database]\npath = \"d\"\n[accounts]\nname_prefix = \"Exile\"\nmax_characters = 1\n[gateway]\nregion = \"r\"\ndisplay_name = \"n\"\n"
+            )
+        };
+        let c = Config::parse(&base("")).unwrap();
+        assert_eq!(c.server.motd, "");
+        assert!(c.metrics.enabled && c.metrics.interval_secs == 5 && c.metrics.retention_hours == 24);
+        assert!(c.scheduler.enabled && c.scheduler.history_keep == 100 && c.scheduler.missed_grace_secs == 120);
+        assert!(c.web.config_editor && c.web.config_backup_keep == 20);
+        assert!(c.source_path.is_none());
+        let c = Config::parse(&base("[server]\nmotd = \"  Welcome!\\nSee you.  \"")).unwrap();
+        assert_eq!(c.server.motd, "Welcome!\nSee you.");
+        let long = "x".repeat(MOTD_MAX_CHARS + 1);
+        assert!(Config::parse(&base(&format!("[server]\nmotd = \"{long}\""))).is_err());
+        assert!(Config::parse(&base("[server]\nmotd = \"bell\\u0007\"")).is_err());
+        assert!(check_motd(&"y".repeat(MOTD_MAX_CHARS)).is_ok());
+        assert!(Config::parse(&base("[metrics]\ninterval_secs = 3601")).is_err());
+        assert!(Config::parse(&base("[metrics]\nretention_hours = 0")).is_err());
+        assert!(Config::parse(&base("[metrics]\nretention_hours = 169")).is_err());
+        assert!(Config::parse(&base("[scheduler]\nmissed_grace_secs = 0")).is_err());
+    }
+
+    #[test]
+    fn load_remembers_the_file() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = root.join("config/server.toml");
+        let c = Config::load_in(&path, &root).unwrap();
+        assert_eq!(c.source_path.as_deref(), Some(std::fs::canonicalize(&path).unwrap().as_path()));
     }
 }

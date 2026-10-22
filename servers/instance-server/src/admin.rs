@@ -55,6 +55,10 @@ impl AdminControl for InstanceServer {
             .online()
             .into_iter()
             .map(|o| OnlinePlayer {
+                muted: self.live.is_muted(&o.character),
+                account_id: o.account_id,
+                connected_at: o.connected_at,
+                ip: o.ip.map(poe_accounts::canonical_ip),
                 character: o.character,
                 account: o.account,
                 instance: o.instance,
@@ -129,6 +133,10 @@ impl AdminControl for InstanceServer {
             args: Vec::new(),
         };
         outcome(self.finish(&Self::web_label(actor), &parsed, &line, result))
+    }
+
+    fn end_sessions(&self, account_id: u32) {
+        self.sessions.supersede(account_id);
     }
 
     fn record(&self, actor: &str, action: &str, result: &str) {

@@ -25,6 +25,10 @@ pub struct LiveSession {
     /// The session (one connection; [`crate::actor::SessionId`]). Not the client's address:
     /// clients on different machines can share a port.
     pub session: u64,
+    /// When the session registered (unix seconds).
+    pub connected_at: i64,
+    /// The client's address, when known (the web admin shows it to admins).
+    pub ip: Option<std::net::IpAddr>,
     /// Joined global and trade channel numbers (ChatJoinRequest).
     pub global: Option<u16>,
     pub trade: Option<u16>,
@@ -52,12 +56,23 @@ pub struct Live {
 pub struct Online {
     pub character: String,
     pub account: String,
+    pub account_id: u32,
+    /// Unix seconds.
+    pub connected_at: i64,
+    pub ip: Option<std::net::IpAddr>,
     pub instance: Option<u32>,
     pub area: String,
 }
 
 impl Live {
     pub fn register(&self, account_id: u32, account: &str, character: &str, instance: Option<u32>, area: &str, session: u64) -> Registration {
+        self.register_from(account_id, account, character, instance, area, session, None)
+    }
+
+    /// [`register`](Self::register) with the client's address.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_from(&self, account_id: u32, account: &str, character: &str, instance: Option<u32>, area: &str, session: u64, ip: Option<std::net::IpAddr>) -> Registration {
+        let connected_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
         let (kick, kicked) = watch::channel(false);
         let (chat, rx) = mpsc::unbounded_channel();
         self.sessions.lock().unwrap().insert(
@@ -69,6 +84,8 @@ impl Live {
                 instance,
                 area: area.to_owned(),
                 session,
+                connected_at,
+                ip,
                 global: None,
                 trade: None,
                 kick,
@@ -93,7 +110,15 @@ impl Live {
             .lock()
             .unwrap()
             .values()
-            .map(|s| Online { character: s.character.clone(), account: s.account.clone(), instance: s.instance, area: s.area.clone() })
+            .map(|s| Online {
+                character: s.character.clone(),
+                account: s.account.clone(),
+                account_id: s.account_id,
+                connected_at: s.connected_at,
+                ip: s.ip,
+                instance: s.instance,
+                area: s.area.clone(),
+            })
             .collect();
         out.sort_by(|a, b| a.character.cmp(&b.character));
         out

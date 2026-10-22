@@ -152,7 +152,10 @@ impl InstanceServer {
     }
 
     async fn handle(&self, stream: TcpStream, mut slot: poe_accounts::ConnectionSlot) -> anyhow::Result<()> {
-        let client_port = stream.peer_addr()?.port();
+        let (client_port, client_ip) = {
+            let peer = stream.peer_addr()?;
+            (peer.port(), peer.ip())
+        };
         let mut conn = Connection::new(stream)?;
         info!("client connected");
         let hello_op = self.protocol.instance.id(Hello::DIRECTION, Hello::NAME)?;
@@ -383,7 +386,7 @@ impl InstanceServer {
         };
         // Another login of the account (or disabling it) ends this session.
         let superseded = self.sessions.subscribe_superseded(ticket.account_id);
-        let registration = self.live.register(ticket.account_id, &account, &name, instance, &ticket.area, session);
+        let registration = self.live.register_from(ticket.account_id, &account, &name, instance, &ticket.area, session, Some(client_ip));
         let social_in = self.live.social.register(self.social_person(&ticket, &account, instance_id, player.entity_id, session));
         self.send_registry(&ctx);
         let closed = self.instances.closed(instance_id);

@@ -16,6 +16,11 @@ Related: accounts, tokens and hashing in [accounts.md](accounts.md); the command
 | `[web] cors_origins` | `[]` | browser origins allowed to call the API (for example `["http://localhost:5173"]` for the Vite dev server). Empty: no CORS headers |
 | `[web] log_buffer` | `2000` | recent log events kept for the live log viewer |
 | `[web] web_token_ttl_secs` | `60` | lifetime of the single-use web sign-in token ([below](#opening-the-web-admin-from-the-launcher)) |
+| `[web] config_editor` | `true` | the web admin's config editor may save the config file ([below](#config-editor)); `false`: it is read-only |
+| `[web] config_backup_dir`, `config_backup_keep` | `runtime/config-backups`, `20` | where the editor keeps the previous file on every save, and how many |
+| `[server] motd` | empty | message of the day, `GET /server` field `motd` ([below](#message-of-the-day)) |
+| `[metrics] enabled`, `interval_secs`, `retention_hours` | `true`, `5`, `24` | the sampler behind the dashboard charts ([below](#metrics)) |
+| `[scheduler] enabled`, `history_keep`, `missed_grace_secs` | `true`, `100`, `120` | scheduled tasks ([below](#scheduled-tasks)) |
 | `[accounts] open_registration` | `false` | whether `POST /register` works |
 
 Start the server and make an admin as described in [../guides/setup.md](../guides/setup.md#web-api) (`curl localhost:8080/api/v1/server`, `POST /api/v1/login` with `{"username", "password"}`, then `Authorization: Bearer <token>` on `/api/v1/admin/...`).
@@ -59,7 +64,7 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 
 | Endpoint | Auth | |
 |---|---|---|
-| `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects; the public login port), `instance_port` (public), `gateway_region`, uptime |
+| `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects; the public login port), `instance_port` (public), `gateway_region`, uptime, and `motd` (the message of the day, plain text of at most 280 characters; absent when there is none) |
 | `POST /register` `{username, password}` | none | new player account; `403` unless `open_registration`, `409` when taken |
 | `POST /login` `{username, password, kind?}` | none | `{token, kind, expires_at, account}` |
 | `POST /logout` | any token | revokes the token used (`204`) |
@@ -69,7 +74,7 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 | `POST /web-token` | launcher token of an admin | `{token, expires_in_secs, login_path}`: a single-use web sign-in token (`[web] web_token_ttl_secs`), see [Opening the web admin from the launcher](#opening-the-web-admin-from-the-launcher). `403` for web or non-admin tokens, `503` when too many unused tokens wait |
 | `POST /web-token/redeem` `{token}` | none (the token is the credential) | the same response as `POST /login` (`kind: "web"`); `401` unknown, used or expired (all alike), `403` disabled account, `429` too many failures from this IP |
 | `GET /openapi.json` | none | the OpenAPI document |
-| `GET /admin/sessions` | admin | players in game: character, account, instance, area |
+| `GET /admin/sessions` | admin | players in game: character, account, level and class id (from the character row), instance, area, `connected_at`, `ip` (the client's address: admin API only), `muted` |
 | `GET /admin/instances` | admin | every instance (area, seed, forced layout, players, age, persistent) |
 | `POST /admin/instances` `{area, seed?, topology?, orientation?}` | admin | creates an instance (`201 {id}`) |
 | `POST /admin/instances/{id}/close` | admin | closes it; its players are disconnected |
@@ -77,6 +82,20 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 | `POST /admin/players/{name}/mute` `{minutes?}` / `.../unmute` | admin | chat mute |
 | `POST /admin/players/{name}/transfer` `{instance}` or `{area, seed?, topology?, orientation?}` | admin | moves a character into an existing or a new instance |
 | `POST /admin/announce` `{message}` | admin | a `<Server>` chat line to everyone |
+| `GET /admin/bans[?active=true]` | admin | the bans, newest first, with the history of lifted and expired ones ([Bans](#bans)) |
+| `POST /admin/bans` `{account` or `ip, reason?, duration_secs?` or `expires_at?}` | admin | bans an account (logins refused, tokens revoked, sessions ended) or an address; `201`. `400` for yourself, an admin, your own address, a bad address, reason or length; `404` unknown account; `409` already banned |
+| `POST /admin/bans/{id}/lift` | admin | lifts an active ban early (`404` unknown, `409` already over) |
+| `GET /admin/metrics[?since=<ms>&range_secs=&max_points=]` | admin | the samples of the dashboard charts ([Metrics](#metrics)) |
+| `POST /admin/motd` `{motd}` | admin | sets the message of the day: live, and written into the config file ([Message of the day](#message-of-the-day)) |
+| `GET /admin/config` | admin | the config file the server runs from: text (token-like values hidden), revision, the form schema and values, warnings ([Config editor](#config-editor)); `409` when the server was not started from a file |
+| `POST /admin/config/validate` `{content}` | admin | parses the text like the server would: `{valid, error{message,line,column}, warnings}` |
+| `POST /admin/config/fields` `{content, set{path: value}}` | admin | writes form values into the text (comments kept) and returns it with its form values; with an empty `set` it only reads them |
+| `POST /admin/config/save` `{content, base_revision, restart?}` | admin | validates, backs up and replaces the file; `restart` (same options as the restart endpoint) restarts afterwards. `400` with the line and column, `403` editor off, `409` the file changed since `base_revision` |
+| `GET /admin/config/backups`, `/{name}` | admin | the saved previous versions and their text |
+| `GET /admin/schedule` | admin | the time zone and every task with its next and last run ([Scheduled tasks](#scheduled-tasks)) |
+| `POST /admin/schedule/tasks`, `/{id}`, `/{id}/enable`, `/{id}/disable`, `/{id}/delete` | admin | create (`201`), replace, turn on or off, delete a task (`TaskBody`: `{name, enabled?, task{kind: "restart", delay_secs?, message?}, schedule{type: ...}}`) |
+| `GET /admin/schedule/tasks/{id}/runs` | admin | the task's history, newest first |
+| `POST /admin/schedule/preview` `{schedule}` | admin | the schedule in words and its next 5 runs, or `400` with the problem |
 | `POST /admin/server/stop` `{delay_secs?, message?}` | admin | stops the server: `202` with the pending shutdown at once, then the countdown runs on the server (see [Stop and restart](#stop-and-restart)). `400` for a delay above 3600 s or a message above 200 characters, `409` when a stop or restart is already pending. The body is optional (no delay) |
 | `POST /admin/server/restart` `{delay_secs?, message?}` | admin | the same, then the server starts again (`[server] restart_mode`) |
 | `POST /admin/server/cancel` | admin | cancels the pending stop or restart while its countdown runs (`404` nothing pending, `409` too late) |
@@ -99,7 +118,8 @@ They do not reimplement anything. `poe_cluster::AdminControl` (`crates/poe-clust
 - `run_command(actor, line)`: parses `line` with the command registry (`commands.rs`), checks the actor's admin role now, and runs the session-free commands (`who`, `kick`, `mute`, `unmute`, `announce`, `instances`, `instance_new`, `close`, `account ...`) through the same code as chat (`exec.rs`: `run_global`/`execute_global`). Commands that need the caller's own game session (`where`, `join`, `teleport`, `terrain`, `area_info`) are refused. The call is logged and appended to the audit file as `<admin> (web)`, with passwords redacted.
 - `create_instance(actor, ...)` and `transfer_player(actor, character, target)`: `instance_new`, and the `transfer` command applied to another player. A transfer hands the account's login connection a ticket for the instance and then ends the player's instance session; the client falls back to character selection and receives the pending `InstanceDetails` ([../guides/server-admin.md](../guides/server-admin.md#transfers)).
 
-- `record(actor, action, result)`: logs an admin action that is not a registry command (a server stop, restart or cancel) and appends it to the audit file, as `<admin> (web)`.
+- `record(actor, action, result)`: logs an admin action that is not a registry command (a server stop, restart or cancel, a ban, a config save, a schedule change) and appends it to the audit file, as `<admin> (web)`.
+- `end_sessions(account_id)`: ends an account's login connections and game sessions (`LoginSessions::supersede`), after a ban. `online()` rows also carry the account id, when the session started, the client's address (the instance connection's peer) and whether the character is muted.
 
 Instance listing reads `InstanceDirectory` directly; characters come from `poe-store` (`Store::all_characters`, `character_by_id`); accounts from `AccountStore`. The crate depends on those traits only, so the tests run it against an in-memory database and a mock `AdminControl`.
 
@@ -131,6 +151,48 @@ Protocol (JSON text frames), after the upgrade:
 
 A binary that was replaced while running (an upgrade) is found again at its path (Linux reports `<path> (deleted)`). If the restart itself fails (exec error), the process logs it and exits 75. Web sessions are rows in the database, so they survive a restart; the SPA polls `GET /server` and `GET /admin/server/shutdown`, shows the countdown and "restarting" in a banner, and signs nobody out. Under a supervisor use `restart_mode = "exit"` ([../guides/hosting.md](../guides/hosting.md#running-it-permanently)).
 
+### Bans
+
+`POST /admin/bans` bans an **account** or an **IP address**, for a length (`duration_secs`, 60 s to 10 years), until a date (`expires_at`) or for good (neither). The row goes into the `bans` table (migration 0007) and stays as history when it expires or is lifted (`POST /admin/bans/{id}/lift`).
+
+- **Account ban.** `AccountStore::authenticate` and `authenticate_token` (`crates/poe-accounts`) refuse a banned account with `AccountError::Banned { reason, until }` *after* the password check, so a wrong password never learns whether the account is banned. That one place covers the game login (the client shows the ban's text: "This account is banned until 2026-10-29 04:00 UTC. Reason: ..."), the web login (`403` with the same text), launcher and game tokens and the web sign-in link. Creating the ban also revokes the account's tokens and ends its login connections and game sessions at once (`AdminControl::end_sessions`, which is `LoginSessions::supersede`, the same as disabling an account).
+- **IP ban.** The address (IPv4, or IPv6 with IPv4-mapped addresses folded into IPv4) is checked before the password and the rate limiter by the game login (`servers/login-server/src/auth.rs`) and by the web API's `login`, `register` and sign-in-link redemption, using the same client address as the login limiter (the socket, or the last `X-Forwarded-For` entry with `[security] trust_forwarded_for`). It is one address, no ranges. Behind a shared connection a ban affects everyone using it.
+- **Safety rules.** An admin cannot be banned (take the role away first), nobody can ban themselves, and the address you are calling from cannot be banned (it would lock you out). A second active ban of the same target is `409`. The reason is plain text up to 200 characters and is shown to the player.
+- **Audit.** `ban account|ip`, `unban account|ip` and the target (and the reason) are appended to the audit file as `<admin> (web)`.
+
+### Metrics
+
+`poe_cluster::metrics` (`crates/poe-cluster/src/metrics.rs`). The instance actors record the time of every simulation frame in `Actors::ticks` (`TickStats`); a sampler task (`spawn_sampler`, started by `poe-server`) takes a `Sample` every `[metrics] interval_secs` into a ring buffer sized for `[metrics] retention_hours` (24 h at 5 s: 17 280 samples, a few MB; lost on a restart).
+
+Each sample holds the time (ms), `players` (sessions in game), `instances` and `occupied` (with a player), the frames of the interval (`tick_count`) with their mean and longest time in microseconds (the meter is read and reset by each sample; no frames while nobody is in game), `rss_bytes` of the server process and `cpu_pct` (percent of one core since the previous sample). Memory and CPU come from `/proc/self` on Linux (`VmRSS`, `utime + stime` at 100 ticks per second); elsewhere they are `0` and absent.
+
+`GET /admin/metrics` answers `{enabled, interval_secs, retention_secs, now, samples}`. `since` (ms) returns only newer samples, `range_secs` the last N seconds, `max_points` (2 to 5000, default 600) merges longer ranges into buckets that keep the peak of players, instances, memory and longest frame, the frame-weighted mean frame time and the mean CPU. The dashboard reloads its range every 5 s (15 min, 1 h) up to every minute (24 h) instead of using a WebSocket or SSE stream; `since` is there for other clients that want to append.
+
+### Config editor
+
+`crates/poe-web-api/src/configfile.rs`. The editor reads and writes **the file the server was started with**: `Config::load` records its absolute path (`Config::source_path`: `POE_CONFIG`, else `config/server.toml`) and nothing else is ever written (`409` when the server has no file, as in tests). `[web] config_editor = false` makes it read-only (`403` on save).
+
+- **Form and raw editor.** `GET /admin/config` returns the text, its `revision` (SHA-256 prefix), the form's field schema (`poe_config::schema::common_fields`: section, key, label, help, type, bounds, default, restart needed; a test checks every default, minimum and maximum against the typed config) and the values the file sets. The form edits those keys; `POST /admin/config/fields` writes them into the text with `toml_edit`, so comments and layout stay, and returns the new text. The raw tab edits the text itself; `POST /admin/config/validate` is the live syntax check. Keys outside the form are edited raw.
+- **Validation before saving.** The text is checked exactly like at start: TOML syntax, the typed sections (unknown values, wrong types, ranges), then the `[game] version` file (`Config::check_text`). An invalid text is refused with its **line and column** (`400`) and nothing changes. A valid text with dangerous settings (`Config::security_warnings`: a non-loopback web bind, open registration on a reachable API, the removed Steam login key) is saved and returns the warnings; the page shows them.
+- **Diff, backup, atomic write.** The page shows a line diff of the old and new text before saving. A save copies the previous file to `[web] config_backup_dir` as `<name>.<UTC timestamp>` (`-001`, `-002` for several in one second; mode 0600; the oldest beyond `config_backup_keep` are deleted), then writes a temporary file beside the original and renames it over it (the permissions of the original are kept). `GET /admin/config/backups` lists them and the page can load one into the editor.
+- **Conflicts.** The save carries the `revision` of the text the editor opened; if the file changed since (a hand edit), it is refused with `409` and nothing is overwritten.
+- **Save and restart.** `restart: {delay_secs?, message?}` requests the restart of [Stop and restart](#stop-and-restart) after the file is written (a pending shutdown makes it `restart_error` while the file stays saved). Most keys are read only at start; the message of the day is applied live.
+- **Secrets.** The config holds none and must not. Any string value under a token-like key (`token`, `secret`, `password`, `passwd`, `api_key`, `private_key`, `credential`) is replaced by `<hidden>` in everything the editor shows (`poe_config::edit::redact`) and restored from the file on save; a placeholder with nothing to restore is refused. Contents are never logged or audited: the audit line says `config save`, the number of changed lines and the backup name.
+- **Safe defaults.** The committed `config/server.toml` has the safe values (loopback binds, no registration, no developer tools; tests keep it valid and warning-free). The editor never loosens anything by itself. When it edits that committed file inside a git checkout it says so: run a server others use from your own copy (`POE_CONFIG=runtime/server.toml`), which the editor then edits. New keys come with safe defaults in `config/server.toml` and `config/server.example.toml`.
+
+### Message of the day
+
+`[server] motd`: plain text, at most 280 characters, line breaks allowed, no other control characters (`poe_config::check_motd`; the config refuses a longer one at load). `GET /server` returns it as `motd` when it is not empty (the launcher's Home page shows it). `POST /admin/motd {motd}` changes it: it applies at once (`WebState::motd`, a live copy), and the same text is written into the config file through the config editor's save path (backup, validation, atomic write) so it survives a restart; when the file cannot be written (editor off, no file, read-only) the response says `persisted: false` with the reason and the message holds until a restart. Saving the config in the editor refreshes the live message from the new text.
+
+### Scheduled tasks
+
+`crates/poe-web-api/src/scheduler/`. Tasks live in the database (`scheduled_tasks` and `scheduled_task_runs`, migration 0008): name, `kind` and its `params`, `schedule` (JSON), enabled flag, who made it, last run, last result, next run. `poe-store` keeps `kind`, `params` and `schedule` as opaque JSON; the scheduler owns their meaning.
+
+- **Schedules** (`schedule.rs`), in the server's **local time zone** (the `TZ` variable, else the system zone; the page and `GET /admin/schedule` show the zone name and offset): `daily` (`HH:MM`), `weekly` (`days` mon..sun, `time`), `interval` (`every_secs`, 60 s to 30 days, counted from the last run or the server start) and `cron` (five fields `minute hour day-of-month month day-of-week`; `*`, numbers, ranges `a-b`, lists, steps `*/n` `a-b/n` `a/n`, names `jan` and `mon-fri`; `0` and `7` are Sunday; if both day fields are restricted either may match, as in Vixie cron). A local time skipped when the clocks go forward runs right after the gap; one that happens twice when they go back runs the first time only.
+- **Kinds** (`kind.rs`): the enum `TaskKind`, serialized with a `kind` tag. Today only `restart` (`delay_secs`, `message`: like `POST /admin/server/restart`, announced in chat during the countdown). To add a kind: a variant with its options, a `tag`, `validate`, `describe` and `execute` arm, then the web admin's task form and `cargo xtask openapi`; the database and the loop need no change. A task runs as the admin account that made it (so the announcements are audited as that admin) and fails with a clear message when that account is no longer an admin.
+- **Running** (`mod.rs`): `Scheduler::run` polls once a second. Before a task runs, its next time is stored, so a run that ends the process (a restart) cannot run again when the server is back. **Missed runs are skipped, not replayed**: a run found more than `[scheduler] missed_grace_secs` (120) after its time, or due while the server was down, is recorded as `missed` in the history and the task moves on; at start the next runs are worked out again from the current time. A restart that finds another shutdown pending is recorded as `skipped`. Results are `ok`, `failed`, `skipped`, `missed`; `history_keep` runs are kept per task. `[scheduler] enabled = false` lists tasks but runs nothing.
+- Every create, update, enable, disable and delete is audited, and so is each scheduled restart (`scheduled restart`, task id and name).
+
 ## Serving the web admin
 
 Every response (API and static files) carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a `Content-Security-Policy` that allows only the app's own scripts, styles, images and connections (`default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`); a reverse proxy that sets the same headers wins. The server has no TLS of its own: put a TLS proxy in front ([../guides/hosting.md](../guides/hosting.md#tls-reverse-proxy-for-the-web-api)).
@@ -145,17 +207,19 @@ Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the
 |---|---|
 | Login | `POST /login` with `kind: "web"`; accounts that are not admins are refused and their token revoked |
 | `#/token-login?t=<token>` | the launcher's one-time sign-in link: strips the token from the URL, redeems it with `POST /web-token/redeem`, then behaves like a login (same admin check); failures land on the login page with a notice |
-| `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s; the **server control** card: Restart and Stop each open a confirmation dialog (optional message to the players, countdown in seconds) and call `POST /admin/server/restart|stop`; a running countdown shows with a Cancel button (`POST /admin/server/cancel`) |
+| `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s; the **server control** card: Restart and Stop each open a confirmation dialog (optional message to the players, countdown in seconds) and call `POST /admin/server/restart|stop`; a running countdown shows with a Cancel button (`POST /admin/server/cancel`). The **Activity** card draws players and instances, simulation frame time (mean and longest), memory and CPU from `GET /admin/metrics` (range picker 15 min, 1 h, 6 h, 24 h; hand-rolled SVG with the theme's tokens, hover or arrow keys for exact values, reloaded every 5 to 60 s depending on the range). The **Message of the day** card calls `POST /admin/motd` |
 | every page | a banner under the top bar from `GET /server` and `GET /admin/server/shutdown` (every 5 s, every 1.5 s while a shutdown is pending or the server does not answer): countdown, restarting, stopped, unreachable; when the server answers again the page checks the session (`GET /me`), toasts and reloads the dashboard |
 | `#/logs` | `POST /admin/logs/ws-ticket`, then `GET /admin/logs/ws?ticket=...` for every connection attempt: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
-| `#/sessions` | `GET /admin/sessions`; kick, mute (minutes or until unmuted), unmute, transfer (instance id or area/seed/topology/orientation) |
+| `#/players` (`#/sessions` still works) | **Online** tab: `GET /admin/sessions` every 5 s: character, class and level, account, area, instance, connected for, IP address (admins only), filter and sort; kick, mute (minutes or until unmuted), unmute, transfer (instance id or area/seed/topology/orientation) and **Ban**. **Bans** tab (`#/players?tab=bans`): `GET /admin/bans` with the history optional, New ban (account or address), Lift. The ban dialog takes a reason and a length (quick buttons or `30m`, `12h`, `7d`, `2w`, Permanent) and can ban the player's address too; the Accounts page has a Ban button as well |
+| `#/schedule` | `GET /admin/schedule` every 10 s: tasks with next run (relative and in the server's zone), last result, an on/off switch; New or Edit task (restart countdown and message; daily, weekly days, interval, cron) with the server's preview of the next 5 runs (`POST /admin/schedule/preview`); History per task; Delete |
+| `#/config` | `GET /admin/config`: **Form** (keys grouped by section with help, defaults, bounds and a "live" or "needs a restart" mark) and **Raw TOML** (live syntax check with line and column, Go to line); **Review changes** shows the diff and the validation, then **Save** or **Save and restart** (`POST /admin/config/save`); Backups lists the saved previous files and loads one into the editor |
 | `#/instances` | `GET /admin/instances`; close, create |
 | `#/accounts` | `GET /admin/accounts`; role change, disable and enable |
 | `#/characters`, `#/characters/{id}` | `GET /admin/characters[?account=]`, `/admin/characters/{id}` |
 | Announce (top bar dialog) | `POST /admin/announce` |
 | `#/inventory`, `#/passives` | stubs ("waiting for the inventory work"), only when built with `VITE_FEATURE_INVENTORY` / `VITE_FEATURE_PASSIVES` = `true` |
 
-Close, kick, disable and role changes ask for confirmation. The bearer token is kept in `sessionStorage` (tab-lifetime, never `localStorage`); a `401` from any call other than login clears it and shows the login page. The TypeScript types (`src/lib/api/schema.d.ts`) are generated from [openapi.json](openapi.json) with `npm run gen:api` in the SPA repo: after `cargo xtask openapi` changes the spec, regenerate, run `npm run check` and commit the result in Poe2WebAdmin, then bump the submodule here. CI in Poe2WebAdmin runs `npm ci`, `npm run check`, `npm test` and `npm run build`.
+Close, kick, unmute, ban (permanent ones twice), lift, disable, delete and role changes ask for confirmation. The bearer token is kept in `sessionStorage` (tab-lifetime, never `localStorage`); a `401` from any call other than login clears it and shows the login page. The TypeScript types (`src/lib/api/schema.d.ts`) are generated from [openapi.json](openapi.json) with `npm run gen:api` in the SPA repo: after `cargo xtask openapi` changes the spec, regenerate, run `npm run check` and commit the result in Poe2WebAdmin, then bump the submodule here. CI in Poe2WebAdmin runs `npm ci`, `npm run check`, `npm test` and `npm run build`.
 
 ## Code map
 
@@ -168,13 +232,17 @@ Close, kick, disable and role changes ask for confirmation. The bearer token is 
 | `public.rs`, `admin.rs` | handlers (each carries its `utoipa` description) |
 | `dto.rs`, `error.rs` | request/response types, error body |
 | `logs.rs` | `LogBuffer`, `LogLayer`, `LogFilter` |
+| `bans.rs`, `metrics.rs`, `motd.rs` | the ban, metrics and message-of-the-day endpoints |
+| `configfile.rs` | the config editor (read, validate, form values, save with backup, backups) |
+| `scheduler/` | `schedule.rs` (schedule syntax, next run), `kind.rs` (`TaskKind`, how a task runs), `mod.rs` (`Scheduler`: tasks, the loop, missed runs), `api.rs` (endpoints) |
 | `openapi.rs` | the OpenAPI document |
-| `tests.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test) |
+| `tests.rs`, `tests_features.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test); `tests_features.rs` covers players, bans, metrics, the config editor, the message of the day and the scheduled tasks |
 
-Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, `/me`, web token mint/redeem (single use, lifetime from the config, launcher-admin only, replacement, disabled account, `no-store`, rate limit per IP), accounts, commands reaching the registry, stop and restart (validation, countdown with a paused clock, announcements, 409, cancel, auth and the admin role), instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream.
+Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, `/me`, web token mint/redeem (single use, lifetime from the config, launcher-admin only, replacement, disabled account, `no-store`, rate limit per IP), accounts, commands reaching the registry, stop and restart (validation, countdown with a paused clock, announcements, 409, cancel, auth and the admin role), instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream. The features' tests: every new endpoint without a token (`401`), as a player and with a launcher token (`403`/`401`); ban validation and its effects (login refused with the text, tokens revoked, sessions ended, lifting, address bans on login and register); metrics (since, range, merging, off); the config editor (line and column errors, form values, backup and atomic save, stale revision, restart, trimming, hidden values, editor off, the file that was loaded); the message of the day (live, persisted, limits); tasks (validation, next runs, history, preview). Elsewhere: `poe-config` (`check_text`, `edit`, the form schema against the typed config), `poe-store` (migrations 0007 and 0008 on an upgraded database, the task tables), `poe-accounts` (bans with a controlled clock), `poe-cluster` (the metrics ring buffer, merging and the sampler on a paused clock), `login-server` (the refusal text through the wire) and the scheduler (a paused clock: due runs, skipped, missed and late runs, restart at start, the loop).
 
 ## Not done
 
 - TLS in the server itself (use a reverse proxy).
 - Inventory and passive-tree endpoints (waiting for the inventory work).
 - A registry listing endpoint (`GET /admin/commands`) for generic command forms.
+- Class names in the players list (it shows the class id: the API has no game data), address ranges for IP bans, `ban`/`unban` as chat commands or `poe-server account` subcommands (the web admin is the only way to ban today), a push stream for the metrics (the page polls).

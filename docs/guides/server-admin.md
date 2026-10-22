@@ -47,9 +47,39 @@ The same commands are available over HTTP for the web admin site: `kick`, `mute`
 
 ## Web admin
 
-A browser UI for the same commands in the launcher's look (dark or light theme, sidebar navigation, a bottom tab bar on narrow screens): dashboard with the server control, live logs, players online (kick, mute, transfer), instances, accounts, characters and an announce dialog. It is the Svelte app in the submodule `modules/web-admin` (repo Poe2WebAdmin); how it is built is in [../architecture/web-api.md](../architecture/web-api.md#the-web-admin-spa).
+A browser UI for the same commands in the launcher's look (dark or light theme, sidebar navigation, a bottom tab bar on narrow screens): dashboard with the server control, live charts and the message of the day, live logs, players (online list with kick, mute, transfer and ban, and the ban list), instances, accounts, characters, scheduled tasks, the config editor and an announce dialog. It is the Svelte app in the submodule `modules/web-admin` (repo Poe2WebAdmin); how it is built is in [../architecture/web-api.md](../architecture/web-api.md#the-web-admin-spa).
 
 Build it, point `[web] static_dir` at `modules/web-admin/dist`, restart `poe-server` and open <http://127.0.0.1:8080> (the `[web] bind` address): [setup.md](setup.md#web-admin-build). Only accounts with the `admin` role get in (make one offline, [setup.md](setup.md#accounts-and-characters-offline)); the session lasts 12 hours. The moon/sun button in the top bar switches the theme (saved in the browser; the system preference decides until you choose).
+
+### Charts on the dashboard
+
+The **Activity** card plots, for the last 15 minutes, 1, 6 or 24 hours (the picker is remembered in the browser): players in game with the number of instances and busy instances, the simulation frame time (mean and longest per interval, a gap while nobody is in game), memory (resident set of the server process) and CPU (percent of one core; memory and CPU need Linux). Hover a chart, or focus it and use the arrow keys, for the exact values. The server takes a sample every 5 s and keeps 24 h in memory, so a restart empties the charts; `[metrics] enabled`, `interval_secs` and `retention_hours` change that ([../architecture/web-api.md](../architecture/web-api.md#metrics)). A frame time that grows with the players, or a longest frame above half of `[instance] tick_ms` (the server logs "slow simulation frame" then), is the sign the instance is overloaded.
+
+### Message of the day
+
+The dashboard's **Message of the day** card edits `[server] motd`: plain text up to 280 characters (line breaks are fine). Save applies it at once (the launcher's Home page shows it, `GET /api/v1/server` returns it as `motd`) and writes it into the config file with a backup. If the file cannot be written (editor off, read-only) you get a message and the text holds until the next restart.
+
+### Players, kicks, mutes and bans
+
+The **Players** page lists who is in game (character, class id and level, account, area, instance, how long connected, **IP address**, muted) with a filter and a sort. Per player: **Mute** (minutes, or until unmuted), **Unmute**, **Transfer**, **Kick** and **Ban**; each asks for confirmation.
+
+A **ban** has a reason (shown to the player), a length (1 hour, 1 day, 7 days, 30 days, your own such as `90m` or `2w`, or Permanent) and, for an account, an option to ban the address it plays from for the same time. What happens: the player is disconnected at once; its saved logins (game Remember Me, launcher, web) stop working; logging in again, in game or on the web, is refused with "This account is banned until 2026-10-29 04:00 UTC. Reason: ..." (or "permanently"); when the time is up the account works again without anyone doing anything. A banned **address** is refused at the game login and the web login, register and sign-in link; it covers everyone behind that address, and IPv6 addresses are matched exactly. You cannot ban yourself, another admin (take the role away first on the Accounts page), or the address you are using. The **Bans** tab lists the bans with when they end; tick "Show ended and lifted bans too" for the history, **Lift** ends one early and **New ban** bans an address or an account by name. The Accounts page has a Ban button too. Bans are stored in the database (`bans` table), so they survive restarts; every ban and lift is in the audit file.
+
+### Config editor
+
+The **Config** page edits the file the server was started with (the path is shown in the header: `POE_CONFIG`, else `config/server.toml`). Only admins see it and `[web] config_editor = false` makes it read-only.
+
+1. **Form**: the common keys by section (server, realm, accounts, security, instances, web, metrics, scheduler, ...) with their help text, defaults and bounds; each says whether a change is **live** (only the message of the day) or **needs a restart**. **Raw TOML**: the whole file, for every other key, with a live syntax check that names the line and column. Switching between the two keeps them in step, and the file's comments and layout are kept.
+2. **Review changes** shows a diff against the file and the server's verdict: it parses the text exactly like the start-up would. An invalid config (wrong syntax, a value of the wrong type or out of range, an unknown game version) **cannot be saved**; the error shows the line and column. Risky settings (a web bind that is not loopback, open registration on a reachable API) are allowed but listed.
+3. **Save** writes the file; **Save and restart** also restarts the server with a countdown and a message (the restart works like the dashboard's button). The previous file is copied to `[web] config_backup_dir` first (`runtime/config-backups`, newest 20 kept); **Backups** lists them and loads one into the editor to restore it. If the file changed on disk after you opened the page (a hand edit) the save is refused: reload and make the change again.
+
+The config has no secrets and must stay that way; the editor hides any string under a key named like `token`, `secret` or `password` and keeps the stored value on save. The committed `config/server.toml` keeps the safe defaults; run a server that others use from your own copy (`POE_CONFIG=runtime/server.toml`), which this page then edits, and the page warns when it is editing the committed file in a checkout. Saves are in the audit file (`config save`, the number of changed lines, the backup name, never the contents).
+
+### Scheduled tasks
+
+The **Schedule** page runs tasks by themselves. The only kind today is **Restart the server** (a countdown, 0 to 3600 s, and a message to the players, like the restart button; the creator must still be an admin when it runs). The schedule is one of: **every day** at a time, **days of the week** at a time, **every N hours** (`6h`, `90m`, `1d`: 1 minute to 30 days, counted from the last run or the server start) or a **cron** expression (`minute hour day-of-month month day-of-week`, for example `0 4 * * mon-fri`; ranges, lists, steps `*/15` and names are fine; if both day fields are set, either may match). Times are in the **server's local time zone**, which the page names (the machine's zone, or the `TZ` environment variable; a time that does not exist when the clocks go forward runs just after the gap, one that happens twice runs the first time). The form previews the next five runs before you save. Tasks can be turned on and off, edited and deleted; **History** lists each run (`ran`, `failed`, `skipped` because a stop or restart was already pending, or `missed`).
+
+A server that was **down** (or the machine asleep) at the time of a run does not make it up afterwards: the run is recorded as **missed** and the task waits for its next time. A scheduled restart that just ran does not run again when the server comes back. `[scheduler] enabled = false` turns the whole scheduler off; `missed_grace_secs` (120) is how late a run may still start. Tasks are in the database, so they survive restarts; each change and each scheduled restart is in the audit file.
 
 ### Stop and restart the server
 

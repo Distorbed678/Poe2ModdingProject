@@ -8,15 +8,20 @@
 
 mod admin;
 mod auth;
+mod bans;
+mod configfile;
 mod dto;
 mod error;
 pub mod lifecycle;
 pub mod logs;
+mod metrics;
+pub mod motd;
 mod openapi;
 mod public;
+pub mod scheduler;
 mod webtoken;
 
-use std::{sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use axum::{
     Router,
@@ -24,7 +29,7 @@ use axum::{
     routing::{get, post},
 };
 use poe_accounts::{AccountStore, LoginLimiter};
-use poe_cluster::{AdminControl, InstanceDirectory};
+use poe_cluster::{AdminControl, InstanceDirectory, Metrics};
 use poe_config::Config;
 use poe_store::Store;
 use tower_http::{
@@ -36,7 +41,9 @@ use tracing::{info, warn};
 pub use error::{ApiError, ErrorBody};
 pub use lifecycle::{Lifecycle, PendingShutdown, ShutdownKind};
 pub use logs::{LogBuffer, LogEvent, LogFilter, LogLayer, LogLevel};
+pub use motd::Motd;
 pub use openapi::{openapi, openapi_json};
+pub use scheduler::{Clock, SystemClock};
 pub use webtoken::WebTokens;
 
 /// Lifetime of a web token (the browser session).
@@ -61,6 +68,16 @@ pub struct WebState {
     /// Stop and restart requests (`/admin/server/...`); the process waits on the receiver of
     /// [`Lifecycle::new`].
     pub lifecycle: Arc<Lifecycle>,
+    /// Samples behind the dashboard charts (`GET /admin/metrics`); filled by
+    /// `poe_cluster::metrics::spawn_sampler`.
+    pub metrics: Arc<Metrics>,
+    /// Scheduled tasks (`/admin/schedule/...`); the process runs [`scheduler::Scheduler::run`].
+    pub scheduler: Arc<scheduler::Scheduler>,
+    /// The live message of the day.
+    pub motd: Arc<Motd>,
+    /// The directory `versions/<version>.toml` is read from when the config editor checks a
+    /// text (the working directory; the repository root in a checkout).
+    pub config_root: PathBuf,
     pub started: Instant,
 }
 
@@ -88,6 +105,33 @@ pub fn router(state: WebState) -> Router {
         .route("/admin/players/{name}/mute", post(admin::mute))
         .route("/admin/players/{name}/unmute", post(admin::unmute))
         .route("/admin/players/{name}/transfer", post(admin::transfer))
+        .route("/admin/bans", get(bans::list).post(bans::create))
+        .route("/admin/bans/{id}/lift", post(bans::lift))
+        .route("/admin/metrics", get(metrics::get))
+        .route("/admin/motd", post(motd::set))
+        .route("/admin/config", get(configfile::get))
+        .route("/admin/config/validate", post(configfile::validate))
+        .route("/admin/config/fields", post(configfile::fields))
+        .route("/admin/config/save", post(configfile::save))
+        .route("/admin/config/backups", get(configfile::backups))
+        .route("/admin/config/backups/{name}", get(configfile::backup))
+        .route("/admin/schedule", get(scheduler::api::overview))
+        .route("/admin/schedule/preview", post(scheduler::api::preview))
+        .route("/admin/schedule/tasks", post(scheduler::api::create))
+        .route("/admin/schedule/tasks/{id}", post(scheduler::api::update))
+        .route(
+            "/admin/schedule/tasks/{id}/enable",
+            post(scheduler::api::enable),
+        )
+        .route(
+            "/admin/schedule/tasks/{id}/disable",
+            post(scheduler::api::disable),
+        )
+        .route(
+            "/admin/schedule/tasks/{id}/delete",
+            post(scheduler::api::delete),
+        )
+        .route("/admin/schedule/tasks/{id}/runs", get(scheduler::api::runs))
         .route("/admin/announce", post(admin::announce))
         .route("/admin/server/stop", post(admin::server_stop))
         .route("/admin/server/restart", post(admin::server_restart))
@@ -177,3 +221,5 @@ pub async fn serve(state: WebState) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_features;

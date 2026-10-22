@@ -7,7 +7,9 @@ use utoipa::{
     openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
 };
 
-use crate::{admin, dto, error, lifecycle, logs, public};
+use crate::{
+    admin, bans, configfile, dto, error, lifecycle, logs, metrics, motd, public, scheduler,
+};
 
 struct BearerAuth;
 
@@ -41,6 +43,12 @@ impl Modify for BearerAuth {
         admin::server_stop, admin::server_restart, admin::server_cancel, admin::server_shutdown,
         admin::accounts, admin::disable_account, admin::enable_account, admin::set_role,
         admin::characters, admin::character, admin::logs_ws_ticket, admin::logs_ws,
+        bans::list, bans::create, bans::lift, metrics::get, motd::set,
+        configfile::get, configfile::validate, configfile::fields, configfile::save,
+        configfile::backups, configfile::backup,
+        scheduler::api::overview, scheduler::api::preview, scheduler::api::create,
+        scheduler::api::update, scheduler::api::enable, scheduler::api::disable,
+        scheduler::api::delete, scheduler::api::runs,
     ),
     components(schemas(
         error::ErrorBody, dto::ServerInfo, dto::AccountInfo, dto::RegisterRequest, dto::LoginRequest,
@@ -49,6 +57,15 @@ impl Modify for BearerAuth {
         dto::AnnounceRequest, dto::RoleRequest, dto::CommandResult, dto::LocationInfo,
         dto::ShutdownRequest, dto::ShutdownStatus, lifecycle::PendingShutdown, lifecycle::ShutdownKind,
         dto::CharacterInfo, logs::LogEvent, logs::LogFilter, logs::LogLevel,
+        bans::BanView, bans::BanRequest, metrics::MetricsPoint, metrics::MetricsResponse,
+        motd::MotdRequest, motd::MotdResponse,
+        configfile::ConfigFile, configfile::ConfigField, configfile::ValidateRequest,
+        configfile::ConfigProblem, configfile::ValidateResponse, configfile::FieldsRequest,
+        configfile::FieldsResponse, configfile::SaveRequest, configfile::SaveResponse,
+        configfile::BackupInfo, configfile::BackupContent,
+        scheduler::api::TaskBody, scheduler::api::TaskView, scheduler::api::ScheduleOverview,
+        scheduler::api::RunView, scheduler::api::PreviewRequest, scheduler::api::PreviewResponse,
+        scheduler::schedule::Schedule, scheduler::kind::TaskKind,
     )),
     modifiers(&BearerAuth),
     tags(

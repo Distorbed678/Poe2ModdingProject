@@ -8,12 +8,14 @@
 //! their SHA-256 is stored, with an expiry, a revoked flag, the account and the `[cluster] id`
 //! of the cluster that issued them.
 
+mod bans;
 mod commands;
 mod ratelimit;
 mod sqlite;
 
 use sha2::{Digest, Sha256};
 
+pub use bans::{BanKind, BanRecord, REASON_MAX, banned_text, canonical_ip, clean_reason, format_stamp, format_utc, parse_ip};
 pub use commands::{AccountCli, CommandOutput, PASSWORD_STDIN_FLAG, parse_account_cli, read_password_line, redact, run_account_command};
 pub use ratelimit::{ConnectionLimiter, ConnectionSlot, LoginLimiter, Locked};
 pub use sqlite::SqliteAccounts;
@@ -132,6 +134,17 @@ pub enum AccountError {
     InvalidName(&'static str),
     #[error("password must be at least {MIN_PASSWORD_LEN} characters")]
     WeakPassword,
+    /// The account is banned (`reason` and `until` are the ban's; shown to the player).
+    #[error("{}", crate::banned_text("account is banned", .reason, *.until))]
+    Banned { reason: String, until: Option<i64> },
+    #[error("no such ban")]
+    NoBan,
+    #[error("that account already has an active ban")]
+    AlreadyBanned,
+    #[error("that ban is not active")]
+    BanNotActive,
+    #[error("invalid ban: {0}")]
+    InvalidBan(&'static str),
     #[error("database: {0}")]
     Db(String),
 }
@@ -181,4 +194,18 @@ pub trait AccountStore: Send + Sync {
     fn revoke_token(&self, token: &[u8; 32]) -> Result<bool>;
     /// Revokes an account's tokens (of one kind, or all); returns how many were still valid.
     fn revoke_tokens(&self, account_id: u32, kind: Option<TokenKind>) -> Result<usize>;
+    /// Bans an account until `expires_at` (unix seconds, in the future; `None`: permanent),
+    /// revoking its tokens. `AlreadyBanned` while another ban of it is active. Logins of the
+    /// account fail with [`AccountError::Banned`] until the ban ends or is lifted.
+    fn ban_account(&self, account_id: u32, reason: &str, by: &str, expires_at: Option<i64>) -> Result<BanRecord>;
+    /// Bans an address (`ip` as [`parse_ip`] accepts it) until `expires_at`.
+    fn ban_ip(&self, ip: &str, reason: &str, by: &str, expires_at: Option<i64>) -> Result<BanRecord>;
+    /// Lifts an active ban early: `NoBan` for an unknown id, `BanNotActive` if it already ended.
+    fn lift_ban(&self, id: u32, by: &str) -> Result<BanRecord>;
+    /// The ban in force on the account now, if any.
+    fn active_account_ban(&self, account_id: u32) -> Result<Option<BanRecord>>;
+    /// The ban in force on the address (canonical text, see [`canonical_ip`]) now, if any.
+    fn active_ip_ban(&self, ip: &str) -> Result<Option<BanRecord>>;
+    /// Bans, newest first; only the ones in force with `active_only`.
+    fn bans(&self, active_only: bool) -> Result<Vec<BanRecord>>;
 }

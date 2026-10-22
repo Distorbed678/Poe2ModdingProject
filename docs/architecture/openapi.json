@@ -356,6 +356,232 @@
         ]
       }
     },
+    "/api/v1/admin/bans": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The bans, newest first (history included unless `?active=true`).",
+        "operationId": "list_bans",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "description": "Only the bans in force now.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BanView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Bans an account (its logins are refused, its tokens revoked and its sessions ended) or an IP\naddress. `400` for an admin, yourself, your own address, a bad address, reason or duration;\n`404` for an unknown account; `409` when the target already has an active ban.",
+        "operationId": "create_ban",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BanView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/bans/{id}/lift": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Lifts a ban that is in force. `404` unknown ban, `409` already over.",
+        "operationId": "lift_ban",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ban id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BanView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/characters": {
       "get": {
         "tags": [
@@ -481,6 +707,416 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The server's config file, with the form schema.",
+        "operationId": "get_config",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigFile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "not started from a config file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config/backups": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The saved previous versions of the config file, newest first.",
+        "operationId": "list_config_backups",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BackupInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config/backups/{name}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The text of one backup, to load into the editor.",
+        "operationId": "get_config_backup",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "backup file name from the list",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config/fields": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Writes form values into config text (comments and layout stay) so the editor can show the\nresult and its diff. Only the keys of the form are accepted; each value is checked against\nits type and bounds. Nothing is saved. With an empty `set` it only reads the form values out\nof the text (`parse_error` when it does not parse): the editor uses that to fill the form\nfrom text typed in the raw editor.",
+        "operationId": "apply_config_fields",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config/save": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Saves the text as the server's config file: validates it, keeps a backup of the previous\nfile and replaces it atomically. `400` with the line and column for an invalid config, `403`\nwhen `[web] config_editor` is off, `409` when the file changed since `base_revision`. With\n`restart` the server then restarts like `POST /admin/server/restart`.",
+        "operationId": "save_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config/validate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Parses the text exactly as the server would at start and reports the first problem with its\nline and column, or the warnings of a valid config. Nothing is saved.",
+        "operationId": "validate_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
             "description": "",
             "content": {
               "application/json": {
@@ -772,6 +1408,170 @@
             }
           },
           "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/metrics": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Players, instances, simulation frame time, memory and CPU of the server over time, sampled\nevery `[metrics] interval_secs` and kept in memory for `[metrics] retention_hours`.",
+        "operationId": "get_metrics",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Only samples after this time (unix milliseconds): to fetch what is new since the last\ncall. Overrides `range_secs`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          },
+          {
+            "name": "range_secs",
+            "in": "query",
+            "description": "Only the last this many seconds (default: everything kept).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "max_points",
+            "in": "query",
+            "description": "At most this many points (default 600, at most 5000): longer ranges are merged into\nbuckets that keep the peak of players, instances, memory and frame time.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/motd": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Sets the message of the day. It takes effect at once (`GET /server`, the launcher's Home\npage) and is written into the config file the server runs from (with a backup, like the\nconfig editor); when that is not possible the message still applies until a restart and\n`persisted` is false.",
+        "operationId": "set_motd",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MotdRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MotdResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -1088,6 +1888,565 @@
         ]
       }
     },
+    "/api/v1/admin/schedule": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The time zone, and every task with its next run and last result.",
+        "operationId": "get_schedule",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/preview": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Checks a schedule and lists its next runs, for the form. `400` names the problem.",
+        "operationId": "preview_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/tasks": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Creates a task. `400` names what is wrong with the schedule or the options.",
+        "operationId": "create_task",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/tasks/{id}": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replaces a task's name, action, schedule and enabled flag.",
+        "operationId": "update_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "task id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/tasks/{id}/delete": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Deletes a task and its history.",
+        "operationId": "delete_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "task id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/tasks/{id}/disable": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Turns a task off; it keeps its history.",
+        "operationId": "disable_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "task id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/tasks/{id}/enable": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Turns a task on; its next run is worked out from now.",
+        "operationId": "enable_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "task id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "the stored task cannot be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/schedule/tasks/{id}/runs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A task's history, newest first (at most 100).",
+        "operationId": "list_task_runs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "task id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/server/cancel": {
       "post": {
         "tags": [
@@ -1359,7 +2718,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Players in game now.",
+        "summary": "Players in game now, with their account, character level and class, where they are, since\nwhen, their address and whether they are muted. (The address is only in the admin API.)",
         "operationId": "sessions",
         "responses": {
           "200": {
@@ -1910,6 +3269,172 @@
           }
         }
       },
+      "BackupContent": {
+        "type": "object",
+        "description": "`GET /admin/config/backups/{name}`.",
+        "required": [
+          "name",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The text (token-like values hidden)."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "BackupInfo": {
+        "type": "object",
+        "description": "One backup.",
+        "required": [
+          "name",
+          "size",
+          "modified"
+        ],
+        "properties": {
+          "modified": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "BanRequest": {
+        "type": "object",
+        "description": "`POST /admin/bans`: give `account` or `ip`, and optionally how long.",
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Account name to ban."
+          },
+          "duration_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Ban length in seconds (60 to 10 years). Neither this nor `expires_at`: permanent.",
+            "minimum": 0
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "End of the ban, unix seconds in the future (instead of `duration_secs`)."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IPv4 or IPv6 address to ban."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown to the player (at most 200 characters)."
+          }
+        }
+      },
+      "BanView": {
+        "type": "object",
+        "description": "A ban, active or not.",
+        "required": [
+          "id",
+          "kind",
+          "reason",
+          "created_by",
+          "created_at",
+          "status"
+        ],
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The banned account's name (account bans)."
+          },
+          "account_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix seconds; absent: permanent."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The banned address (IP bans)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`account` or `ip`."
+          },
+          "lifted_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "lifted_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`active`, `expired` or `lifted`."
+          }
+        }
+      },
       "CharacterInfo": {
         "type": "object",
         "required": [
@@ -2002,6 +3527,171 @@
           }
         }
       },
+      "ConfigField": {
+        "type": "object",
+        "description": "One key of the form.",
+        "required": [
+          "section",
+          "key",
+          "path",
+          "label",
+          "help",
+          "kind",
+          "multiline",
+          "options",
+          "default",
+          "restart"
+        ],
+        "properties": {
+          "default": {
+            "type": "object",
+            "description": "The value that applies when the key is absent."
+          },
+          "help": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`bool`, `int`, `text`, `choice` or `list`."
+          },
+          "label": {
+            "type": "string"
+          },
+          "max": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "max_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "multiline": {
+            "type": "boolean"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string",
+            "description": "`section.key`."
+          },
+          "restart": {
+            "type": "boolean",
+            "description": "Whether a restart is needed for a change to apply."
+          },
+          "section": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigFile": {
+        "type": "object",
+        "description": "`GET /admin/config`: the file, its form schema and its warnings.",
+        "required": [
+          "path",
+          "content",
+          "revision",
+          "editable",
+          "warnings",
+          "notices",
+          "values",
+          "fields",
+          "backup_dir"
+        ],
+        "properties": {
+          "backup_dir": {
+            "type": "string",
+            "description": "Where backups go."
+          },
+          "content": {
+            "type": "string",
+            "description": "The file's text (token-like values hidden)."
+          },
+          "editable": {
+            "type": "boolean",
+            "description": "`[web] config_editor`: whether saving is allowed."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigField"
+            },
+            "description": "The keys the form offers."
+          },
+          "notices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Things to know about this file."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where the file is."
+          },
+          "revision": {
+            "type": "string",
+            "description": "Identifies this version of the file: send it back as `base_revision` when saving."
+          },
+          "values": {
+            "type": "object",
+            "description": "The values of the form's keys as the file has them (absent: the default applies)."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Dangerous settings in the file now (`Config::security_warnings`)."
+          }
+        }
+      },
+      "ConfigProblem": {
+        "type": "object",
+        "description": "A problem in the text.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "1-based, when known.",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "CreatedInstance": {
         "type": "object",
         "required": [
@@ -2024,6 +3714,58 @@
         "properties": {
           "error": {
             "type": "string"
+          }
+        }
+      },
+      "FieldsRequest": {
+        "type": "object",
+        "description": "`POST /admin/config/fields`: form values applied to a text.",
+        "required": [
+          "content",
+          "set"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The text to change (the editor's current content)."
+          },
+          "set": {
+            "type": "object",
+            "description": "`section.key` to the new value; `null` removes the key (the default applies again).",
+            "additionalProperties": {
+              "type": "object"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "FieldsResponse": {
+        "type": "object",
+        "required": [
+          "content",
+          "values"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The text with the values written in; comments and layout are kept."
+          },
+          "parse_error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfigProblem",
+                "description": "Why the text does not parse, if it does not."
+              }
+            ]
+          },
+          "values": {
+            "type": "object",
+            "description": "The form values of that text (as `GET /admin/config` reports them), so the form can be\nfilled from any text; empty when the text does not parse."
           }
         }
       },
@@ -2263,6 +4005,152 @@
           }
         }
       },
+      "MetricsPoint": {
+        "type": "object",
+        "description": "One sample.",
+        "required": [
+          "t",
+          "players",
+          "instances",
+          "occupied",
+          "tick_count",
+          "tick_avg_us",
+          "tick_max_us",
+          "rss_bytes"
+        ],
+        "properties": {
+          "cpu_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "CPU use of the server process, percent of one core; absent for the first sample and on\nplatforms where it is unknown."
+          },
+          "instances": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Instances that exist.",
+            "minimum": 0
+          },
+          "occupied": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Instances with at least one player.",
+            "minimum": 0
+          },
+          "players": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Players in game.",
+            "minimum": 0
+          },
+          "rss_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Resident memory of the server process in bytes (0: unknown on this platform).",
+            "minimum": 0
+          },
+          "t": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix milliseconds."
+          },
+          "tick_avg_us": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tick_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Simulation frames in the interval, and their mean and longest time in microseconds.",
+            "minimum": 0
+          },
+          "tick_max_us": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsResponse": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "interval_secs",
+          "retention_secs",
+          "now",
+          "samples"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "`[metrics] enabled`; when off there are no samples."
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between samples.",
+            "minimum": 0
+          },
+          "now": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The server's clock, unix milliseconds."
+          },
+          "retention_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds of history kept.",
+            "minimum": 0
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsPoint"
+            },
+            "description": "Oldest first."
+          }
+        }
+      },
+      "MotdRequest": {
+        "type": "object",
+        "description": "`POST /admin/motd`.",
+        "required": [
+          "motd"
+        ],
+        "properties": {
+          "motd": {
+            "type": "string",
+            "description": "Plain text, at most 280 characters, line breaks allowed. Empty clears it."
+          }
+        }
+      },
+      "MotdResponse": {
+        "type": "object",
+        "required": [
+          "motd",
+          "persisted"
+        ],
+        "properties": {
+          "motd": {
+            "type": "string",
+            "description": "The message now in effect (trimmed)."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was not written (config editor off, no file, read-only file, ...)."
+          },
+          "persisted": {
+            "type": "boolean",
+            "description": "Whether it was also written into the config file, so it survives a restart."
+          }
+        }
+      },
       "MuteRequest": {
         "type": "object",
         "description": "`POST /admin/players/{name}/mute`.",
@@ -2323,11 +4211,19 @@
         "required": [
           "character",
           "account",
-          "area"
+          "account_id",
+          "area",
+          "connected_at",
+          "muted"
         ],
         "properties": {
           "account": {
             "type": "string"
+          },
+          "account_id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           },
           "area": {
             "type": "string",
@@ -2336,6 +4232,20 @@
           "character": {
             "type": "string"
           },
+          "class_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "`Characters.IntegerId` of the character's class.",
+            "minimum": 0
+          },
+          "connected_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the session started (unix seconds)."
+          },
           "instance": {
             "type": [
               "integer",
@@ -2343,6 +4253,26 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's address (admin API only), when known."
+          },
+          "level": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Level of the character, when it is in the database.",
+            "minimum": 0
+          },
+          "muted": {
+            "type": "boolean",
+            "description": "The character cannot chat."
           }
         }
       },
@@ -2406,6 +4336,43 @@
           }
         }
       },
+      "PreviewRequest": {
+        "type": "object",
+        "description": "`POST /admin/schedule/preview`.",
+        "required": [
+          "schedule"
+        ],
+        "properties": {
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          }
+        }
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "required": [
+          "description",
+          "next_runs",
+          "timezone"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "The schedule in words."
+          },
+          "next_runs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The next runs (unix seconds), up to 5."
+          },
+          "timezone": {
+            "type": "string"
+          }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "description": "`POST /register`.",
@@ -2434,6 +4401,254 @@
           "role": {
             "type": "string",
             "description": "`player` or `admin`."
+          }
+        }
+      },
+      "RunView": {
+        "type": "object",
+        "description": "One entry of a task's history.",
+        "required": [
+          "id",
+          "due_at",
+          "started_at",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "due_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the run was scheduled for (unix seconds)."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok`, `failed`, `skipped` or `missed`."
+          }
+        }
+      },
+      "SaveRequest": {
+        "type": "object",
+        "description": "`POST /admin/config/save`.",
+        "required": [
+          "content",
+          "base_revision"
+        ],
+        "properties": {
+          "base_revision": {
+            "type": "string",
+            "description": "The `revision` of the file the editor opened."
+          },
+          "content": {
+            "type": "string",
+            "description": "The whole new text."
+          },
+          "restart": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ShutdownRequest",
+                "description": "Restart the server after saving (the same options as `POST /admin/server/restart`)."
+              }
+            ]
+          }
+        }
+      },
+      "SaveResponse": {
+        "type": "object",
+        "required": [
+          "saved",
+          "changed",
+          "revision",
+          "lines_changed",
+          "warnings"
+        ],
+        "properties": {
+          "backup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "File name of the backup of the previous version."
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "`false`: the text equals the file, nothing was written."
+          },
+          "lines_changed": {
+            "type": "integer",
+            "description": "Lines that differ from the previous version.",
+            "minimum": 0
+          },
+          "restart": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingShutdown",
+                "description": "The restart that was requested."
+              }
+            ]
+          },
+          "restart_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the requested restart did not start (the file is saved anyway)."
+          },
+          "revision": {
+            "type": "string",
+            "description": "The new revision."
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Schedule": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Every day at `time` (`\"HH:MM\"`, 24 hours).",
+            "required": [
+              "time",
+              "type"
+            ],
+            "properties": {
+              "time": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "daily"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "On `days` (`mon`, `tue`, ..., `sun`) at `time`.",
+            "required": [
+              "days",
+              "time",
+              "type"
+            ],
+            "properties": {
+              "days": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "time": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "weekly"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Every `every_secs` seconds (60 to 2 592 000).",
+            "required": [
+              "every_secs",
+              "type"
+            ],
+            "properties": {
+              "every_secs": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "interval"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A five-field cron expression: `minute hour day-of-month month day-of-week`.",
+            "required": [
+              "expr",
+              "type"
+            ],
+            "properties": {
+              "expr": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cron"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "How often a task runs."
+      },
+      "ScheduleOverview": {
+        "type": "object",
+        "description": "`GET /admin/schedule`.",
+        "required": [
+          "timezone",
+          "utc_offset",
+          "now",
+          "enabled",
+          "tasks"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "`[scheduler] enabled`: when off, tasks are listed but never run."
+          },
+          "now": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The server's clock, unix seconds."
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskView"
+            }
+          },
+          "timezone": {
+            "type": "string",
+            "description": "The zone the schedules are in (`Europe/Berlin`, or `UTC+02:00` when it has no name)."
+          },
+          "utc_offset": {
+            "type": "string",
+            "description": "The zone's offset from UTC now, `+02:00`."
           }
         }
       },
@@ -2475,6 +4690,13 @@
             "format": "int32",
             "description": "Port the client connects to for login (`[network.login] public_port`, else the bind port).",
             "minimum": 0
+          },
+          "motd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Message of the day (`[server] motd`, plain text, at most 280 characters); absent when\nthere is none. The launcher's Home page shows it."
           },
           "name": {
             "type": "string",
@@ -2546,6 +4768,170 @@
           }
         }
       },
+      "TaskBody": {
+        "type": "object",
+        "description": "The body of create and update.",
+        "required": [
+          "name",
+          "task",
+          "schedule"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "description": "1 to 80 characters."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "When it runs."
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskKind",
+            "description": "What the task does (`{\"kind\":\"restart\",\"delay_secs\":300,\"message\":\"...\"}`)."
+          }
+        }
+      },
+      "TaskKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Restart the server like `POST /admin/server/restart`: the players are warned during the\ncountdown, then disconnected, and the server starts again (`[server] restart_mode`).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "delay_secs": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Countdown in seconds (0 to 3600).",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "restart"
+                ]
+              },
+              "message": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Added to every announcement (at most 200 characters)."
+              }
+            }
+          }
+        ],
+        "description": "A task's action and its options."
+      },
+      "TaskView": {
+        "type": "object",
+        "description": "A task as the page shows it.",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "created_at",
+          "created_by",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "last_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_run_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "last_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`ok`, `failed`, `skipped` or `missed`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it runs next (unix seconds); absent for a disabled task."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Schedule"
+              }
+            ]
+          },
+          "schedule_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskKind",
+                "description": "Absent when the stored task cannot be read (`problem` says why)."
+              }
+            ]
+          },
+          "task_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task and the schedule in words."
+          },
+          "updated_at": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "TransferRequest": {
         "type": "object",
         "description": "`POST /admin/players/{name}/transfer`: give `instance`, or `area` (with the optional\nlayout fields) for a new one.",
@@ -2587,6 +4973,47 @@
             ],
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ValidateRequest": {
+        "type": "object",
+        "description": "`POST /admin/config/validate`.",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "ValidateResponse": {
+        "type": "object",
+        "required": [
+          "valid",
+          "warnings"
+        ],
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfigProblem"
+              }
+            ]
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Dangerous settings in valid text."
           }
         }
       },

@@ -113,7 +113,7 @@ Create the players' accounts on the server: the offline `account create <name> -
 
 ## Running it permanently
 
-The server is one process with no daemon mode; stop it with Ctrl+C or SIGTERM (players are disconnected and their sessions saved, the database is consistent after every write, exit code 0). Admins can also stop and restart it from the web admin's dashboard, with a countdown announced in game ([server-admin.md](server-admin.md#stop-and-restart-the-server)). Run it from the package folder.
+The server is one process with no daemon mode; stop it with Ctrl+C or SIGTERM (players are disconnected and their sessions saved, the database is consistent after every write, exit code 0). Admins can also stop and restart it from the web admin's dashboard, with a countdown announced in game ([server-admin.md](server-admin.md#stop-and-restart-the-server)), or on a schedule ([scheduled restarts](server-admin.md#scheduled-tasks): set `TZ` in the service environment if the machine's zone is not the one you want), and edit the config file from the browser ([config editor](server-admin.md#config-editor): point it at your own copy with `POE_CONFIG`; give the service user write access to that file and to `[web] config_backup_dir`). The dashboard's charts keep 24 h in memory, a few MB. Run it from the package folder.
 
 **Linux (systemd).** A unit for a dedicated user, saved as `/etc/systemd/system/poe-server.service` (adapt the paths):
 

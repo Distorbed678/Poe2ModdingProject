@@ -62,11 +62,40 @@ fn failed(out: AdminOutcome) -> ApiError {
         .unwrap_or_else(|| ApiError::internal("failed outcome reported ok"))
 }
 
-/// Players in game now.
+/// Players in game now, with their account, character level and class, where they are, since
+/// when, their address and whether they are muted. (The address is only in the admin API.)
 #[utoipa::path(get, path = "/api/v1/admin/sessions", tag = "admin", security(("bearer" = [])),
     responses((status = 200, body = Vec<OnlinePlayerInfo>), (status = 401, body = crate::ErrorBody), (status = 403, body = crate::ErrorBody)))]
-pub async fn sessions(State(s): State<WebState>, _: AdminAuth) -> Json<Vec<OnlinePlayerInfo>> {
-    Json(s.admin.online().into_iter().map(Into::into).collect())
+pub async fn sessions(
+    State(s): State<WebState>,
+    _: AdminAuth,
+) -> Result<Json<Vec<OnlinePlayerInfo>>, ApiError> {
+    let state = s.clone();
+    let list = blocking(move || -> Result<Vec<OnlinePlayerInfo>, ApiError> {
+        let online = state.admin.online();
+        if online.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Level and class come from the character rows.
+        let characters: HashMap<String, (u32, u32)> = state
+            .store
+            .all_characters()?
+            .into_iter()
+            .map(|c| (c.name.to_lowercase(), (c.level, c.class_id)))
+            .collect();
+        Ok(online
+            .into_iter()
+            .map(|o| {
+                let found = characters.get(&o.character.to_lowercase()).copied();
+                let mut info = OnlinePlayerInfo::from(o);
+                info.level = found.map(|f| f.0);
+                info.class_id = found.map(|f| f.1);
+                info
+            })
+            .collect())
+    })
+    .await??;
+    Ok(Json(list))
 }
 
 /// Every instance with its players.
@@ -224,6 +253,27 @@ pub async fn announce(
     )
 }
 
+/// Checks the countdown and the message of a shutdown request.
+pub(crate) fn shutdown_options(
+    delay_secs: Option<u32>,
+    message: Option<&str>,
+) -> Result<(u32, Option<String>), ApiError> {
+    let delay = delay_secs.unwrap_or(0);
+    if delay > lifecycle::MAX_DELAY_SECS {
+        return Err(ApiError::bad_request(format!(
+            "delay_secs is at most {}",
+            lifecycle::MAX_DELAY_SECS
+        )));
+    }
+    let message = lifecycle::normalize(message).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "message is at most {} characters",
+            lifecycle::MAX_MESSAGE_CHARS
+        ))
+    })?;
+    Ok((delay, message))
+}
+
 /// Reads the optional body of a shutdown request: the countdown and the message.
 fn shutdown_args(body: &[u8]) -> Result<(u32, Option<String>), ApiError> {
     let req: ShutdownRequest = if body.iter().all(u8::is_ascii_whitespace) {
@@ -232,20 +282,7 @@ fn shutdown_args(body: &[u8]) -> Result<(u32, Option<String>), ApiError> {
         serde_json::from_slice(body)
             .map_err(|e| ApiError::bad_request(format!("bad JSON body: {e}")))?
     };
-    let delay = req.delay_secs.unwrap_or(0);
-    if delay > lifecycle::MAX_DELAY_SECS {
-        return Err(ApiError::bad_request(format!(
-            "delay_secs is at most {}",
-            lifecycle::MAX_DELAY_SECS
-        )));
-    }
-    let message = lifecycle::normalize(req.message.as_deref()).ok_or_else(|| {
-        ApiError::bad_request(format!(
-            "message is at most {} characters",
-            lifecycle::MAX_MESSAGE_CHARS
-        ))
-    })?;
-    Ok((delay, message))
+    shutdown_options(req.delay_secs, req.message.as_deref())
 }
 
 async fn request_shutdown(

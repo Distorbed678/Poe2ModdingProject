@@ -71,6 +71,10 @@ fn map_error(e: AccountError, token_login: bool) -> Verdict {
         AccountError::NoAccount => refused(code::NO_ACCOUNT, "The specified account does not exist."),
         AccountError::WrongPassword => refused(code::WRONG_PASSWORD, "The password is not correct for this account."),
         AccountError::Disabled => refused(code::DISABLED, "This account has been disabled."),
+        // The ban's own words: when it ends and why.
+        AccountError::Banned { reason, until } => {
+            refused(code::DISABLED, &poe_accounts::banned_text("This account is banned", &reason, until))
+        }
         AccountError::TokenExpired | AccountError::TokenRevoked | AccountError::TokenUnknown => {
             refused(code::TOKEN_INVALID, TOKEN_STALE_NOTICE)
         }
@@ -136,6 +140,15 @@ pub fn credentials_login(
     creds: &Credentials,
 ) -> Verdict {
     let token_login = creds.token_login != 0;
+    // A banned address gets nothing, not even the password check.
+    match accounts.active_ip_ban(&poe_accounts::canonical_ip(ip)) {
+        Ok(Some(ban)) => {
+            tracing::warn!(%ip, ban = ban.id, "login refused: banned address");
+            return refused(code::DISABLED, &ban.notice());
+        }
+        Ok(None) => {}
+        Err(e) => return map_error(e, token_login),
+    }
     let account = if token_login {
         match accounts.authenticate_token(&creds.password_hash, &[TokenKind::GameRemember, TokenKind::Launcher]) {
             // A token belongs to one account: the saved user name must match it.
@@ -369,6 +382,47 @@ mod tests {
         let (r, _) = w.login(&password_creds("alice", "hunter22", false));
         assert_eq!(r.result, code::DISABLED);
         assert!(r.notice.contains("disabled"));
+    }
+
+    /// A banned account is refused with the ban's own words (expiry and reason) and can log in
+    /// again when the ban ends or is lifted; a banned address is refused before the password.
+    #[test]
+    fn banned_accounts_and_addresses_are_refused_with_a_clear_message() {
+        let w = World::new("c", Arc::new(SqliteStore::in_memory().unwrap()));
+        let rec = w.accounts.create_account("Alice", &password_digest("hunter22"), Role::Player).unwrap();
+        let (saved, _) = w.login(&password_creds("alice", "hunter22", true));
+        assert_eq!(saved.result, 0);
+
+        let now = 1_000_000;
+        let ban = w.accounts.ban_account(rec.id, "cheating", "root", Some(now + 7200)).unwrap();
+        let (r, v) = w.login(&password_creds("alice", "hunter22", false));
+        assert_eq!(r.result, code::DISABLED);
+        assert_eq!(r.notice, "This account is banned until 1970-01-12 15:46 UTC. Reason: cheating.");
+        assert!(matches!(v, Verdict::Refused { .. }));
+        assert_eq!((r.account_id, r.session_token), (0, [0; 32]));
+        // Wrong password still says wrong password (the ban is not disclosed to guessers).
+        assert_eq!(w.login(&password_creds("alice", "nope-nope", false)).0.result, code::WRONG_PASSWORD);
+        // The saved login was revoked by the ban; after the ban it is stale, the password works.
+        let (r, _) = w.login(&token_creds("alice", saved.session_token));
+        assert_eq!(r.result, code::TOKEN_INVALID);
+        // It ends by time...
+        w.time.fetch_add(7200, Ordering::SeqCst);
+        assert_eq!(w.login(&password_creds("alice", "hunter22", false)).0.result, 0);
+        // ...or when lifted. A permanent ban has no date.
+        let permanent = w.accounts.ban_account(rec.id, "", "root", None).unwrap();
+        let (r, _) = w.login(&password_creds("alice", "hunter22", false));
+        assert_eq!(r.notice, "This account is banned permanently.");
+        w.accounts.lift_ban(permanent.id, "root").unwrap();
+        assert_eq!(w.login(&password_creds("alice", "hunter22", false)).0.result, 0);
+        assert_eq!(ban.id + 1, permanent.id);
+
+        // The address of the test client.
+        w.accounts.ban_ip("10.0.0.1", "spam", "root", None).unwrap();
+        for creds in [password_creds("alice", "hunter22", false), password_creds("nobody", "x", false)] {
+            let (r, _) = w.login(&creds);
+            assert_eq!(r.result, code::DISABLED);
+            assert_eq!(r.notice, "Connections from your address are banned permanently. Reason: spam.");
+        }
     }
 
     #[test]

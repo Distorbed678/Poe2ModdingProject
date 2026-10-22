@@ -11,6 +11,13 @@
 pub struct OnlinePlayer {
     pub character: String,
     pub account: String,
+    pub account_id: u32,
+    /// When the session started (unix seconds).
+    pub connected_at: i64,
+    /// The client's address, when known.
+    pub ip: Option<String>,
+    /// The character cannot chat (`mute`).
+    pub muted: bool,
     pub instance: Option<u32>,
     /// `WorldAreas.Id`.
     pub area: String,
@@ -79,4 +86,7 @@ pub trait AdminControl: Send + Sync {
     /// appends it to the audit file, like [`run_command`](Self::run_command) does for commands.
     /// The default does nothing (mocks).
     fn record(&self, _actor: &str, _action: &str, _result: &str) {}
+    /// Ends an account's login connections and its game sessions at once (a ban, like disabling
+    /// an account). The default does nothing (mocks).
+    fn end_sessions(&self, _account_id: u32) {}
 }

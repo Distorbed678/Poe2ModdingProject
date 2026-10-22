@@ -147,6 +147,10 @@ audit_log = "runtime/admin-audit.log"
 # starts itself again; "exit" = exit code 75 for a supervisor to restart. A stop exits with 0.
 # docs/guides/server-admin.md
 restart_mode = "exec"
+# Message of the day: plain text (at most 280 characters, line breaks allowed) shown by the
+# launcher's Home page (GET /api/v1/server, field `motd`). Empty = none. The web admin edits it
+# live (Dashboard card or the config editor) and writes it back into this file.
+motd = ""   # default: none
 
 [web]
 # HTTP API and web admin (docs/architecture/web-api.md). Passwords travel in request bodies:
@@ -162,6 +166,27 @@ log_buffer = 2000
 # Lifetime (seconds) of the single-use token the launcher's "Open web admin" button hands the
 # browser (POST /api/v1/web-token); it is redeemed at once, so keep it short.
 web_token_ttl_secs = 60
+# The web admin's config editor (Config page): view, validate and save THIS file (the one the
+# server was started with: POE_CONFIG or config/server.toml). false = saving is refused.
+config_editor = true   # default
+# Each save keeps the previous file here as <name>.<timestamp>; the oldest beyond config_backup_keep go.
+config_backup_dir = "runtime/config-backups"   # default
+config_backup_keep = 20   # default
+
+[metrics]
+# Dashboard charts (GET /api/v1/admin/metrics): players, instances, tick time, memory and CPU of
+# the server process are sampled into a ring buffer in memory (lost on a restart).
+enabled = true   # default
+interval_secs = 5   # default; 1 to 3600
+retention_hours = 24   # default; 1 to 168
+
+[scheduler]
+# Scheduled tasks (web admin, Schedule page; stored in the database): currently scheduled
+# restarts. A run found later than missed_grace_secs after its time (the machine slept, the server
+# was down) is skipped and recorded as missed, never run late.
+enabled = true   # default
+history_keep = 100   # default: runs kept per task
+missed_grace_secs = 120   # default; 1 to 86400
 
 [database]
 path = "runtime/server.sqlite"

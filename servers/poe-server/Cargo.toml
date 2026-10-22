@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 instance-server.workspace = true
+jiff = "0.2"
 login-server.workspace = true
 poe-accounts.workspace = true
 poe-cluster.workspace = true

@@ -646,6 +646,7 @@ async fn run(
     mut actor: Actor,
     mut rx: mpsc::UnboundedReceiver<Cmd>,
     mut closed: Option<watch::Receiver<bool>>,
+    ticks: Arc<poe_cluster::TickStats>,
 ) {
     let mut ticker =
         tokio::time::interval(Duration::from_millis(u64::from(actor.init.tick_ms.max(1))));
@@ -671,6 +672,7 @@ async fn run(
                 let started = Instant::now();
                 actor.tick();
                 let took = started.elapsed();
+                ticks.record(took);
                 if took.as_millis() as u32 > actor.init.tick_ms / 2 {
                     warn!(instance = actor.instance(), ?took, "slow simulation frame");
                 }
@@ -748,6 +750,8 @@ pub struct Actors {
     map: Mutex<HashMap<u32, ActorHandle>>,
     generation: AtomicU64,
     sessions: AtomicU64,
+    /// Frame times of every actor, read by the metrics sampler (web admin dashboard).
+    pub ticks: Arc<poe_cluster::TickStats>,
 }
 
 /// Why a join failed.
@@ -831,7 +835,7 @@ impl Actors {
         let registry = self.clone();
         let generation = handle.generation;
         tokio::spawn(async move {
-            run(actor, rx, closed).await;
+            run(actor, rx, closed, registry.ticks.clone()).await;
             let mut map = registry.map.lock().unwrap();
             if map
                 .get(&instance)

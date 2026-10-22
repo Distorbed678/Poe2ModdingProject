@@ -9,3 +9,6 @@ publish.workspace = true
 [dependencies]
 rand.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

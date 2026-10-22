@@ -24,7 +24,7 @@ use tower::ServiceExt;
 
 use crate::{LogBuffer, LogLevel, WebState};
 
-const CONFIG: &str = r#"
+pub(crate) const CONFIG: &str = r#"
     [game]
     version = "0.5.5e"
     game_dir = "g"
@@ -51,7 +51,7 @@ const CONFIG: &str = r#"
 "#;
 
 /// Records commands; `account` commands really run against the account store.
-struct MockAdmin {
+pub(crate) struct MockAdmin {
     accounts: Arc<dyn AccountStore>,
     calls: Mutex<Vec<String>>,
     online: Vec<OnlinePlayer>,
@@ -118,18 +118,62 @@ impl AdminControl for MockAdmin {
             .unwrap()
             .push(format!("{actor}: record {action} [{result}]"));
     }
+
+    fn end_sessions(&self, account_id: u32) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("end_sessions {account_id}"));
+    }
 }
 
-struct Fixture {
-    app: Router,
-    state: WebState,
-    mock: Arc<MockAdmin>,
+/// A clock the tests move by hand.
+pub(crate) struct TestClock(pub std::sync::atomic::AtomicI64);
+
+impl crate::Clock for TestClock {
+    fn now(&self) -> i64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+pub(crate) struct Fixture {
+    pub(crate) app: Router,
+    pub(crate) state: WebState,
+    pub(crate) mock: Arc<MockAdmin>,
     /// What the process would receive when a shutdown countdown ends.
-    shutdown: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::ShutdownKind>>,
+    pub(crate) shutdown:
+        tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::ShutdownKind>>,
+    /// The scheduler's clock.
+    pub(crate) clock: Arc<TestClock>,
 }
 
-fn fixture_with(config: &str) -> Fixture {
-    let config = Arc::new(Config::parse(config).unwrap());
+pub(crate) fn fixture_with(config: &str) -> Fixture {
+    fixture_at(config, None)
+}
+
+/// The repository root (where `versions/` is).
+pub(crate) fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// A fresh directory under `target/` for a test's files.
+pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let dir = repo_root().join("target/test-tmp").join(format!(
+        "web-api-{}-{}-{name}",
+        std::process::id(),
+        N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// A fixture whose config was loaded from `source` (the config editor's file).
+pub(crate) fn fixture_at(config: &str, source: Option<std::path::PathBuf>) -> Fixture {
+    let mut config = Config::parse(config).unwrap();
+    config.source_path = source;
+    let config = Arc::new(config);
     let store = Arc::new(SqliteStore::in_memory().unwrap());
     let accounts: Arc<dyn AccountStore> = Arc::new(
         SqliteAccounts::new(store.clone(), config.cluster.id.clone())
@@ -141,6 +185,10 @@ fn fixture_with(config: &str) -> Fixture {
         online: vec![OnlinePlayer {
             character: "Bob".into(),
             account: "bobby".into(),
+            account_id: 7,
+            connected_at: 1_700_000_000,
+            ip: Some("203.0.113.9".into()),
+            muted: false,
             instance: Some(1),
             area: "G1_1".into(),
         }],
@@ -156,6 +204,21 @@ fn fixture_with(config: &str) -> Fixture {
     );
     let limiter = Arc::new(poe_accounts::LoginLimiter::from_config(&config.security));
     let (lifecycle, shutdown) = crate::Lifecycle::new();
+    let clock = Arc::new(TestClock(std::sync::atomic::AtomicI64::new(1_792_000_000)));
+    let scheduler = Arc::new(crate::scheduler::Scheduler::new(
+        store.clone(),
+        mock.clone(),
+        lifecycle.clone(),
+        accounts.clone(),
+        clock.clone(),
+        jiff::tz::TimeZone::UTC,
+        &config.scheduler,
+    ));
+    let motd = Arc::new(crate::Motd::new(&config.server.motd));
+    let metrics = Arc::new(poe_cluster::Metrics::new(
+        config.metrics.interval_secs,
+        config.metrics.retention_hours * 3600,
+    ));
     let state = WebState {
         config,
         accounts,
@@ -167,6 +230,10 @@ fn fixture_with(config: &str) -> Fixture {
         web_tokens: Default::default(),
         ws_tickets: Default::default(),
         lifecycle,
+        metrics,
+        scheduler,
+        motd,
+        config_root: repo_root(),
         started: Instant::now(),
     };
     Fixture {
@@ -174,14 +241,15 @@ fn fixture_with(config: &str) -> Fixture {
         state,
         mock,
         shutdown: tokio::sync::Mutex::new(shutdown),
+        clock,
     }
 }
 
-fn fixture() -> Fixture {
+pub(crate) fn fixture() -> Fixture {
     fixture_with(CONFIG)
 }
 
-fn open_registration() -> String {
+pub(crate) fn open_registration() -> String {
     CONFIG.replace(
         "remember_days = 7",
         "remember_days = 7\n    open_registration = true",
@@ -189,7 +257,7 @@ fn open_registration() -> String {
 }
 
 impl Fixture {
-    async fn call(
+    pub(crate) async fn call(
         &self,
         method: &str,
         uri: &str,
@@ -220,14 +288,14 @@ impl Fixture {
         (status, value)
     }
 
-    fn account(&self, name: &str, password: &str, role: Role) {
+    pub(crate) fn account(&self, name: &str, password: &str, role: Role) {
         self.state
             .accounts
             .create_account(name, &password_digest(password), role)
             .unwrap();
     }
 
-    async fn login(&self, name: &str, password: &str) -> String {
+    pub(crate) async fn login(&self, name: &str, password: &str) -> String {
         let (status, body) = self
             .call(
                 "POST",
@@ -240,7 +308,7 @@ impl Fixture {
         body["token"].as_str().unwrap().to_owned()
     }
 
-    fn calls(&self) -> Vec<String> {
+    pub(crate) fn calls(&self) -> Vec<String> {
         self.mock.calls.lock().unwrap().clone()
     }
 }
@@ -644,6 +712,7 @@ async fn a_token_from_another_cluster_is_refused() {
             state,
             mock: f.mock.clone(),
             shutdown: tokio::sync::Mutex::new(crate::Lifecycle::new().1),
+            clock: f.clock.clone(),
         }
     };
     let (status, _) = other

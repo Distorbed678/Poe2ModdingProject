@@ -27,6 +27,10 @@ pub struct ServerInfo {
     /// Realm region written into the client's gateway list.
     pub gateway_region: String,
     pub uptime_secs: u64,
+    /// Message of the day (`[server] motd`, plain text, at most 280 characters); absent when
+    /// there is none. The launcher's Home page shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motd: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -131,9 +135,20 @@ pub struct PasswordRequest {
 pub struct OnlinePlayerInfo {
     pub character: String,
     pub account: String,
+    pub account_id: u32,
+    /// Level of the character, when it is in the database.
+    pub level: Option<u32>,
+    /// `Characters.IntegerId` of the character's class.
+    pub class_id: Option<u32>,
     pub instance: Option<u32>,
     /// `WorldAreas.Id`.
     pub area: String,
+    /// When the session started (unix seconds).
+    pub connected_at: i64,
+    /// The client's address (admin API only), when known.
+    pub ip: Option<String>,
+    /// The character cannot chat.
+    pub muted: bool,
 }
 
 impl From<OnlinePlayer> for OnlinePlayerInfo {
@@ -141,8 +156,14 @@ impl From<OnlinePlayer> for OnlinePlayerInfo {
         Self {
             character: o.character,
             account: o.account,
+            account_id: o.account_id,
+            level: None,
+            class_id: None,
             instance: o.instance,
             area: o.area,
+            connected_at: o.connected_at,
+            ip: o.ip,
+            muted: o.muted,
         }
     }
 }
