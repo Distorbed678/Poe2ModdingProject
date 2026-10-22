@@ -16,9 +16,13 @@ poe-cluster.workspace = true
 poe-config.workspace = true
 poe-data.workspace = true
 poe-game.workspace = true
+poe-mod-host.workspace = true
 poe-proto.workspace = true
 poe-store.workspace = true
 poe-web-api.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

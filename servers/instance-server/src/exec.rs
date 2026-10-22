@@ -2,6 +2,7 @@
 
 use poe_cluster::{InstanceSpec, Ticket};
 use poe_data::views::WorldArea;
+use poe_mod_host::CommandAction;
 use tracing::{info, warn};
 
 use crate::{
@@ -46,12 +47,21 @@ impl Outcome {
     }
 }
 
+/// How many aliases of mod commands may call each other.
+const MAX_ALIAS_DEPTH: u8 = 4;
+
 /// The name server messages are sent under.
 pub const SERVER_NAME: &str = "<Server>";
 
 impl InstanceServer {
     /// Parses and runs a command line (without the chat prefix).
     pub(crate) fn run_command(&self, ctx: &SessionCtx<'_>, player: &mut player::Player, line: &str) -> Outcome {
+        self.run_command_depth(ctx, player, line, 0)
+    }
+
+    /// [`run_command`](Self::run_command) for an alias of a mod: `depth` counts the aliases
+    /// followed so far.
+    fn run_command_depth(&self, ctx: &SessionCtx<'_>, player: &mut player::Player, line: &str, depth: u8) -> Outcome {
         let parsed = match commands::parse(line) {
             Ok(p) => p,
             Err(e) => return Outcome::err(e),
@@ -60,8 +70,43 @@ impl InstanceServer {
         if parsed.spec.admin && !self.is_admin(&ctx.account) {
             return Outcome::err(format!("{} is for admins only", parsed.spec.name));
         }
-        let out = self.execute(ctx, player, &parsed);
+        let out = match commands::extra(parsed.spec.name) {
+            Some(extra) => self.execute_mod(ctx, player, &parsed, extra, depth),
+            None => self.execute(ctx, player, &parsed),
+        };
         self.finish(&ctx.account, &parsed, line, out)
+    }
+
+    /// A command that a mod added: a fixed reply, an alias of another command line, or the
+    /// mod's own code (run by the instance actor; the answer arrives as the chat lines the mod
+    /// submits, so this outcome has no text).
+    fn execute_mod(
+        &self,
+        ctx: &SessionCtx<'_>,
+        player: &mut player::Player,
+        p: &Parsed,
+        extra: &commands::Extra,
+        depth: u8,
+    ) -> anyhow::Result<Outcome> {
+        let args = p.get("args").unwrap_or_default();
+        let fill = |text: &str| commands::fill(text, &ctx.ticket.character.name, args);
+        Ok(match &extra.action {
+            CommandAction::Reply(text) => Outcome::ok(fill(text)),
+            CommandAction::Alias(line) => {
+                if depth >= MAX_ALIAS_DEPTH {
+                    return Ok(Outcome::err(format!("{}: aliases nest too deep", p.spec.name)));
+                }
+                // The target command is checked like a typed one (its role, its arguments).
+                return Ok(self.run_command_depth(ctx, player, fill(line).trim(), depth + 1));
+            }
+            CommandAction::Native => {
+                if player.mod_command(&extra.mod_id, p.spec.name, args) {
+                    Outcome::ok("")
+                } else {
+                    Outcome::err("the instance is not running")
+                }
+            }
+        })
     }
 
     /// Runs a command that needs no game session of its own (the web API's `AdminControl`):
@@ -193,7 +238,7 @@ impl InstanceServer {
                     None => Outcome::err(format!("no command {c}")),
                 },
                 None => {
-                    let list: Vec<&str> = commands::COMMANDS.iter().filter(|c| ctx.admin || !c.admin).map(|c| c.name).collect();
+                    let list: Vec<&str> = commands::all().filter(|c| ctx.admin || !c.admin).map(|c| c.name).collect();
                     Outcome::ok(format!("commands ({}help <command>): {}", self.config.commands.prefix, list.join(", ")))
                 }
             },

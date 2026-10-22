@@ -357,6 +357,24 @@ async fn serve_frames(
                 return reply(stream, sc::REPLY_AUTH, &format!("{r:?}")).await;
             }
         };
+        if kind == Kind::ModReport {
+            // The hook's list of loaded client mods: kept for the login check of this session.
+            return match poe_hook_shared::modreport::ModReport::decode(&payload) {
+                Ok(report) => {
+                    info!(
+                        session = format_args!("{session:016x}"),
+                        mods = report.mods.len(),
+                        "client mod report"
+                    );
+                    reports.store_mod_report(session, report);
+                    reply(stream, sc::REPLY_OK, "stored").await
+                }
+                Err(e) => {
+                    warn!("client mod report rejected: {e}");
+                    reply(stream, sc::REPLY_REJECTED, &e.to_string()).await
+                }
+            };
+        }
         *session_out = Some(session);
         match kind {
             Kind::UploadOffer => {
@@ -730,6 +748,35 @@ mod tests {
             0,
             "nothing written"
         );
+    }
+
+    #[tokio::test]
+    async fn a_mod_report_over_tcp_is_kept_for_its_session() {
+        use poe_hook_shared::modreport::{ModReport, ReportedMod, sha256};
+        let dir = Scratch::new("modreport");
+        let rig = rig(dir.path()).await;
+        let material = [9u8; 64];
+        let sid = rig.reports.register(&material, 50000);
+        let keys = SessionKeys::derive(&material);
+        assert_eq!(rig.reports.mod_report(sid), None);
+        let report = ModReport {
+            mods: vec![ReportedMod { id: "hello-both".into(), version: "0.1.0".into(), manifest_sha256: sha256(b"t"), dll_sha256: Some(sha256(b"d")) }],
+        };
+        let frame = seal(&keys, Kind::ModReport, 1, &report.encode());
+        let replies = client_exchange(rig.addr, &[frame.clone()]).await;
+        assert_eq!(replies, vec![(sc::REPLY_OK, "stored".to_owned())]);
+        assert_eq!(rig.reports.mod_report(sid), Some(report.clone()));
+        // The session's waiter sees it at once; a replay of the frame is refused.
+        assert_eq!(rig.reports.wait_mod_report(sid, Duration::from_secs(1)).await, Some(report));
+        assert_eq!(client_exchange(rig.addr, &[frame]).await[0].0, sc::REPLY_AUTH);
+        // A report that does not decode is rejected and keeps nothing for the other session.
+        let other = [10u8; 64];
+        let oid = rig.reports.register(&other, 50001);
+        let bad = seal(&SessionKeys::derive(&other), Kind::ModReport, 1, &[1, 5, 0]);
+        assert_eq!(client_exchange(rig.addr, &[bad]).await[0].0, sc::REPLY_REJECTED);
+        assert_eq!(rig.reports.mod_report(oid), None);
+        // No report in time: the waiter gives up (an old hook).
+        assert_eq!(rig.reports.wait_mod_report(oid, Duration::from_millis(250)).await, None);
     }
 
     #[tokio::test]

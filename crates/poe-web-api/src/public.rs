@@ -110,6 +110,7 @@ pub async fn server(State(s): State<WebState>) -> Json<ServerInfo> {
         gateway_region: c.gateway.region.clone(),
         uptime_secs: s.started.elapsed().as_secs(),
         motd: Some(s.motd.get()).filter(|m| !m.is_empty()),
+        mods: crate::mods::advertised(&s),
     })
 }
 

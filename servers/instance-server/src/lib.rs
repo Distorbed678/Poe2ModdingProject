@@ -20,7 +20,9 @@ mod appearance;
 pub mod chat;
 pub mod commands;
 mod exec;
+pub use exec::SERVER_NAME;
 pub mod live;
+pub mod modlink;
 mod movement;
 mod player;
 pub mod seeds;
@@ -30,6 +32,8 @@ pub mod sync;
 pub mod terrain_store;
 #[cfg(test)]
 mod actor_tests;
+#[cfg(test)]
+mod mod_tests;
 #[cfg(test)]
 mod replay_tests;
 use poe_data::{
@@ -77,6 +81,8 @@ pub struct InstanceServer {
     pub terrain: Arc<terrain_store::TerrainStore>,
     /// The instance actors (one per instance with players, started by the first join).
     pub actors: Arc<actor::Actors>,
+    /// The server's mods (events, commands, the login check of the client's mods).
+    pub mods: Arc<poe_mod_host::ModHost>,
 }
 
 impl InstanceServer {
@@ -338,6 +344,10 @@ impl InstanceServer {
             .flatten()
             .map(|a| a.name)
             .unwrap_or_else(|| format!("account {}", ticket.account_id));
+        // The client's mods against the server's requirements (the hook reports them over the
+        // side channel while the terrain was generating); the answer is acted on once the
+        // client is in the world and can show a message.
+        let mod_verdict = self.client_mod_verdict(side.id).await;
         // Join the instance's actor. The saved or start cell is the spawn; the session's
         // entity id comes from the instance's counter.
         let session = self.actors.next_session();
@@ -355,6 +365,8 @@ impl InstanceServer {
         let request = actor::JoinRequest {
             session,
             name: name.clone(),
+            account: account.clone(),
+            admin: self.is_admin(&account),
             spawn: cell,
             speed: setup.speed,
             movement: setup.movement.clone(),
@@ -373,6 +385,11 @@ impl InstanceServer {
             self.store.set_intro_done(ticket.character.id)?;
         }
         self.enter_world(&mut conn, &ticket, &class, washed_up, &joined, &player).await?;
+        if let poe_mod_host::Verdict::Refused(problems) = mod_verdict {
+            self.refuse_client_mods(&mut conn, &name, &problems).await?;
+            player.leave().await;
+            return Ok(());
+        }
 
         let ctx = exec::SessionCtx {
             ticket: &ticket,
@@ -422,6 +439,41 @@ impl InstanceServer {
         result
     }
 
+    /// Compares the client's reported mods with the server's required set
+    /// ([`poe_mod_host::check_client`]). Waits for the report only when the answer depends on
+    /// it: the check is on and the server requires mods or forbids extra ones.
+    async fn client_mod_verdict(&self, side: u64) -> poe_mod_host::Verdict {
+        use poe_mod_host::Verdict;
+        let mods = &self.mods;
+        if !mods.check_enabled() || (mods.required().is_empty() && mods.allow_extra_client_mods()) {
+            return Verdict::Allowed;
+        }
+        let wait = Duration::from_secs(mods.report_wait_secs());
+        let report = self.reports.wait_mod_report(side, wait).await;
+        if report.is_none() {
+            warn!(waited = ?wait, "the client sent no mod report (an old hook, or none)");
+        }
+        poe_mod_host::check_client(mods.required(), mods.allow_extra_client_mods(), report.as_ref())
+    }
+
+    /// Tells the client why it is refused (server chat lines), gives it a moment to show them
+    /// and ends the session.
+    async fn refuse_client_mods(&self, conn: &mut Connection, name: &str, problems: &[String]) -> anyhow::Result<()> {
+        warn!(player = name, ?problems, "login refused: the client's mods do not match this server's");
+        let mut lines = vec!["You cannot play on this server: your client mods do not match it.".to_owned()];
+        lines.extend(problems.iter().cloned());
+        let needed: Vec<String> = self.mods.required().iter().map(|m| format!("{} {}", m.id, m.version)).collect();
+        if !needed.is_empty() {
+            lines.push(format!("This server needs: {}. Install them with the launcher (server page), then log in again.", needed.join(", ")));
+        }
+        for text in lines {
+            let line = live::ChatOut { sender: exec::SERVER_NAME.into(), text };
+            conn.send(&self.protocol.instance.encode(&chat_line(&line))?).await?;
+        }
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        Ok(())
+    }
+
     /// What the actor of `instance` is created with (the first join's character supplies the
     /// default movement configuration and the grid).
     fn actor_init(&self, ticket: &Ticket, instance: u32, first: &actor::JoinRequest) -> actor::ActorInit {
@@ -442,6 +494,8 @@ impl InstanceServer {
             idle: Duration::from_secs(self.config.instance.idle_minutes * 60),
             trace: self.reports.trace().is_some(),
             player_spacing: self.config.spawn.player_spacing,
+            mods: self.mods.clone(),
+            sink: Arc::new(modlink::LiveSink(self.live.clone())),
         }
     }
 
@@ -774,7 +828,7 @@ impl InstanceServer {
             return;
         }
         let mut chunk = String::from("cmds\tbegin\n");
-        for spec in commands::COMMANDS {
+        for spec in commands::all() {
             let line = commands::wire(spec);
             if chunk.len() + line.len() > 3000 {
                 self.reports.send_debug(ctx.side, &chunk);
@@ -1017,9 +1071,12 @@ impl InstanceServer {
                             conn.send(&out.raw).await?;
                         }
                         let leave = out.leave;
-                        let text = if out.ok { out.text } else { format!("Error: {}", out.text) };
-                        let line = live::ChatOut { sender: exec::SERVER_NAME.into(), text };
-                        conn.send(&table.encode(&chat_line(&line))?).await?;
+                        // A mod's own command answers with the chat lines it submits.
+                        if !(out.ok && out.text.is_empty()) {
+                            let text = if out.ok { out.text } else { format!("Error: {}", out.text) };
+                            let line = live::ChatOut { sender: exec::SERVER_NAME.into(), text };
+                            conn.send(&table.encode(&chat_line(&line))?).await?;
+                        }
                         if leave {
                             info!("handing the client to another instance: ending this session");
                             return Ok(Handled::Exit);

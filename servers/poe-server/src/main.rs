@@ -1,4 +1,5 @@
 mod lifecycle;
+mod mods_cli;
 
 use std::sync::Arc;
 
@@ -14,6 +15,12 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 async fn main() -> anyhow::Result<()> {
     lifecycle::wait_for_parent().await;
     let config = Arc::new(Config::load_default()?);
+    // `poe-server mod <list|install|enable|disable|verify>` manages the mods folder offline.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("mod") {
+        return mods_cli::run(&config.mods.dir, &args[1..]);
+    }
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(&config.logging.filter));
     // The web API keeps recent events for its live log viewer (`[web] log_buffer`).
@@ -51,7 +58,6 @@ async fn main() -> anyhow::Result<()> {
     // accounts offline (the first admin), then exits. `create`/`passwd` take the password with
     // `--password-stdin` (one line on standard input; it is not visible in the process list).
     // The password as a command-line argument still works but is discouraged.
-    let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("account") {
         let cli = poe_accounts::parse_account_cli(&args[1..], &mut std::io::stdin().lock()).map_err(anyhow::Error::msg)?;
         return match poe_accounts::run_account_command(&*accounts, None, &cli.sub, cli.name.as_deref(), cli.value.as_deref()) {
@@ -69,7 +75,22 @@ async fn main() -> anyhow::Result<()> {
     let tickets = Arc::new(MemoryTickets::new(std::time::Duration::from_secs(60)));
     let sessions = Arc::new(MemorySessions::default());
     let instances = Arc::new(MemoryInstances::default());
-    let data = Arc::new(GameData::open(&config.game.game_dir, &config.game.schema)?);
+    // Server mods: planned and loaded before anything serves. Their commands join the registry
+    // and their data overlays go in front of the game files.
+    let mods = Arc::new(poe_mod_host::ModHost::load(&poe_mod_host::HostConfig {
+        mods: config.mods.clone(),
+        game_version: config.game.version.clone(),
+        server_version: env!("CARGO_PKG_VERSION").to_owned(),
+        server_dir: std::env::current_dir().unwrap_or_default(),
+        reserved_commands: instance_server::commands::COMMANDS.iter().map(|c| c.name.to_owned()).collect(),
+    }));
+    instance_server::commands::install_mod_commands(mods.commands());
+    let mut game_data = GameData::open(&config.game.game_dir, &config.game.schema)?;
+    for dir in mods.overlay_dirs() {
+        tracing::info!(dir = %dir.display(), "mods: data overlay");
+        game_data.files_mut().push_override(dir.clone());
+    }
+    let data = Arc::new(game_data);
     tracing::info!(game_dir = %config.game.game_dir.display(), "game data opened");
     // One limiter for the login server and the web API.
     let limiter = Arc::new(poe_accounts::LoginLimiter::from_config(&config.security));
@@ -102,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         instances: instances.clone(),
         live: Default::default(),
         actors: Default::default(),
+        mods: mods.clone(),
     });
 
     let (web_lifecycle, mut shutdown_requests) = poe_web_api::Lifecycle::new();
@@ -149,6 +171,7 @@ async fn main() -> anyhow::Result<()> {
         metrics,
         scheduler,
         motd: Arc::new(poe_web_api::Motd::new(&config.server.motd)),
+        mods: mods.clone(),
         config_root: std::path::PathBuf::from("."),
         started: std::time::Instant::now(),
     };
@@ -161,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
             std::future::pending().await
         }
     };
+    mods.dispatch(&poe_mod_host::EventData::server(poe_mod_host::EVENT_SERVER_START));
     // Runs until a failure or until a stop or restart is requested: by an admin (web API,
     // after its countdown) or by SIGINT/SIGTERM (at once).
     let kind = {
@@ -175,7 +199,15 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     tracing::info!(action = kind.as_str(), "shutting down: disconnecting players");
+    // Mods hear about the stop first (while players are still there), then shut down after.
+    let submitted = mods.dispatch(&poe_mod_host::EventData::server(poe_mod_host::EVENT_SERVER_STOP));
+    for s in submitted {
+        if let poe_mod_host::ModCommand::Broadcast { text } = s.command {
+            instance.live.broadcast(instance_server::live::ChatOut { sender: instance_server::SERVER_NAME.into(), text }, |_| true);
+        }
+    }
     drain(&instance).await;
+    mods.shutdown();
     let action = lifecycle::decide(kind, config.server.restart_mode, lifecycle::HAS_EXEC);
     tracing::info!(?action, "shutdown complete");
     lifecycle::perform(action)

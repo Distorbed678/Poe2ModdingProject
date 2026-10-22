@@ -129,6 +129,11 @@ impl Live {
         self.sessions.lock().unwrap().get(&character.to_lowercase()).map(|s| (s.account_id, s.character.clone()))
     }
 
+    /// The character name of an online session (`PlayerSnap::id` is a session id).
+    pub fn character_of(&self, session: u64) -> Option<String> {
+        self.sessions.lock().unwrap().values().find(|s| s.session == session).map(|s| s.character.clone())
+    }
+
     /// The character's exact name if it is online.
     pub fn find(&self, character: &str) -> Option<String> {
         self.sessions.lock().unwrap().get(&character.to_lowercase()).map(|s| s.character.clone())

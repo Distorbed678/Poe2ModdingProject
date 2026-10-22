@@ -188,6 +188,29 @@ enabled = true   # default
 history_keep = 100   # default: runs kept per task
 missed_grace_secs = 120   # default; 1 to 86400
 
+[mods]
+# Server mods (docs/guides/modding.md, `poe-server mod list|install|enable|disable|verify`).
+# The folder holds state.toml (enabled mods in load order), one folder per mod and
+# packages/<id>-<version>.zip (what clients download). Changing mods needs a restart.
+dir = "mods"   # default
+# Check at login that the client runs exactly the client mods this server requires (side client or
+# both, enabled). Only active when <dir>/state.toml exists. A client without the mod hook's
+# report (old hook) is refused when the server requires mods.
+require_client_mods = true   # default
+# Allow client mods the server does not list. false: any extra client mod refuses the login.
+allow_extra_client_mods = false   # default
+# More download addresses advertised for every offered mod ({id} and {version} are replaced).
+extra_urls = []   # default
+# Seconds to wait for the client's mod report after it entered the instance; 1 to 120.
+report_wait_secs = 15   # default
+# A mod whose callbacks fail this many times in a row is disabled; 0 = never.
+max_failures = 5   # default
+# A mod callback slower than this (milliseconds) is logged and counts as a failure; 0 = no limit.
+callback_budget_ms = 50   # default
+# Settings handed to one mod (read with config_get):
+# [mods.config.hello-server]
+# greeting = "Hello"
+
 [database]
 path = "runtime/server.sqlite"
 

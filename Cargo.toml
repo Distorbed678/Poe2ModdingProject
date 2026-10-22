@@ -42,6 +42,13 @@ poe-hook-deploy = { path = "modules/client-hook/poe-hook-deploy" }
 poe-hook-sig = { path = "modules/client-hook/poe-hook-sig" }
 # Side-channel framing (HMAC, upload payload) shared with the client DLL.
 poe-hook-shared = { path = "modules/client-hook/poe-hook-shared" }
+# Manifest v2, state.toml, load plan and package verification, shared with the client hook, the
+# launcher and the SDK (path through the client-hook submodule).
+poe-hook-mods = { path = "modules/client-hook/poe-hook-mods" }
+# The server mod C ABI (SERVER_API_VERSION 1): the SDK's crate at its v0.1.0 tag, so the
+# server and the mods built with the SDK agree on one definition (docs/architecture/mod-host.md).
+poe-mod-api = { git = "https://github.com/Distorbed678/Poe2ModSDK", tag = "v0.1.0" }
+poe-mod-host = { path = "crates/poe-mod-host" }
 poe-store = { path = "crates/poe-store" }
 poe-accounts = { path = "crates/poe-accounts" }
 poe-cluster = { path = "crates/poe-cluster" }

@@ -1523,6 +1523,52 @@
         ]
       }
     },
+    "/api/v1/admin/mods": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every mod in the server's mods folder with its state, and whether a restart would change\nwhat is loaded (admin).",
+        "operationId": "admin_list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModsAdminInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/motd": {
       "post": {
         "tags": [
@@ -2935,6 +2981,56 @@
         ]
       }
     },
+    "/api/v1/mods/{id}/{file}": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "The package zip of an offered mod. `ETag` is the package's SHA-256; `If-None-Match` gets 304.",
+        "operationId": "package",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "mod id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "description": "`<version>.zip`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the package (application/zip)",
+            "content": {
+              "application/zip": {}
+            }
+          },
+          "304": {
+            "description": "unchanged"
+          },
+          "404": {
+            "description": "no such offered mod or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/password": {
       "post": {
         "tags": [
@@ -4114,6 +4210,196 @@
           }
         }
       },
+      "ModInfo": {
+        "type": "object",
+        "description": "A client mod this server requires (`GET /server`, field `mods`).",
+        "required": [
+          "id",
+          "name",
+          "version",
+          "side",
+          "sha256",
+          "size",
+          "required",
+          "game_versions",
+          "code",
+          "authors",
+          "description",
+          "sources"
+        ],
+        "properties": {
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "code": {
+            "type": "boolean",
+            "description": "The client half contains a native DLL (code that runs in the game process)."
+          },
+          "description": {
+            "type": "string"
+          },
+          "game_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hook_api": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The client mod API the client half was built for.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean",
+            "description": "The login check requires it (all listed mods are)."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the package zip, 64 lower-case hex digits."
+          },
+          "side": {
+            "type": "string",
+            "description": "`client` or `both`."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the package in bytes.",
+            "minimum": 0
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModSource"
+            },
+            "description": "Where to download the package: the server itself first, then `[mods] extra_urls`."
+          },
+          "version": {
+            "type": "string",
+            "description": "The exact version the server pins (semver)."
+          }
+        }
+      },
+      "ModSource": {
+        "type": "object",
+        "description": "One download address of a mod package.",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For `server`: `/api/v1/mods/{id}/{version}.zip`."
+          },
+          "type": {
+            "type": "string",
+            "description": "`server` (a path on this server's web address) or `url` (an absolute address)."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For `url`."
+          }
+        }
+      },
+      "ModStatusInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "version",
+          "side",
+          "enabled",
+          "state",
+          "detail",
+          "commands"
+        ],
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Chat commands the mod added."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Why a mod is not loaded, or a note."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "description": "`client`, `server` or `both`."
+          },
+          "state": {
+            "type": "string",
+            "description": "`loaded`, `skipped`, `failed` or `installed` (not enabled)."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ModsAdminInfo": {
+        "type": "object",
+        "description": "`GET /admin/mods`: every mod in the mods folder and what the check does.",
+        "required": [
+          "active",
+          "mods",
+          "restart_required",
+          "require_client_mods",
+          "allow_extra_client_mods"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "The mods folder has a `state.toml` (the mod system is on)."
+          },
+          "allow_extra_client_mods": {
+            "type": "boolean"
+          },
+          "mods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModStatusInfo"
+            }
+          },
+          "require_client_mods": {
+            "type": "boolean",
+            "description": "`[mods] require_client_mods` and `allow_extra_client_mods`."
+          },
+          "restart_required": {
+            "type": "boolean",
+            "description": "`state.toml` or an installed mod changed since the server started: a restart applies it."
+          }
+        }
+      },
       "MotdRequest": {
         "type": "object",
         "description": "`POST /admin/motd`.",
@@ -4690,6 +4976,16 @@
             "format": "int32",
             "description": "Port the client connects to for login (`[network.login] public_port`, else the bind port).",
             "minimum": 0
+          },
+          "mods": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ModInfo"
+            },
+            "description": "The client mods a player needs on this server (side `client` or `both`, enabled): the\nlauncher compares them with its mods and downloads the missing ones. Absent when the\nserver has none (old servers have no such field either). Server-only mods are not\nlisted."
           },
           "motd": {
             "type": [

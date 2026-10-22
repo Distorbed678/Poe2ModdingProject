@@ -41,6 +41,19 @@ client's own choice). Any area in `WorldAreas` works, not only act 1. Topology n
 1-based in the area's topology list; orientations are checked against that topology's allowed
 ones.
 
+## Mods
+
+Server mods are managed on the server with `poe-server mod` (offline; the server does not need to run; every change applies at the next start):
+
+```
+poe-server mod list                      the mods folder ([mods] dir) and what is enabled
+poe-server mod install <zip> [--enable]  verify a package (hash, names, paths) and install it
+poe-server mod enable <id> | disable <id>
+poe-server mod verify                    check packages, manifests and libraries without starting
+```
+
+The web admin's **Mods** page (`GET /api/v1/admin/mods`) shows every mod with its state (`loaded`, `skipped` with the reason, `failed`, `installed`), the chat commands it added, and a **Restart required** notice when the folder changed after the server started. Mod commands show up in `!help` and in the overlay like built-in ones. The `[mods]` options (`require_client_mods`, `allow_extra_client_mods`, `extra_urls`, `report_wait_secs`, `max_failures`, `callback_budget_ms`, per-mod `[mods.config.<id>]`) are described in [modding.md](modding.md#running-server-mods). A player whose client mods do not match is refused with a list of what is missing; look for `login refused: the client's mods do not match` in the log.
+
 ## Web API
 
 The same commands are available over HTTP for the web admin site: `kick`, `mute`/`unmute`, `announce`, instance create/close, player transfer and the `account` actions are endpoints of `poe-web-api` that run the registry command as the logged-in web admin (role checked at the time, audit lines tagged `<admin> (web)`, passwords redacted). Endpoints, authentication and the live log: [../architecture/web-api.md](../architecture/web-api.md). Setup in short: make an admin offline ([setup.md](setup.md#accounts-and-characters-offline)), start `poe-server`, `POST /api/v1/login` on `[web] bind` (default `127.0.0.1:8080`), and send the token as `Authorization: Bearer`. `[accounts] open_registration = true` lets `POST /api/v1/register` create player accounts; server commands always can.

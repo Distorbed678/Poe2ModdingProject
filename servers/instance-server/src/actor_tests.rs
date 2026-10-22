@@ -182,6 +182,8 @@ pub(crate) fn actor_init(
         idle: Duration::ZERO,
         trace: true,
         player_spacing: 0,
+        mods: Arc::new(poe_mod_host::ModHost::empty()),
+        sink: Arc::new(crate::modlink::NullSink),
     }
 }
 
@@ -208,6 +210,8 @@ pub(crate) fn join_request(
         JoinRequest {
             session,
             name: name.to_owned(),
+            account: format!("acc-{name}"),
+            admin: false,
             spawn: cell,
             speed: 37.0,
             movement,

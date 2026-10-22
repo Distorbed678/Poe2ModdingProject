@@ -19,8 +19,10 @@ use tokio::sync::watch;
 pub mod admin;
 pub mod instances;
 pub mod metrics;
+pub mod mods;
 pub use admin::{AdminControl, AdminOutcome, NewInstance, OnlinePlayer, TransferTarget};
 pub use instances::{InstanceDirectory, InstanceInfo, InstanceSpec, MemoryInstances};
+pub use mods::{ModAdvert, ModDirectory, ModPackage, ModStatus, NoMods};
 pub use metrics::{Metrics, Sample, Sampler, TickInterval, TickStats};
 
 /// The character being handed off (what the instance server needs to spawn it).

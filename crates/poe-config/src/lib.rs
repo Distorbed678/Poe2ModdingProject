@@ -139,6 +139,9 @@ pub struct Config {
     /// The task scheduler (scheduled restarts).
     #[serde(default)]
     pub scheduler: SchedulerConfig,
+    /// Server mods and the client mod check (`crates/poe-mod-host`).
+    #[serde(default)]
+    pub mods: ModsConfig,
     /// The build `[game] version` selects (`versions/<version>.toml`). Filled by
     /// [`Config::load`]; `None` for a config made with [`Config::parse`] (tests), which turns
     /// the client version check off.
@@ -314,6 +317,77 @@ fn de_metrics_interval<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D:
 
 fn de_metrics_retention<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     ranged(d, "[metrics] retention_hours", 1, 168)
+}
+
+/// `[mods]`: server mods (`mods/` folder, `poe-server mod ...`), what the server offers
+/// clients and the check of the client's mods at login. Changing any of it needs a restart.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModsConfig {
+    /// The mods folder: `state.toml` (the enabled mods in load order), one folder per mod and
+    /// the packages (`packages/<id>-<version>.zip`). Relative to the working directory.
+    #[serde(default = "default_mods_dir")]
+    pub dir: PathBuf,
+    /// Check at login that the client runs exactly the client mods this server requires
+    /// (`side` client or both, enabled). Only active when the mods folder has a `state.toml`.
+    #[serde(default = "yes")]
+    pub require_client_mods: bool,
+    /// Let a client run client mods the server does not list. Off: any extra mod refuses the
+    /// login (the client's report is a consistency check, not anti-cheat).
+    #[serde(default)]
+    pub allow_extra_client_mods: bool,
+    /// Further download addresses advertised for every offered mod, next to the server's own
+    /// (`/api/v1/mods/{id}/{version}.zip`). `{id}` and `{version}` are replaced.
+    #[serde(default)]
+    pub extra_urls: Vec<String>,
+    /// Seconds to wait for the client's mod report after it entered the instance (1 to 120).
+    #[serde(default = "default_report_wait", deserialize_with = "de_report_wait")]
+    pub report_wait_secs: u64,
+    /// A mod whose callbacks fail this many times in a row is disabled (0: never).
+    #[serde(default = "default_max_failures")]
+    pub max_failures: u32,
+    /// A callback running longer than this many milliseconds is logged and counted as a
+    /// failure (0: no limit).
+    #[serde(default = "default_callback_budget")]
+    pub callback_budget_ms: u64,
+    /// Settings handed to a mod: `[mods.config.<id>]` with plain values (the mod reads a key
+    /// as text with `config_get`).
+    #[serde(default)]
+    pub config: std::collections::BTreeMap<String, toml::Table>,
+}
+
+impl Default for ModsConfig {
+    fn default() -> Self {
+        Self {
+            dir: default_mods_dir(),
+            require_client_mods: true,
+            allow_extra_client_mods: false,
+            extra_urls: Vec::new(),
+            report_wait_secs: default_report_wait(),
+            max_failures: default_max_failures(),
+            callback_budget_ms: default_callback_budget(),
+            config: Default::default(),
+        }
+    }
+}
+
+fn default_mods_dir() -> PathBuf {
+    PathBuf::from("mods")
+}
+
+fn default_report_wait() -> u64 {
+    15
+}
+
+fn default_max_failures() -> u32 {
+    5
+}
+
+fn default_callback_budget() -> u64 {
+    50
+}
+
+fn de_report_wait<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    ranged(d, "[mods] report_wait_secs", 1, 120)
 }
 
 /// `[scheduler]`: tasks stored in the database and run on a schedule (scheduled restarts).
@@ -1327,6 +1401,27 @@ mod tests {
     /// S-01 of the public release audit (docs/plans/public-release-audit.md): the committed
     /// config is safe to run on a checkout. Development setups use runtime/server.dev.toml
     /// (scripts/dev-config.py).
+    #[test]
+    fn mods_section_defaults_match_the_shipped_config_and_parses_per_mod_settings() {
+        let d = ModsConfig::default();
+        for text in [include_str!("../../../config/server.toml"), include_str!("../../../config/server.example.toml")] {
+            let m = Config::parse(text).unwrap().mods;
+            assert_eq!(m.dir, d.dir);
+            assert!(m.require_client_mods && !m.allow_extra_client_mods, "safe defaults: required, no extras");
+            assert!(m.extra_urls.is_empty() && m.config.is_empty());
+            assert_eq!((m.report_wait_secs, m.max_failures, m.callback_budget_ms), (d.report_wait_secs, d.max_failures, d.callback_budget_ms));
+        }
+        let base = include_str!("../../../config/server.toml");
+        let cfg = Config::parse(&format!(
+            "{base}\n[mods.config.hello-server]\ngreeting = \"Hi\"\nn = 3\n"
+        ));
+        // `[mods]` appears twice in `base`+sub-table only when base has it: the sub-table form is valid.
+        let cfg = cfg.unwrap();
+        assert_eq!(cfg.mods.config["hello-server"]["greeting"].as_str(), Some("Hi"));
+        let bad = base.replace("report_wait_secs = 15", "report_wait_secs = 0");
+        assert!(Config::parse(&bad).is_err(), "report_wait_secs 0 is out of range");
+    }
+
     #[test]
     fn committed_config_is_safe() {
         let cfg = Config::parse(include_str!("../../../config/server.toml")).unwrap();

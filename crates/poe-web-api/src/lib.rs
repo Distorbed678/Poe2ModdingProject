@@ -16,6 +16,7 @@ pub mod lifecycle;
 pub mod logs;
 mod metrics;
 pub mod motd;
+mod mods;
 mod openapi;
 mod public;
 pub mod scheduler;
@@ -29,7 +30,7 @@ use axum::{
     routing::{get, post},
 };
 use poe_accounts::{AccountStore, LoginLimiter};
-use poe_cluster::{AdminControl, InstanceDirectory, Metrics};
+use poe_cluster::{AdminControl, InstanceDirectory, Metrics, ModDirectory};
 use poe_config::Config;
 use poe_store::Store;
 use tower_http::{
@@ -75,6 +76,8 @@ pub struct WebState {
     pub scheduler: Arc<scheduler::Scheduler>,
     /// The live message of the day.
     pub motd: Arc<Motd>,
+    /// The server's mods: the client mods it offers and the admin's list.
+    pub mods: Arc<dyn ModDirectory>,
     /// The directory `versions/<version>.toml` is read from when the config editor checks a
     /// text (the working directory; the repository root in a checkout).
     pub config_root: PathBuf,
@@ -87,6 +90,7 @@ pub fn router(state: WebState) -> Router {
     let web = &state.config.web;
     let api = Router::new()
         .route("/server", get(public::server))
+        .route("/mods/{id}/{file}", get(mods::package))
         .route("/register", post(public::register))
         .route("/login", post(public::login))
         .route("/logout", post(public::logout))
@@ -108,6 +112,7 @@ pub fn router(state: WebState) -> Router {
         .route("/admin/bans", get(bans::list).post(bans::create))
         .route("/admin/bans/{id}/lift", post(bans::lift))
         .route("/admin/metrics", get(metrics::get))
+        .route("/admin/mods", get(mods::admin_list))
         .route("/admin/motd", post(motd::set))
         .route("/admin/config", get(configfile::get))
         .route("/admin/config/validate", post(configfile::validate))
@@ -223,3 +228,5 @@ pub async fn serve(state: WebState) -> anyhow::Result<()> {
 mod tests;
 #[cfg(test)]
 mod tests_features;
+#[cfg(test)]
+mod tests_mods;

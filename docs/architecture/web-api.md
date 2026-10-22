@@ -21,6 +21,7 @@ Related: accounts, tokens and hashing in [accounts.md](accounts.md); the command
 | `[server] motd` | empty | message of the day, `GET /server` field `motd` ([below](#message-of-the-day)) |
 | `[metrics] enabled`, `interval_secs`, `retention_hours` | `true`, `5`, `24` | the sampler behind the dashboard charts ([below](#metrics)) |
 | `[scheduler] enabled`, `history_keep`, `missed_grace_secs` | `true`, `100`, `120` | scheduled tasks ([below](#scheduled-tasks)) |
+| `[mods] dir`, `require_client_mods`, `allow_extra_client_mods`, `extra_urls`, `report_wait_secs`, `max_failures`, `callback_budget_ms` | `mods`, `true`, `false`, `[]`, `15`, `5`, `50` | server mods and the client mod check ([below](#mods), [mod-host.md](mod-host.md)) |
 | `[accounts] open_registration` | `false` | whether `POST /register` works |
 
 Start the server and make an admin as described in [../guides/setup.md](../guides/setup.md#web-api) (`curl localhost:8080/api/v1/server`, `POST /api/v1/login` with `{"username", "password"}`, then `Authorization: Bearer <token>` on `/api/v1/admin/...`).
@@ -64,7 +65,7 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 
 | Endpoint | Auth | |
 |---|---|---|
-| `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects; the public login port), `instance_port` (public), `gateway_region`, uptime, and `motd` (the message of the day, plain text of at most 280 characters; absent when there is none) |
+| `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects; the public login port), `instance_port` (public), `gateway_region`, uptime, `motd` (the message of the day, plain text of at most 280 characters; absent when there is none) and `mods` (the client mods players need, an array; absent when there are none; [below](#mods)) |
 | `POST /register` `{username, password}` | none | new player account; `403` unless `open_registration`, `409` when taken |
 | `POST /login` `{username, password, kind?}` | none | `{token, kind, expires_at, account}` |
 | `POST /logout` | any token | revokes the token used (`204`) |
@@ -86,6 +87,8 @@ All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
 | `POST /admin/bans` `{account` or `ip, reason?, duration_secs?` or `expires_at?}` | admin | bans an account (logins refused, tokens revoked, sessions ended) or an address; `201`. `400` for yourself, an admin, your own address, a bad address, reason or length; `404` unknown account; `409` already banned |
 | `POST /admin/bans/{id}/lift` | admin | lifts an active ban early (`404` unknown, `409` already over) |
 | `GET /admin/metrics[?since=<ms>&range_secs=&max_points=]` | admin | the samples of the dashboard charts ([Metrics](#metrics)) |
+| `GET /mods/{id}/{version}.zip` | none | the package of an offered client mod ([Mods](#mods)) |
+| `GET /admin/mods` | admin | every mod with its state, `restart_required`, and the check options |
 | `POST /admin/motd` `{motd}` | admin | sets the message of the day: live, and written into the config file ([Message of the day](#message-of-the-day)) |
 | `GET /admin/config` | admin | the config file the server runs from: text (token-like values hidden), revision, the form schema and values, warnings ([Config editor](#config-editor)); `409` when the server was not started from a file |
 | `POST /admin/config/validate` `{content}` | admin | parses the text like the server would: `{valid, error{message,line,column}, warnings}` |
@@ -184,6 +187,29 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 
 `[server] motd`: plain text, at most 280 characters, line breaks allowed, no other control characters (`poe_config::check_motd`; the config refuses a longer one at load). `GET /server` returns it as `motd` when it is not empty (the launcher's Home page shows it). `POST /admin/motd {motd}` changes it: it applies at once (`WebState::motd`, a live copy), and the same text is written into the config file through the config editor's save path (backup, validation, atomic write) so it survives a restart; when the file cannot be written (editor off, no file, read-only) the response says `persisted: false` with the reason and the message holds until a restart. Saving the config in the editor refreshes the live message from the new text.
 
+### Mods
+
+`WebState::mods` is a `poe_cluster::ModDirectory` (implemented by `poe_mod_host::ModHost`; `NoMods` in tests). Three endpoints, `crates/poe-web-api/src/mods.rs`:
+
+- **`mods` in `GET /server`**, a plain array (the launcher's contract, pinned by `tests_mods.rs`). One entry per enabled mod with side `client` or `both` that loaded on the server (server-only mods are never listed):
+
+```json
+"mods": [{
+  "id": "hello-both", "name": "Hello both", "version": "0.1.0", "side": "both",
+  "sha256": "<64 lower-case hex of the zip>", "size": 288813,
+  "required": true, "hook_api": 1, "game_versions": ["0.5.5e"], "code": true,
+  "authors": ["..."], "description": "...",
+  "sources": [
+    {"type": "server", "path": "/api/v1/mods/hello-both/0.1.0.zip"},
+    {"type": "url", "url": "https://example.invalid/hello-both-0.1.0.zip"}
+  ]
+}]
+```
+
+  `hook_api` is absent for a data-only client half; `sources` has the server's own path first and then one `url` entry per `[mods] extra_urls` (`{id}`/`{version}` replaced). The field is absent for a server without client mods (old servers never had it).
+- **`GET /mods/{id}/{version}.zip`**: public, the verified package bytes, `ETag` = the SHA-256 (quoted), `If-None-Match` gives `304`, `Cache-Control: public, max-age=3600`, `Content-Disposition` with `<id>-<version>.zip`; `404` for unknown or server-only mods, malformed ids and versions (letters, digits, `. - _ +` only). The host re-hashes the file before sending. No rate limit of its own (the package is public by design); put the usual reverse-proxy limits in front of a public server.
+- **`GET /admin/mods`** (admin): `{active, mods: [{id, name, version, side, enabled, state, detail, commands}], restart_required, require_client_mods, allow_extra_client_mods}` for the web admin's Mods page. `state` is `loaded`, `skipped` (with the reason in `detail`), `failed` (disabled at run time) or `installed` (not enabled). Changing mods is done on the server (`poe-server mod ...`, [../guides/modding.md](../guides/modding.md#running-server-mods)) and applies at the next start; there is no endpoint that changes them.
+
 ### Scheduled tasks
 
 `crates/poe-web-api/src/scheduler/`. Tasks live in the database (`scheduled_tasks` and `scheduled_task_runs`, migration 0008): name, `kind` and its `params`, `schedule` (JSON), enabled flag, who made it, last run, last result, next run. `poe-store` keeps `kind`, `params` and `schedule` as opaque JSON; the scheduler owns their meaning.
@@ -232,11 +258,11 @@ Close, kick, unmute, ban (permanent ones twice), lift, disable, delete and role 
 | `public.rs`, `admin.rs` | handlers (each carries its `utoipa` description) |
 | `dto.rs`, `error.rs` | request/response types, error body |
 | `logs.rs` | `LogBuffer`, `LogLayer`, `LogFilter` |
-| `bans.rs`, `metrics.rs`, `motd.rs` | the ban, metrics and message-of-the-day endpoints |
+| `bans.rs`, `metrics.rs`, `motd.rs`, `mods.rs` | the ban, metrics, message-of-the-day and mod endpoints |
 | `configfile.rs` | the config editor (read, validate, form values, save with backup, backups) |
 | `scheduler/` | `schedule.rs` (schedule syntax, next run), `kind.rs` (`TaskKind`, how a task runs), `mod.rs` (`Scheduler`: tasks, the loop, missed runs), `api.rs` (endpoints) |
 | `openapi.rs` | the OpenAPI document |
-| `tests.rs`, `tests_features.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test); `tests_features.rs` covers players, bans, metrics, the config editor, the message of the day and the scheduled tasks |
+| `tests.rs`, `tests_features.rs` | router tests with tower `oneshot` (plus one real-socket WebSocket test); `tests_mods.rs` pins the mod advertisement JSON and the package download; `tests_features.rs` covers players, bans, metrics, the config editor, the message of the day and the scheduled tasks |
 
 Tests: register on and off, login good and bad, rate limiting per account and per IP (`429`, `Retry-After`, `X-Forwarded-For` only when trusted), tokens required, admin vs player (`403`), revoked token (`401`), foreign cluster, password change, `/me`, web token mint/redeem (single use, lifetime from the config, launcher-admin only, replacement, disabled account, `no-store`, rate limit per IP), accounts, commands reaching the registry, stop and restart (validation, countdown with a paused clock, announcements, 409, cancel, auth and the admin role), instances and characters, OpenAPI coverage and freshness, SPA fallback, CORS, the log ring buffer and the WebSocket stream. The features' tests: every new endpoint without a token (`401`), as a player and with a launcher token (`403`/`401`); ban validation and its effects (login refused with the text, tokens revoked, sessions ended, lifting, address bans on login and register); metrics (since, range, merging, off); the config editor (line and column errors, form values, backup and atomic save, stale revision, restart, trimming, hidden values, editor off, the file that was loaded); the message of the day (live, persisted, limits); tasks (validation, next runs, history, preview). Elsewhere: `poe-config` (`check_text`, `edit`, the form schema against the typed config), `poe-store` (migrations 0007 and 0008 on an upgraded database, the task tables), `poe-accounts` (bans with a controlled clock), `poe-cluster` (the metrics ring buffer, merging and the sampler on a paused clock), `login-server` (the refusal text through the wire) and the scheduler (a paused clock: due runs, skipped, missed and late runs, restart at start, the loop).
 

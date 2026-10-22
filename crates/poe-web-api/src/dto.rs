@@ -31,6 +31,82 @@ pub struct ServerInfo {
     /// there is none. The launcher's Home page shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motd: Option<String>,
+    /// The client mods a player needs on this server (side `client` or `both`, enabled): the
+    /// launcher compares them with its mods and downloads the missing ones. Absent when the
+    /// server has none (old servers have no such field either). Server-only mods are not
+    /// listed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mods: Option<Vec<ModInfo>>,
+}
+
+/// A client mod this server requires (`GET /server`, field `mods`).
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ModInfo {
+    pub id: String,
+    pub name: String,
+    /// The exact version the server pins (semver).
+    pub version: String,
+    /// `client` or `both`.
+    pub side: String,
+    /// SHA-256 of the package zip, 64 lower-case hex digits.
+    pub sha256: String,
+    /// Size of the package in bytes.
+    pub size: u64,
+    /// The login check requires it (all listed mods are).
+    pub required: bool,
+    /// The client mod API the client half was built for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_api: Option<u32>,
+    pub game_versions: Vec<String>,
+    /// The client half contains a native DLL (code that runs in the game process).
+    pub code: bool,
+    pub authors: Vec<String>,
+    pub description: String,
+    /// Where to download the package: the server itself first, then `[mods] extra_urls`.
+    pub sources: Vec<ModSource>,
+}
+
+/// One download address of a mod package.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ModSource {
+    /// `server` (a path on this server's web address) or `url` (an absolute address).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// For `server`: `/api/v1/mods/{id}/{version}.zip`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// For `url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// `GET /admin/mods`: every mod in the mods folder and what the check does.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ModsAdminInfo {
+    /// The mods folder has a `state.toml` (the mod system is on).
+    pub active: bool,
+    pub mods: Vec<ModStatusInfo>,
+    /// `state.toml` or an installed mod changed since the server started: a restart applies it.
+    pub restart_required: bool,
+    /// `[mods] require_client_mods` and `allow_extra_client_mods`.
+    pub require_client_mods: bool,
+    pub allow_extra_client_mods: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ModStatusInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    /// `client`, `server` or `both`.
+    pub side: String,
+    pub enabled: bool,
+    /// `loaded`, `skipped`, `failed` or `installed` (not enabled).
+    pub state: String,
+    /// Why a mod is not loaded, or a note.
+    pub detail: String,
+    /// Chat commands the mod added.
+    pub commands: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

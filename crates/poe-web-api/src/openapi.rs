@@ -8,7 +8,7 @@ use utoipa::{
 };
 
 use crate::{
-    admin, bans, configfile, dto, error, lifecycle, logs, metrics, motd, public, scheduler,
+    admin, bans, configfile, dto, error, lifecycle, logs, metrics, mods, motd, public, scheduler,
 };
 
 struct BearerAuth;
@@ -43,7 +43,7 @@ impl Modify for BearerAuth {
         admin::server_stop, admin::server_restart, admin::server_cancel, admin::server_shutdown,
         admin::accounts, admin::disable_account, admin::enable_account, admin::set_role,
         admin::characters, admin::character, admin::logs_ws_ticket, admin::logs_ws,
-        bans::list, bans::create, bans::lift, metrics::get, motd::set,
+        bans::list, bans::create, bans::lift, metrics::get, motd::set, mods::package, mods::admin_list,
         configfile::get, configfile::validate, configfile::fields, configfile::save,
         configfile::backups, configfile::backup,
         scheduler::api::overview, scheduler::api::preview, scheduler::api::create,
@@ -51,7 +51,7 @@ impl Modify for BearerAuth {
         scheduler::api::delete, scheduler::api::runs,
     ),
     components(schemas(
-        error::ErrorBody, dto::ServerInfo, dto::AccountInfo, dto::RegisterRequest, dto::LoginRequest,
+        error::ErrorBody, dto::ServerInfo, dto::ModInfo, dto::ModSource, dto::ModsAdminInfo, dto::ModStatusInfo, dto::AccountInfo, dto::RegisterRequest, dto::LoginRequest,
         dto::LoginResponse, dto::WsTicketResponse, dto::WebTokenResponse, dto::WebTokenRedeemRequest, dto::PasswordRequest, dto::OnlinePlayerInfo, dto::InstanceView,
         dto::NewInstanceRequest, dto::CreatedInstance, dto::TransferRequest, dto::MuteRequest,
         dto::AnnounceRequest, dto::RoleRequest, dto::CommandResult, dto::LocationInfo,

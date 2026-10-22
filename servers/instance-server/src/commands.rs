@@ -1,7 +1,15 @@
 //! Server commands: one registry for chat commands (`!name args`, prefix from `[commands]`)
 //! and the client DLL overlay (the debug link sends [`wire`] lines and the overlay builds a
 //! form per command), so every command is available in both and they cannot drift apart.
-//! Execution is in `lib.rs` (`InstanceServer::run_command`).
+//! Execution is in `exec.rs` (`InstanceServer::run_command`).
+//!
+//! The built-in commands are a compile-time list; mods add theirs at startup
+//! ([`install_mod_commands`]: native commands a mod registered and the `[[commands]]` of data
+//! mods), after which the registry is fixed for the life of the process.
+
+use std::sync::OnceLock;
+
+use poe_mod_host::{CommandAction, CommandInfo};
 
 /// An argument's type: how the overlay asks for it and how it is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,8 +108,82 @@ pub const COMMANDS: &[Spec] = &[
     Spec { name: "area_info", group: "terrain", admin: true, args: &[arg("area", Kind::Area), arg("seed", Kind::Seed)], help: "Research: a second AreaInfo on this connection (the client may crash)." },
 ];
 
+/// A command that a mod added: its spec (leaked, mods load once per process) and what it does.
+#[derive(Debug)]
+pub struct Extra {
+    pub spec: &'static Spec,
+    pub mod_id: String,
+    pub action: CommandAction,
+}
+
+/// The one argument of every mod command: the rest of the line.
+static MOD_ARGS: [Arg; 1] = [opt("args", Kind::Rest)];
+
+/// Builds the registry entries for the commands the mod host collected. Names that the built-in
+/// commands or an earlier entry already use are dropped (the host refuses them first; this keeps
+/// the registry consistent regardless).
+pub fn make_extras(infos: &[CommandInfo]) -> Vec<Extra> {
+    let leak = |s: &str| -> &'static str { Box::leak(s.to_owned().into_boxed_str()) };
+    let mut out: Vec<Extra> = Vec::new();
+    for c in infos {
+        let taken = COMMANDS.iter().any(|b| b.name.eq_ignore_ascii_case(&c.name))
+            || out.iter().any(|e| e.spec.name.eq_ignore_ascii_case(&c.name));
+        if taken {
+            continue;
+        }
+        out.push(Extra {
+            spec: Box::leak(Box::new(Spec {
+                name: leak(&c.name),
+                group: "mods",
+                admin: c.admin,
+                args: &MOD_ARGS,
+                help: leak(&c.help),
+            })),
+            mod_id: c.mod_id.clone(),
+            action: c.action.clone(),
+        });
+    }
+    out
+}
+
+/// The text of a data-tier reply or alias with `{player}` (the caller's character) and
+/// `{args}` (the rest of the line) filled in.
+pub fn fill(text: &str, player: &str, args: &str) -> String {
+    text.replace("{player}", player).replace("{args}", args)
+}
+
+static EXTRAS: OnceLock<Vec<Extra>> = OnceLock::new();
+
+/// Adds the mods' commands to the registry. Once per process, before the server runs (mods are
+/// never reloaded); a second call is ignored.
+pub fn install_mod_commands(infos: &[CommandInfo]) {
+    let _ = EXTRAS.set(make_extras(infos));
+}
+
+/// The commands mods added.
+pub fn extras() -> &'static [Extra] {
+    EXTRAS.get().map_or(&[], Vec::as_slice)
+}
+
+/// The mod command named `name`, if it is one.
+pub fn extra(name: &str) -> Option<&'static Extra> {
+    extras().iter().find(|e| e.spec.name.eq_ignore_ascii_case(name))
+}
+
+/// Every command: the built-in ones, then the mods'.
+pub fn all() -> impl Iterator<Item = &'static Spec> {
+    COMMANDS.iter().chain(extras().iter().map(|e| e.spec))
+}
+
 pub fn find(name: &str) -> Option<&'static Spec> {
-    COMMANDS.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+    find_in(extras(), name)
+}
+
+fn find_in(extras: &'static [Extra], name: &str) -> Option<&'static Spec> {
+    COMMANDS
+        .iter()
+        .find(|c| c.name.eq_ignore_ascii_case(name))
+        .or_else(|| extras.iter().find(|e| e.spec.name.eq_ignore_ascii_case(name)).map(|e| e.spec))
 }
 
 /// `name <arg> [arg]` for messages.
@@ -167,9 +249,14 @@ impl Parsed {
 
 /// Parses `name args...` (without the chat prefix) and checks the arguments.
 pub fn parse(line: &str) -> Result<Parsed, String> {
+    parse_in(extras(), line)
+}
+
+/// [`parse`] against a given set of mod commands (tests build their own).
+pub fn parse_in(extras: &'static [Extra], line: &str) -> Result<Parsed, String> {
     let line = line.trim();
     let (name, mut rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-    let spec = find(name).ok_or_else(|| format!("unknown command {name:?} (try help)"))?;
+    let spec = find_in(extras, name).ok_or_else(|| format!("unknown command {name:?} (try help)"))?;
     let mut args = Vec::new();
     for a in spec.args {
         rest = rest.trim_start();
@@ -229,6 +316,38 @@ mod tests {
         assert_eq!(parse("announce hello there all").unwrap().get("message"), Some("hello there all"));
         assert!(parse("nonsense").is_err());
         assert!(parse("where extra").is_err());
+    }
+
+    #[test]
+    fn mod_commands_extend_the_registry_without_replacing_built_ins() {
+        let infos = vec![
+            CommandInfo { name: "motd".into(), help: "Shows it.".into(), admin: false, mod_id: "m".into(), action: CommandAction::Reply("hi".into()) },
+            // A built-in name and a repeat are dropped.
+            CommandInfo { name: "kick".into(), help: "mine".into(), admin: false, mod_id: "m".into(), action: CommandAction::Native },
+            CommandInfo { name: "motd".into(), help: "again".into(), admin: true, mod_id: "n".into(), action: CommandAction::Native },
+            CommandInfo { name: "secret".into(), help: "x".into(), admin: true, mod_id: "m".into(), action: CommandAction::Native },
+        ];
+        let extras: &'static [Extra] = Box::leak(make_extras(&infos).into_boxed_slice());
+        assert_eq!(extras.iter().map(|e| e.spec.name).collect::<Vec<_>>(), ["motd", "secret"]);
+        let p = parse_in(extras, "motd some words here").unwrap();
+        assert_eq!(p.spec.name, "motd");
+        assert_eq!(p.get("args"), Some("some words here"));
+        assert_eq!(parse_in(extras, "motd").unwrap().get("args"), None);
+        assert!(parse_in(extras, "secret").unwrap().spec.admin);
+        // Built-ins still resolve to the built-in spec.
+        assert_eq!(parse_in(extras, "kick Bob").unwrap().spec.group, "admin");
+        assert!(parse_in(extras, "nonsense").is_err());
+        assert_eq!(wire(extras[0].spec).split('\t').count(), 6);
+    }
+
+    #[test]
+    fn replies_and_aliases_fill_in_the_caller_and_the_arguments() {
+        assert_eq!(fill("Hi {player}, you said {args}.", "Ann", "boo"), "Hi Ann, you said boo.");
+        assert_eq!(fill("announce [{player}] {args}", "Ann", "hello all"), "announce [Ann] hello all");
+        assert_eq!(fill("no placeholders", "Ann", "x"), "no placeholders");
+        // An alias line parses like a typed one.
+        let line = fill("where {args}", "Ann", "");
+        assert!(parse(line.trim()).is_ok());
     }
 
     #[test]

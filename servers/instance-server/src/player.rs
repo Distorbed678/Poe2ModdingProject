@@ -152,6 +152,17 @@ impl Player {
         });
     }
 
+    /// A chat command of a mod: the actor runs the mod's callback and applies what it submits.
+    /// `false` when the actor is gone.
+    pub fn mod_command(&self, mod_id: &str, name: &str, args: &str) -> bool {
+        self.actor.send(Cmd::ModCommand {
+            session: self.session,
+            mod_id: mod_id.to_owned(),
+            name: name.to_owned(),
+            args: args.to_owned(),
+        })
+    }
+
     /// Takes the pose of the latest frame.
     pub fn apply(&mut self, own: Own) {
         self.own = own;

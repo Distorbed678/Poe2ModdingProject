@@ -52,7 +52,13 @@ use poe_proto::{
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
-use crate::{movement::Codec, spawn};
+use poe_mod_host::{
+    EVENT_COMMAND, EVENT_INSTANCE_CLOSED, EVENT_INSTANCE_CREATED, EVENT_PLAYER_JOIN,
+    EVENT_PLAYER_LEAVE, EVENT_TICK, EventData, InstanceSnap, ModCommand, ModHost, PlayerSnap,
+    Submitted,
+};
+
+use crate::{modlink::ModSink, movement::Codec, spawn};
 
 /// Identifies a session (one client connection) for the actor. Unique per server process; not
 /// derived from the account, the character or the client's address.
@@ -134,6 +140,9 @@ pub struct JoinRequest {
     pub session: SessionId,
     /// Character name (the instance's player list, logs).
     pub name: String,
+    /// The account's name and whether it has the admin role (the mods' player snapshots).
+    pub account: String,
+    pub admin: bool,
     /// The cell the character should start on; the actor moves it to a free cell nearby when
     /// another player stands there.
     pub spawn: (i32, i32),
@@ -187,6 +196,14 @@ pub enum Cmd {
         session: SessionId,
         cell: (i32, i32),
     },
+    /// A chat command of a mod: the actor delivers it to the mod with a full snapshot and
+    /// applies what the mod submits (`EVENT_COMMAND`).
+    ModCommand {
+        session: SessionId,
+        mod_id: String,
+        name: String,
+        args: String,
+    },
     /// The escape menu; the reply says whether the world was paused or unpaused.
     SetPaused {
         session: SessionId,
@@ -213,12 +230,18 @@ pub struct ActorInit {
     /// `[spawn] player_spacing`: the smallest distance in cells between a joining player's cell
     /// and the players already in the instance (0: spawn where requested).
     pub player_spacing: i32,
+    /// The server's mods (events are delivered from this actor).
+    pub mods: Arc<ModHost>,
+    /// Chat and kick for what mods submit.
+    pub sink: Arc<dyn ModSink>,
 }
 
 struct Member {
     session: SessionId,
     entity: EntityId,
     name: String,
+    account: String,
+    admin: bool,
     out: mpsc::UnboundedSender<Frame>,
     appearance: Appearance,
     want_debug: bool,
@@ -356,6 +379,9 @@ impl Actor {
                     self.world.teleport(m.entity, cell);
                 }
             }
+            Cmd::ModCommand { session, mod_id, name, args } => {
+                self.mod_command(session, &mod_id, &name, &args)
+            }
             Cmd::SetPaused {
                 session,
                 paused,
@@ -461,6 +487,8 @@ impl Actor {
             session: req.session,
             entity,
             name: req.name,
+            account: req.account,
+            admin: req.admin,
             out: req.out,
             appearance: req.appearance,
             want_debug: req.want_debug,
@@ -505,8 +533,14 @@ impl Actor {
             self.world.set_paused(false);
         }
         let own = self.own(&member);
+        let joined_session = member.session;
         self.members.push(member);
         self.players.store(self.members.len(), Ordering::Relaxed);
+        if self.init.mods.wants(EVENT_PLAYER_JOIN) {
+            let snapshot = self.snapshot();
+            let who = snapshot.players.iter().find(|p| p.id == joined_session).cloned();
+            self.emit(EVENT_PLAYER_JOIN, who.as_ref(), Some(&snapshot), "", "");
+        }
         let joined = Joined {
             entity: entity.0,
             add_objects,
@@ -524,6 +558,7 @@ impl Actor {
     /// (docs/protocol/entities.md). Returns the cell it was in.
     fn leave(&mut self, session: SessionId) -> Option<(i32, i32)> {
         let i = self.members.iter().position(|m| m.session == session)?;
+        let leaving = self.init.mods.wants(EVENT_PLAYER_LEAVE).then(|| self.player_snap(&self.members[i]));
         let gone = self.members.remove(i);
         if self.paused_by == Some(session) {
             self.paused_by = None;
@@ -560,7 +595,103 @@ impl Actor {
             players = self.members.len(),
             "player left the instance"
         );
+        if let Some(who) = leaving {
+            let snapshot = self.snapshot();
+            self.emit(EVENT_PLAYER_LEAVE, Some(&who), Some(&snapshot), "", "");
+        }
         cell
+    }
+
+    // ---- mods ----
+
+    fn player_snap(&self, m: &Member) -> PlayerSnap {
+        let (x, y) = self
+            .world
+            .entity(m.entity)
+            .map_or((0.0, 0.0), |e| e.movement.position());
+        PlayerSnap {
+            id: m.session,
+            entity: u64::from(m.entity.0),
+            account: m.account.clone(),
+            character: m.name.clone(),
+            admin: m.admin,
+            x,
+            y,
+        }
+    }
+
+    /// A read-only copy of the instance for the mods.
+    fn snapshot(&self) -> InstanceSnap {
+        InstanceSnap {
+            frame: self.world.frame(),
+            instance_id: u64::from(self.init.instance),
+            area: self.init.area.clone(),
+            players: self.members.iter().map(|m| self.player_snap(m)).collect(),
+        }
+    }
+
+    /// Delivers an event to the mods and applies what they submit.
+    fn emit(&mut self, kind: u32, player: Option<&PlayerSnap>, snapshot: Option<&InstanceSnap>, text: &str, args: &str) {
+        let mods = self.init.mods.clone();
+        let ev = EventData {
+            kind,
+            frame: self.world.frame(),
+            instance_id: u64::from(self.init.instance),
+            snapshot,
+            player,
+            text,
+            args,
+        };
+        let submitted = mods.dispatch(&ev);
+        self.apply(submitted);
+    }
+
+    /// A chat command for the mod that registered it.
+    fn mod_command(&mut self, session: SessionId, mod_id: &str, name: &str, args: &str) {
+        let Some(i) = self.members.iter().position(|m| m.session == session) else {
+            return;
+        };
+        let snapshot = self.snapshot();
+        let who = self.player_snap(&self.members[i]);
+        let mods = self.init.mods.clone();
+        let ev = EventData {
+            kind: EVENT_COMMAND,
+            frame: snapshot.frame,
+            instance_id: snapshot.instance_id,
+            snapshot: Some(&snapshot),
+            player: Some(&who),
+            text: name,
+            args,
+        };
+        let submitted = mods.dispatch_command(mod_id, &ev);
+        self.apply(submitted);
+    }
+
+    /// Applies the commands mods submitted, on this task, after their callback returned. A
+    /// command about a player who is gone (or never was here) is dropped.
+    fn apply(&mut self, submitted: Vec<Submitted>) {
+        for s in submitted {
+            match s.command {
+                ModCommand::SendChat { target, text } => {
+                    if !self.init.sink.send_chat(target, &text) {
+                        debug!(mod_id = %s.mod_id, target, "mod chat: no such player online");
+                    }
+                }
+                ModCommand::Broadcast { text } => self.init.sink.broadcast(&text),
+                ModCommand::Teleport { target, x, y } => match self.member(target) {
+                    Some(m) => {
+                        let cell = (x.round() as i32, y.round() as i32);
+                        info!(mod_id = %s.mod_id, player = %m.name, ?cell, "mod teleport");
+                        self.world.teleport(m.entity, cell);
+                    }
+                    None => debug!(mod_id = %s.mod_id, target, "mod teleport: the player is not in this instance"),
+                },
+                ModCommand::Kick { target, reason } => {
+                    info!(mod_id = %s.mod_id, target, "mod kick");
+                    self.init.sink.kick(target, &reason);
+                }
+            }
+        }
     }
 
     /// One frame: advances the world, encodes its events once and gives every session its
@@ -638,6 +769,10 @@ impl Actor {
             debug!(session, "session channel closed: leaving");
             self.leave(session);
         }
+        if self.init.mods.wants(EVENT_TICK) {
+            let snapshot = self.snapshot();
+            self.emit(EVENT_TICK, None, Some(&snapshot), "", "");
+        }
     }
 }
 
@@ -653,6 +788,11 @@ async fn run(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let idle = actor.init.idle;
     let mut empty_since = Some(tokio::time::Instant::now());
+    // Server-scope events: the instance's actor started / ended.
+    let area = actor.init.area.clone();
+    if actor.init.mods.wants(EVENT_INSTANCE_CREATED) {
+        actor.emit(EVENT_INSTANCE_CREATED, None, None, &area, "");
+    }
     loop {
         let idle_at = empty_since.filter(|_| !idle.is_zero()).map(|t| t + idle);
         tokio::select! {
@@ -698,6 +838,9 @@ async fn run(
         actor.init.directory.leave(actor.init.instance, &name);
     }
     actor.players.store(0, Ordering::Relaxed);
+    if actor.init.mods.wants(EVENT_INSTANCE_CLOSED) {
+        actor.emit(EVENT_INSTANCE_CLOSED, None, None, &area, "");
+    }
 }
 
 async fn instance_closed(rx: &mut Option<watch::Receiver<bool>>) {

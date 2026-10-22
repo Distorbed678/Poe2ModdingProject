@@ -53,7 +53,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
 | [Launcher](#launcher) | `█████████░ 86%` | 5/7 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
-| [Modding](#modding) | `██████░░░░ 60%` | 3/5 |
+| [Modding](#modding) | `█████████░ 90%` | 9/10 |
 
 ✅ done · 🟡 partial · ❌ missing · ⬜ planned. Progress counts done as 1 and partial as 0.5.
 
@@ -692,6 +692,11 @@ Docs: [docs/guides/modding.md](docs/guides/modding.md)
 | ✅ | Server file overrides in front of Bundles2 |  |
 | ✅ | Server command registry (one place for chat and overlay) |  |
 | ✅ | [Client mod loader in the DLL (mod.toml, mod ABI 1, sample mod)](modules/client-hook/docs/mod-manifest.md) | loads enabled poe-hook-mods/<id> DLLs in state.toml order, ABI check, never in official mode; [data] overlays not applied yet |
-| ⬜ | Hook bus for server mods (poe-mod-api) |  |
+| ✅ | [Mod manifest v2 and packages (side client/server/both, verified zips)](modules/client-hook/docs/mod-manifest.md) | poe-hook-mods: manifest v1+v2, [client]/[server]/[[commands]], verify_package; Poe2ModSDK repo with poe-mod tool and examples |
+| ✅ | [Server mod host (native libraries, poe-mod-api, data-tier commands)](docs/architecture/mod-host.md) | crates/poe-mod-host: mods/ + state.toml, ABI and game-version checks, events, submitted commands, poe-server mod CLI; never unloaded; config_defaults and server opcodes overlays not applied yet; in game: !hello from the SDK example |
+| ✅ | [Mod advertisement and downloads](docs/architecture/mod-host.md) | GET /api/v1/server `mods` (client and both mods, exact version + SHA-256), GET /api/v1/mods/{id}/{version}.zip |
+| ✅ | [Login mod check](docs/architecture/mod-host.md) | the hook reports its loaded client mods on the side channel; the server refuses missing or wrong versions, extra client mods only with [mods] allow_extra_client_mods; verified in game |
+| ✅ | [Launcher mod sync and mod browser](docs/guides/launcher.md) | per-server mod sets, Off/Ask/Auto, verified cache, Poe2Mods index; not yet run against a real server with mods |
+| ✅ | [Web admin Mods page](docs/architecture/web-api.md) |  |
 | ⬜ | Client loose-file override hook and packet hooks |  |
 <!-- tracker:end -->

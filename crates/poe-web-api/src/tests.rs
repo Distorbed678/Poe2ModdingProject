@@ -233,6 +233,7 @@ pub(crate) fn fixture_at(config: &str, source: Option<std::path::PathBuf>) -> Fi
         metrics,
         scheduler,
         motd,
+        mods: Arc::new(poe_cluster::NoMods),
         config_root: repo_root(),
         started: Instant::now(),
     };

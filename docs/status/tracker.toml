@@ -535,8 +535,39 @@ note = "loads enabled poe-hook-mods/<id> DLLs in state.toml order, ABI check, ne
 link = "modules/client-hook/docs/mod-manifest.md"
 
 [[subsystem.item]]
-name = "Hook bus for server mods (poe-mod-api)"
-status = "planned"
+name = "Mod manifest v2 and packages (side client/server/both, verified zips)"
+status = "done"
+note = "poe-hook-mods: manifest v1+v2, [client]/[server]/[[commands]], verify_package; Poe2ModSDK repo with poe-mod tool and examples"
+link = "modules/client-hook/docs/mod-manifest.md"
+
+[[subsystem.item]]
+name = "Server mod host (native libraries, poe-mod-api, data-tier commands)"
+status = "done"
+note = "crates/poe-mod-host: mods/ + state.toml, ABI and game-version checks, events, submitted commands, poe-server mod CLI; never unloaded; config_defaults and server opcodes overlays not applied yet; in game: !hello from the SDK example"
+link = "docs/architecture/mod-host.md"
+
+[[subsystem.item]]
+name = "Mod advertisement and downloads"
+status = "done"
+note = "GET /api/v1/server `mods` (client and both mods, exact version + SHA-256), GET /api/v1/mods/{id}/{version}.zip"
+link = "docs/architecture/mod-host.md"
+
+[[subsystem.item]]
+name = "Login mod check"
+status = "done"
+note = "the hook reports its loaded client mods on the side channel; the server refuses missing or wrong versions, extra client mods only with [mods] allow_extra_client_mods; verified in game"
+link = "docs/architecture/mod-host.md"
+
+[[subsystem.item]]
+name = "Launcher mod sync and mod browser"
+status = "done"
+note = "per-server mod sets, Off/Ask/Auto, verified cache, Poe2Mods index; not yet run against a real server with mods"
+link = "docs/guides/launcher.md"
+
+[[subsystem.item]]
+name = "Web admin Mods page"
+status = "done"
+link = "docs/architecture/web-api.md"
 
 [[subsystem.item]]
 name = "Client loose-file override hook and packet hooks"

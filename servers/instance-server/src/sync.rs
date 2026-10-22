@@ -25,6 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use poe_hook_shared::modreport::ModReport;
 use poe_hook_shared::sidechannel::{
     self as sc, Dir, Kind, Reject, ReplayWindow, ReportPayload, SessionKeys,
 };
@@ -168,6 +169,8 @@ struct SideSession {
     peer: Option<SocketAddr>,
     latest: Option<ClientReport>,
     commands: Vec<String>,
+    /// The client mods the hook reported (`Kind::ModReport`), once it did.
+    mods: Option<ModReport>,
 }
 
 /// The side-channel sessions of the instance server: the latest position report, the debug
@@ -243,6 +246,7 @@ impl ClientReports {
                 peer: None,
                 latest: None,
                 commands: Vec::new(),
+                mods: None,
             },
         );
         id
@@ -367,7 +371,7 @@ impl ClientReports {
             .map(|s| s.keys.clone())
             .ok_or(Reject::WrongSession)?;
         let frame = sc::open(&keys, Dir::ClientToServer, data)?;
-        if !matches!(frame.kind, Kind::Upload | Kind::UploadOffer) {
+        if !matches!(frame.kind, Kind::Upload | Kind::UploadOffer | Kind::ModReport) {
             return Err(Reject::UnknownKind(frame.kind as u8));
         }
         let mut sessions = self.sessions.lock().unwrap();
@@ -376,6 +380,33 @@ impl ClientReports {
             return Err(Reject::Replay);
         }
         Ok((id, frame.kind, frame.payload.to_vec()))
+    }
+
+    /// Keeps the client's mod report for session `id`.
+    pub fn store_mod_report(&self, id: u64, report: ModReport) {
+        if let Some(s) = self.sessions.lock().unwrap().get_mut(&id) {
+            s.mods = Some(report);
+        }
+    }
+
+    /// The mod report of session `id`, if the hook has sent one.
+    pub fn mod_report(&self, id: u64) -> Option<ModReport> {
+        self.sessions.lock().unwrap().get(&id)?.mods.clone()
+    }
+
+    /// Waits up to `wait` for the session's mod report (the hook sends it right after its
+    /// instance connection starts, from a background thread); `None` when it never comes.
+    pub async fn wait_mod_report(&self, id: u64, wait: Duration) -> Option<ModReport> {
+        let end = tokio::time::Instant::now() + wait;
+        loop {
+            if let Some(r) = self.mod_report(id) {
+                return Some(r);
+            }
+            if tokio::time::Instant::now() >= end {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     /// Receives side-channel datagrams on the instance address (UDP, same port as the TCP
