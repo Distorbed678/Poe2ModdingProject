@@ -81,8 +81,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The server reads the community .datc64 schema at run time. It is a rolling download, so
-      # the release ships exactly the file the version file pins (data.schema_sha256).
+      # The server reads the community .datc64 schema (poe-tool-dev/dat-schema, MIT) at run time.
+      # Upstream only keeps a rolling "latest", so the exact file the version file pins
+      # (data.schema_sha256) is kept as an asset of this repo's release `dat-schema-<game>`
+      # (docs/guides/releasing-server.md); the checksum is still checked.
       - name: Download and verify the dat schema
         env:
           GH_TOKEN: ${{ github.token }}
@@ -91,10 +93,10 @@ jobs:
           want=$(sed -n 's/^schema_sha256 *= *"\([0-9a-f]*\)".*/\1/p' "versions/$game.toml")
           [ -n "$want" ] || { echo "::error::versions/$game.toml has no data.schema_sha256"; exit 1; }
           mkdir -p schema
-          gh release download latest -R poe-tool-dev/dat-schema -p schema-poe2.min.json -D schema --clobber
+          gh release download "dat-schema-$game" -R "$GITHUB_REPOSITORY" -p schema-poe2.min.json -D schema --clobber
           got=$(sha256sum schema/schema-poe2.min.json | cut -d' ' -f1)
           if [ "$got" != "$want" ]; then
-            echo "::error::dat-schema changed upstream: sha256 is $got, versions/$game.toml pins $want. Run cargo xtask check-build with the new schema, then update the pin."
+            echo "::error::the schema of release dat-schema-$game has sha256 $got, versions/$game.toml pins $want. Upload the pinned file to that release (docs/guides/releasing-server.md)."
             exit 1
           fi
       - uses: actions/upload-artifact@v4
