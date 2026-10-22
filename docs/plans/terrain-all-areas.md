@@ -27,6 +27,27 @@ Matrix totals (2026-10-21, `cargo xtask terrain-matrix`):
 | match / fail / untested | 18 / 1 / 4489 |
 | Generator probe, seed 1001, first orientation | 701 of 1141 topologies run to the end; 284 of 432 areas run for every topology |
 
+## Decisions (user, 2026-10-22)
+
+- **Goal:** a 1:1 port: every area in every topology (default league mode: 1141 topologies, 4508
+  topology x orientation combinations) and every allowed orientation reproduces the client's
+  **tile hash, doodad hash and collision grid** (the client's server-only spawn scatter in the
+  doodad pass is out of scope: items and entities are not implemented).
+- **Acceptance test:** a script makes the client generate every combination with **50 random
+  seeds** (about 225,000 layouts) and compares the port with it. A combination is done when all
+  50 seeds match, or it has a documented reason.
+- **Method: in-client batch generation.** The login sweep (20 s per layout) would take about 52
+  days, so the DLL drives the client's own generator (`HeadlessWorld_LoadArea` / base generator)
+  in a loop on worker threads, private mode only. This replaces the "optional acceleration" of
+  section 2 and makes it the primary data source; the forced login sweep (WP7.3) stays as a
+  cross-check for a handful of combinations.
+- **Dynamic debugging:** agents may use x64dbg on the GameFiles client in private mode (one agent
+  at a time, never on official servers).
+- The 84 league-mode topologies stay out of scope.
+
+Work package WP7.16 (batch harness) and the 50-seed matrix are added on top of section 5; the
+generator WPs keep their order, with the batch results as their regression gate.
+
 ## 1. Scope inventory
 
 **Which rows.** Every `WorldAreas` row whose `Topologies` column is not empty generates terrain
@@ -448,3 +469,18 @@ session-history trace from the user), request-driven extra rooms and shrines, In
   reason in `terrain.md` (the 10 `fixed` rows and the 6 world-map panels listed); the README matrix
   shows the totals; then decide with the user whether `[terrain] generate` in `modules/server/config/server.toml`
   defaults to on.
+
+**WP7.16 In-client batch generation and the 50-seed matrix** (large; needs the client, private
+mode; x64dbg allowed). Added 2026-10-22, see Decisions.
+- Hook feature `gen_batch` (off by default, refused in official mode): reads a job list
+  (`area seed topology orientation`), runs the client's base generator for each job on worker
+  threads without rendering, writes `batch-results.tsv` (`area seed topology orientation status
+  tile_hash doodad_hash width height ms detail`), exports layout, doodads and grid of a job only
+  on request (the fails). `scripts/re/terrain_batch.py` plans every combination x 50 random seeds
+  (seed list recorded), starts the client, resumes after a crash, skips finished jobs.
+- Port side: `forced_verify` reads `batch-results.tsv`, generates every row with the same forced
+  choice on threads and writes `forced-results.tsv`; `terrain-matrix` gets the seed count per
+  combination (`match 50/50`, `partial N/50`, `fail`).
+- Acceptance: the batch's hashes equal the login sweep's for `G1_8 1001 1:3`, `G1_6 1001 2:7`,
+  `G1_2 1001 15:0` and the 25 known vectors; act 1 x 50 seeds runs unattended; the measured time
+  per layout and the projected full-run time are in `docs/status/terrain.md`.
