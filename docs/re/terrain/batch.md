@@ -275,3 +275,7 @@ of act 10 or 50,000 of act 1; 12 threads add under 1 GB and gain 17 % throughput
   doodad scatter (globals `0x1445c991c` / `0x14458c705`) is not run.
 - The generator's natural topology choice (no forced stats) uses the world map pins; with none it
   falls back to a draw (`0x141ff9280`). Jobs with topology 0 run that fallback.
+
+## Traces in batch mode
+
+`POE_HOOK_GEN_TRACE=1 python3 scripts/re/terrain_batch.py run <name> --threads 1` writes `generator_trace.tsv` next to the export of every job in `export.txt` (the trace buffer is global: one worker thread only). Runs of 2026-10-22 under `dumps/0.5.5e/terrain/batch/`: `a1` (63 act 1 / dgr jobs), `a2`, `b1`, `b3`, `c1`; `b2` has exports without traces.

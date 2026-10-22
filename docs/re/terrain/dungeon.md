@@ -280,3 +280,10 @@ buffer and de-repetition as for `.tgr` ([shared-passes.md](shared-passes.md)).
   so 3×3 ground slots on the region's border fill from −1. The outer fill aligns a 3×3 tile one
   cell outside when the region's corner and size are 1 mod 3. Fill rooms floor their slot heights
   like pass A; de-repetition keeps the replaced tile's height.
+
+## Findings 2026-10-22 (agent A, batch comparison)
+
+- Graph turn `0x141d14b30` also turns the `.dgr` node random-offset ranges (node values 5..8 = x min, y min, x max, y max, at node +0x78..+0x84): each (min, max) pair is a vector turned by the region table (`[-x, x, -y, y]` indexed like the position), then each axis' pair is put in order. Without it odd and mirrored orientations draw the offsets from the wrong ranges (G1_9 +536 jobs, G1_6 all 1600, G1_12, many dgr areas).
+- Fill rooms (`0x141f8c8c0`): a room cell's tile height is the passed fill height (the listed ground cell's slot height) plus the slot key's lowest corner (G1_12 / G3_7 `*forcedblank`, +1,900 jobs).
+- Tools: `lay_cmp <export dir> [--map] [--units margin,step,size] [--at x,y,r] [--lat x0,y0,x1,y1] [--margin M] [--dy N]` (cell/cluster diff, placement order against the export's `generator_trace.tsv`, lattice heights), `POE_DUMP_ROOMS=1` (rooms after the layout) with `runtime/a`-style room comparison against the trace's `derepeat_room` lines, `POE_DBG_ASTAR=1` (corridor search).
+- Open: G1_7 4:0 seed 145312311: edge 9 (14 -> 4, fuzzy 0) takes (2,2),(1,2),(1,3),(0,3) in the port but (1,1),(1,2),(0,2),(0,3) in the client (same length; every other path and all draws up to the placeholder pick agree); search, neighbours, `connectable`, h/g and `isqrt` were checked against `0x1420a4330`. Outer-buffer left strip (Abyss_Boss2 seed 121918740): the client's row at y=36 reads lattice height 1 at x0=4, the port 2 (interior lattice points of a levelled fill tile). Limestone/Kalguur/Cavern: outer-fill tiles end at the wrong height (port too high or low). G1_12 seed 991375241: four `Fill_02/04` tiles of the dungeon fill end at storey 1 in the client.
