@@ -138,6 +138,33 @@ at least one attempt, 588 in all of theirs (254 of 432 areas run in all). The co
 128 match (283 of 283 tested seeds), 0 partial, 0 fail, 4380 untested (act 1: 76, act 2: 10,
 act 3: 3, act 4: 3, act 6: 5, act 10: 31).
 
+## 50-seed client batch (2026-10-22, WP7.16)
+
+The acceptance data of the 1:1 port: `scripts/re/terrain_batch.py plan full --seeds 50` and
+`run full` made the client generate every combination of the matrix (4508) with 50 random seeds,
+225,400 jobs, in 1.3 h of one client launch (8 threads, 48 layouts/s, mean 170 ms per layout, 0
+crashes; how: [../re/terrain/batch.md](../re/terrain/batch.md)). The client itself threw a
+generator exception for 6,695 jobs (100 areas, most in `G2_10_1`, `MapBackwash`, `G2_1`,
+`MapUniqueVault`, `G1_12`; `IncursionTemple*` needs session data). `forced_verify` ran the port on
+the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vectors/forced-results.tsv`.
+
+- **37,380 of 218,705 layouts match (17 %)**; combinations: 501 match on every seed, 508 partial,
+  3460 fail, 39 untested (all seeds a client error); areas: 85 match on every job, 44 some, 297 none.
+- **Wrong output, no error: 91,453 jobs** (dgr 78,285, tgr 9,429, town 3,739), the largest class,
+  invisible to the probe. Top areas `G2_5_1`, `MapCrypt`, `G3_6_1`, `MapHeadland`,
+  `MapSteamingSprings`, `G2_9_1`, `MapWoodland`, `MapLostTowers`. Areas that match on most seeds
+  and differ on others (seed-dependent bugs in ported code): `G1_9` 3713/4783, `G1_7` 4287/4562,
+  `G1_12` 2864/4490, `G1_6` 1485/1600, `G1_4` 938/2201, `G2_10_1` 703/2592.
+- **Map size differs: 4,661.**
+- **Port errors** (unported systems, jobs): 3x3 door spots 12,957; dungeon edge types with
+  chirality, all `.et` together about 25,000 (`UnwalkableLedge`, `woodscliff_height`, `woods_ledge`,
+  `vaal_water`, `dune_to_ocean_virt`, `cavern_ledge`, `courtyard_outerwall`, ...); overlay phase 2
+  4,429; blank special rooms 3,600; fill orientation masks 3,198; tgr routing retries 2,644; node
+  tiles 4,204; no RoomSet 2,100; no border tile 1,714; no root key 1,571; failed to connect 1,411;
+  `//` path 1,781; room overlap 1,004.
+- Open: the client checks the forced topology against the unfiltered topology list (all league
+  modes); the matrix counts the mode 1 list. The 11 areas with other-mode topologies need a check.
+
 ## To do, in order
 
 1. G1_12 is done (2026-10-22).
