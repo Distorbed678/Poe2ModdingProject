@@ -30,17 +30,31 @@ Linux needs the WebKitGTK stack (Arch: `webkit2gtk-4.1 gtk3 libsoup3 librsvg`; D
 
 ## One-time set-up
 
-1. **Hook DLLs.** Settings, *Hook DLL directory*: a build of Poe2ClientHook holding `poe_hook.dll` and `poe_hook_core.dll`, normally `modules/client-hook/target/x86_64-pc-windows-msvc/release` (built with `build-dll`, [setup.md](setup.md#build-and-test)). Bundling them into the launcher is not done.
+1. **Hook DLLs.** Nothing to set: the launcher downloads the **client hook** itself ([below](#client-hook)). Only if you want your own build (a developer), set Settings, *Hook DLL directory* to a folder holding `poe_hook.dll` and `poe_hook_core.dll`, normally `modules/client-hook/target/x86_64-pc-windows-msvc/release` (built with `build-dll`, [setup.md](setup.md#build-and-test)); it then wins over the download.
 2. **Keyring (Linux).** Login tokens are stored only in the Secret Service (GNOME Keyring, or KWallet with its Secret Service interface switched on in System Settings). Without a provider the login is refused with an explanation, and the token is revoked again. Windows uses the Credential Manager.
 3. **Linux:** Steam must be running when you press Play, and the Proton set in Settings (default `Proton - Experimental`) must exist under `<Steam>/steamapps/common`. The launcher only reads Proton from there.
 4. **Server:** a server that has the web API on (`[web] enabled`, reachable from the player; use TLS outside a trusted network) and an account (`open_registration = true`, or `account create`).
 
 ## The flow
 
+A fresh launcher shows a **Get ready to play** checklist at the top of the Servers page (it disappears once all three steps are done): **1. Install the game** (Install page), **2. Get the client hook** (a *Download* button right there), **3. Host a server or join one** (*Host a server* downloads the server package and sets it up; *Join a server* is the form below). Nothing needs to be built, copied or configured by hand. The Play button says what is still missing.
+
 1. **Servers:** *Add server*, e.g. `127.0.0.1:8080` (`http://` is added, a pasted `/api/v1` is dropped). *Check* shows realm, client version, players, whether registration is open and the game address.
 2. **Account:** *Log in* (`POST /login`, kind `launcher`, valid `[accounts] remember_days`) or *Create account* (only if registration is open; it logs in afterwards). *Log out* revokes the token on the server (and removes it locally even if the server is down, saying so).
 3. **Install:** your Steam account name and password, optionally *Remember the Steam login*. A Steam Guard code is typed into the launcher when Steam asks. The download is about 150 GB.
 4. **Play** (footer, for the selected server) once the game is installed and you are logged in.
+
+## Client hook
+
+The hook is the pair of DLLs (`poe_hook.dll`, installed as the game's `version.dll`, and `poe_hook_core.dll`) that connect the game to a private server and, read-only, observe the official one. The **Client hook** card on the Install page (and step 2 of the checklist) gets it from the releases of [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) (tag `hook-v<version>`, made by that repository's CI: [releasing-hook.md](releasing-hook.md)):
+
+- **Which release.** The newest stable release (a pre-release only when nothing stable fits) whose package supports the selected game version (from the version dropdown; *Official (read-only)* uses the newest private version's hook, the same DLLs run in official mode). The package name carries the game versions: `poe-hook-v<version>-game-<game versions>-windows-x86_64.zip`.
+- **Checks.** The zip against the release's `.sha256` (and its size), then safe unpacking (no paths outside the folder, no links, bounded size), then `release.json` (schema, `windows`/`x86_64`, both DLLs listed, only safe paths), then **every file against the size and SHA-256 in `release.json`, with no unlisted file allowed**, and the game version against the one selected. A failure deletes everything; nothing is installed. The same files are hashed again right before each Play (a changed DLL stops Play with "download it again").
+- **Where.** `<data>/hook/packages/<hook version>/`; Play deploys from there automatically. A newer release replaces the older one of the same game versions; a hook kept for another game version stays. Downloads go to `<data>/hook/downloads/` and are removed.
+- **The card** shows the installed version, the game versions it serves and the mod ABI, whether an update is available (looked up once at start and on *Check for updates*) and a *Download client hook* / *Update* button. Offline or rate-limited GitHub is a message on the card, never a stop for a hook that is already installed.
+- **Override.** Settings, *Hook DLL directory* (advanced) stays: when set it wins over the download (the card says "your own build"). Files in the old default folder `<data>/hook-dlls` are still used when nothing is downloaded and no directory is set ("files copied by hand").
+
+Without a hook Play is blocked with "Get the client hook first (Install page)".
 
 ## Game versions and the official mode
 
@@ -56,6 +70,7 @@ What follows the selection:
 | Play | the selected server profile, auto-login token, `mode = "private"` | no server, no token, `mode = "official"` ([below](#official-read-only)) |
 | Servers, Account, Host a server, Mods | available; a server that reports another client version is marked *incompatible* | hidden (these are for private versions) |
 | Host a server | downloads the `poe-server` package whose name carries this game version | not possible |
+| Client hook | the newest hook release whose package supports `<v>` | the newest private version's hook, run in official mode |
 
 **Server compatibility.** *Check* (and a quiet check at start) reads `GET /server`. A server whose client version equals the selection is *compatible*. A server that reports another version this launcher supports shows *needs client X* with a one-click *Switch to X*, and Play is blocked for it. A server reporting a version the launcher does not know is marked *incompatible* with a warning; Play is not blocked then (the check can be wrong).
 
@@ -177,6 +192,8 @@ enabled = ["core-lib", "my-mod"]    # load order; the mods' own mod.toml files a
 The real-server test needs a scratch server config (shifted ports, `open_registration = true`, an account made offline); commands: [setup.md](setup.md#launcher-build-and-test), config: [setup.md](setup.md#web-api).
 
 The launcher's own tests already cover profiles with a mock keyring, login/logout/register and the whole Play preparation against a mock web API and a fake Proton; the plain-http guard and Open web admin against a mock web API (the browser is a recorder, nothing is opened); finding, downloading, verifying and unpacking server packages against a mock GitHub API; an ignored test downloads and starts the pinned DepotDownloader (never logs in).
+
+**The client hook against the real release** (an ignored test, network only, nothing is deployed): `POE2_TEST_HOOK_REAL=1 cargo test --test hook_flow real_release -- --ignored --nocapture` in `src-tauri` lists the releases of Poe2ClientHook, downloads the newest one for the oldest supported game version into a temporary folder and checks the archive, `release.json` and every file.
 
 **Hosting against a real server package** (an ignored test, no game client involved): build a package as in [releasing-server.md](releasing-server.md#checking-a-package-locally), then
 

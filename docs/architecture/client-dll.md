@@ -11,6 +11,10 @@ The client imports `VERSION.dll` (`GetFileVersionInfoW`, `GetFileVersionInfoSize
 | `poe-hook-mods` | (library) | | Host-buildable logic of the mod loader: `mod.toml` and `state.toml` parsing, the load plan, the ABI check, the official-mode refusal. `examples/sample-mod` is a tiny mod DLL (`sample_mod.dll`). |
 | `poe-hook-sig` | (library) | | The **signature table** matcher: pattern parser, PE reader, scanner, resolver, per-feature status. Pure Rust without Windows dependencies, so `cargo xtask check-build` (WP A3) can use it on the exe file. `signatures/<version>.toml` is embedded by `include_str!`. See [Signature table](#signature-table-signaturesversiontoml). |
 
+## Distribution
+
+The DLLs are released from the Poe2ClientHook repository: a tag `hook-v<version>` runs `.github/workflows/release.yml` there, which builds `poe_hook.dll` and `poe_hook_core.dll` for `x86_64-pc-windows-msvc` and publishes `poe-hook-v<version>-game-<game versions>-windows-x86_64.zip` with a `.sha256`, `SHA256SUMS` and a `release.json` inside (hook version, game versions = the signature tables shipped, mod ABI, SHA-256 of every file); how: [../guides/releasing-hook.md](../guides/releasing-hook.md). The launcher (`modules/launcher/src-tauri/src/hook.rs`, `hook_ops.rs`) downloads the newest stable release that supports the selected game version, checks the archive and every file, keeps it in `<data>/hook/packages/<version>/` and deploys from there; its *Hook DLL directory* setting stays as an override for developers' own builds ([../guides/launcher.md](../guides/launcher.md#client-hook)). `cargo xtask build-dll` and `deploy-client` are unchanged (they use the local build).
+
 ## Loader (`modules/client-hook/poe-hook`)
 | File | Role |
 |---|---|

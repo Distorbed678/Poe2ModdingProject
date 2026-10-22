@@ -100,7 +100,7 @@ Findings from analysing the client go in [docs/re/](docs/re/README.md), not in c
 
 ## Releases
 
-Maintainers cut releases from tags; contributors do not need to. How: the server in [docs/guides/releasing-server.md](docs/guides/releasing-server.md) (tag `server-v<version>`), the launcher in [docs/guides/launcher.md](docs/guides/launcher.md#releasing) (tag `v<version>`, signed updates). The server package is described for hosts in [docs/guides/hosting.md](docs/guides/hosting.md#getting-a-server-release).
+Maintainers cut releases from tags; contributors do not need to. How: the server in [docs/guides/releasing-server.md](docs/guides/releasing-server.md) (tag `server-v<version>`), the client hook in [docs/guides/releasing-hook.md](docs/guides/releasing-hook.md) (tag `hook-v<version>` in Poe2ClientHook), the launcher in [docs/guides/launcher.md](docs/guides/launcher.md#releasing) (tag `v<version>`, signed updates). The server package is described for hosts in [docs/guides/hosting.md](docs/guides/hosting.md#getting-a-server-release).
 
 ## Licence
 

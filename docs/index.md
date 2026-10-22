@@ -14,6 +14,7 @@ Contributing, security reports and the legal notice: [../CONTRIBUTING.md](../CON
 | [guides/client.md](guides/client.md) | The client and install guide: install through the launcher, or by hand with `cargo xtask` on Linux (Proton) and Windows; first start, updating, going back, troubleshooting |
 | [guides/releasing-server.md](guides/releasing-server.md) | Releasing the server: tagging `server-v*`, what the release workflow builds and packages, the secrets it needs, checking a package locally |
 | [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
+| [guides/releasing-hook.md](guides/releasing-hook.md) | Releasing the client hook (Poe2ClientHook): tagging `hook-v*`, what the workflow builds, the package and its `release.json`, what the launcher checks before it uses a download |
 | [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, profiles, Steam depot install, Play, hosting a server from the launcher, Open web admin, the plain-http warning, mods, releasing (tags, signing secrets and key) |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
 
