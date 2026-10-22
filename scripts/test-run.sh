@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 name=$1; wait=${2:-12}
 CFG=${POE_CONFIG:-runtime/server.dev.toml}
 ACCT=${TEST_ACCOUNT:-testrun}
-srv() { POE_CONFIG=$CFG target/debug/poe-server "$@"; }
+srv() { POE_CONFIG=$CFG modules/server/target/debug/poe-server "$@"; }
 . scripts/lib/test-accounts.sh
 grep -q '^login_mode *= *"standalone"' GameFiles/poe-hook.toml \
     || { echo "GameFiles is not in standalone login mode: cargo xtask deploy-client --no-build --login-mode standalone"; exit 1; }
@@ -28,7 +28,7 @@ log() { sed 's/\x1b\[[0-9;]*m//g' runtime/server-run.log; }
 start=$(log | wc -l)
 # Fresh terrain exports for this run: the server waits for the layout the client writes (by tile
 # hash), so stale layouts and grids from earlier runs would hide a DLL that stopped exporting.
-version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' config/server.toml | head -n1)
+version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' modules/server/config/server.toml | head -n1)
 rm -f GameFiles/poe-hook.log GameFiles/terrain_layout*.tsv GameFiles/terrain_grid*.bin \
     "dumps/$version"/terrain/layouts/terrain_layout_*.tsv "dumps/$version"/terrain/grids/terrain_grid_*.bin
 POE_HOOK_MOVEMENT_LOG=1 POE_HOOK_WINDOW_TITLE="PoE2 Test Client" POE_HOOK_AUTO_KEYS=20000:13 POE_HOOK_FAKE_FOCUS=1 \

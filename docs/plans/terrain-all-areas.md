@@ -7,7 +7,7 @@ is in [../re/terrain/](../re/terrain/README.md). The matrix this plan is built o
 
 ## Where things stand
 
-- The port (`crates/poe-world`, 24 modules) reproduces the client's tile hash for 25 of 33 act 1
+- The port (`modules/server/crates/poe-world`, 24 modules) reproduces the client's tile hash for 25 of 33 act 1
   vectors: Town, `G1_1`, `G1_2`, `G1_3`, `G1_6`, `G1_7`, `G1_8`, `G1_9` (3/3 each), `G1_4` (2/3).
   `G1_5`, `G1_11`, `G1_12` give 0 matches and `G1_13`-`G1_15` have no client trace yet.
 - Nothing outside act 1 has been compared with a client hash. A first probe (below) shows that
@@ -109,7 +109,7 @@ probe must run several of both (WP7.2).
 1. *Forced sweeps (authoritative).* The server sends AreaInfo with the first stat record
    `map_force_topology` (key 0xb92, 1-based topology) and `map_force_orientation` (orientation +
    1); the client generates exactly that layout and reports its tile and doodad hash in
-   TerrainHashes. This path exists for instances (`servers/instance-server/src/lib.rs`, around
+   TerrainHashes. This path exists for instances (`modules/server/servers/instance-server/src/lib.rs`, around
    line 690, `transfer <area> [seed] [topology] [orientation]`). The seed sweep (`[dev] sweep`,
    `POE_SWEEP`, `scripts/re/sweep_drive.py`) does not use it yet: its entries go through the dev
    `area_info_command` with no stats and a `<area> <seed> [count]` list, and the results file has
@@ -145,7 +145,7 @@ was `fail`.
 
 1. `scripts/re/sweep_plan.py` (new): reads `terrain-matrix.tsv`, writes a sweep list
    `<area> <seed> <count> <topology>:<orientation>` for a tier, act and probe filter.
-2. The instance server (sweep branch of `servers/instance-server/src/lib.rs`) parses the optional
+2. The instance server (sweep branch of `modules/server/servers/instance-server/src/lib.rs`) parses the optional
    fourth field and sends the forced stat record like `send_area`; the sweep results file gets
    two columns (`topology`, `orientation`). Old files keep working (columns are optional).
 3. `scripts/re/sweep_drive.py` gets resume (`--skip N`, because `SWEEP_NEXT` is lost when the
@@ -192,7 +192,7 @@ user's call). Worth a day only if T2/T3 are still pending after act 1 to 4 are d
   (`docs/re/terrain/dungeon.md`): with unit 29 and 3 units, overlap 1 gives 85 and overlap 0
   gives 87, so the height difference is exactly overlap 1 against 0. G1_12's master has
   `RoomOverlap 0`. The code takes the overlap from the first room's `.arm` dimension, not from
-  the master: `crates/poe-world/src/dungeon.rs:331-332` (comment says "Master +0x14b", code is
+  the master: `modules/server/crates/poe-world/src/dungeon.rs:331-332` (comment says "Master +0x14b", code is
   `set.rooms.first().and_then(|r| r.room.arm.dimensions.uint1).unwrap_or(1)`), used again as
   `grid.overlap` in `area.rs:504-506` for the map size.
 - Next step: read `RoomOverlap` from the `.tsi` (`tsi.get("RoomUnitSize")` at `area.rs:504` shows
@@ -291,7 +291,7 @@ or as missing output):
 | System | Areas | Why it matters | Verification data |
 |---|---|---|---|
 | Doodads and the doodad hash (`TerrainGen_TileDoodads` `0x141ff3310`, cell and angle `0x141fe78d0`, entries at tile data +0x70..+0x78, 0x58 bytes each; hash in `hash.rs`) | all 432 (every area has a doodad hash; towns vary with quest state) | the client sends tile hash and doodad hash; only the tile hash is matched today. Doodads are also the entities and blockers the server will want | `doodads.tsv` in every area export (80 sessions) and the doodad hash column of every vector and sweep result |
-| Collision grid output (feeds `GridSource`, `crates/poe-game/src/grid.rs`) | all 432 | server movement and spawning on the generated terrain. Today the DLL's grid (`terrain_grid_<hash>.bin`, `PWG1`) or the client's upload over the instance port (WP3.4) stands in | `grids.bin` in every area export and `dumps/.../grids/*.bin`: compare cell by cell |
+| Collision grid output (feeds `GridSource`, `modules/server/crates/poe-game/src/grid.rs`) | all 432 | server movement and spawning on the generated terrain. Today the DLL's grid (`terrain_grid_<hash>.bin`, `PWG1`) or the client's upload over the instance port (WP3.4) stands in | `grids.bin` in every area export and `dumps/.../grids/*.bin`: compare cell by cell |
 | Extra rooms and shrines, request-driven (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`) | 0 plain areas | `dungeon.rs:602` notes they place nothing without a request (league mechanics, area mods); matters only once AreaInfo carries such requests | a forced trace with a request, from the user |
 | Off-map virtual ends `0x1420ba340`, transition tiles `0x141fe0b40` and tile-set option `+0x165`, de-repetition corner fix-ups `0x141fde880`, height offset of overlays | unknown | silent; decided by T1/T2 mismatches | forced-layout fails with `area_trace` |
 | World-map panels (6 rows) | 6 | the client generates them, logs no hashes | export compare only |
@@ -345,7 +345,7 @@ packages' files):
   forced stats in `instance-server` (reuse the code at `lib.rs:690`), two results columns,
   `sweep_drive.py` resume and retry, the `forced_verify` example, `forced-results.tsv` into the
   matrix (already read by `terrain_matrix.rs`), docs in `docs/guides/setup.md` and
-  `docs/re/terrain/README.md` (Tools), `dumps/README.md`. Another agent edits `servers/` for the
+  `docs/re/terrain/README.md` (Tools), `dumps/README.md`. Another agent edits `modules/server/servers/` for the
   multiplayer test: coordinate or do this after it lands.
 - Acceptance: a forced sweep of three known combinations (`G1_8 1001 1:3`, `G1_6 1001 2:7`,
   `G1_2 1001 15:0`) gives `match` in `forced-results.tsv` with the client's hashes equal to
@@ -446,5 +446,5 @@ session-history trace from the user), request-driven extra rooms and shrines, In
   the matrix, `terrain.md` and the tracker.
 - Acceptance: every combination is `match`, `fail` with a stored reason, or `untested` with a
   reason in `terrain.md` (the 10 `fixed` rows and the 6 world-map panels listed); the README matrix
-  shows the totals; then decide with the user whether `[terrain] generate` in `config/server.toml`
+  shows the totals; then decide with the user whether `[terrain] generate` in `modules/server/config/server.toml`
   defaults to on.

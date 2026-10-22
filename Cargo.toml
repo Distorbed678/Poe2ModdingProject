@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "servers/*", "xtask"]
-# modules/ holds the git submodules (Poe2Protocol, Poe2ClientHook, ...), each its own Cargo
-# workspace. They are consumed as path dependencies only. The client DLLs target Windows and
-# are built separately (cargo xtask build-dll).
+members = ["xtask"]
+# modules/ holds the git submodules (Poe2Server, Poe2Protocol, Poe2ClientHook, ...), each its own
+# Cargo workspace (or an npm project). xtask consumes some of them as path dependencies only;
+# the client DLLs target Windows and are built separately (cargo xtask build-dll), the server is
+# built in its own workspace (cargo xtask server build).
 exclude = ["modules"]
 
 [workspace.package]
@@ -14,50 +15,26 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1"
-thiserror = "2"
-bytes = "1"
+clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-clap = { version = "4", features = ["derive"] }
-poe_data_tools = "4.0.1"
-salsa20 = "0.10"
 sha2 = "0.10"
-rand = "0.9"
-rusqlite = { version = "0.37", features = ["bundled"] }
 hex = "0.4"
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder", "intel"] }
-argon2 = "0.5"
 
-poe-config = { path = "crates/poe-config" }
-# Poe2Protocol submodule. The servers use poe-net's TCP connection (feature `tokio`).
-poe-net = { path = "modules/protocol/poe-net", features = ["tokio"] }
-poe-proto = { path = "modules/protocol/poe-proto" }
+# Poe2Server submodule (modules/server): the crates xtask shares code with (the config and
+# version files, the game data and the terrain generator).
+poe-config = { path = "modules/server/crates/poe-config" }
+poe-data = { path = "modules/server/crates/poe-data" }
+poe-world = { path = "modules/server/crates/poe-world" }
+# Poe2Protocol as the server's nested submodule (modules/server/modules/protocol): poe-world
+# and xtask must share ONE poe-proto, so xtask takes it from the same checkout as the server.
+poe-proto = { path = "modules/server/modules/protocol/poe-proto" }
 # Poe2ClientHook submodule: host-side deploy library used by xtask.
 poe-hook-deploy = { path = "modules/client-hook/poe-hook-deploy" }
 # Byte-signature table of the client DLL (pure Rust): `cargo xtask check-build` scans an exe with it.
 poe-hook-sig = { path = "modules/client-hook/poe-hook-sig" }
-# Side-channel framing (HMAC, upload payload) shared with the client DLL.
-poe-hook-shared = { path = "modules/client-hook/poe-hook-shared" }
-# Manifest v2, state.toml, load plan and package verification, shared with the client hook, the
-# launcher and the SDK (path through the client-hook submodule).
-poe-hook-mods = { path = "modules/client-hook/poe-hook-mods" }
-# The server mod C ABI (SERVER_API_VERSION 1): the SDK's crate at its v0.1.0 tag, so the
-# server and the mods built with the SDK agree on one definition (docs/architecture/mod-host.md).
-poe-mod-api = { git = "https://github.com/Distorbed678/Poe2ModSDK", tag = "v0.1.0" }
-poe-mod-host = { path = "crates/poe-mod-host" }
-poe-store = { path = "crates/poe-store" }
-poe-accounts = { path = "crates/poe-accounts" }
-poe-cluster = { path = "crates/poe-cluster" }
-poe-web-api = { path = "crates/poe-web-api" }
-poe-data = { path = "crates/poe-data" }
-poe-game = { path = "crates/poe-game" }
-poe-world = { path = "crates/poe-world" }
-login-server = { path = "servers/login-server" }
-instance-server = { path = "servers/instance-server" }
 
 # `cargo xtask check-build` scans and fingerprints the 78 MB game image: only fast optimised.
 [profile.dev.package.iced-x86]

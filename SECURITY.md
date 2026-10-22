@@ -8,7 +8,7 @@ Include what you found, how to reproduce it (a version or commit, a config, step
 
 ## Scope
 
-In scope for **Poe2ModdingProject**: the server (`poe-server`, the login and instance servers, the web API and its token handling, accounts and passwords, the rate limiter), the xtask and deploy tooling, and the release packages.
+In scope for **Poe2ModdingProject** (the hub): the xtask and deploy tooling and the scripts. The server (`poe-server`, the login and instance servers, the web API and its token handling, accounts and passwords, the rate limiter, the mod host) and its release packages are in [Poe2Server](https://github.com/Distorbed678/Poe2Server), which has its own security policy; the other repositories (Poe2Protocol, Poe2ClientHook, Poe2WebAdmin, Poe2Launcher, Poe2ModSDK) too. Report to the repository the problem is in; if unsure, report here.
 
 Out of scope: Grinding Gear Games' game, services and anti-cheat; bugs in Path of Exile 2 itself; using the project against official servers (not supported); problems that need a modified client or physical access to your machine and do not cross a trust boundary the documentation promises.
 
@@ -18,4 +18,4 @@ The project follows **Path of Exile 2 client 0.5.5e**. Only the latest commit on
 
 ## Notes for users
 
-This is an unofficial hobby project for personal and educational use. It has not had a professional security audit; an internal pre-release review is in the main repository ([docs/plans/public-release-audit.md](https://github.com/Distorbed678/Poe2ModdingProject/blob/main/docs/plans/public-release-audit.md)). Hosting a server for other people is your responsibility: follow [docs/guides/hosting.md](docs/guides/hosting.md) (keep `dev_machine_hash_login` off, put the web API behind TLS).
+This is an unofficial hobby project for personal and educational use. It has not had a professional security audit; an internal pre-release review is in the main repository ([docs/plans/public-release-audit.md](https://github.com/Distorbed678/Poe2ModdingProject/blob/main/docs/plans/public-release-audit.md)). Hosting a server for other people is your responsibility: follow [modules/server/docs/hosting.md](modules/server/docs/hosting.md) (keep `dev_machine_hash_login` off, put the web API behind TLS).

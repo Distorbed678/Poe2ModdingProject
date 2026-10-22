@@ -2,7 +2,7 @@
 
 ## Commands
 
-One registry (`servers/instance-server/src/commands.rs`) defines every server command: name,
+One registry (`modules/server/servers/instance-server/src/commands.rs`) defines every server command: name,
 group, whether it needs an admin, typed arguments and help. The same commands work in two
 places:
 
@@ -80,13 +80,13 @@ A **ban** has a reason (shown to the player), a length (1 hour, 1 day, 7 days, 3
 
 ### Config editor
 
-The **Config** page edits the file the server was started with (the path is shown in the header: `POE_CONFIG`, else `config/server.toml`). Only admins see it and `[web] config_editor = false` makes it read-only.
+The **Config** page edits the file the server was started with (the path is shown in the header: `POE_CONFIG`, else `modules/server/config/server.toml`). Only admins see it and `[web] config_editor = false` makes it read-only.
 
 1. **Form**: the common keys by section (server, realm, accounts, security, instances, web, metrics, scheduler, ...) with their help text, defaults and bounds; each says whether a change is **live** (only the message of the day) or **needs a restart**. **Raw TOML**: the whole file, for every other key, with a live syntax check that names the line and column. Switching between the two keeps them in step, and the file's comments and layout are kept.
 2. **Review changes** shows a diff against the file and the server's verdict: it parses the text exactly like the start-up would. An invalid config (wrong syntax, a value of the wrong type or out of range, an unknown game version) **cannot be saved**; the error shows the line and column. Risky settings (a web bind that is not loopback, open registration on a reachable API) are allowed but listed.
 3. **Save** writes the file; **Save and restart** also restarts the server with a countdown and a message (the restart works like the dashboard's button). The previous file is copied to `[web] config_backup_dir` first (`runtime/config-backups`, newest 20 kept); **Backups** lists them and loads one into the editor to restore it. If the file changed on disk after you opened the page (a hand edit) the save is refused: reload and make the change again.
 
-The config has no secrets and must stay that way; the editor hides any string under a key named like `token`, `secret` or `password` and keeps the stored value on save. The committed `config/server.toml` keeps the safe defaults; run a server that others use from your own copy (`POE_CONFIG=runtime/server.toml`), which this page then edits, and the page warns when it is editing the committed file in a checkout. Saves are in the audit file (`config save`, the number of changed lines, the backup name, never the contents).
+The config has no secrets and must stay that way; the editor hides any string under a key named like `token`, `secret` or `password` and keeps the stored value on save. The committed `modules/server/config/server.toml` keeps the safe defaults; run a server that others use from your own copy (`POE_CONFIG=runtime/server.toml`), which this page then edits, and the page warns when it is editing the committed file in a checkout. Saves are in the audit file (`config save`, the number of changed lines, the backup name, never the contents).
 
 ### Scheduled tasks
 
@@ -100,12 +100,12 @@ The dashboard's **Server** card has **Restart** and **Stop** buttons (admins onl
 
 Ctrl+C and SIGTERM (systemd stop, the launcher's Stop) shut the server down the same way, at once and without announcements: players are disconnected, sessions saved, exit code 0.
 
-**How a restart brings the server back** (`[server] restart_mode` in `config/server.toml`):
+**How a restart brings the server back** (`[server] restart_mode` in `modules/server/config/server.toml`):
 
 | `restart_mode` | After the shutdown | Use it |
 |---|---|---|
 | `"exec"` (default) | the process starts itself again with the same binary, arguments, environment and working directory (Unix: `exec`, the pid stays; Windows: a new process is started and the old one exits) | `cargo run`, a terminal, tmux, a systemd unit without special settings on Linux |
-| `"exit"` | the process exits with **code 75** and something else starts it again | systemd (`RestartForceExitStatus=75`, [hosting.md](hosting.md#running-it-permanently)), the launcher's Host a server page (see below), any supervisor that restarts on an exit code |
+| `"exit"` | the process exits with **code 75** and something else starts it again | systemd (`RestartForceExitStatus=75`, [hosting.md](../../modules/server/docs/hosting.md#running-it-permanently)), the launcher's Host a server page (see below), any supervisor that restarts on an exit code |
 
 A stop exits with 0, so a supervisor that restarts only on failure leaves a stopped server stopped. A supervisor that restarts on every exit (`Restart=always`) also restarts a stop; use `on-failure` as in the hosting guide. Without a supervisor and with `"exit"` a restart request simply ends the process.
 
@@ -133,7 +133,7 @@ Passwords typed in chat travel over the game connection and appear on screen: pr
 
 Password attempts are rate limited (`[security]`: 5 failures per account name and 20 per IP in 5 minutes lock the key for 5 minutes, in game and on the web; saved-token logins are not affected; a restart clears locks; details: [../architecture/accounts.md](../architecture/accounts.md#password-attempt-limits)). Set a limit to 0 to switch it off, e.g. for a test script that fails logins on purpose.
 
-A client whose exe is not a known build of `[game] version` (its `client_hash` is not in `versions/<version>.toml` `[client] hashes`) is refused at login with the client's own "There has been a patch that you need to update to" popup. `[security] allow_unknown_client = true` lets any build in (logged); a test config made without a version file checks nothing. Nothing is refused while the version file's `hashes_confirmed` is `false` ([new-game-version.md](new-game-version.md#what-the-server-does-with-the-clients-version)).
+A client whose exe is not a known build of `[game] version` (its `client_hash` is not in `modules/protocol/versions/<version>.toml` `[client] hashes`) is refused at login with the client's own "There has been a patch that you need to update to" popup. `[security] allow_unknown_client = true` lets any build in (logged); a test config made without a version file checks nothing. Nothing is refused while the version file's `hashes_confirmed` is `false` ([new-game-version.md](new-game-version.md#what-the-server-does-with-the-clients-version)).
 
 A second login of an account ends the first one (login connection and game). Existing databases: accounts made by the removed machine-hash login (null password) cannot log in until `account passwd` gives one a password, and an existing `Exile1` was made an admin by the database migration (a fresh database promotes nobody).
 

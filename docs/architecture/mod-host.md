@@ -1,9 +1,9 @@
 # Server mod host
 
-The server half of the mod system: the crate `crates/poe-mod-host` loads native server mods and data mods, delivers events to them, advertises the client half of mods to launchers, serves the packages and checks at login that a client runs the mods the server requires. Decisions behind it: [../plans/server-modding-analysis.md](../plans/server-modding-analysis.md) ("Decisions (user, 2026-10-22)"). Operator and author guide: [../guides/modding.md](../guides/modding.md). The mod ABI and the SDK live in the public repository [Poe2ModSDK](https://github.com/Distorbed678/Poe2ModSDK); the manifest, `state.toml`, plan logic and package verification are `modules/client-hook/poe-hook-mods`, shared with the client hook and the launcher.
+The server half of the mod system: the crate `modules/server/crates/poe-mod-host` loads native server mods and data mods, delivers events to them, advertises the client half of mods to launchers, serves the packages and checks at login that a client runs the mods the server requires. Decisions behind it: [../plans/server-modding-analysis.md](../plans/server-modding-analysis.md) ("Decisions (user, 2026-10-22)"). Operator and author guide: [../guides/modding.md](../guides/modding.md). The mod ABI and the SDK live in the public repository [Poe2ModSDK](https://github.com/Distorbed678/Poe2ModSDK); the manifest, `state.toml`, plan logic and package verification are `modules/client-hook/poe-hook-mods`, shared with the client hook and the launcher.
 
 ```
-poe-server ── ModHost::load ──► mods/ (state.toml, <id>/, packages/)      crates/poe-mod-host
+poe-server ── ModHost::load ──► mods/ (state.toml, <id>/, packages/)      modules/server/crates/poe-mod-host
    │                               │ plan (poe-hook-mods) → libloading → poe_server_mod_init(ServerApi)
    │                               ▼
    ├─ instance-server ── actors ── dispatch(Event + read-only snapshot) ──► mod callbacks
@@ -87,7 +87,7 @@ Implemented from the start (decision Q6). Components:
 | Part | Where |
 |---|---|
 | The report: id, version, SHA-256 of `mod.toml` and of the entry DLL of every loaded client mod | `poe_hook_shared::modreport` (client-hook), built by the hook loader (`poe-hook/src/mods.rs`), handed to the core through `HostApi::mod_report` (core ABI 3) |
-| The transport: side-channel frame `Kind::ModReport` (6), TCP on the instance port with the `PSUP` framing, sealed with the session keys, answered with `PSUR` status 0 | `poe-hook-core/src/side.rs`, `servers/instance-server/src/{terrain_store,sync}.rs`; protocol in [../protocol/side-channel.md](../protocol/side-channel.md#mod-report) |
+| The transport: side-channel frame `Kind::ModReport` (6), TCP on the instance port with the `PSUP` framing, sealed with the session keys, answered with `PSUR` status 0 | `poe-hook-core/src/side.rs`, `modules/server/servers/instance-server/src/{terrain_store,sync}.rs`; protocol in [../protocol/side-channel.md](../protocol/side-channel.md#mod-report) |
 | The comparison | `poe_mod_host::check_client(required, allow_extra, report)` (pure, unit-tested) |
 | Where it is acted on | `InstanceServer::handle`: the server waits up to `[mods] report_wait_secs` for the report (it arrives while the terrain is generated), joins the instance, enters the world, and then sends the refusal as server chat lines, waits 8 seconds so the client can show them, and ends the session before the player is registered as online |
 
@@ -101,7 +101,7 @@ The hash of the installed `mod.toml` equals the one in the package only if the i
 
 The server depends on two things the SDK also uses:
 
-- `poe-hook-mods` (manifest v2, plan logic, package verification): a **path dependency through the client-hook submodule** (`modules/client-hook/poe-hook-mods`), so the server, the launcher and the hook share one parser at the commit the submodule pins. The SDK pins the same crate by git commit; the server's e2e test (`crates/poe-mod-host/tests/sdk_hello.rs`) loads a library built with the SDK's pin, which would fail on a manifest disagreement.
+- `poe-hook-mods` (manifest v2, plan logic, package verification): a **path dependency through the client-hook submodule** (`modules/client-hook/poe-hook-mods`), so the server, the launcher and the hook share one parser at the commit the submodule pins. The SDK pins the same crate by git commit; the server's e2e test (`modules/server/crates/poe-mod-host/tests/sdk_hello.rs`) loads a library built with the SDK's pin, which would fail on a manifest disagreement.
 - `poe-mod-api` (the server ABI): a **git dependency pinned to the SDK's `v0.1.0` tag** (`Cargo.toml`, workspace dependency). The alternative, checking a vendored copy by a layout test, would put two definitions of the ABI in the tree; with the tag there is one definition, reviewed in the SDK, and moving to another ABI version is a visible one-line change. Because a tag could in principle be moved, `ffi.rs` also repeats the pinned struct sizes in a test (`the_abi_layout_matches_what_this_host_was_written_for`), and the host refuses a library whose `poe_server_mod_abi_version` differs from `SERVER_API_VERSION` before calling anything else. When the SDK bumps `SERVER_API_VERSION`, change the tag and the host's code together.
 
 ## Tests

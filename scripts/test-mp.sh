@@ -1,5 +1,5 @@
 #!/bin/bash
-# Local two-client multiplayer test (WP3.7, docs/guides/hosting.md "Local two-client test").
+# Local two-client multiplayer test (WP3.7, modules/server/docs/hosting.md "Local two-client test").
 #
 # Two clients run the same GameFiles exe in two Proton prefixes (third_party/proton-prefix and
 # third_party/proton-prefix-2), each logged in as its own account (mp1, mp2) with a remember-me
@@ -42,14 +42,14 @@ prefix_of() { [ "$1" = 1 ] && echo third_party/proton-prefix || echo third_party
 ini_of() { echo "$(prefix_of "$1")/$DOCS/poe2_production_Config.ini"; }
 shots_of() { echo "$(prefix_of "$1")/$DOCS/Screenshots"; }
 xt() { cargo xtask --config "$CFG" "$@"; }
-srv() { POE_CONFIG=$CFG target/debug/poe-server "$@"; }
+srv() { POE_CONFIG=$CFG modules/server/target/debug/poe-server "$@"; }
 . scripts/lib/test-accounts.sh
 slog() { sed 's/\x1b\[[0-9;]*m//g' "$LOG"; }
 
 cmd_setup() {
     [ -n "$LAN_IP" ] || { echo "no LAN IP (set LAN_IP)"; exit 1; }
-    cargo build -p poe-server -p xtask
-    # Runtime copy of the config: the dev settings (config/server.toml is committed with safe
+    cargo xtask server build && cargo build -p xtask
+    # Runtime copy of the config: the dev settings (modules/server/config/server.toml is committed with safe
     # values: loopback binds, no developer tools), the LAN address, and its own database (mp
     # accounts stay out of the dev one).
     python3 scripts/dev-config.py --out $CFG >/dev/null
@@ -91,7 +91,7 @@ cmd_setup() {
 cmd_server() {
     pgrep -f '[t]arget/debug/poe-server' >/dev/null && { echo "server already running"; return; }
     : > $LOG
-    POE_CONFIG=$CFG setsid nohup target/debug/poe-server > $LOG 2>&1 < /dev/null &
+    POE_CONFIG=$CFG setsid nohup modules/server/target/debug/poe-server > $LOG 2>&1 < /dev/null &
     for _ in $(seq 60); do slog | grep -q "web api\|listening" && break; sleep 1; done
     slog | grep -iE "listen|warn|error" | head -8
 }

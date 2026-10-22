@@ -1,18 +1,18 @@
 # When GGG ships a new game build
 
-Step by step, from the new files to the in-game check. Background and the list of what breaks: [../re/update-compatibility.md](../re/update-compatibility.md). Everything that names a build lives in one file per build, `versions/<version>.toml` at the repository root; this guide ends with adding one.
+Step by step, from the new files to the in-game check. Background and the list of what breaks: [../re/update-compatibility.md](../re/update-compatibility.md). Everything that names a build lives in one file per build, `modules/protocol/versions/<version>.toml`, in the Poe2Protocol repository next to `opcodes/<version>/` (its paths are relative to the working directory of the consumer: the hub or Poe2Server); this guide ends with adding one.
 
 ## What defines a supported build
 
 | Piece | Where | Read by |
 |---|---|---|
-| **The version file** `versions/<version>.toml`: depots and manifests, the exe's sha256, size and PE fingerprint (timestamp, image size), the build revision, key-file sizes and floors, the opcode folder, the signature table path, the features that must resolve, the known `client_hash` values, strings the exe must contain, data anchors and row counts, the dat-schema pin | repository root | `cargo xtask` (deploy, `check-build`), the servers (`[game] version`), the launcher |
+| **The version file** `modules/protocol/versions/<version>.toml`: depots and manifests, the exe's sha256, size and PE fingerprint (timestamp, image size), the build revision, key-file sizes and floors, the opcode folder, the signature table path, the features that must resolve, the known `client_hash` values, strings the exe must contain, data anchors and row counts, the dat-schema pin | repository root | `cargo xtask` (deploy, `check-build`), the servers (`[game] version`), the launcher |
 | The launcher's copy | `modules/launcher/versions/<version>.toml`, byte-identical, written by `cargo xtask versions` (`--check` compares; `check-build` and a test compare too) | the launcher (it is a separate repository and must build alone; its `build.rs` embeds every file there) |
 | Opcode tables | `modules/protocol/opcodes/<version>/` (`login.toml`, `instance.toml`, `hnc.toml`, `inventories.tsv`, `deserializers.tsv`) and `poe_proto::opcodes::EMBEDDED` | servers (loaded from the folder), the DLL (compiled in) |
 | Signature table | `modules/client-hook/signatures/<version>.toml`, listed in `poe-hook-sig/src/embedded.rs` `TABLES` | the DLL, `check-build` |
 | Data | `dumps/<version>/` (git-ignored), `docs/re/addresses-<version>.md` (history) | tools, scripts (`scripts/re/version.py` picks the newest version file, or `$POE_VERSION`) |
 
-`[game] version` in `config/server.toml` selects the version file. `{version}` in the config's path settings (`known_seeds`, `sweep_results`, `layout_dir`) is replaced by it, and `protocol_dir` defaults to the file's `[protocol] opcodes`, so a new build is a new file plus one changed config value. A version the server has no file for is a start-up error that names the known ones.
+`[game] version` in `modules/server/config/server.toml` selects the version file. `{version}` in the config's path settings (`known_seeds`, `sweep_results`, `layout_dir`) is replaced by it, and `protocol_dir` defaults to the file's `[protocol] opcodes`, so a new build is a new file plus one changed config value. A version the server has no file for is a start-up error that names the known ones.
 
 Kinds of patch (rating in the compatibility doc): **data** (`Bundles2` changes, the exe is byte-identical: only steps 1, 2, 4 and the data part of 5), **hotfix** (a rebuilt exe, the common case: functions move; most signatures survive), **major** (new league or 0.6: messages and generator passes change).
 
@@ -59,13 +59,13 @@ Only when step 2 shows missing or ambiguous entries, or the build changed at all
 
 If every signature already resolves, the shortcut is to copy the old table, change `[build]` (version, `build_revision`, `pe_timestamp`, `image_size`, `exe_sha256`) and refresh `ghidra` and `value` with `sig_gen.py` or the `resolve` output.
 
-## 4. Add `versions/<new>.toml` and the opcode folder
+## 4. Add `modules/protocol/versions/<new>.toml` and the opcode folder (both in Poe2Protocol: commit and push there first, then the pointers in Poe2Server and the hub)
 
-1. Copy `versions/<old>.toml` and change: `version`, `build_revision` (the string `check-build` printed, the `Build Revision:` of `Client.txt`), `status = "experimental"` until step 6 passes, `[exe]` (`sha256`, `size`, `pe_timestamp`, `image_size`; from the report's fingerprint table), the depots and manifests (what the Steam download dialog or DepotDownloader shows for the build; old manifests may disappear from Steam), `[verify]` sizes (`ls -l` the key files), `[protocol] opcodes`, `[client_hook] signatures`, `[client] hashes = ["<new exe sha256>"]` with `hashes_confirmed = false`, `[data]` (`schema_sha256` of the schema you checked with, `row_counts`, anchors; after a data patch the row indices of the anchors are what the server's keys depend on: change the config and the anchors together).
+1. Copy `modules/protocol/versions/<old>.toml` and change: `version`, `build_revision` (the string `check-build` printed, the `Build Revision:` of `Client.txt`), `status = "experimental"` until step 6 passes, `[exe]` (`sha256`, `size`, `pe_timestamp`, `image_size`; from the report's fingerprint table), the depots and manifests (what the Steam download dialog or DepotDownloader shows for the build; old manifests may disappear from Steam), `[verify]` sizes (`ls -l` the key files), `[protocol] opcodes`, `[client_hook] signatures`, `[client] hashes = ["<new exe sha256>"]` with `hashes_confirmed = false`, `[data]` (`schema_sha256` of the schema you checked with, `row_counts`, anchors; after a data patch the row indices of the anchors are what the server's keys depend on: change the config and the anchors together).
 2. `cp -r modules/protocol/opcodes/<old> modules/protocol/opcodes/<new>`, fix the headers and any renumbered or new opcodes, add it to `EMBEDDED` in `modules/protocol/poe-proto/src/opcodes.rs` (a test fails when a folder is missing there). Regenerate the drift baseline: dump the factories (`dump_factory.py`, output `dumps/<new>/ghidra/{login,instance,instance2}_factory*_s2c.json`; `find_switches.py` prints the arguments; for a switch with an index table `--bytes <rva>`) and run `cargo xtask check-build <exe> --version <new> --write-fingerprints`.
 3. `cargo xtask versions` (copies the file to the launcher), then `cargo xtask check-build GameFiles/PathOfExileSteam.exe` again: it must exit 0.
-4. Set `version = "<new>"` in `config/server.toml` (and the example) and move `dumps/<old>` aside if the generated data of the old build must not mix with the new one (`known_seeds`, `layout_dir`, `sweep_results` follow `{version}`).
-5. Not configuration, and left alone on purpose: `0.5.5e` in the history of docs, in comments with Ghidra addresses, `docs/re/addresses-<version>.md`, the captures' build in `servers/instance-server/src/replay_tests.rs` (`CAPTURE_VERSION`: the tests replay the official captures of that build), the launcher's test fixtures and `poe_proto::opcodes::v0_5_5e` (kept for the DLL; it selects by name today).
+4. Set `version = "<new>"` in `modules/server/config/server.toml` (and the example) and move `dumps/<old>` aside if the generated data of the old build must not mix with the new one (`known_seeds`, `layout_dir`, `sweep_results` follow `{version}`).
+5. Not configuration, and left alone on purpose: `0.5.5e` in the history of docs, in comments with Ghidra addresses, `docs/re/addresses-<version>.md`, the captures' build in `modules/server/servers/instance-server/src/replay_tests.rs` (`CAPTURE_VERSION`: the tests replay the official captures of that build), the launcher's test fixtures and `poe_proto::opcodes::v0_5_5e` (kept for the DLL; it selects by name today).
 
 ### The launcher and the version dropdown
 
@@ -76,7 +76,7 @@ To check it: add the file, `cargo test` in `modules/launcher/src-tauri` (the `ev
 ## 5. Tests
 
 ```
-cargo build && cargo test                           # main repository
+cargo build && cargo xtask server test               # hub (xtask) and server
 cargo test                                          # in each submodule you changed (modules/protocol, modules/client-hook)
 cargo test; npm run check                           # modules/launcher/src-tauri, and the frontend if it changed
 cargo xtask versions --check

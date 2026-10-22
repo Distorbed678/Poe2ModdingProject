@@ -1,23 +1,28 @@
 # Documentation index
 
-A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules and the project overview: [../CLAUDE.md](../CLAUDE.md). Start with [guides/setup.md](guides/setup.md), then [architecture/overview.md](architecture/overview.md).
+A private server for Path of Exile 2 (client **0.5.5e**), written in Rust. Rules: [../CLAUDE.md](../CLAUDE.md). Which repository does what and how they fit together: [overview.md](overview.md). Start with [guides/setup.md](guides/setup.md), then [architecture/overview.md](architecture/overview.md).
 
 Contributing, security reports and the legal notice: [../CONTRIBUTING.md](../CONTRIBUTING.md) (setup, pull requests, checks, docs rule, how RE findings are documented), [../SECURITY.md](../SECURITY.md), [the disclaimer](../README.md#disclaimer).
+
+## Overview
+| Document | Contents |
+|---|---|
+| [overview.md](overview.md) | The repositories (hub, Poe2Server, Poe2Protocol, Poe2ClientHook, Poe2WebAdmin, Poe2Launcher, Poe2ModSDK, Poe2Mods, Poe2ServerList): what each does, the dependency diagram, where releases live, how players, hosts and developers get started |
 
 ## Guides
 | Document | Contents |
 |---|---|
 | [guides/setup.md](guides/setup.md) | The only place for commands, logs and unattended tests: clone, toolchain, build, deploy to `GameFiles/`, run client and server, offline accounts and characters, web admin and launcher builds, two-client test, official read-only sessions, config keys and migration, crash dumps |
 | [guides/server-admin.md](guides/server-admin.md) | Server commands (chat `!` and overlay), admins, instances, transfers, chat, the web admin site |
-| [guides/hosting.md](guides/hosting.md) | The hosting guide: release package or source, ports, `public_host`, config, terrain upload, firewall, accounts, running it permanently (systemd, Windows), TLS reverse proxy, backups and updates, logs, what a remote player needs, security notes, troubleshooting, the local two-client test and its results |
+| [hosting.md](../modules/server/docs/hosting.md) (Poe2Server) | The hosting guide: release package or source, ports, `public_host`, config, terrain upload, firewall, accounts, running it permanently (systemd, Windows), TLS reverse proxy, backups and updates, logs, what a remote player needs, security notes, troubleshooting, the local two-client test and its results |
 | [guides/official-mode.md](guides/official-mode.md) | Official mode: observing a session on the official servers with the hook, read-only: what it does and does not do, the read-only latch, the detection risk to your account, step by step (`deploy-client --official`, play, where the captures go, switching back) |
 | [guides/client.md](guides/client.md) | The client and install guide: install through the launcher, or by hand with `cargo xtask` on Linux (Proton) and Windows; first start, updating, going back, troubleshooting |
-| [guides/releasing-server.md](guides/releasing-server.md) | Releasing the server: tagging `server-v*`, what the release workflow builds and packages, the secrets it needs, checking a package locally |
-| [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
+| [releasing.md](../modules/server/docs/releasing.md) (Poe2Server) | Releasing the server: tagging `server-v*`, what the release workflow builds and packages, the secrets it needs, checking a package locally |
+| [guides/new-game-version.md](guides/new-game-version.md) | When GGG ships a build: `modules/protocol/versions/<version>.toml` (the single definition), `cargo xtask check-build`, signatures, opcodes, the launcher copy, the in-game check, and how the server refuses an unknown client |
 | [guides/releasing-hook.md](guides/releasing-hook.md) | Releasing the client hook (Poe2ClientHook): tagging `hook-v*`, what the workflow builds, the package and its `release.json`, what the launcher checks before it uses a download |
 | [guides/launcher.md](guides/launcher.md) | The player launcher (Poe2Launcher): download and auto-update, the Home/Servers/Host/Library/Settings layout, Home news and the server's message of the day, the public server browser, profiles and accounts, Steam depot install (pause/resume, speed, disk space), logs and crash dumps, Play, hosting a server from the launcher (restart supervision, database backups), Open web admin, the plain-http warning, mods, releasing (tags, signing secrets and key) |
-| [server-list-template/README.md](server-list-template/README.md) | Initial content of the public server list repository `Poe2ServerList` (how a host lists a server by pull request, the `servers.json` schema, a validation script): create the repository from this folder |
-| [mod-index-template/README.md](mod-index-template/README.md) | Initial content of the public mod index repository `Poe2Mods` (how an author submits a mod by pull request, the `index.json` schema, a validation script with tests, CI): create the repository from this folder; the launcher's mod browser reads it |
+| [server-list-template/README.md](server-list-template/README.md) | Template of the public server list repository `Poe2ServerList` (`modules/server-list`; how a host lists a server by pull request, the `servers.json` schema, a validation script) |
+| [mod-index-template/README.md](mod-index-template/README.md) | Template of the public mod index repository `Poe2Mods` (`modules/mod-index`; how an author submits a mod by pull request, the `index.json` schema, a validation script with tests, CI); the launcher's mod browser reads it |
 | [guides/modding.md](guides/modding.md) | Server and client modding hooks (existing and planned) |
 
 ## Architecture
@@ -30,7 +35,7 @@ Contributing, security reports and the legal notice: [../CONTRIBUTING.md](../CON
 | [architecture/instance-world.md](architecture/instance-world.md) | Instance directory, the instance actor (one shared `World` per instance), join/relay/leave/pause, the movement component and its tests |
 | [architecture/web-api.md](architecture/web-api.md) | The web API (accounts, admin endpoints, live log, OpenAPI) and the web admin SPA (modules/web-admin) |
 | [architecture/mod-host.md](architecture/mod-host.md) | The server mod host: mods folder, state.toml, native mod loading (poe-mod-api), data-tier commands, the mod advertisement and downloads, the login mod check |
-| [architecture/openapi.json](architecture/openapi.json) | The API's OpenAPI document, generated by `cargo xtask openapi` (the web admin and launcher generate their types from it) |
+| [openapi.json](../modules/server/docs/openapi.json) (Poe2Server) | The API's OpenAPI document, generated by `cargo xtask openapi` (the web admin and launcher generate their types from it) |
 
 ## Protocol (client 0.5.5e)
 | Document | Contents |

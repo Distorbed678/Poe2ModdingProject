@@ -3,7 +3,7 @@
 Most act 1 areas (G1_3, G1_6, G1_7, G1_8, G1_9, G1_11, G1_12, G1_13–15) use `.dgr` topologies
 instead of `.tgr`. The topology choice, the graph load and the node-existence rolls are shared
 with `.tgr` ([shared-passes.md](shared-passes.md)); after them the client runs a separate dungeon
-layout. Port: `crates/poe-world/src/dungeon.rs` (layout) and `dungeon_tiles.rs` (tile pass). Which
+layout. Port: `modules/server/crates/poe-world/src/dungeon.rs` (layout) and `dungeon_tiles.rs` (tile pass). Which
 areas match the client and what is still missing: [../../status/terrain.md](../../status/terrain.md).
 The tools (`area_trace`, `area_vectors`, `wiggle_check`, debug switches) are listed in
 [README.md](README.md#tools).

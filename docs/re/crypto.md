@@ -28,7 +28,7 @@ The IV offset formula is `((is_client ^ 1) + 2) * 16` for the first instance and
 
 ## Private-server bypass (`poe-hook` feature `crypto_bypass`)
 - The DLL finds the verify-and-derive routine by its prologue pattern and replaces it. The replacement writes `SHA-512(server key bytes)` into the key buffer and returns. There is no signature check and no DH.
-- The server (`servers/login-server/src/handshake.rs`) sends 128 random bytes as its key with an empty signature, then derives the same key material (`poe_net::KeyMaterial::from_server_public_key`).
+- The server (`modules/server/servers/login-server/src/handshake.rs`) sends 128 random bytes as its key with an empty signature, then derives the same key material (`poe_net::KeyMaterial::from_server_public_key`).
 
 ## Other crypto in the binary
 - `0x14219cde0`: SHA-384(8-byte seed), then Salsa20, applied in place to a buffer.

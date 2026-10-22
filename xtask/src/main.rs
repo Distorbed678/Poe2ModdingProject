@@ -16,12 +16,15 @@ use poe_hook_deploy::{DeployOptions, GatewayEntry, LoginMode, Mode, launch::Prot
 
 mod check_build;
 mod fingerprint;
+mod server;
 mod terrain_matrix;
 mod tracker;
 mod versions;
 
 /// The client DLL workspace (Poe2ClientHook submodule), relative to the repo root.
 const CLIENT_HOOK_DIR: &str = "modules/client-hook";
+/// The server config xtask reads when neither `--config` nor `POE_CONFIG` is given.
+const DEFAULT_CONFIG: &str = "modules/server/config/server.toml";
 /// The client's compile target.
 const DLL_TARGET: &str = "x86_64-pc-windows-msvc";
 /// The sample mod (a cdylib in the client DLL workspace) and where it is installed from.
@@ -32,9 +35,10 @@ const SAMPLE_MOD_DLL: &str = "sample_mod.dll";
 #[derive(Parser)]
 #[command(about = "PoE2 server development tasks")]
 struct Cli {
-    /// Server config to read ports/hosts from.
-    #[arg(long, default_value = poe_config::DEFAULT_PATH)]
-    config: PathBuf,
+    /// Server config to read ports/hosts from (default: `POE_CONFIG`, else
+    /// modules/server/config/server.toml).
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
     /// Proton prefix for `run-client`, `login-token`, `select-gateway` and the gateway selection
     /// of `deploy-client` (default `third_party/proton-prefix`; a second client of the local
     /// two-client test uses `third_party/proton-prefix-2`, see scripts/test-mp.sh). Never the
@@ -123,7 +127,7 @@ enum Cmd {
         check: bool,
     },
     /// What a game build breaks: scans an exe for every entry of the client DLL's signature
-    /// table, checks the build identity against versions/<version>.toml, the opcode tables
+    /// table, checks the build identity against modules/protocol/versions/<version>.toml, the opcode tables
     /// (HNC table, deserializer fingerprints), the strings the tools need and the game data the
     /// server reads, writes dumps/<version>/check-build.md and prints a summary. Exit code 0 all
     /// fine, 1 warnings, 2 something required is missing, ambiguous or different
@@ -147,7 +151,7 @@ enum Cmd {
         #[arg(long)]
         write_fingerprints: bool,
     },
-    /// Copy versions/<version>.toml into the launcher (modules/launcher/versions/), which embeds
+    /// Copy modules/protocol/versions/<version>.toml into the launcher (modules/launcher/versions/), which embeds
     /// byte-identical copies; with --check only compare.
     Versions {
         #[arg(long)]
@@ -164,12 +168,18 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Write the web API's OpenAPI document to docs/architecture/openapi.json (the web admin
-    /// and the launcher generate their types from it).
+    /// Write the web API's OpenAPI document to modules/server/docs/openapi.json (the web admin
+    /// and the launcher generate their types from it). Runs `cargo xtask openapi` of Poe2Server.
     Openapi {
         /// Only check; exit 1 if the file is out of date.
         #[arg(long)]
         check: bool,
+    },
+    /// The server (modules/server) from the hub: build, run with the hub as working directory
+    /// (rebuilding the web admin when its sources are newer than dist/build.json), test.
+    Server {
+        #[command(subcommand)]
+        cmd: server::ServerCmd,
     },
     /// Make the standalone client sign `<account>` in without a password: writes the 32-byte
     /// remember-me token (64 hex digits) and `[LOGIN] username` / `save_login` into the
@@ -202,6 +212,14 @@ fn main() -> Result<()> {
     if let Cmd::Openapi { check } = cli.cmd {
         return openapi(&root, check);
     }
+    let config_path = cli
+        .config
+        .clone()
+        .or_else(|| std::env::var_os(poe_config::ENV_PATH).map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG));
+    if let Cmd::Server { cmd } = cli.cmd {
+        return server::run(&root, &config_path, cmd);
+    }
     if let Cmd::TerrainMatrix { dumps, out } = cli.cmd {
         return terrain_matrix::run(&root, dumps, out);
     }
@@ -211,7 +229,7 @@ fn main() -> Result<()> {
     if let Cmd::CheckBuild { exe, bundles, version, report, write_fingerprints } = cli.cmd {
         // The config is optional: it only supplies the game directory, the schema and the
         // server's version.
-        let config = Config::load(&cli.config).ok();
+        let config = Config::load(&config_path).ok();
         let code = check_build::run(
             &root,
             config.as_ref(),
@@ -223,7 +241,7 @@ fn main() -> Result<()> {
     if let Cmd::LoginToken { account, token_hex } = &cli.cmd {
         return login_token(&prefix, account, token_hex);
     }
-    let config = Config::load(&cli.config)?;
+    let config = Config::load(&config_path)?;
     match cli.cmd {
         Cmd::BuildDll { debug } => build_dll(&root, !debug).map(|_| ()),
         Cmd::DeployClient {
@@ -252,6 +270,7 @@ fn main() -> Result<()> {
         Cmd::DllData => export_dll_data(&config),
         Cmd::Tracker { .. }
         | Cmd::Openapi { .. }
+        | Cmd::Server { .. }
         | Cmd::LoginToken { .. }
         | Cmd::TerrainMatrix { .. }
         | Cmd::Versions { .. }
@@ -268,19 +287,15 @@ fn main() -> Result<()> {
     }
 }
 
-/// Writes (or checks) `docs/architecture/openapi.json` from `poe_web_api::openapi_json`.
+/// Writes (or checks) `modules/server/docs/openapi.json`: the generator is Poe2Server's own
+/// `cargo xtask openapi` (so the server repository checks it in its CI).
 fn openapi(root: &Path, check: bool) -> Result<()> {
-    let path = root.join("docs/architecture/openapi.json");
-    let text = poe_web_api::openapi_json() + "\n";
+    let mut cmd = Command::new("cargo");
+    cmd.args(["xtask", "openapi"]).current_dir(root.join(server::SERVER_DIR));
     if check {
-        if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
-            bail!("{} is out of date: run `cargo xtask openapi`", path.display());
-        }
-        return Ok(());
+        cmd.arg("--check");
     }
-    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
-    println!("wrote {}", path.display());
-    Ok(())
+    run(&mut cmd)
 }
 
 fn repo_root() -> PathBuf {

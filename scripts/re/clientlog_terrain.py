@@ -3,7 +3,7 @@
 Usage: clientlog_terrain.py <Client.txt> [out.tsv]
 
 Each area entry logs `Generating level L area "A" with seed S` followed by `Tile hash: T` and
-`Doodad hash: D`. A server-side generator (`crates/poe-world`) is correct when it reproduces (T, D) for (A, S).
+`Doodad hash: D`. A server-side generator (`modules/server/crates/poe-world`) is correct when it reproduces (T, D) for (A, S).
 Writes `area<TAB>level<TAB>seed<TAB>tile_hash<TAB>doodad_hash<TAB>build`, de-duplicated; `build`
 is the client's `Build Revision` at the time (game data, and so layouts, change with it).
 """

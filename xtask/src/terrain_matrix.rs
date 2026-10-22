@@ -26,10 +26,10 @@ use anyhow::{Context, Result, bail};
 
 /// The matrix, relative to the repo root.
 pub const MATRIX_PATH: &str = "docs/status/terrain-matrix.tsv";
-/// Verification outputs of the newest supported build (`versions/<version>.toml`):
+/// Verification outputs of the newest supported build (`modules/protocol/versions/<version>.toml`):
 /// `dumps/<version>/terrain/vectors` below the repo root.
 pub fn vectors_dir(root: &Path) -> Result<PathBuf> {
-    let v = poe_config::VersionFile::latest(root).context("reading versions/")?;
+    let v = poe_config::VersionFile::latest(root).context("reading modules/protocol/versions/")?;
     Ok(v.dumps_dir(root).join("terrain/vectors"))
 }
 const VECTOR_RESULTS: &str = "area-vectors-results.txt";

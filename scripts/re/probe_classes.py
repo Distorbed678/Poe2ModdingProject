@@ -7,7 +7,7 @@ Usage: scripts/re/probe_classes.py [probe-results.tsv] [--areas]
 Prints, per class: failing topologies, areas touched, areas that only this class blocks
 ("solo"); then a greedy order (the class that makes the most areas fully clean first). With
 `--areas` the areas of each class are listed. The classes are regexes over the generator's error
-text (crates/poe-world); an error that matches none is listed as `other: <text>`.
+text (modules/server/crates/poe-world); an error that matches none is listed as `other: <text>`.
 A probe checks one seed and one orientation per topology and stops at the first error, so the
 counts are a lower bound: later errors stay hidden behind the first.
 """

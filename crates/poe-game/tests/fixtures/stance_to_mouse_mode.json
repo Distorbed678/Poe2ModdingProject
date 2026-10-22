@@ -1,1 +1,0 @@
-{"combat_stance":true,"name":"stance_to_mouse_mode","description":"input mode toggled to click-to-move: AimMode(0) and the stance request in one frame, stance 0 one frame later","source":"2026-10-20_18-41-14_336","capture_frames":[3284,3290],"start_cell":[50,50],"inputs":[{"f":0,"op":"aim_mode","mode":0}],"expect":[{"f":1,"ev":"stance","combat":false}]}

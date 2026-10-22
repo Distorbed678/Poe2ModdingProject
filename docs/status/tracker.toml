@@ -79,7 +79,7 @@ link = "docs/architecture/accounts.md"
 [[subsystem.item]]
 name = "Duplicate login ends the old session"
 status = "done"
-note = "LoginSessions::supersede; verified with two real clients (plan 1 WP3.7, docs/guides/hosting.md)"
+note = "LoginSessions::supersede; verified with two real clients (plan 1 WP3.7, modules/server/docs/hosting.md)"
 link = "docs/architecture/accounts.md"
 
 [[subsystem.item]]
@@ -175,30 +175,30 @@ link = "docs/status/terrain.md"
 
 [[subsystem]]
 name = "Multiplayer"
-link = "docs/guides/hosting.md"
+link = "modules/server/docs/hosting.md"
 
 [[subsystem.item]]
 name = "Remote client login (trusted_servers in the DLL)"
 status = "done"
 note = "trusted servers are not blocked or latched and get the crypto bypass; verified with two clients over the LAN IP (WP3.7); a second physical machine is untested"
-link = "docs/guides/hosting.md"
+link = "modules/server/docs/hosting.md"
 
 [[subsystem.item]]
 name = "Remote readiness: advertised host, layout/grid upload, session-keyed debug link"
 status = "done"
 note = "WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine"
-link = "docs/guides/hosting.md"
+link = "modules/server/docs/hosting.md"
 
 [[subsystem.item]]
 name = "Remote-player protocol (add/remove, broadcast actions)"
 status = "done"
-note = "WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looked darker and orange before WP C2; WP C2 built the remote blob to the official layout and fixed the remote roll's stat lists; in-game re-check 2026-10-21: no remote tint left, the remote roll animates and its packets match the official order; the bisect switches stayed unused, docs/guides/hosting.md)"
+note = "WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looked darker and orange before WP C2; WP C2 built the remote blob to the official layout and fixed the remote roll's stat lists; in-game re-check 2026-10-21: no remote tint left, the remote roll animates and its packets match the official order; the bisect switches stayed unused, modules/server/docs/hosting.md)"
 link = "docs/architecture/instance-world.md"
 
 [[subsystem.item]]
 name = "Shared world: players in one instance see each other"
 status = "partial"
-note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat sync"
+note = "WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (modules/server/docs/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat sync"
 link = "docs/architecture/instance-world.md"
 
 [[subsystem.item]]
@@ -211,7 +211,7 @@ link = "docs/protocol/entities.md#party-and-trade-flows-wp-c3"
 name = "Two-client local test harness"
 status = "done"
 note = "WP3.7: scripts/test-mp.sh (two prefixes, LAN IP, token logins, per-client input files, F8 shots); login, shared instance, walk/roll relay, chat, transfer leave sequence and duplicate-login kick passed; found the town freeze (InitialState flags 7 in a town)"
-link = "docs/guides/hosting.md"
+link = "modules/server/docs/hosting.md"
 
 [[subsystem.item]]
 name = "Parties"
@@ -407,7 +407,7 @@ note = "WP3.3: login_mode patch, shared is_trusted, `cargo xtask login-token`; i
 link = "docs/architecture/client-dll.md#login-mode-and-trusted-servers"
 
 [[subsystem.item]]
-name = "Game update compatibility: signature table, `cargo xtask check-build`, `versions/<version>.toml`, unknown-client refusal"
+name = "Game update compatibility: signature table, `cargo xtask check-build`, `modules/protocol/versions/<version>.toml`, unknown-client refusal"
 status = "partial"
 note = "WP A2-A4: DLL addresses and offsets from byte signatures; check-build (signatures, offsets, opcode fingerprints, strings, game data) with report and exit codes; one version file for xtask, server and launcher; the server refuses an unknown `client_hash` once `hashes_confirmed`; the client_hash is derived from the code, the in-game check must confirm it; renumbered opcodes are not derived"
 link = "docs/guides/new-game-version.md"
@@ -475,8 +475,8 @@ link = "docs/architecture/web-api.md"
 [[subsystem.item]]
 name = "OpenAPI spec (utoipa) for the SPA and launcher types"
 status = "done"
-note = "docs/architecture/openapi.json, `cargo xtask openapi`"
-link = "docs/architecture/openapi.json"
+note = "modules/server/docs/openapi.json, `cargo xtask openapi`"
+link = "modules/server/docs/openapi.json"
 
 [[subsystem.item]]
 name = "Poe2WebAdmin SPA (Svelte 5 + Vite, submodule modules/web-admin)"
@@ -543,7 +543,7 @@ link = "modules/client-hook/docs/mod-manifest.md"
 [[subsystem.item]]
 name = "Server mod host (native libraries, poe-mod-api, data-tier commands)"
 status = "done"
-note = "crates/poe-mod-host: mods/ + state.toml, ABI and game-version checks, events, submitted commands, poe-server mod CLI; never unloaded; config_defaults and server opcodes overlays not applied yet; in game: !hello from the SDK example"
+note = "modules/server/crates/poe-mod-host: mods/ + state.toml, ABI and game-version checks, events, submitted commands, poe-server mod CLI; never unloaded; config_defaults and server opcodes overlays not applied yet; in game: !hello from the SDK example"
 link = "docs/architecture/mod-host.md"
 
 [[subsystem.item]]

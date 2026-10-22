@@ -2,7 +2,9 @@
 """Check the relative links and #anchors of the Markdown docs (stdlib only).
 
 Usage: python3 scripts/check-links.py [file-or-dir ...]
-Default: docs/, README.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md and dumps/README.md.
+Default: docs/, README.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md and dumps/README.md of the hub,
+plus the Markdown of the server submodule (modules/server: README, CONTRIBUTING, SECURITY, CLAUDE.md,
+docs/), skipped with a warning when it is not checked out.
 
 Checks `[text](target)` links outside code blocks and inline code:
 - a relative path must exist (files and directories);
@@ -19,6 +21,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTS = ["docs", "README.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "dumps/README.md"]
+# The server repository's own docs: links between them are checked here too.
+SERVER_DEFAULTS = [
+    "modules/server/README.md",
+    "modules/server/CLAUDE.md",
+    "modules/server/CONTRIBUTING.md",
+    "modules/server/SECURITY.md",
+    "modules/server/docs",
+]
 SOFT_DIRS = {"dumps", "runtime", "third_party", "GameFiles", "modules"}
 
 LINK_RE = re.compile(r"(?<!\!)\[((?:[^\[\]]|\[[^\]]*\])*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
@@ -83,7 +93,7 @@ def is_soft(target):
 
 def collect(args):
     files = []
-    for a in args or DEFAULTS:
+    for a in args or DEFAULTS + SERVER_DEFAULTS:
         p = (ROOT / a) if not Path(a).is_absolute() else Path(a)
         if p.is_dir():
             files += sorted(p.rglob("*.md"))

@@ -4,23 +4,31 @@ A private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust and de
 
 ## How the repos fit together
 
-This repo holds the server. The shared protocol code, the client hook, the launcher and the web admin live in their own repos (under `Distorbed678`), included as git submodules.
+This repository is the **project hub**: the documentation, the plans, the reverse-engineering notes, the dev tooling (`xtask`, `scripts/`) and the progress tracker below. The code lives in separate repositories under `Distorbed678`, included here as git submodules in `modules/`. The full overview with a dependency diagram, the release channels and how a player, a host and a developer get started: **[docs/overview.md](docs/overview.md)**.
 
 | Repo | Where | Role |
 |---|---|---|
-| **Poe2ModdingProject** (this repo) | `/` | `servers/` (login, instance, and the `poe-server` launcher that runs both plus the web API), `crates/` (config, data, store, accounts, cluster, web API, terrain generator, simulation), `xtask`, `docs/`, `scripts/` |
-| [Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol) | `modules/protocol` | `poe-proto`, `poe-net` (codec and ciphers) and the opcode tables `opcodes/<version>/*.toml`, used by the server and the client hook |
-| [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) | `modules/client-hook` | The client DLLs (`version.dll` loader, hot-reloadable debug core with the in-game overlay) and `poe-hook-deploy`; carries Poe2Protocol as a nested submodule |
-| [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) | `modules/launcher` | Player launcher (Tauri 2 + Svelte 5): server profiles and login (keyring), installs 0.5.5e from Steam depots, deploys the hook and starts the game, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)); carries Poe2ClientHook as a nested submodule |
-| [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API; build it and set `[web] static_dir = "modules/web-admin/dist"` ([docs/guides/setup.md](docs/guides/setup.md#web-admin-build), [docs/architecture/web-api.md](docs/architecture/web-api.md)) |
+| **Poe2ModdingProject** (this repo) | `/` | Hub: `docs/`, `scripts/`, `xtask` (client deploy, DLL build, `check-build`, tracker, running the server from the hub), news |
+| [Poe2Server](https://github.com/Distorbed678/Poe2Server) | `modules/server` | The server: `servers/` (login, instance, `poe-server`), `crates/` (config, data, store, accounts, cluster, web API, terrain generator, simulation, mod host), `config/`; releases `server-v*` |
+| [Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol) | `modules/protocol` | `poe-proto`, `poe-net` (codec and ciphers), the opcode tables `opcodes/<version>/*.toml` and the supported-build definitions `versions/<version>.toml` |
+| [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) | `modules/client-hook` | The client DLLs (`version.dll` loader, hot-reloadable debug core with the in-game overlay, mod loader), `poe-hook-deploy`, `poe-hook-mods`; releases `hook-v*` |
+| [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API ([docs/guides/setup.md](docs/guides/setup.md#web-admin-build), [docs/architecture/web-api.md](docs/architecture/web-api.md)) |
+| [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) | `modules/launcher` | Player and host launcher (Tauri 2 + Svelte 5): server profiles and login, installs 0.5.5e from Steam depots, deploys the hook, starts the game, hosts a server, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)); releases `v*` |
+| [Poe2ModSDK](https://github.com/Distorbed678/Poe2ModSDK) | `modules/mod-sdk` | SDK for server and client mods (`poe-mod-api`, `poe-mod` tool, examples) |
+| [Poe2Mods](https://github.com/Distorbed678/Poe2Mods) | `modules/mod-index` | Public mod index read by the launcher |
+| [Poe2ServerList](https://github.com/Distorbed678/Poe2ServerList) | `modules/server-list` | Public server list read by the launcher |
 
 Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (server data and logs, git-ignored), `dumps/` (datamined outputs, git-ignored; [dumps/README.md](dumps/README.md)), `GameFiles/` (your copy of the 0.5.5e client, never in git). Every crate and server: [docs/architecture/crates.md](docs/architecture/crates.md).
+
+**Players** use the launcher ([docs/guides/client.md](docs/guides/client.md)); **hosts** take a [server release](https://github.com/Distorbed678/Poe2Server/releases) or the launcher's *Host a server* page ([hosting guide](modules/server/docs/hosting.md)); **developers** clone with `git clone --recursive`.
 
 ## Quick start
 
 Needs Linux with rustup, Steam with Proton Experimental, and a copy of the 0.5.5e client in `GameFiles/`. The full requirements, options and the unattended test tools are in [docs/guides/setup.md](docs/guides/setup.md).
 
 The steps are in [docs/guides/setup.md](docs/guides/setup.md): [clone](docs/guides/setup.md#clone) with submodules, [fetch the tools](docs/guides/setup.md#tools), [build](docs/guides/setup.md#build-and-test), [start the server and deploy the client](docs/guides/setup.md#run) into `GameFiles/`, and [play](docs/guides/setup.md#playing-from-steam-non-steam-game-shortcut) or launch the client through Proton. `revert-client` restores `GameFiles/`.
+
+Build and run the server from the hub with `cargo xtask server build` and `cargo xtask server run` (it runs with this folder as its working directory and rebuilds the web admin when its sources changed); the server alone builds from its own repository ([Poe2Server](https://github.com/Distorbed678/Poe2Server)).
 
 Server commands and admins: [docs/guides/server-admin.md](docs/guides/server-admin.md).
 
@@ -80,7 +88,7 @@ Docs: [docs/architecture/accounts.md](docs/architecture/accounts.md)
 | ✅ | Tickets, resume tickets and login sessions (many accounts at once) |  |
 | ✅ | [Passwords (argon2id) and chosen account names; roles; disable (poe-accounts, migration 0006)](docs/architecture/accounts.md) | WP3.2; verified with the real standalone screen in game (WP3.3) |
 | ✅ | [Remember Me and per-cluster tokens (hashed, expiring, revocable, rolling)](docs/architecture/accounts.md) | game tokens in use; launcher and web tokens issued by the web API (WP4.1) |
-| ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; verified with two real clients (plan 1 WP3.7, docs/guides/hosting.md) |
+| ✅ | [Duplicate login ends the old session](docs/architecture/accounts.md) | LoginSessions::supersede; verified with two real clients (plan 1 WP3.7, modules/server/docs/hosting.md) |
 | ✅ | [Rate limiting of password attempts (game login and web API)](docs/architecture/accounts.md) | WP B2: [security] per account name and per IP, result 0x49 in game, HTTP 429 with Retry-After on the web; unit and login-level tests; in-game message check pending |
 
 ### Instances/Transfers
@@ -112,16 +120,16 @@ Docs: [docs/protocol/movement.md](docs/protocol/movement.md)
 
 ### Multiplayer
 
-Docs: [docs/guides/hosting.md](docs/guides/hosting.md)
+Docs: [modules/server/docs/hosting.md](modules/server/docs/hosting.md)
 
 | | Item | Note |
 |---|---|---|
-| ✅ | [Remote client login (trusted_servers in the DLL)](docs/guides/hosting.md) | trusted servers are not blocked or latched and get the crypto bypass; verified with two clients over the LAN IP (WP3.7); a second physical machine is untested |
-| ✅ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](docs/guides/hosting.md) | WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine |
-| ✅ | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looked darker and orange before WP C2; WP C2 built the remote blob to the official layout and fixed the remote roll's stat lists; in-game re-check 2026-10-21: no remote tint left, the remote roll animates and its packets match the official order; the bisect switches stayed unused, docs/guides/hosting.md) |
-| 🟡 | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (docs/guides/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat sync |
+| ✅ | [Remote client login (trusted_servers in the DLL)](modules/server/docs/hosting.md) | trusted servers are not blocked or latched and get the crypto bypass; verified with two clients over the LAN IP (WP3.7); a second physical machine is untested |
+| ✅ | [Remote readiness: advertised host, layout/grid upload, session-keyed debug link](modules/server/docs/hosting.md) | WP3.4: terrain layout/grid upload over the instance TCP port (offer, then zlib data, cached per tile hash); PSY/debug-link datagrams replaced by HMAC-SHA256 frames keyed by session (key from the ticket keys, replay window, version byte); [network.login] public_port and a loopback public_host warning; verified in game with an empty layout dir (upload, spawn, authenticated drift check); not yet tried from a second machine |
+| ✅ | [Remote-player protocol (add/remove, broadcast actions)](docs/architecture/instance-world.md) | WP3.5 decoded it from the official town capture (docs/protocol/entities.md); WP3.6 sends it (remote AddObject blob, removal sequence, relayed simulation messages); WP3.7: two real clients see each other, walk and roll are relayed, the leave sequence on a transfer works (remote model looked darker and orange before WP C2; WP C2 built the remote blob to the official layout and fixed the remote roll's stat lists; in-game re-check 2026-10-21: no remote tint left, the remote roll animates and its packets match the official order; the bisect switches stayed unused, modules/server/docs/hosting.md) |
+| 🟡 | [Shared world: players in one instance see each other](docs/architecture/instance-world.md) | WP3.6: all sessions of an instance share one World; every entity's events go to every session in the frame they are produced, join/leave add and remove the remote player; pause only for a lone player; WP3.7 verified with two game clients (modules/server/docs/hosting.md); WP C2: a second player spawns on a free walkable cell (`[spawn] player_spacing`, verified in game: cells 8 apart); open: no combat sync |
 | 🟡 | [Party and trade requests (invite, cancel)](docs/protocol/entities.md#party-and-trade-flows-wp-c3) | WP C3: party invite and cancel, trade request and cancel between two sessions, verified with two real clients 2026-10-21 (invitee popups, cancel, leave; a trade request needs the two slot-0x79 AddInventory first, else both clients crash with "Invalid inventory id"); accept, decline, timeouts and joined members are not implemented: gate G-PARTY (needs an official capture where a friend answers) |
-| ✅ | [Two-client local test harness](docs/guides/hosting.md) | WP3.7: scripts/test-mp.sh (two prefixes, LAN IP, token logins, per-client input files, F8 shots); login, shared instance, walk/roll relay, chat, transfer leave sequence and duplicate-login kick passed; found the town freeze (InitialState flags 7 in a town) |
+| ✅ | [Two-client local test harness](modules/server/docs/hosting.md) | WP3.7: scripts/test-mp.sh (two prefixes, LAN IP, token logins, per-client input files, F8 shots); login, shared instance, walk/roll relay, chat, transfer leave sequence and duplicate-login kick passed; found the town freeze (InitialState flags 7 in a town) |
 | ❌ | Parties |  |
 
 ### Chat/Commands
@@ -652,7 +660,7 @@ Docs: [docs/architecture/client-dll.md](docs/architecture/client-dll.md)
 | ✅ | Read-only mode on official servers (latch) |  |
 | ✅ | [Deploy and launch library (poe-hook-deploy)](docs/architecture/crates.md) |  |
 | 🟡 | [Standalone login screen, token auto-login, trusted_servers](docs/architecture/client-dll.md#login-mode-and-trusted-servers) | WP3.3: login_mode patch, shared is_trusted, `cargo xtask login-token`; in-game test plan pending |
-| 🟡 | [Game update compatibility: signature table, `cargo xtask check-build`, `versions/<version>.toml`, unknown-client refusal](docs/guides/new-game-version.md) | WP A2-A4: DLL addresses and offsets from byte signatures; check-build (signatures, offsets, opcode fingerprints, strings, game data) with report and exit codes; one version file for xtask, server and launcher; the server refuses an unknown `client_hash` once `hashes_confirmed`; the client_hash is derived from the code, the in-game check must confirm it; renumbered opcodes are not derived |
+| 🟡 | [Game update compatibility: signature table, `cargo xtask check-build`, `modules/protocol/versions/<version>.toml`, unknown-client refusal](docs/guides/new-game-version.md) | WP A2-A4: DLL addresses and offsets from byte signatures; check-build (signatures, offsets, opcode fingerprints, strings, game data) with report and exit codes; one version file for xtask, server and launcher; the server refuses an unknown `client_hash` once `hashes_confirmed`; the client_hash is derived from the code, the in-game check must confirm it; renumbered opcodes are not derived |
 
 ### Launcher
 
@@ -675,7 +683,7 @@ Docs: [docs/architecture/web-api.md](docs/architecture/web-api.md)
 | | Item | Note |
 |---|---|---|
 | ✅ | [Web API crate (axum, in poe-server)](docs/architecture/web-api.md) | WP4.1; register/login/password, tokens, 20 endpoints; tested with oneshot and a smoke run on shifted ports |
-| ✅ | [OpenAPI spec (utoipa) for the SPA and launcher types](docs/architecture/openapi.json) | docs/architecture/openapi.json, `cargo xtask openapi` |
+| ✅ | [OpenAPI spec (utoipa) for the SPA and launcher types](modules/server/docs/openapi.json) | modules/server/docs/openapi.json, `cargo xtask openapi` |
 | ✅ | [Poe2WebAdmin SPA (Svelte 5 + Vite, submodule modules/web-admin)](docs/architecture/web-api.md#the-web-admin-spa) | WP4.2; login, dashboard, players, instances, accounts, characters, announce; typed from openapi.json; vitest + CI; served via `[web] static_dir` |
 | ✅ | [Live log over WebSocket (ring buffer, level/target/text filter)](docs/architecture/web-api.md) | server side |
 | ✅ | [Live log viewer page (filters, pause, autoscroll, reconnect)](docs/architecture/web-api.md#the-web-admin-spa) | WP4.2; 3000 lines in the DOM at most |
@@ -693,7 +701,7 @@ Docs: [docs/guides/modding.md](docs/guides/modding.md)
 | ✅ | Server command registry (one place for chat and overlay) |  |
 | ✅ | [Client mod loader in the DLL (mod.toml, mod ABI 1, sample mod)](modules/client-hook/docs/mod-manifest.md) | loads enabled poe-hook-mods/<id> DLLs in state.toml order, ABI check, never in official mode; [data] overlays not applied yet |
 | ✅ | [Mod manifest v2 and packages (side client/server/both, verified zips)](modules/client-hook/docs/mod-manifest.md) | poe-hook-mods: manifest v1+v2, [client]/[server]/[[commands]], verify_package; Poe2ModSDK repo with poe-mod tool and examples |
-| ✅ | [Server mod host (native libraries, poe-mod-api, data-tier commands)](docs/architecture/mod-host.md) | crates/poe-mod-host: mods/ + state.toml, ABI and game-version checks, events, submitted commands, poe-server mod CLI; never unloaded; config_defaults and server opcodes overlays not applied yet; in game: !hello from the SDK example |
+| ✅ | [Server mod host (native libraries, poe-mod-api, data-tier commands)](docs/architecture/mod-host.md) | modules/server/crates/poe-mod-host: mods/ + state.toml, ABI and game-version checks, events, submitted commands, poe-server mod CLI; never unloaded; config_defaults and server opcodes overlays not applied yet; in game: !hello from the SDK example |
 | ✅ | [Mod advertisement and downloads](docs/architecture/mod-host.md) | GET /api/v1/server `mods` (client and both mods, exact version + SHA-256), GET /api/v1/mods/{id}/{version}.zip |
 | ✅ | [Login mod check](docs/architecture/mod-host.md) | the hook reports its loaded client mods on the side channel; the server refuses missing or wrong versions, extra client mods only with [mods] allow_extra_client_mods; verified in game |
 | ✅ | [Launcher mod sync and mod browser](docs/guides/launcher.md) | per-server mod sets, Off/Ask/Auto, verified cache, Poe2Mods index; not yet run against a real server with mods |

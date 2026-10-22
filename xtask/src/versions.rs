@@ -1,9 +1,9 @@
 //! `cargo xtask versions`: keeps the launcher's copies of the version files.
 //!
-//! `versions/<version>.toml` at the repository root is the single definition of a supported
-//! build. The launcher is a separate repository (the submodule `modules/launcher`) that must
+//! `modules/protocol/versions/<version>.toml` (Poe2Protocol) is the single definition of a
+//! supported build. The launcher is a separate repository (the submodule `modules/launcher`) that must
 //! build on its own, so it embeds copies, `modules/launcher/versions/<version>.toml`, which
-//! are byte-identical to the root files. This command writes them (or with `--check` only
+//! are byte-identical to the Poe2Protocol files. This command writes them (or with `--check` only
 //! compares, exit 1 when one is stale); `check-build` and a test of this crate compare them
 //! too. Nothing in the launcher repository is edited by hand.
 
@@ -28,13 +28,13 @@ pub fn check_launcher_copy(root: &Path, version: &str) -> Result<Option<String>>
     match std::fs::read(copy_path(root, version)) {
         Ok(copy) if copy == source => Ok(None),
         Ok(_) => Ok(Some(format!(
-            "{LAUNCHER_DIR}/{version}.toml differs from versions/{version}.toml"
+            "{LAUNCHER_DIR}/{version}.toml differs from modules/protocol/versions/{version}.toml"
         ))),
         Err(_) => Ok(Some(format!("{LAUNCHER_DIR}/{version}.toml is missing"))),
     }
 }
 
-/// Copies every `versions/*.toml` to the launcher (or only checks them).
+/// Copies every `modules/protocol/versions/*.toml` to the launcher (or only checks them).
 pub fn run(root: &Path, check: bool) -> Result<()> {
     let dir = root.join(LAUNCHER_DIR);
     if !dir.is_dir() {
@@ -47,7 +47,7 @@ pub fn run(root: &Path, check: bool) -> Result<()> {
     for version in poe_config::versions::known_versions(root) {
         // Parse first: a broken file must not reach the launcher.
         poe_config::VersionFile::load(root, &version)
-            .with_context(|| format!("versions/{version}.toml"))?;
+            .with_context(|| format!("modules/protocol/versions/{version}.toml"))?;
         match check_launcher_copy(root, &version)? {
             None => println!("{LAUNCHER_DIR}/{version}.toml: in sync"),
             Some(why) if check => {

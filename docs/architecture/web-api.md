@@ -1,18 +1,18 @@
 # Web API
 
-The server's HTTP and WebSocket API, for the web admin site ([Poe2WebAdmin](#the-web-admin-spa)) and the launcher ([../guides/launcher.md](../guides/launcher.md)). It is the crate `crates/poe-web-api` (axum 0.8), started by `poe-server` next to the login and instance servers. The machine-readable description is [openapi.json](openapi.json), generated from the code (`cargo xtask openapi`) and also served live at `GET /api/v1/openapi.json`.
+The server's HTTP and WebSocket API, for the web admin site ([Poe2WebAdmin](#the-web-admin-spa)) and the launcher ([../guides/launcher.md](../guides/launcher.md)). It is the crate `modules/server/crates/poe-web-api` (axum 0.8), started by `poe-server` next to the login and instance servers. The machine-readable description is [openapi.json](../../modules/server/docs/openapi.json), generated from the code (`cargo xtask openapi`) and also served live at `GET /api/v1/openapi.json`.
 
 Related: accounts, tokens and hashing in [accounts.md](accounts.md); the commands the admin endpoints run in [../guides/server-admin.md](../guides/server-admin.md); the plan in [../plans/orchestration-2026-10.md](../plans/orchestration-2026-10.md) (phase 4).
 
 ## Running it
 
-`poe-server` starts the API when `[web] enabled` is true (the default). Config (`config/server.toml`, every key in `config/server.example.toml`):
+`poe-server` starts the API when `[web] enabled` is true (the default). Config (`modules/server/config/server.toml`, every key in `modules/server/config/server.example.toml`):
 
 | Key | Default | |
 |---|---|---|
 | `[web] enabled` | `true` | start the API with poe-server |
 | `[web] bind` | `127.0.0.1:8080` | listen address. Loopback by default: passwords travel in request bodies, so put a TLS reverse proxy in front before exposing it |
-| `[web] static_dir` | empty | directory with the built web admin; served at `/` with an `index.html` fallback for client-side routes. A set but missing directory logs a warning and serves nothing |
+| `[web] static_dir` | empty | directory with the built web admin (resolved from the working directory); served at `/` with an `index.html` fallback for client-side routes. A set but missing directory logs a warning and serves nothing |
 | `[web] cors_origins` | `[]` | browser origins allowed to call the API (for example `["http://localhost:5173"]` for the Vite dev server). Empty: no CORS headers |
 | `[web] log_buffer` | `2000` | recent log events kept for the live log viewer |
 | `[web] web_token_ttl_secs` | `60` | lifetime of the single-use web sign-in token ([below](#opening-the-web-admin-from-the-launcher)) |
@@ -27,7 +27,7 @@ Related: accounts, tokens and hashing in [accounts.md](accounts.md); the command
 Start the server and make an admin as described in [../guides/setup.md](../guides/setup.md#web-api) (`curl localhost:8080/api/v1/server`, `POST /api/v1/login` with `{"username", "password"}`, then `Authorization: Bearer <token>` on `/api/v1/admin/...`).
 
 
-`cargo xtask openapi` rewrites `docs/architecture/openapi.json` (`--check` fails when it is stale; a unit test in the crate fails too). The SPA and the launcher generate their types from that file.
+`cargo xtask openapi` rewrites `modules/server/docs/openapi.json` (`--check` fails when it is stale; a unit test in the crate fails too). The SPA and the launcher generate their types from that file.
 
 ## Authentication
 
@@ -61,7 +61,7 @@ Errors are JSON, `{"error": "..."}`, with `400` bad input, `401` no or bad token
 
 ## Endpoints
 
-All under `/api/v1`. Full schemas: [openapi.json](openapi.json).
+All under `/api/v1`. Full schemas: [openapi.json](../../modules/server/docs/openapi.json).
 
 | Endpoint | Auth | |
 |---|---|---|
@@ -115,7 +115,7 @@ Character names and account names in paths must not contain whitespace (they go 
 
 ### How the admin endpoints run
 
-They do not reimplement anything. `poe_cluster::AdminControl` (`crates/poe-cluster/src/admin.rs`) is the small surface the API needs from the instance server, which implements it (`servers/instance-server/src/admin.rs`):
+They do not reimplement anything. `poe_cluster::AdminControl` (`modules/server/crates/poe-cluster/src/admin.rs`) is the small surface the API needs from the instance server, which implements it (`modules/server/servers/instance-server/src/admin.rs`):
 
 - `online()`: the live sessions (`Live::online`).
 - `run_command(actor, line)`: parses `line` with the command registry (`commands.rs`), checks the actor's admin role now, and runs the session-free commands (`who`, `kick`, `mute`, `unmute`, `announce`, `instances`, `instance_new`, `close`, `account ...`) through the same code as chat (`exec.rs`: `run_global`/`execute_global`). Commands that need the caller's own game session (`where`, `join`, `teleport`, `terrain`, `area_info`) are refused. The call is logged and appended to the audit file as `<admin> (web)`, with passwords redacted.
@@ -140,7 +140,7 @@ Protocol (JSON text frames), after the upgrade:
 
 ### Stop and restart
 
-`crates/poe-web-api/src/lifecycle.rs` owns the request, `servers/poe-server/src/lifecycle.rs` the end of the process.
+`modules/server/crates/poe-web-api/src/lifecycle.rs` owns the request, `modules/server/servers/poe-server/src/lifecycle.rs` the end of the process.
 
 1. `POST /admin/server/stop|restart` validates the body (`delay_secs` 0 to 3600, `message` up to 200 characters, whitespace normalised), refuses a second request with `409`, audits `server stop|restart` and answers `202`. A countdown task starts.
 2. The task announces through the `announce` command (a `<Server>` chat line, audited like every announce): at the start (`Server restarting in 1 min 30 s: <message>`), then at each of 10 min, 5 min, 2 min, 1 min, 30 s, 10 s, 5 s below the delay, and `Server restarting now` at the end. Until that last line the request can be cancelled (`POST /admin/server/cancel` announces the cancellation).
@@ -152,20 +152,20 @@ Protocol (JSON text frames), after the upgrade:
 | restart | `exec` (default) | starts itself again: Unix `exec` of the same binary with the same arguments, environment and working directory (same pid, so a parent that waits for the process, like the launcher's Host page or a systemd unit, keeps seeing it; every socket is closed by the exec); Windows has no `exec`: it spawns the new process (which waits 2 s for the ports, `POE_SERVER_RESTART_WAIT_MS`) and exits 0, so a parent sees an exit |
 | restart | `exit` | exits with code **75** (`poe_config::RESTART_EXIT_CODE`, `EX_TEMPFAIL`) and leaves the start to a supervisor |
 
-A binary that was replaced while running (an upgrade) is found again at its path (Linux reports `<path> (deleted)`). If the restart itself fails (exec error), the process logs it and exits 75. Web sessions are rows in the database, so they survive a restart; the SPA polls `GET /server` and `GET /admin/server/shutdown`, shows the countdown and "restarting" in a banner, and signs nobody out. Under a supervisor use `restart_mode = "exit"` ([../guides/hosting.md](../guides/hosting.md#running-it-permanently)).
+A binary that was replaced while running (an upgrade) is found again at its path (Linux reports `<path> (deleted)`). If the restart itself fails (exec error), the process logs it and exits 75. Web sessions are rows in the database, so they survive a restart; the SPA polls `GET /server` and `GET /admin/server/shutdown`, shows the countdown and "restarting" in a banner, and signs nobody out. Under a supervisor use `restart_mode = "exit"` ([../guides/hosting.md](../../modules/server/docs/hosting.md#running-it-permanently)).
 
 ### Bans
 
 `POST /admin/bans` bans an **account** or an **IP address**, for a length (`duration_secs`, 60 s to 10 years), until a date (`expires_at`) or for good (neither). The row goes into the `bans` table (migration 0007) and stays as history when it expires or is lifted (`POST /admin/bans/{id}/lift`).
 
-- **Account ban.** `AccountStore::authenticate` and `authenticate_token` (`crates/poe-accounts`) refuse a banned account with `AccountError::Banned { reason, until }` *after* the password check, so a wrong password never learns whether the account is banned. That one place covers the game login (the client shows the ban's text: "This account is banned until 2026-10-29 04:00 UTC. Reason: ..."), the web login (`403` with the same text), launcher and game tokens and the web sign-in link. Creating the ban also revokes the account's tokens and ends its login connections and game sessions at once (`AdminControl::end_sessions`, which is `LoginSessions::supersede`, the same as disabling an account).
-- **IP ban.** The address (IPv4, or IPv6 with IPv4-mapped addresses folded into IPv4) is checked before the password and the rate limiter by the game login (`servers/login-server/src/auth.rs`) and by the web API's `login`, `register` and sign-in-link redemption, using the same client address as the login limiter (the socket, or the last `X-Forwarded-For` entry with `[security] trust_forwarded_for`). It is one address, no ranges. Behind a shared connection a ban affects everyone using it.
+- **Account ban.** `AccountStore::authenticate` and `authenticate_token` (`modules/server/crates/poe-accounts`) refuse a banned account with `AccountError::Banned { reason, until }` *after* the password check, so a wrong password never learns whether the account is banned. That one place covers the game login (the client shows the ban's text: "This account is banned until 2026-10-29 04:00 UTC. Reason: ..."), the web login (`403` with the same text), launcher and game tokens and the web sign-in link. Creating the ban also revokes the account's tokens and ends its login connections and game sessions at once (`AdminControl::end_sessions`, which is `LoginSessions::supersede`, the same as disabling an account).
+- **IP ban.** The address (IPv4, or IPv6 with IPv4-mapped addresses folded into IPv4) is checked before the password and the rate limiter by the game login (`modules/server/servers/login-server/src/auth.rs`) and by the web API's `login`, `register` and sign-in-link redemption, using the same client address as the login limiter (the socket, or the last `X-Forwarded-For` entry with `[security] trust_forwarded_for`). It is one address, no ranges. Behind a shared connection a ban affects everyone using it.
 - **Safety rules.** An admin cannot be banned (take the role away first), nobody can ban themselves, and the address you are calling from cannot be banned (it would lock you out). A second active ban of the same target is `409`. The reason is plain text up to 200 characters and is shown to the player.
 - **Audit.** `ban account|ip`, `unban account|ip` and the target (and the reason) are appended to the audit file as `<admin> (web)`.
 
 ### Metrics
 
-`poe_cluster::metrics` (`crates/poe-cluster/src/metrics.rs`). The instance actors record the time of every simulation frame in `Actors::ticks` (`TickStats`); a sampler task (`spawn_sampler`, started by `poe-server`) takes a `Sample` every `[metrics] interval_secs` into a ring buffer sized for `[metrics] retention_hours` (24 h at 5 s: 17 280 samples, a few MB; lost on a restart).
+`poe_cluster::metrics` (`modules/server/crates/poe-cluster/src/metrics.rs`). The instance actors record the time of every simulation frame in `Actors::ticks` (`TickStats`); a sampler task (`spawn_sampler`, started by `poe-server`) takes a `Sample` every `[metrics] interval_secs` into a ring buffer sized for `[metrics] retention_hours` (24 h at 5 s: 17 280 samples, a few MB; lost on a restart).
 
 Each sample holds the time (ms), `players` (sessions in game), `instances` and `occupied` (with a player), the frames of the interval (`tick_count`) with their mean and longest time in microseconds (the meter is read and reset by each sample; no frames while nobody is in game), `rss_bytes` of the server process and `cpu_pct` (percent of one core since the previous sample). Memory and CPU come from `/proc/self` on Linux (`VmRSS`, `utime + stime` at 100 ticks per second); elsewhere they are `0` and absent.
 
@@ -173,7 +173,7 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 
 ### Config editor
 
-`crates/poe-web-api/src/configfile.rs`. The editor reads and writes **the file the server was started with**: `Config::load` records its absolute path (`Config::source_path`: `POE_CONFIG`, else `config/server.toml`) and nothing else is ever written (`409` when the server has no file, as in tests). `[web] config_editor = false` makes it read-only (`403` on save).
+`modules/server/crates/poe-web-api/src/configfile.rs`. The editor reads and writes **the file the server was started with**: `Config::load` records its absolute path (`Config::source_path`: `POE_CONFIG`, else `modules/server/config/server.toml`) and nothing else is ever written (`409` when the server has no file, as in tests). `[web] config_editor = false` makes it read-only (`403` on save).
 
 - **Form and raw editor.** `GET /admin/config` returns the text, its `revision` (SHA-256 prefix), the form's field schema (`poe_config::schema::common_fields`: section, key, label, help, type, bounds, default, restart needed; a test checks every default, minimum and maximum against the typed config) and the values the file sets. The form edits those keys; `POST /admin/config/fields` writes them into the text with `toml_edit`, so comments and layout stay, and returns the new text. The raw tab edits the text itself; `POST /admin/config/validate` is the live syntax check. Keys outside the form are edited raw.
 - **Validation before saving.** The text is checked exactly like at start: TOML syntax, the typed sections (unknown values, wrong types, ranges), then the `[game] version` file (`Config::check_text`). An invalid text is refused with its **line and column** (`400`) and nothing changes. A valid text with dangerous settings (`Config::security_warnings`: a non-loopback web bind, open registration on a reachable API, the removed Steam login key) is saved and returns the warnings; the page shows them.
@@ -181,7 +181,7 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 - **Conflicts.** The save carries the `revision` of the text the editor opened; if the file changed since (a hand edit), it is refused with `409` and nothing is overwritten.
 - **Save and restart.** `restart: {delay_secs?, message?}` requests the restart of [Stop and restart](#stop-and-restart) after the file is written (a pending shutdown makes it `restart_error` while the file stays saved). Most keys are read only at start; the message of the day is applied live.
 - **Secrets.** The config holds none and must not. Any string value under a token-like key (`token`, `secret`, `password`, `passwd`, `api_key`, `private_key`, `credential`) is replaced by `<hidden>` in everything the editor shows (`poe_config::edit::redact`) and restored from the file on save; a placeholder with nothing to restore is refused. Contents are never logged or audited: the audit line says `config save`, the number of changed lines and the backup name.
-- **Safe defaults.** The committed `config/server.toml` has the safe values (loopback binds, no registration, no developer tools; tests keep it valid and warning-free). The editor never loosens anything by itself. When it edits that committed file inside a git checkout it says so: run a server others use from your own copy (`POE_CONFIG=runtime/server.toml`), which the editor then edits. New keys come with safe defaults in `config/server.toml` and `config/server.example.toml`.
+- **Safe defaults.** The committed `modules/server/config/server.toml` has the safe values (loopback binds, no registration, no developer tools; tests keep it valid and warning-free). The editor never loosens anything by itself. When it edits that committed file inside a git checkout it says so: run a server others use from your own copy (`POE_CONFIG=runtime/server.toml`), which the editor then edits. New keys come with safe defaults in `modules/server/config/server.toml` and `modules/server/config/server.example.toml`.
 
 ### Message of the day
 
@@ -189,7 +189,7 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 
 ### Mods
 
-`WebState::mods` is a `poe_cluster::ModDirectory` (implemented by `poe_mod_host::ModHost`; `NoMods` in tests). Three endpoints, `crates/poe-web-api/src/mods.rs`:
+`WebState::mods` is a `poe_cluster::ModDirectory` (implemented by `poe_mod_host::ModHost`; `NoMods` in tests). Three endpoints, `modules/server/crates/poe-web-api/src/mods.rs`:
 
 - **`mods` in `GET /server`**, a plain array (the launcher's contract, pinned by `tests_mods.rs`). One entry per enabled mod with side `client` or `both` that loaded on the server (server-only mods are never listed):
 
@@ -212,7 +212,7 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 
 ### Scheduled tasks
 
-`crates/poe-web-api/src/scheduler/`. Tasks live in the database (`scheduled_tasks` and `scheduled_task_runs`, migration 0008): name, `kind` and its `params`, `schedule` (JSON), enabled flag, who made it, last run, last result, next run. `poe-store` keeps `kind`, `params` and `schedule` as opaque JSON; the scheduler owns their meaning.
+`modules/server/crates/poe-web-api/src/scheduler/`. Tasks live in the database (`scheduled_tasks` and `scheduled_task_runs`, migration 0008): name, `kind` and its `params`, `schedule` (JSON), enabled flag, who made it, last run, last result, next run. `poe-store` keeps `kind`, `params` and `schedule` as opaque JSON; the scheduler owns their meaning.
 
 - **Schedules** (`schedule.rs`), in the server's **local time zone** (the `TZ` variable, else the system zone; the page and `GET /admin/schedule` show the zone name and offset): `daily` (`HH:MM`), `weekly` (`days` mon..sun, `time`), `interval` (`every_secs`, 60 s to 30 days, counted from the last run or the server start) and `cron` (five fields `minute hour day-of-month month day-of-week`; `*`, numbers, ranges `a-b`, lists, steps `*/n` `a-b/n` `a/n`, names `jan` and `mon-fri`; `0` and `7` are Sunday; if both day fields are restricted either may match, as in Vixie cron). A local time skipped when the clocks go forward runs right after the gap; one that happens twice when they go back runs the first time only.
 - **Kinds** (`kind.rs`): the enum `TaskKind`, serialized with a `kind` tag. Today only `restart` (`delay_secs`, `message`: like `POST /admin/server/restart`, announced in chat during the countdown). To add a kind: a variant with its options, a `tag`, `validate`, `describe` and `execute` arm, then the web admin's task form and `cargo xtask openapi`; the database and the loop need no change. A task runs as the admin account that made it (so the announcements are audited as that admin) and fails with a clear message when that account is no longer an admin.
@@ -221,9 +221,9 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 
 ## Serving the web admin
 
-Every response (API and static files) carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a `Content-Security-Policy` that allows only the app's own scripts, styles, images and connections (`default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`); a reverse proxy that sets the same headers wins. The server has no TLS of its own: put a TLS proxy in front ([../guides/hosting.md](../guides/hosting.md#tls-reverse-proxy-for-the-web-api)).
+Every response (API and static files) carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and a `Content-Security-Policy` that allows only the app's own scripts, styles, images and connections (`default-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`); a reverse proxy that sets the same headers wins. The server has no TLS of its own: put a TLS proxy in front ([../guides/hosting.md](../../modules/server/docs/hosting.md#tls-reverse-proxy-for-the-web-api)).
 
-With `[web] static_dir` set to the SPA build (`modules/web-admin/dist`), the same port serves it: files as they are, any unknown non-API path as `index.html`. Unknown `/api/v1/...` paths stay JSON `404`s. During SPA development run Vite on its own port; its dev server proxies `/api` (and the log WebSocket) to `[web] bind`, so `cors_origins` is only needed when the page calls the API cross-origin.
+With `[web] static_dir` set to the SPA build (`modules/web-admin/dist`), the same port serves it: files as they are, any unknown non-API path as `index.html`. At start the server logs which build it serves, read from `dist/build.json` that the web admin's build writes (`name`, `version`, `built_at`, `commit`, `dirty`), and warns when the sources next to `dist` are newer than the build or `build.json` is missing (`modules/server/crates/poe-web-api/src/webadmin.rs`). A release package has no sources, so it never warns; from the hub, `cargo xtask server run` rebuilds a stale web admin before starting ([setup.md](../guides/setup.md#web-admin-build)). Unknown `/api/v1/...` paths stay JSON `404`s. During SPA development run Vite on its own port; its dev server proxies `/api` (and the log WebSocket) to `[web] bind`, so `cors_origins` is only needed when the page calls the API cross-origin.
 
 ## The web admin SPA
 
@@ -245,13 +245,13 @@ Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the
 | Announce (top bar dialog) | `POST /admin/announce` |
 | `#/inventory`, `#/passives` | stubs ("waiting for the inventory work"), only when built with `VITE_FEATURE_INVENTORY` / `VITE_FEATURE_PASSIVES` = `true` |
 
-Close, kick, unmute, ban (permanent ones twice), lift, disable, delete and role changes ask for confirmation. The bearer token is kept in `sessionStorage` (tab-lifetime, never `localStorage`); a `401` from any call other than login clears it and shows the login page. The TypeScript types (`src/lib/api/schema.d.ts`) are generated from [openapi.json](openapi.json) with `npm run gen:api` in the SPA repo: after `cargo xtask openapi` changes the spec, regenerate, run `npm run check` and commit the result in Poe2WebAdmin, then bump the submodule here. CI in Poe2WebAdmin runs `npm ci`, `npm run check`, `npm test` and `npm run build`.
+Close, kick, unmute, ban (permanent ones twice), lift, disable, delete and role changes ask for confirmation. The bearer token is kept in `sessionStorage` (tab-lifetime, never `localStorage`); a `401` from any call other than login clears it and shows the login page. The TypeScript types (`src/lib/api/schema.d.ts`) are generated from [openapi.json](../../modules/server/docs/openapi.json) with `npm run gen:api` in the SPA repo: after `cargo xtask openapi` changes the spec, regenerate, run `npm run check` and commit the result in Poe2WebAdmin, then bump the submodule here. CI in Poe2WebAdmin runs `npm ci`, `npm run check`, `npm test` and `npm run build`.
 
 ## Code map
 
 | File | |
 |---|---|
-| `crates/poe-web-api/src/lib.rs` | `WebState` (including the shared `LoginLimiter` and the `Lifecycle`), `router`, `serve` |
+| `modules/server/crates/poe-web-api/src/lib.rs` | `WebState` (including the shared `LoginLimiter` and the `Lifecycle`), `router`, `serve` |
 | `lifecycle.rs` | stop and restart requests: validation helpers, the countdown task, the pending state |
 | `auth.rs` | bearer extractors (`Auth`, `AdminAuth`, `WsAdminAuth`) |
 | `webtoken.rs` | `WebTokens`: the in-memory store of single-use sign-in tokens |

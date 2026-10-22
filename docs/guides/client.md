@@ -1,8 +1,8 @@
 # Client and install guide
 
-How a player gets the game client onto a private server of this project: through the launcher, or by hand with `cargo xtask`, on Linux (Proton) or Windows. For running a server for others see [hosting.md](hosting.md); for developers [setup.md](setup.md) has every command.
+How a player gets the game client onto a private server of this project: through the launcher, or by hand with `cargo xtask`, on Linux (Proton) or Windows. For running a server for others see [hosting.md](../../modules/server/docs/hosting.md); for developers [setup.md](setup.md) has every command.
 
-**Unofficial.** This project is not affiliated with or endorsed by Grinding Gear Games. No game files are distributed: you need your own legal copy of Path of Exile 2, on the build the server supports (**0.5.5e**; the exact build and its executable checksum are in `versions/0.5.5e.toml`). The client hook is a DLL that is loaded into the game; the game's anti-cheat may detect it. Use it only for the private server and never on an account you care about; if you want to use it to observe an official session, read [official-mode.md](official-mode.md) first ([overview](#going-back-to-the-official-game)). See the [disclaimer](../../README.md#disclaimer).
+**Unofficial.** This project is not affiliated with or endorsed by Grinding Gear Games. No game files are distributed: you need your own legal copy of Path of Exile 2, on the build the server supports (**0.5.5e**; the exact build and its executable checksum are in `modules/protocol/versions/0.5.5e.toml`). The client hook is a DLL that is loaded into the game; the game's anti-cheat may detect it. Use it only for the private server and never on an account you care about; if you want to use it to observe an official session, read [official-mode.md](official-mode.md) first ([overview](#going-back-to-the-official-game)). See the [disclaimer](../../README.md#disclaimer).
 
 ## What gets installed
 
@@ -30,7 +30,7 @@ The launcher never touches your real Steam install of Path of Exile 2 and never 
 
 ## Option 2: by hand (`cargo xtask`)
 
-For developers and people who build from source. You need a checkout of the main repository with its submodules ([setup.md](setup.md#clone)), the tools ([setup.md](setup.md#tools)) and a copy of the game files.
+For developers and people who build from source. You need a checkout of the hub repository (Poe2ModdingProject) with its submodules ([setup.md](setup.md#clone)), the tools ([setup.md](setup.md#tools)) and a copy of the game files.
 
 ### The game files
 
@@ -43,11 +43,11 @@ Requirements: Steam running (without it the client exits with `Unable to init St
 ```sh
 third_party/fetch-tools.sh                  # once: tools, cargo-xwin, the pinned toolchain
 cargo xtask build-dll                       # the hook DLLs for the Windows target
-cargo xtask deploy-client --no-build        # gateway entry, version.dll, poe-hook.toml; reads [network] public_host and the ports from config/server.toml
+cargo xtask deploy-client --no-build        # gateway entry, version.dll, poe-hook.toml; reads [network] public_host and the ports from modules/server/config/server.toml
 cargo xtask run-client                      # starts the game through Proton in its own prefix (third_party/proton-prefix)
 ```
 
-`deploy-client` reads the server address and ports from the config it is given: for someone else's server copy their `config/server.example.toml` values into a config of your own (only `[network]` and `[gateway]` matter) and pass `--config <file>` (or `POE_CONFIG=<file>`), exactly as the player section of [hosting.md](hosting.md#what-a-remote-player-needs) says. The default login is the account name and password screen (`--login-mode standalone`); for a development server that uses the Steam machine-hash login deploy with `--login-mode steam` ([setup.md](setup.md#developer-config)). Each deploy lists what it did; `cargo xtask revert-client` restores the original files.
+`deploy-client` reads the server address and ports from the config it is given: for someone else's server copy their `modules/server/config/server.example.toml` values into a config of your own (only `[network]` and `[gateway]` matter) and pass `--config <file>` (or `POE_CONFIG=<file>`), exactly as the player section of [hosting.md](../../modules/server/docs/hosting.md#what-a-remote-player-needs) says. The default login is the account name and password screen (`--login-mode standalone`); for a development server that uses the Steam machine-hash login deploy with `--login-mode steam` ([setup.md](setup.md#developer-config)). Each deploy lists what it did; `cargo xtask revert-client` restores the original files.
 
 To start the game from Steam instead of `run-client` (Steam overlay, controller), add `GameFiles/PathOfExileSteam.exe` as a non-Steam game with the launch options from [setup.md](setup.md#playing-from-steam-non-steam-game-shortcut).
 
@@ -86,10 +86,10 @@ The project also has an `--official` mode that lets the hook *observe* a session
 |---|---|---|
 | The client exits at once, log says `Unable to init Steam API` | Steam is not running | Start Steam first |
 | The login screen shows the official realms, or the client never contacts the server | `gateway_list.txt` was not replaced, or the client remembered an earlier realm | Deploy again; `cargo xtask select-gateway` resets the remembered gateway (Proton prefix); check `gateway_list.txt` |
-| "There has been a patch that you need to update to" | The server does not know your executable (another build) | Use the 0.5.5e build the server names; the server owner can allow unknown builds ([hosting.md](hosting.md#troubleshooting)) |
+| "There has been a patch that you need to update to" | The server does not know your executable (another build) | Use the 0.5.5e build the server names; the server owner can allow unknown builds ([hosting.md](../../modules/server/docs/hosting.md#troubleshooting)) |
 | Login screen offers Steam login, not account and password | `login_mode = "steam"` in `poe-hook.toml` | Set `login_mode = "standalone"` or deploy without `--login-mode steam` |
 | Account does not exist / wrong password | No account yet, or a typo | Ask the server owner, or "Create account" in the launcher if registration is open. Too many failures lock the account for a few minutes |
-| Stuck on the loading screen, or a freeze right after entering | Port 6112 (TCP) not reachable, or the server does not have the area's layout yet | Tell the server owner; see [hosting.md](hosting.md#troubleshooting) |
+| Stuck on the loading screen, or a freeze right after entering | Port 6112 (TCP) not reachable, or the server does not have the area's layout yet | Tell the server owner; see [hosting.md](../../modules/server/docs/hosting.md#troubleshooting) |
 | The game crashes | Many possible causes | Logs: `GameFiles/poe-hook.log`, `GameFiles/logs/poe-hook/<session>/`, `logs/Client.txt`; crash dumps are moved to `runtime/crash-dumps/` by `run-client` ([setup.md](setup.md#logs), [crash reports](setup.md#crash-reports)). Do not attach captures or logs with passwords to a public issue |
 
 If something else breaks, open an issue and say your OS, the client build, the server release and what the logs say after you have removed account names, tokens and passwords.

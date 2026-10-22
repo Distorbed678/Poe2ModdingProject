@@ -10,3 +10,15 @@
 [submodule "modules/launcher"]
 	path = modules/launcher
 	url = https://github.com/Distorbed678/Poe2Launcher.git
+[submodule "modules/server"]
+	path = modules/server
+	url = https://github.com/Distorbed678/Poe2Server.git
+[submodule "modules/mod-sdk"]
+	path = modules/mod-sdk
+	url = https://github.com/Distorbed678/Poe2ModSDK.git
+[submodule "modules/mod-index"]
+	path = modules/mod-index
+	url = https://github.com/Distorbed678/Poe2Mods.git
+[submodule "modules/server-list"]
+	path = modules/server-list
+	url = https://github.com/Distorbed678/Poe2ServerList.git

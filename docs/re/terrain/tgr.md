@@ -45,7 +45,7 @@ without a draw), then `0x1420bec40` lays the graph out. Seed 1000 → topology 2
   constraint flags (read by the caller; constrained axes are not jittered).
 - edge: from, to, internal points, exist %, chirality, priority, edge type, min/max width.
 
-**Node jitter** (`0x141ef4720` builds, `0x141ef3bb0` applies; `crates/poe-world/src/voronoi.rs`,
+**Node jitter** (`0x141ef4720` builds, `0x141ef3bb0` applies; `modules/server/crates/poe-world/src/voronoi.rs`,
 `layout.rs`):
 1. Sites = node positions, then every edge's internal points (grid cells, 23 per tile).
 2. Voronoi diagram (`0x141ef73e0`/`0x141ef8370`): Fortune's sweepline in the
@@ -68,7 +68,7 @@ without a draw), then `0x1420bec40` lays the graph out. Seed 1000 → topology 2
 
 ### Room placement
 
-(`crates/poe-world/src/rooms.rs`; trace kinds `node_candidates`, `node_key`,
+(`modules/server/crates/poe-world/src/rooms.rs`; trace kinds `node_candidates`, `node_key`,
 `node_place` from DLL hooks on `0x1420c76d0` and `0x1420c87a0`). Room nodes are placed in
 node order, all before any room pass (the passes then run in the same order):
 1. Node key (`0x1420d2e20`): each graph edge (except `.et` types named `Wildcard…`, flag 0x80)
@@ -102,7 +102,7 @@ node order, all before any room pass (the passes then run in the same order):
 
 ### Repulsion, exits and routing
 
-(`crates/poe-world/src/rooms.rs` `repel`, `routing.rs`; DLL
+(`modules/server/crates/poe-world/src/rooms.rs` `repel`, `routing.rs`; DLL
 trace kinds `route_edge` and, with `POE_HOOK_ROUTE_GRIDS=1`, `route_grid` per edge):
 1. Placement stage order (`0x1420caa40`): place room nodes → `0x1420cbe60` → tilise each room
    (`0x1420c9970`: room pass, then exits).
@@ -130,7 +130,7 @@ trace kinds `route_edge` and, with `POE_HOOK_ROUTE_GRIDS=1`, `route_grid` per ed
 
 ### Edge smoothing
 
-(`crates/poe-world/src/smoothing.rs`; DLL trace kinds `arc_start`, `arc_end`,
+(`modules/server/crates/poe-world/src/smoothing.rs`; DLL trace kinds `arc_start`, `arc_end`,
 `round`, `graph_after_smooth1`; `cargo run -p poe-world --example smooth_check -- <trace>`
 replays the logged arc steps). After routing, `0x1420bd650(layout, 1)` (no RNG):
 1. Room nodes were split per exit by `0x141ef2800` (the node takes its first edge's exit, every
@@ -150,7 +150,7 @@ replays the logged arc steps). After routing, `0x1420bd650(layout, 1)` (no RNG):
 
 ### Virtual edges and the last graph passes
 
-(`crates/poe-world/src/split.rs`; DLL dumps
+(`modules/server/crates/poe-world/src/split.rs`; DLL dumps
 `graph_after_split`, `graph_before_tiles`):
 1. Room exits of virtual edges get a pair of virtual end points (virtual exit, exit), ordered by
    `0x1420c6860` (side of the edge they fall on) and `0x1420c5b50` (side of the exit direction).
@@ -176,7 +176,7 @@ border (the clone's far node also copies fixed).
 
 ### Node tiles
 
-(`crates/poe-world/src/node_tiles.rs`, `0x1420cade0`): at the start of the tile
+(`modules/server/crates/poe-world/src/node_tiles.rs`, `0x1420cade0`): at the start of the tile
 stage `0x1420c7400` sorts the room-less nodes into lists. The tile list takes dead ends (a
 virtual one only at the border), nodes with three or more edges, and nodes whose two edges have
 different `.et` types; two edges of one type pass through. Nodes touching a virtual edge
@@ -237,7 +237,7 @@ ordering `0x1420c6860`, node split `0x1420c5ee0`, and logical links. The split u
 
 ### Edge tiles
 
-(`crates/poe-world/src/edge_tiles.rs`, `0x1420b6950`):
+(`modules/server/crates/poe-world/src/edge_tiles.rs`, `0x1420b6950`):
 1. Occupancy grid (`0x141ef5700`, 0x20-byte cells: cost, parent, f, g, h, closed, occupied,
    open-set link): cells under room tiles are occupied. Per edge (`0x1420b6660`): +80 cost on
    every tile its line crosses (`0x141ef6ab0`, tiles rounded down to the `.et` size); an edge

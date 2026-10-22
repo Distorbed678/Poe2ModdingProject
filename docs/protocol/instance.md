@@ -51,7 +51,7 @@ The server sends, in this order (`InstanceServer::enter_world`):
    - `u8, u8 local player index, u32 inventory id, inventory`.
    - inventory (reader `0x1425aa550`, serializer `0x1425aa290`): `u8 id key, u8 slot (= Inventories row), u8 width, u8 height, u8 flags, [u64 if flags&8], [4×u32 if flags&0x10], varuint item count, items`.
    - Handled in the per-player processor `0x142106a30` (case 0xdf), registry insert `0x141cf1da0`. The registry also maps slot → inventory id (0x79 slots, except 0x1a). The in-game UI resolves every slot through it, and a missing one throws "Invalid inventory id".
-   - Grid sizes are not in the game tables; they are configured in `[inventories]` of `config/server.toml`.
+   - Grid sizes are not in the game tables; they are configured in `[inventories]` of `modules/server/config/server.toml`.
 3. **S→C `0x0024` PlayerEntity**: `u8, u8 local player index, u32 entity id`. Sets the local player's entity id (+0x184).
 4. **S→C `0x02f7` AddObject** for the player entity, then a **`0x02f4`** frame marker (see below and [entities.md](entities.md)). The header's component byte (+0x18) is `0xff`: see "Frame ordering" below.
 5. **S→C `0x0023` InitialState** (deserializer `0x142158130`, handler `0x142122eed`):

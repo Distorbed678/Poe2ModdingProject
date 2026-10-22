@@ -2,7 +2,7 @@
 
 Everything the client DLL says to our instance server outside the game protocol, and what the server answers: per-frame **position reports** and the **debug link** (overlay commands and state) over UDP, and the **terrain upload** and the **mod report** over TCP. WP3.4 replaced the old unauthenticated datagrams (`PSY1`/`PSY2`/`PDC1`/`PDB1`, loopback only, keyed by TCP port) with the format below. There is no fallback to the old formats.
 
-Code: `modules/client-hook/poe-hook-shared/src/sidechannel.rs` (framing, keys, replay window, upload payload; one implementation used by both sides), DLL `poe-hook-core/src/{side,position_sync,devlink}.rs`, server `servers/instance-server/src/{sync,terrain_store}.rs`.
+Code: `modules/client-hook/poe-hook-shared/src/sidechannel.rs` (framing, keys, replay window, upload payload; one implementation used by both sides), DLL `poe-hook-core/src/{side,position_sync,devlink}.rs`, server `modules/server/servers/instance-server/src/{sync,terrain_store}.rs`.
 
 ## Session keys
 Both sides hold the instance session's 64-byte **key material**: the server issues it in the ticket (`Ticket::keys`, random per hand-off) and sends it to the client in `InstanceDetails` (login stream, encrypted); the client passes it to the instance cipher builder `0x14212aa90` (`rdx` = `InstanceDetails + 0x38`), which the DLL hooks ([../re/crypto.md](../re/crypto.md#side-channel-keys)). Every transfer to another instance is a new ticket, so a new session.

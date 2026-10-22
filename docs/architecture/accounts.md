@@ -1,8 +1,8 @@
 # Accounts and identity
 
-How a player logs in, how accounts and tokens are stored, and how admins are chosen. How a remote player reaches the server: [../guides/hosting.md](../guides/hosting.md). Wire format: [../protocol/login.md](../protocol/login.md). The client side: [../re/standalone-login.md](../re/standalone-login.md).
+How a player logs in, how accounts and tokens are stored, and how admins are chosen. How a remote player reaches the server: [../guides/hosting.md](../../modules/server/docs/hosting.md). Wire format: [../protocol/login.md](../protocol/login.md). The client side: [../re/standalone-login.md](../re/standalone-login.md).
 
-The code is the `poe-accounts` crate (`AccountStore` trait, `SqliteAccounts` implementation over the `poe-store` database, migration `0006_accounts_auth.sql`). The login server decides in `servers/login-server/src/auth.rs`.
+The code is the `poe-accounts` crate (`AccountStore` trait, `SqliteAccounts` implementation over the `poe-store` database, migration `0006_accounts_auth.sql`). The login server decides in `modules/server/servers/login-server/src/auth.rs`.
 
 ## Model
 
@@ -12,7 +12,7 @@ The code is the `poe-accounts` crate (`AccountStore` trait, `SqliteAccounts` imp
 | Role | `player` or `admin`. Admin commands check the role at the time of the command; there is no config list any more. |
 | Disabled | A disabled account cannot log in (result `0x47`), its tokens are revoked and its running sessions are ended. |
 | Token | `account_tokens` table: `kind` (`game_remember`, `launcher`, `web`), `token_hash`, `cluster_id`, `created_at`, `expires_at`, `revoked`, `last_used`. |
-| Cluster | `[cluster] id` in `config/server.toml`. Every token records the id of the cluster that issued it. |
+| Cluster | `[cluster] id` in `modules/server/config/server.toml`. Every token records the id of the cluster that issued it. |
 
 Usernames are 3-64 characters from `A-Za-z0-9_.@+-` (so an email address works as the account name on the client's login screen). Server commands require passwords of at least 8 characters.
 
@@ -27,7 +27,7 @@ digest = SHA-256(password encoded as UTF-16LE, no BOM, no terminator)
 stored = argon2id(digest)            // poe_accounts::AccountStore takes the digest, never the text
 ```
 
-`poe_accounts::password_digest(&str)` does the first step. The server commands (`account create`, `account passwd`) and the web API (registration, login, password change, launcher login: `crates/poe-web-api`) go through it, or an account made on the web would not accept the same password in game. The web API receives the plain password in the request body (use TLS outside the local machine) and hashes it with the same function; it never needs the stored hash.
+`poe_accounts::password_digest(&str)` does the first step. The server commands (`account create`, `account passwd`) and the web API (registration, login, password change, launcher login: `modules/server/crates/poe-web-api`) go through it, or an account made on the web would not accept the same password in game. The web API receives the plain password in the request body (use TLS outside the local machine) and hashes it with the same function; it never needs the stored hash.
 
 Consequence of the client's design: the digest is a password equivalent for this server (whoever has it can log in), but it is stored only inside an argon2id hash.
 
@@ -55,13 +55,13 @@ Accounts that existed before migration `0006` (made by the old machine-hash logi
 
 ## Admins and account commands
 
-Admin is the `admin` role. Commands (chat `!account ...`, the overlay's Commands page, or offline `cargo run -p poe-server -- account ...`): `create`, `role`, `disable`, `enable`, `passwd`, `list`; see [../guides/server-admin.md](../guides/server-admin.md). The first admin is made offline: `account create <name> <password>`, then `account role <name> admin`. Passwords typed in chat are replaced by `***` in the log and the audit file. An admin cannot demote or disable themselves.
+Admin is the `admin` role. Commands (chat `!account ...`, the overlay's Commands page, or offline `cargo xtask server run -- account ...`): `create`, `role`, `disable`, `enable`, `passwd`, `list`; see [../guides/server-admin.md](../guides/server-admin.md). The first admin is made offline: `account create <name> <password>`, then `account role <name> admin`. Passwords typed in chat are replaced by `***` in the log and the audit file. An admin cannot demote or disable themselves.
 
 `[accounts] open_registration` (default false) lets `POST /api/v1/register` of the web API create player accounts ([web-api.md](web-api.md)); server commands always work.
 
 ## Password attempt limits
 
-`[security]` (`config/server.toml`) limits failed password attempts. One `poe_accounts::LoginLimiter` is shared by the login server (`0x0003` password logins) and the web API (`POST /login`, and the old-password check of `POST /password`), so attempts cannot be split between them. Failures are counted per account name (case-insensitive; unknown names count too, so the limit does not reveal which accounts exist) and per client IP (IPv6 per /64) in a sliding window; at the limit the key is locked and further attempts are refused before the password is checked (so a locked account does not cost argon2 time).
+`[security]` (`modules/server/config/server.toml`) limits failed password attempts. One `poe_accounts::LoginLimiter` is shared by the login server (`0x0003` password logins) and the web API (`POST /login`, and the old-password check of `POST /password`), so attempts cannot be split between them. Failures are counted per account name (case-insensitive; unknown names count too, so the limit does not reveal which accounts exist) and per client IP (IPv6 per /64) in a sliding window; at the limit the key is locked and further attempts are refused before the password is checked (so a locked account does not cost argon2 time).
 
 | Key | Default | Meaning |
 |---|---|---|

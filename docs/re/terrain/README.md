@@ -1,7 +1,7 @@
 # Terrain generation (0.5.5e)
 
 What the client's terrain generator does, as far as it is known, and the tools for porting it
-to the server (`crates/poe-world`, the terrain generator). Addresses are Ghidra addresses (image
+to the server (`modules/server/crates/poe-world`, the terrain generator). Addresses are Ghidra addresses (image
 base `0x140000000`). How far the port has come is in [../../status/terrain.md](../../status/terrain.md).
 
 | File | Contents |
@@ -192,7 +192,7 @@ objects, not sent by the server.
 
 ## Port crate map
 
-`crates/poe-world`, checked against the client by the examples above:
+`modules/server/crates/poe-world`, checked against the client by the examples above:
 - `rng`: `std::mt19937` and MSVC `uniform_int`, equal to the traced draws (unit tests).
 - `hash`: the tile and doodad hashes.
 - `graph` (`.tgr`), `tdt` (`.tdt` header: size in tiles, edge types per side, ground types per

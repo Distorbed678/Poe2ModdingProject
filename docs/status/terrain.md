@@ -1,7 +1,7 @@
 # Terrain generator: status and next steps
 
 Last updated 2026-10-21 (the G1_12 work stopped on 2026-10-16, results consolidated 2026-10-20, matrix added 2026-10-21). This is the only place
-for terrain status and the resume point for the server-side terrain generator (`crates/poe-world`).
+for terrain status and the resume point for the server-side terrain generator (`modules/server/crates/poe-world`).
 How the client's generator works, and the tools used below, are in
 [../re/terrain/](../re/terrain/README.md): [README](../re/terrain/README.md#tools) (tools),
 [tgr.md](../re/terrain/tgr.md), [dungeon.md](../re/terrain/dungeon.md),

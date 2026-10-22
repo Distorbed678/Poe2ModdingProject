@@ -8,7 +8,7 @@ Assessment for WP A1 of [../plans/orchestration-2026-10b.md](../plans/orchestrat
 - **Today the DLL cannot tell which build it runs in.** It checks no version, no hash and no build number. Every address is a fixed Ghidra address of 0.5.5e. Only one feature (`crypto_bypass`) finds its target by a byte pattern.
 - **Hooks are installed without checking the target's bytes.** `hooks::install` only saves 16 bytes for the undo (`modules/client-hook/poe-hook-core/src/hooks.rs:45`). The research hooks (`dump_object_types`, `area_export`, packet capture, `crash_log`) are **on by default, also in official read-only mode** (`poe-hook-shared/src/config.rs:125-139`). A stale address crashes the client, also on an official observation session.
 - **The login patch check is weak.** It compares 3 bytes. In the 0.5.5e exe, 1,167 functions start with `40 55 53` and 6,590 start with `48 8b c4`. After an exe rebuild, another function may sit at the old address, and it would be overwritten with `xor eax,eax; ret`.
-- **The server never learns the client version.** `game.version` in `config/server.toml` is a label. The opcode folder, the DLL's compiled-in tables and `dumps/0.5.5e` all name the version by hand, in separate places.
+- **The server never learns the client version.** `game.version` in `modules/server/config/server.toml` is a label. The opcode folder, the DLL's compiled-in tables and `dumps/0.5.5e` all name the version by hand, in separate places.
 - **The exe sha256 in the launcher file is correct.** `7157984534da1b146e9b0be342aa9fd24272915b6f478aadef9830fc7873f89f` matches `GameFiles/PathOfExileSteam.exe` (78,335,832 bytes). The five key-file sizes also match. It is still unconfirmed against a real depot download, and `exe_sha256_enforce = false`.
 - **Good news for signatures.** Prologue signatures with wildcards over the `rel32`/`disp32` fields and the stack-frame immediates are unique in `.text` for 44 of the 47 addresses I tried (details below). The build also carries a plain `323943` string in `.rdata` (the `Build Revision` that `Client.txt` prints), a cheap version fingerprint.
 
@@ -34,22 +34,22 @@ Ratings are L (low), M (medium), H (high), written D/H/M. Detection: **easy** = 
 | 8 | `InitialState` / `AddObject` blob layouts and the component order (`entity.rs`, `player_blob.rs`, `docs/protocol/entities.md`) | M/M/H | Components misread; wrong stats, a crash in the client's entity code; component order comes from the `.ot` data | hard | Reader-span self-test with the DLL's `entity_trace` (zero blob, measure spans); order from `.ot` instead of code |
 | 9 | Struct offsets read by the DLL (Positioned, Actor, Entity, stream, world, terrain; list in section 2) | L/H/M | `position_sync` reports garbage: the server sees drift (silent); exports wrong | silent / hard | Derive from instruction operands (S2); sanity checks (position inside the terrain)<br>**A2 done** for the offsets the table lists (see client-dll.md); the runtime sanity check (position near terrain) is not done. |
 | 10 | Hard-coded component indices: Positioned = 0, Actor = 9 (`position_sync.rs:87-90`, `actions.rs:50`, `dump_types.rs:508`) | M/L/M | Reads another component's memory | silent | Look the index up by name with `entities::component_names` once per entity |
-| 11 | Data row indices used as keys: `sprint_buff_rows` `[2758, 2737, 2853]` (`config/server.toml:48`, `poe-config/src/lib.rs:444-459`), `Stats` row + 1 (`views.rs:175-179`), `Inventories` row = slot (`views.rs:136-154`), `ActionTypes` 2nd column (`views.rs:182-189`), `Move` `0x20002909` (`poe-game/src/world.rs:258`) | H/M/M | Wrong buff, stat or slot ids: the wrong sprint effects, broken inventories, wrong action names | silent | Store ids not rows; resolve at start; `check-build` anchors (S4)<br>**A3 partly done**: `check-build` verifies the row anchors (`Stats`, `ActionTypes` `Move`, `Inventories`, the sprint buffs) and the config's rows; ids are not yet stored instead of rows. |
+| 11 | Data row indices used as keys: `sprint_buff_rows` `[2758, 2737, 2853]` (`modules/server/config/server.toml:48`, `poe-config/src/lib.rs:444-459`), `Stats` row + 1 (`views.rs:175-179`), `Inventories` row = slot (`views.rs:136-154`), `ActionTypes` 2nd column (`views.rs:182-189`), `Move` `0x20002909` (`poe-game/src/world.rs:258`) | H/M/M | Wrong buff, stat or slot ids: the wrong sprint effects, broken inventories, wrong action names | silent | Store ids not rows; resolve at start; `check-build` anchors (S4)<br>**A3 partly done**: `check-build` verifies the row anchors (`Stats`, `ActionTypes` `Move`, `Inventories`, the sprint buffs) and the config's rows; ids are not yet stored instead of rows. |
 | 12 | dat schema `third_party/dat-schema` (rolling `latest`, unpinned, `fetch-tools.sh:15-17`) and table columns | H/M/M | Column names or widths drift. A wider schema only warns (`dat.rs:97-103`); positional access reads wrong data | hard | Pin the schema release per version; `check-build` compares every used column with row width (S4)<br>**A3 partly done**: `check-build` checks every used table and column (`poe_data::used`), the row width and the schema's sha256 pin; `fetch-tools.sh` warns on a different schema but cannot fetch a given release; the start-up warning of `dat.rs` is unchanged. |
-| 13 | No version plumbing: `game.version` is a label; `v0_5_5e` module (`poe-proto/src/opcodes.rs:11`); `0.5.5e` in the login-server tests, `xtask`, config defaults, `dumps/0.5.5e` | M/M/M | Mixed tables from two builds; dumps written into the wrong folder; nobody notices | silent | `versions/<ver>.toml` as the single source (S5); refuse unknown builds<br>**A4 done**: `versions/<ver>.toml` is the single source for xtask, the server (`[game] version`, `{version}` in paths, `protocol_dir` default) and the launcher (byte-identical copy, `cargo xtask versions`); the server refuses an unknown client hash. |
+| 13 | No version plumbing: `game.version` is a label; `v0_5_5e` module (`poe-proto/src/opcodes.rs:11`); `0.5.5e` in the login-server tests, `xtask`, config defaults, `dumps/0.5.5e` | M/M/M | Mixed tables from two builds; dumps written into the wrong folder; nobody notices | silent | `modules/protocol/versions/<ver>.toml` as the single source (S5); refuse unknown builds<br>**A4 done**: `modules/protocol/versions/<ver>.toml` is the single source for xtask, the server (`[game] version`, `{version}` in paths, `protocol_dir` default) and the launcher (byte-identical copy, `cargo xtask versions`); the server refuses an unknown client hash. |
 | 14 | Terrain generator port (`poe-world`, 14,800 lines, 500 address refs) and data formats (`.tgr` version 25, `.dgr`, `.tdt`, `.ot`) | M/M/H | Layout differs from the client's: walls and spawn are wrong. Data patches change tile sets, so layouts change even with an unchanged exe | hard, but the client logs `Tile hash` / `Doodad hash` as an oracle | Re-run vectors per build; `check-build` reports stale `terrain-vectors.tsv` by its `build` column |
 | 15 | Terrain export hooks and offsets (`area_export`: world `+0x98/+0x1b4/+0x114/+0x118`, terrain `+0x18/+0x20/+0x28`, tile record `0x38`, grid `+0xd0/+0xe8/+0x100/+0x118`) | L/H/M | Wrong layouts uploaded to the server | easy: the export re-checks the client's own tile hash (`terrain_tools.rs:1050`) | Keep the hash check; make a failed check disable the upload |
 | 16 | HNC table: `key_xor` and `swaps` (`opcodes/0.5.5e/hnc.toml`, exe `0x142f10960`, `0x1421c50b0`); Salsa20 key/IV split (`poe-net/src/cipher.rs:40`) | L/L/M | Our side of the HNC channel cannot decode (the client disconnects after `0x1c`) | easy | `check-build` re-extracts the 64 bytes from the exe and compares<br>**A3 done** for `key_xor` (found by value); the `swaps` are not re-derived. |
 | 17 | Packet capture stream offsets (`packets.rs:333-440`, `protocol.rs:102-123`) and caller ranges `LOGIN_READER`/`INSTANCE_READER` (`packets.rs:41-42`) | L/H/M | Captures show wrong messages or wrong channel; no crash (guarded reads) | hard | Derive offsets from the stream functions' operands; channel from `.pdata` function containing the return address<br>**A2 done**: offsets are fields; the channel is the `.pdata` range of the two session loops. |
 | 18 | Packet redaction by opcode name (`packets.rs:198-211`) | L/L/H | After a renumber, secrets are written to `packets.jsonl` | silent | Redact all outgoing login bodies on an unknown build (see surprises)<br>**A2 done**: `Credentials` added and every login message is redacted on an unverified build (`redact.rs`). |
-| 19 | Launcher `versions/*.toml`: depots, manifests, sha, key sizes (`modules/launcher/versions/0.5.5e.toml`) | L/H/H | Old manifest may be removed by Steam (download fails); `verify` only warns; Play does not check the exe against the hook | easy (verify report) | One file with `status`; Play compares the exe sha/build with the DLL's table (S5)<br>**A4 done**: the launcher reads the shared file (its `[exe]` section), embeds every file of `versions/` (`build.rs`); `status` is parsed by the server only; Play still does not compare the exe with the DLL's table. |
+| 19 | Launcher `modules/protocol/versions/*.toml`: depots, manifests, sha, key sizes (`modules/launcher/versions/0.5.5e.toml`) | L/H/H | Old manifest may be removed by Steam (download fails); `verify` only warns; Play does not check the exe against the hook | easy (verify report) | One file with `status`; Play compares the exe sha/build with the DLL's table (S5)<br>**A4 done**: the launcher reads the shared file (its `[exe]` section), embeds every file of `modules/protocol/versions/` (`build.rs`); `status` is parsed by the server only; Play still does not compare the exe with the DLL's table. |
 | 20 | `symbols.tsv` (585 names) and `addresses-0.5.5e.md` | L/H/M | Misleading names in crash logs and the Protocol page | hard (just confusing) | Embed the table by build id; header with the build; `export_symbols.py` takes a version |
 | 21 | `Client.txt` parsing: `Generating level ... with seed`, `Tile hash:`, `Doodad hash:`, `Build Revision:` (`scripts/re/clientlog_terrain.py:13-16`, `clientlog_entries.py:13-19`, DLL `gamelog.rs`) | L/L/M | Scripts give 0 vectors; the Game log page empties | easy (count printed) | Keep; use `Build Revision` as the version key |
 | 22 | Command-line options `--success-event`, `--disable-client-switching` (`login.rs:38-41`, `login_patch.rs:64`) and `config.json` / credentials file name | L/L/M | The patcher window appears and talks to GGG patch servers (the guard blocks external connects in private mode) | easy | Signature for `StandalonePatcher_Run` (row 3) is the safety net; check option strings with `check-build`<br>**A3 done**: the strings are checked by `check-build` (`[client] strings`). |
 | 23 | Data pointer `0x1445d8308` (game window handle) in `auto_keys.rs:473` and `trace_calls` / `POE_HOOK_TRACE` addresses | L/H/L | Test injection only: wrong focus for the aim check. Tests only | easy | Resolve by pattern or drop |
 | 24 | Scripts with fixed addresses: `scripts/re/dump_factory.py` arguments (`d 35f 217305c 142173040`), `export_symbols.py` file names | L/H/L | The tool dumps wrong tables | easy | Find the factory by the string `Unable to deserialise packet` (S4)<br>**A3 partly done**: `dump_factory.py` takes an index table (`--bytes`) and `find_switches.py` prints its arguments; the factory is still found by hand. |
 | 25 | Win32 and Vulkan hooks (ws2_32 `connect`, `GetRawInputData`, Vulkan loader), `version.dll` proxy exports | L/L/L | None expected | easy | None |
-| 26 | `poe-hook-deploy` constants: `PathOfExileSteam.exe`, `gateway_list.txt`, app id `2694490` (`lib.rs:39-51`) | L/L/L | Deploy fails or copies to the wrong file | easy | Take from `versions/<ver>.toml` |
+| 26 | `poe-hook-deploy` constants: `PathOfExileSteam.exe`, `gateway_list.txt`, app id `2694490` (`lib.rs:39-51`) | L/L/L | Deploy fails or copies to the wrong file | easy | Take from `modules/protocol/versions/<ver>.toml` |
 
 ## What WP A2 did
 Implemented 2026-10-21 in `modules/client-hook` (crate `poe-hook-sig`, `signatures/0.5.5e.toml`, the DLL changes) and `scripts/re/sig_gen.py`. Behaviour and format: [../architecture/client-dll.md](../architecture/client-dll.md#signature-table-signaturesversiontoml).
@@ -77,12 +77,12 @@ Implemented 2026-10-21 in `modules/client-hook` (crate `poe-hook-sig`, `signatur
 - `cargo xtask sig-gen`: `scripts/re/sig_gen.py` is the generator for now; A3 can wrap it.
 
 ## What WP A3 and A4 did
-Implemented 2026-10-21: `cargo xtask check-build` (`xtask/src/check_build.rs`, `fingerprint.rs`), `versions/<version>.toml` and its consumers, the server's client check, [../guides/new-game-version.md](../guides/new-game-version.md) (the procedure; read it for behaviour and commands).
+Implemented 2026-10-21: `cargo xtask check-build` (`xtask/src/check_build.rs`, `fingerprint.rs`), `modules/protocol/versions/<version>.toml` and its consumers, the server's client check, [../guides/new-game-version.md](../guides/new-game-version.md) (the procedure; read it for behaviour and commands).
 
 **Done**
 - S4 `check-build <exe> [--bundles <dir>] [--version v] [--report f]`: identity (sha256, size, PE timestamp and image size, the revision string, the signature table's `[build]` against the version file, the launcher copy), every signature and struct offset (found with its new address and delta, missing, ambiguous, failed), per-feature status split into required and research (`[client_hook] required_features`), HNC `key_xor` by value, the strings the tools need, every table and column the server reads (`poe_data::used`) with the row width, the dat-schema pin, row counts and the row anchors, the config's sprint buff rows, key-file sizes, and the build of the terrain vectors. Report `dumps/<version>/check-build.md`; exit 0/1/2. Tests: the real exe passes, and a copy with one byte of a required function changed fails with exit 2 (skipped without `GameFiles/`).
 - **Opcode drift by deserializer fingerprint** (not the full factory derivation): `opcodes/<version>/deserializers.tsv` (135 server-to-client opcodes of the login factory and the two instance factories; generated by `check-build --write-fingerprints` from the factory dumps). Every `.pdata` function of the new exe is fingerprinted (instruction decode with iced-x86; call/jump targets, RIP and stack displacements, frame sizes and image addresses wildcarded; about 1 s) and each baseline entry is looked up. A changed deserializer of a named opcode is a FAIL.
-- S5: `versions/<version>.toml` (one place: depots and manifests, `[exe]` sha256/size/PE fingerprint, key files, `[protocol] opcodes`, `[client_hook] signatures`, `[client]` hashes and strings, `[data]` pin, anchors and row counts). Read by xtask (`dumps/<version>`, `check-build`, the terrain matrix), the server (`Config::load`: `[game] version` selects the file, an unknown version stops the start-up and names the known ones; `{version}` in path settings; `protocol_dir` default) and the launcher (a byte-identical copy `modules/launcher/versions/<version>.toml`, written and checked by `cargo xtask versions`; its `build.rs` embeds every file, so the `EMBEDDED` list and its hand-written version are gone). The Python tools use `scripts/re/version.py`; `poe_proto::opcodes::EMBEDDED` lists the compiled-in tables by version.
+- S5: `modules/protocol/versions/<version>.toml` (one place: depots and manifests, `[exe]` sha256/size/PE fingerprint, key files, `[protocol] opcodes`, `[client_hook] signatures`, `[client]` hashes and strings, `[data]` pin, anchors and row counts). Read by xtask (`dumps/<version>`, `check-build`, the terrain matrix), the server (`Config::load`: `[game] version` selects the file, an unknown version stops the start-up and names the known ones; `{version}` in path settings; `protocol_dir` default) and the launcher (a byte-identical copy `modules/launcher/versions/<version>.toml`, written and checked by `cargo xtask versions`; its `build.rs` embeds every file, so the `EMBEDDED` list and its hand-written version are gone). The Python tools use `scripts/re/version.py`; `poe_proto::opcodes::EMBEDDED` lists the compiled-in tables by version.
 - The server refuses an unknown client: the login server judges the `client_hash` of `0x0003` and `0x0005` (a SHA-256 of the exe, read off `LoginClientHash_Get32`/`Sha256_Bytes32`) against `[client] hashes`; an unknown one gets code 8 (`InvalidProtocolVersion`, the client's "you need to update" popup) and a notice. `[security] allow_unknown_client` (default `false`) lets it in.
 
 **Not done (still open)**
@@ -106,7 +106,7 @@ Implemented 2026-10-21: `cargo xtask check-build` (`xtask/src/check_build.rs`, `
 | Trace | `trace_calls.rs:29`, `POE_HOOK_TRACE` | any address typed by the user |
 | Symbols | `symbols.rs:24` (`assets/symbols.tsv`, 585 lines) | names for Ghidra addresses |
 | Docs | `docs/re/addresses-0.5.5e.md` (248 lines), `docs/re/terrain/*.md`, `docs/protocol/*.md` | the knowledge itself |
-| Server crates | 500 address mentions in `crates/poe-world` and 139 in `modules/protocol` | comments only: they say where the algorithm came from |
+| Server crates | 500 address mentions in `modules/server/crates/poe-world` and 139 in `modules/protocol` | comments only: they say where the algorithm came from |
 
 The server crates have no runtime dependency on an address. After a patch, those comments become wrong, but nothing breaks. They are the starting points for re-deriving a changed algorithm.
 
@@ -186,7 +186,7 @@ How to derive an operand safely (A2):
 
 ### 3.1 Opcodes
 - Files: `modules/protocol/opcodes/0.5.5e/login.toml` (35 lines), `instance.toml` (143 lines, 75 named opcodes), `hnc.toml`, `inventories.tsv`.
-- Loaded by the servers from `[game] protocol_dir` (`config/server.toml:11`) and compiled into the DLL by `poe-proto/src/opcodes.rs:11-19` (`v0_5_5e`, hard-coded module name and `include_str!` paths).
+- Loaded by the servers from `[game] protocol_dir` (`modules/server/config/server.toml:11`) and compiled into the DLL by `poe-proto/src/opcodes.rs:11-19` (`v0_5_5e`, hard-coded module name and `include_str!` paths).
 - The client's factories are about 316 server-to-client instance opcodes and 90 more in the second factory (`dumps/0.5.5e/ghidra/instance_factory_s2c.json`, `instance_factory2_s2c.json`). We name 75.
 - A wrong opcode table is a hard failure only for opcodes the client reads with a different class. An unknown opcode is fatal on the client (`docs/protocol/framing.md`).
 - Opcode numbers are likely to move on a major patch (messages are inserted in the middle of the switch) and unlikely to move on a hotfix.
@@ -196,7 +196,7 @@ How to derive an operand safely (A2):
 ### 3.2 Layouts
 - Rust types: `poe-proto/src/login.rs` (934 lines), `instance.rs` (1,669), `entity.rs`, `player_blob.rs`, `remote.rs`, `skill.rs`. The doc comments carry the reader addresses, so a changed layout is traceable.
 - The client does not check that a message or a blob was fully consumed. A layout error does not fail loudly: later fields read garbage.
-- **Oracle:** the replay tests (`servers/instance-server/src/replay_tests.rs`, `crates/poe-game/tests/replay.rs`) compare against official captures of 0.5.5e. They protect the current build only. For a new build they need new captures, which are the user's (Gate: official capture).
+- **Oracle:** the replay tests (`modules/server/servers/instance-server/src/replay_tests.rs`, `modules/server/crates/poe-game/tests/replay.rs`) compare against official captures of 0.5.5e. They protect the current build only. For a new build they need new captures, which are the user's (Gate: official capture).
 - **Cheaper oracle for blobs:** the DLL's reader-span trace (`entity_trace`) measures how many bytes each component reader consumes. Keep the 0.5.5e spans as a table (`docs/protocol/entities.md`); on a new build, run one session and diff the spans.
 - `InitialState` and the character-state flags reader (`0x1420edaa0`) are the most delicate: they feed a lot of client state with few checks.
 - `client_body_sizes` in `instance.toml:129-143` are sizes of messages we do not decode. They are in the same drift class as opcodes.
@@ -214,16 +214,16 @@ How to derive an operand safely (A2):
 - Positional access (fragile): `get_index(1)` for the `ActionTypes` key (`views.rs:189`, `:287`).
 - **Row index as a key** (each one breaks if a row is inserted before it):
   - network key of a stat = `Stats` row + 1 (`views.rs:175-179`; DLL `stats.tsv` from `xtask/src/main.rs:353-364`);
-  - inventory slot = `Inventories` row (`views.rs:136-154`; 121 rows in 0.5.5e; `opcodes/0.5.5e/inventories.tsv` has 123 lines; `config/server.toml:151-158`);
-  - `sprint_buff_rows = [2758, 2737, 2853]` (`config/server.toml:48`);
+  - inventory slot = `Inventories` row (`views.rs:136-154`; 121 rows in 0.5.5e; `opcodes/0.5.5e/inventories.tsv` has 123 lines; `modules/server/config/server.toml:151-158`);
+  - `sprint_buff_rows = [2758, 2737, 2853]` (`modules/server/config/server.toml:48`);
   - the `Move` skill id `0x20002909` is `0x20000000 | ActionTypes key (10505)`. The constant is also written in `poe-game/src/world.rs:258` (test config), `poe-game/src/locomotion.rs:1374`, `poe-game/tests/replay.rs:20`, `instance-server/src/replay_tests.rs:34`. Production code takes it from data (`views.rs:182-189`), the tests do not.
 - `InstanceDetails` carries an area `HASH16` that must exist in `WorldAreas` (`docs/protocol/login.md:164`). A data patch that removes an area breaks any character saved there.
-- Config values copied from captures: `first_entity_id = 12000`, `animation_sets` (`config/server.toml:42,215`), the two account flag bytes `[0x23, 0x03]` (`config/server.toml`, default in `poe-config`). They come from official behaviour and may change with the client.
+- Config values copied from captures: `first_entity_id = 12000`, `animation_sets` (`modules/server/config/server.toml:42,215`), the two account flag bytes `[0x23, 0x03]` (`modules/server/config/server.toml`, default in `poe-config`). They come from official behaviour and may change with the client.
 - Bundle paths: `Bundles2/_.index.bin`, `data/balance/<table>.datc64` (`lib.rs:29,70`). `gateway_list.txt` at the game root is written by deploy (`poe-hook-deploy/src/gateway.rs`); the client also looks at `Bundles2/gateway_list.txt` (`addresses-0.5.5e.md:7`).
 
 **Fixes:**
 - Store ids in config and code, resolve rows at start (`sprint_buffs = ["<BuffDefinitions id>", ...]`; the ids can be read from the 0.5.5e rows now).
-- Pin the schema: record the release tag or file sha256 in `versions/<ver>.toml`, and have `fetch-tools.sh` download that.
+- Pin the schema: record the release tag or file sha256 in `modules/protocol/versions/<ver>.toml`, and have `fetch-tools.sh` download that.
 - `check-build` (A3) walks every `(table, column)` used by `poe-data` and the xtask exports. For each table: the column exists, the schema row width equals the file row width, the row count is plausible. Then the anchors: `Stats` has `actor_scale_+%`, `ActionTypes` has `Move` with key 10505, `Inventories` has 121 rows and `MainInventory` at the expected index, and the three sprint buffs exist by id.
 - A width mismatch in a table the server uses should be an error at start, not a warning.
 
@@ -231,14 +231,14 @@ How to derive an operand safely (A2):
 
 | Place | What | Lines |
 |---|---|---|
-| `config/server.toml`, `config/server.example.toml` | `version`, `protocol_dir`, `layout_dir`, `known_seeds`, `sweep_results` all contain `0.5.5e` | `:5,11,54,72,175` |
-| `crates/poe-config/src/lib.rs` | `[game] version` is a plain `String`; the default sweep path contains `0.5.5e` | `:329`, `:523` |
+| `modules/server/config/server.toml`, `modules/server/config/server.example.toml` | `version`, `protocol_dir`, `layout_dir`, `known_seeds`, `sweep_results` all contain `0.5.5e` | `:5,11,54,72,175` |
+| `modules/server/crates/poe-config/src/lib.rs` | `[game] version` is a plain `String`; the default sweep path contains `0.5.5e` | `:329`, `:523` |
 | `xtask/src/main.rs` | `dump_dir = dumps/<config.game.version>` | `:274` |
 | `xtask/src/terrain_matrix.rs` | `VECTORS_DIR = "dumps/0.5.5e/terrain/vectors"` | `:30` |
 | `modules/protocol/poe-proto/src/opcodes.rs` | module `v0_5_5e` and `include_str!` paths | `:11-19`, tests `:236-260` |
 | DLL | `packets.rs:164,168` uses `v0_5_5e` | |
-| `servers/login-server/src/auth.rs` | test path `opcodes/0.5.5e` | `:134` |
-| `servers/instance-server/src/replay_tests.rs` | same | `:41,602` |
+| `modules/server/servers/login-server/src/auth.rs` | test path `opcodes/0.5.5e` | `:134` |
+| `modules/server/servers/instance-server/src/replay_tests.rs` | same | `:41,602` |
 | `modules/launcher/versions/0.5.5e.toml`, `src-tauri/src/version.rs:7` | `EMBEDDED` list; `settings.rs:157`, `paths.rs:160-178` use `0.5.5e` in test paths | |
 | `modules/launcher/src-tauri/src/mods.rs` | mod `versions = ["0.5.5e"]` compatibility check (`compat`) | `:930-1019` |
 | Web API | `GET /public` shows `game.version` (`poe-web-api/src/public.rs:74`) | |
@@ -351,12 +351,12 @@ Example pattern for `positioned_set_orientation` (tested, unique in 0.5.5e): `f6
 
 **A generator for signatures:** the algorithm I used (decode instruction by instruction with capstone, wildcard `rel32`, RIP-relative `disp32`, image-address immediates and stack-frame immediates, grow until unique in `.text`) is about 60 lines of Python. A3 should ship it as `cargo xtask sig-gen <exe> <addr>…` or a `scripts/re/` tool, so a new table can be bootstrapped from a Ghidra export of the old one (`symbols.tsv`).
 
-## 10. Proposal: `versions/<ver>.toml` as the single source
+## 10. Proposal: `modules/protocol/versions/<ver>.toml` as the single source
 
 Today the version appears in about 15 places (section 5). Proposed: one file per supported build.
 
 ```toml
-# versions/0.5.5e.toml
+# modules/protocol/versions/0.5.5e.toml
 version        = "0.5.5e"
 build_revision = "323943"
 status         = "supported"            # supported | experimental | legacy
@@ -397,7 +397,7 @@ dumps          = "dumps/0.5.5e"
 Placement: the version file is needed by the server, xtask, the launcher and (through its embedded copy of the protocol repo) the DLL. Poe2Protocol is the repo all of them already depend on (`opcodes/<ver>/` lives there, and the DLL and the launcher embed it). Put the canonical files in `modules/protocol/versions/<ver>.toml` and let the launcher embed them (it already `include_str!`s its own copy, `version.rs:7`). The signature table stays in Poe2ClientHook as the plan says, referenced by name. The alternative (repo root) works for the server and xtask but the launcher and the DLL cannot read it at build time.
 
 Consumers:
-- **Server:** `[game] version` is looked up in `versions/`; startup fails for an unknown version, loads `opcodes` from the file instead of `protocol_dir`. The `Protocol::load` check for duplicates stays.
+- **Server:** `[game] version` is looked up in `modules/protocol/versions/`; startup fails for an unknown version, loads `opcodes` from the file instead of `protocol_dir`. The `Protocol::load` check for duplicates stays.
 - **xtask:** `dump_dir`, deploy paths and `check-build` read the file.
 - **Launcher:** the `EMBEDDED` list is generated from the folder; Play compares the installed exe (cached sha from the install, or at least size and PE timestamp) with the file and refuses to deploy the hook on a mismatch unless the user overrides.
 - **DLL:** the signature table and opcode tables are embedded by build; the table is selected by `pe_timestamp` and `image_size`.
@@ -422,7 +422,7 @@ Each block reports found / ambiguous / missing (or OK / drift / fail):
 | Data | each used table and column, row width, row-count sanity, the anchors in section 4, the sprint buff ids | `Bundles2` |
 | Formats | `.tgr` / `.dgr` / `.tdt` / `.ot` versions seen in the bundles against the versions the parsers accept | `Bundles2` |
 | Vectors | `build` column of `terrain-vectors.tsv`, vector count for this build | dumps |
-| Launcher | exe sha vs `versions/*.toml`, depot manifests listed | files |
+| Launcher | exe sha vs `modules/protocol/versions/*.toml`, depot manifests listed | files |
 
 Exit code: 0 all fine, 1 warnings (a research signature missing), 2 a required feature missing.
 

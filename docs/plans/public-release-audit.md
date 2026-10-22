@@ -29,7 +29,7 @@ Counts (findings table below): **critical 0, high 1, medium 6, low 15, info 11**
 | 9 | The four `.hex` blobs | Check for real ids | D-07 below: nothing real found |
 | 10 | Licence | MIT only, all five repos | `LICENSE-APACHE` removed, `LICENSE-MIT` renamed to `LICENSE` everywhere, `license = "MIT"` in every `Cargo.toml`, `package.json` and the sample mod, READMEs, NOTICE and CONTRIBUTING reworded; `docs/architecture/openapi.json` regenerated. The AGPL-port part of the question stays a statement for the user to confirm (nothing here can prove the negative) |
 | 11 | `terrain-matrix.tsv` | Keep | D-06 accepted |
-| 12 | Terrain upload (S-08) | Stays on by default | Accepted; trade-off written in [hosting.md](../guides/hosting.md#security-notes) |
+| 12 | Terrain upload (S-08) | Stays on by default | Accepted; trade-off written in [hosting.md](../../modules/server/docs/hosting.md#security-notes) |
 | 13 | `ConnectEx` guard (S-10) | In-game WP (done 2026-10-21) | Status: done (APIs checked, guard widened, run in game; commit pending) |
 | 14 | Private vulnerability reporting | Enabled when the repos go public | Left open on purpose |
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the replay fixtures of `crates/poe-game/tests/fixtures/` from official captures (WP2.2).
+"""Builds the replay fixtures of `modules/server/crates/poe-game/tests/fixtures/` from official captures (WP2.2).
 
 A fixture is a short window of one capture, reduced to *movement* messages of the local player:
 the client inputs and the server replies, as semantic events (the names of
@@ -36,7 +36,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import movement_sequences as ms  # noqa: E402
 
-OUT_DEFAULT = os.path.join(ms.ROOT, "crates", "poe-game", "tests", "fixtures")
+OUT_DEFAULT = os.path.join(ms.ROOT, "modules", "server", "crates", "poe-game", "tests", "fixtures")
 
 NEW = "2026-10-20_18-41-14_336"
 

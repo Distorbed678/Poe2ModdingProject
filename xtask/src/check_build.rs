@@ -2,7 +2,7 @@
 //!
 //! Scans an executable for every entry of the client DLL's signature table
 //! (`poe-hook-sig`, the same matcher the DLL uses), checks the build identity against
-//! `versions/<version>.toml`, the opcode tables against the exe (HNC table, deserializer
+//! `modules/protocol/versions/<version>.toml`, the opcode tables against the exe (HNC table, deserializer
 //! fingerprints), the strings the tools depend on, and the game data the server reads
 //! (`poe_data::used`, the anchors of the version file) against `Bundles2`. Writes
 //! `dumps/<version>/check-build.md` and prints a summary. Exit code: 0 all fine, 1 warnings
@@ -124,7 +124,7 @@ pub fn run(root: &Path, config: Option<&Config>, opts: Options) -> Result<i32> {
 
     let version = pick_version(root, config, &opts, &image, &sha256)?;
     println!(
-        "check-build: {} against versions/{}.toml (exe {} bytes, sha256 {}...)",
+        "check-build: {} against modules/protocol/versions/{}.toml (exe {} bytes, sha256 {}...)",
         opts.exe.display(),
         version.version,
         file.len(),
@@ -216,7 +216,7 @@ fn pick_version(
         );
         return Ok(v.clone());
     }
-    let latest = VersionFile::latest(root).context("no versions/*.toml")?;
+    let latest = VersionFile::latest(root).context("no modules/protocol/versions/*.toml")?;
     println!(
         "this exe is none of the known builds ({}); checking against {}",
         known.join(", "),
@@ -272,7 +272,7 @@ fn identity(
                 item,
                 "DIFFERENT",
                 level,
-                format!("exe {got}, versions/{}.toml {want}", v.version),
+                format!("exe {got}, modules/protocol/versions/{}.toml {want}", v.version),
             );
         }
     };
@@ -1198,7 +1198,7 @@ fn files(dir: &Path, v: &VersionFile, r: &mut Report) {
                 "size DIFFERENT",
                 Level::Fail,
                 format!(
-                    "{} bytes, versions/{}.toml says {}",
+                    "{} bytes, modules/protocol/versions/{}.toml says {}",
                     m.len(),
                     v.version,
                     f.size
@@ -1229,7 +1229,7 @@ fn markdown(
     let _ = writeln!(o, "# check-build: {}\n", exe.display());
     let _ = writeln!(
         o,
-        "Checked against `versions/{}.toml` (status `{:?}`). Verdict: **{}**.\n",
+        "Checked against `modules/protocol/versions/{}.toml` (status `{:?}`). Verdict: **{}**.\n",
         v.version,
         v.status,
         match r.worst() {
@@ -1410,7 +1410,7 @@ mod tests {
         }
         let tmp = std::env::temp_dir().join(format!("check-build-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let config = Config::load_in(&root.join(poe_config::DEFAULT_PATH), &root).ok();
+        let config = Config::load_in(&root.join("modules/server/config/server.toml"), &root).ok();
         let report = tmp.join("report.md");
         assert_eq!(
             run(&root, config.as_ref(), opts(&exe, &report)).unwrap(),

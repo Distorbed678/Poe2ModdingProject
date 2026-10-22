@@ -10,7 +10,7 @@ to 15 bits until it has `bits(n-1)` bits, reject ≥ n; n < 2 → 0 without step
 `0x141ff89e0` loads the chosen graph (another `below(count)` and `below(0x348)` only when no
 topology was passed); `0x141ff8310` turns the graph into a region record (0x98 bytes, in the
 generation state's region list).
-Details (`crates/poe-world/src/area.rs` `topologies`, `generate_with`):
+Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_with`):
 - `0x141fdfe30` keeps the topologies whose last Topologies column (topology +0x40, league
   or mode) equals the area's mode; if none match, it keeps those marked 0x39 ("any"). With
   neither it retries with mode 1. Act areas use 1, and their league variants use other
@@ -44,7 +44,7 @@ to a new node at their nearest point and erases it.
 
 ### Region orientation
 
-(`0x141ff89e0`, `crates/poe-world/src/region.rs`): a topology may be laid
+(`0x141ff89e0`, `modules/server/crates/poe-world/src/region.rs`): a topology may be laid
 out turned or mirrored. Table `0x142f020c8` drives the point transform (`0x141d14b30`), the
 centring of even-sized placements and the alignment snap `0x141fe7400` (a remainder of exactly
 half rounds by orientation). `0x141d14990` turns the graph; mirrored orientations flip the
@@ -61,7 +61,7 @@ the margin. `TileMap` keeps those writes and `embed` applies them.
 
 ### Overlays (`.toy`)
 
-(`crates/poe-world/src/overlay.rs`; master `Overlays`, +0x200): passes with
+(`modules/server/crates/poe-world/src/overlay.rs`; master `Overlays`, +0x200): passes with
 a header `phase1 phase2 [phase3] [Random|FileOrder|SizeOrder] [±flags]` and entries
 `weight "arm" [±flags] [!excl] [limit=N] [required=N] [rotations]`. Flags: 0x01 TileOverlays,
 0x02 FeatureTiles, 0x04 FeatureRooms, 0x08 FeatureRoomOverlap, 0x10 DescriptionNodes, 0x20
@@ -115,7 +115,7 @@ over `(w + 1) × (h + 1)` tile corners, +0x68 the ground table, indices in order
   is its top-left corner's) and de-repetition. The DLL dumps the lattice before each step
   (`lattice <step>` trace lines).
 
-- Border floods (`0x1420b94d0` → `0x1420b9180`, `crates/poe-world/src/lattice.rs`): per placed
+- Border floods (`0x1420b94d0` → `0x1420b9180`, `modules/server/crates/poe-world/src/lattice.rs`): per placed
   tile (columns, then rows), from each border corner (top and bottom left to right, then left
   and right) the corner's ground floods breadth-first outward (straight on and to both sides) if
   it has `.gt` flag 2, over corners with flag 1 clear (with `.gt` flag 8 also over tile corners
@@ -134,7 +134,7 @@ over `(w + 1) × (h + 1)` tile corners, +0x68 the ground table, indices in order
 
 ### Fill
 
-(`crates/poe-world/src/fill.rs`):
+(`modules/server/crates/poe-world/src/fill.rs`):
 - `0x141f93060`: rows top to bottom, cells left to right, skipping the rest of a placed tile's
   width. A cell's ground is its top-left corner's; it is "walkable" when that ground is missing
   or has `.gt` flag 4 and the corner has no flag 8.
@@ -199,7 +199,7 @@ not the doodad list.
 
 ### Outer buffer
 
-(`0x141fd8360`, `crates/poe-world/src/outer_buffer.rs`): the map is the
+(`0x141fd8360`, `modules/server/crates/poe-world/src/outer_buffer.rs`): the map is the
 region plus the master's `OuterBufferSize` (top right bottom left; the Riverbank's `3 3 3 0`
 gives a 69×78 map with the region at (0, 3)). Set corners get flag 2; each margin corner takes
 the ground and height of the nearest set corner along its column (up/down) and row

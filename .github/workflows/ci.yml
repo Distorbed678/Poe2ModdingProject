@@ -1,8 +1,8 @@
 name: CI
 
-# Checks on every push to main and every pull request: the docs' links, the server workspace
-# (build and tests) and a scan of the working tree for secrets. What contributors should run
-# locally before a PR: CONTRIBUTING.md. The release workflow is release.yml.
+# Checks on every push to main and every pull request: the docs' links, the dev tooling (xtask)
+# and a scan of the working tree for secrets. The server is checked and released by the Poe2Server
+# repository. What contributors should run locally before a PR: CONTRIBUTING.md.
 on:
   push:
     branches: [main]
@@ -23,26 +23,33 @@ jobs:
     name: Docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: python3 scripts/check-links.py
-
-  server:
-    name: Server workspace
-    runs-on: ubuntu-latest
-    steps:
-      # Path dependencies in modules/protocol and modules/client-hook (public repositories).
+      # Submodules: the docs link into modules/server/docs and others (anchors are checked).
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - run: python3 scripts/check-links.py
+
+  xtask:
+    name: Dev tooling (xtask)
+    runs-on: ubuntu-latest
+    steps:
+      # xtask has path dependencies in the submodules: modules/server (Poe2Server, with its own
+      # nested protocol, client-hook and web-admin) and modules/client-hook. All are public.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       # The pinned nightly of rust-toolchain.toml (poe_data_tools needs nightly features).
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install --profile minimal
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --locked
-      # Tests that read the game files (poe-data) skip themselves when GameFiles/ is absent.
+      # Tests that read the game files skip themselves when GameFiles/ is absent. The server's own
+      # build and tests run in the Poe2Server repository's CI.
       - run: cargo test --locked
-      - name: The committed OpenAPI document is current
-        run: cargo run --locked -q -p xtask -- openapi --check
+      - name: The README tracker is current
+        run: cargo xtask tracker --check
+      - name: The launcher's version files are current
+        run: cargo xtask versions --check
 
   secrets:
     name: Secret scan

@@ -15,7 +15,7 @@ ROOT=$PWD
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
-version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' config/server.toml | head -n1)
+version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' modules/server/config/server.toml | head -n1)
 D=${DUMPS_DIR:-$ROOT/dumps/$version}
 GF=$ROOT/GameFiles
 RT=$ROOT/runtime

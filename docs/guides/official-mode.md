@@ -24,14 +24,14 @@ In official mode the DLL sets its **read-only latch** at start and the latch nev
 - **It can be detected.** Anti-cheat and the game's terms of service can treat any injected DLL as a violation, even a passive one. The game can also load server-delivered code modules that inspect the process. There is no guarantee that this has not been, or will not be, noticed.
 - **Your account is what is at risk**: a warning, a temporary or a permanent ban are possible. Do not use official mode on an account you care about, on an account with purchases, or on one you cannot afford to lose. A throw-away account is the safer choice, although the terms apply to it too.
 - **Captures contain your play.** They hold what the server sent you: your character's data, inventory, chat and the names of other players near you. The login messages are redacted, nothing else is. Do not post a capture or log anywhere without reading it, and never attach one to a public issue.
-- **The hook is built for one client build.** With an unverified build (the game was patched and the signature tables do not match) only the pure observers start. Use the build the repository names (`versions/0.5.5e.toml`) and update your `GameFiles/` copy first when the game is patched.
+- **The hook is built for one client build.** With an unverified build (the game was patched and the signature tables do not match) only the pure observers start. Use the build the repository names (`modules/protocol/versions/0.5.5e.toml`) and update your `GameFiles/` copy first when the game is patched.
 - The launcher offers this mode only as the explicit **Official (read-only)** entry of its game version dropdown, after the warning above is accepted ([From the launcher](#from-the-launcher)); it never uses it by itself.
 
 If any of that is not acceptable to you, stop here: playing the game on the official servers through Steam's own, untouched install is unaffected by this project.
 
 ## Requirements
 
-- A checkout of the main repository with its submodules and the tools ([setup.md](setup.md#clone), [setup.md](setup.md#tools)).
+- A checkout of the hub repository (Poe2ModdingProject) with its submodules and the tools ([setup.md](setup.md#clone), [setup.md](setup.md#tools)).
 - A **copy** of the game files in `GameFiles/` that is the same build as the live game. Never point the tooling at Steam's own folder; the project never writes to the Steam install or to its Proton prefix.
 - Linux: Steam running (the client exits at once without it) and a Proton installed through Steam; the copy runs in its own prefix (`third_party/proton-prefix`), so you sign in to Steam normally and the game asks for your usual Path of Exile 2 login.
 
@@ -61,7 +61,7 @@ If any of that is not acceptable to you, stop here: playing the game on the offi
 
 The [launcher](launcher.md#official-read-only) has the same mode for players who are not developers: choose **Official (read-only)** at the top of the game version dropdown. Then:
 
-- **Install** downloads the *current* official build from Steam with your own Steam login (DepotDownloader without pinned manifests) into its own folder `<data>/game/official`, separate from every private-server version; *Download again* updates it, *Repair* re-checks it. The official servers need the latest client, so the build is not the pinned one of `versions/<version>.toml`.
+- **Install** downloads the *current* official build from Steam with your own Steam login (DepotDownloader without pinned manifests) into its own folder `<data>/game/official`, separate from every private-server version; *Download again* updates it, *Repair* re-checks it. The official servers need the latest client, so the build is not the pinned one of `modules/protocol/versions/<version>.toml`.
 - **Play** asks once for the risk section above to be accepted, then deploys exactly what `deploy-client --official` deploys (`mode = "official"`, `login_mode = "steam"`, empty `trusted_servers`, the original `gateway_list.txt`, no position sync, no output folder) and starts the game as shipped: the Steam login happens in the game, the launcher sends no token and logs in nowhere. Linux uses a separate Proton prefix (`<data>/proton-prefix-official`); Steam must be running.
 - **Servers, Account, Host a server and Mods are hidden** while it is selected: they are for private versions.
 - **A newer official build than the hook knows:** the hook's signature table is for one client build. If the game was patched, the hook switches its features off by itself (`NOT verified` in `poe-hook.log`). That is expected; the game runs, there is just no observer until a hook release for the new build.
@@ -77,6 +77,6 @@ The [launcher](launcher.md#official-read-only) has the same mode for players who
 |---|---|
 | The client exits at once, log says `Unable to init Steam API` | Steam is not running |
 | The login screen shows the private server's realm, or the account-name screen | `GameFiles/` was last deployed for the private server: run `deploy-client --official` again |
-| The overlay is missing or features are off, `NOT verified` in the log | The game build differs from the one the hook knows: update the `GameFiles/` copy to the build in `versions/0.5.5e.toml`, or wait for a hook release for the new build ([new-game-version.md](new-game-version.md)) |
+| The overlay is missing or features are off, `NOT verified` in the log | The game build differs from the one the hook knows: update the `GameFiles/` copy to the build in `modules/protocol/versions/0.5.5e.toml`, or wait for a hook release for the new build ([new-game-version.md](new-game-version.md)) |
 | The game freezes for seconds when monsters appear | A tracing option from an earlier private session is on (`entity_trace`); set it to `false` in `poe-hook.toml` |
 | You were disconnected or warned | Stop using the mode and see the risk section; the project cannot help with an account decision |

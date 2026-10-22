@@ -16,7 +16,6 @@ poe-data.workspace = true
 poe-hook-deploy.workspace = true
 poe-hook-sig.workspace = true
 poe-proto.workspace = true
-poe-web-api.workspace = true
 poe-world.workspace = true
 serde.workspace = true
 serde_json.workspace = true

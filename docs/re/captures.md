@@ -7,7 +7,7 @@ delete/create, the Riverbank intro, moving, sprinting, a bow pickup, three kills
 server's traffic, and what was changed to match. Tools: the DLL's Packets/Protocol/Coverage tabs,
 `modules/protocol/poe-proto/examples/check_capture.rs` (decodes every captured message with our layouts;
 `--dump <channel> <in|out> <0xop>` prints them) and `scripts/re/packets_diff.py`.
-Run it inside the Poe2Protocol submodule (it is not a member of the main workspace): `cd modules/protocol && cargo run -p poe-proto --example check_capture -- opcodes/0.5.5e <packets.jsonl> [--show N]`, with captures from `dumps/0.5.5e/captures/`.
+Run it inside the Poe2Protocol submodule (it is not a member of the hub's workspace): `cd modules/protocol && cargo run -p poe-proto --example check_capture -- opcodes/0.5.5e <packets.jsonl> [--show N]`, with captures from `dumps/0.5.5e/captures/`.
 
 Compare a capture with one from our server: `third_party/pyenv/bin/python scripts/re/packets_diff.py <official>/packets.jsonl <ours>/packets.jsonl [--channel instance] [--seq 40]`. How a capture is made: [../guides/setup.md](../guides/setup.md#official-servers-read-only-observation), [../architecture/client-dll.md](../architecture/client-dll.md#packet-capture-packets-packetsrs).
 
@@ -17,7 +17,7 @@ two whose richer forms we do not support (our server sends the simple forms): `A
 optional blocks and `AddInventory` items.
 
 ## Movement capture 2026-10-20
-`dumps/0.5.5e/captures/official/2026-10-20_18-41-14_336/`: a read-only official session that followed a checklist for the movement gaps (standing and chained rolls, taps around the sprint threshold, stops during a sprint, attacks during rolls, sprints into walls, click-to-move and held clicks with rolls, an input-mode toggle). The DLL's movement log was on, so `poe-hook.log` has the client's position per frame (`frame #n ... world ... step ... grid`, same frame numbers as the capture) and the client's action starts/ends (`action start slot 0: DodgeRoll`). `check_capture` decodes every movement message with 0 errors and 0 leftover bytes (only `AddInventory` items mismatch, as before). Results: [../protocol/movement.md](../protocol/movement.md) (index at "Session 2026-10-20"), fixtures `crates/poe-game/tests/fixtures/` (`scripts/re/movement_fixtures.py`).
+`dumps/0.5.5e/captures/official/2026-10-20_18-41-14_336/`: a read-only official session that followed a checklist for the movement gaps (standing and chained rolls, taps around the sprint threshold, stops during a sprint, attacks during rolls, sprints into walls, click-to-move and held clicks with rolls, an input-mode toggle). The DLL's movement log was on, so `poe-hook.log` has the client's position per frame (`frame #n ... world ... step ... grid`, same frame numbers as the capture) and the client's action starts/ends (`action start slot 0: DodgeRoll`). `check_capture` decodes every movement message with 0 errors and 0 leftover bytes (only `AddInventory` items mismatch, as before). Results: [../protocol/movement.md](../protocol/movement.md) (index at "Session 2026-10-20"), fixtures `modules/server/crates/poe-game/tests/fixtures/` (`scripts/re/movement_fixtures.py`).
 
 ## Town capture with other players 2026-10-20
 | Session | What | Results |
