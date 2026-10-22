@@ -243,11 +243,31 @@ of act 10 or 50,000 of act 1; 12 threads add under 1 GB and gain 17 % throughput
 
 ## Open issues
 
-- Forced topology index: the client checks it against the **raw** `WorldAreas` list (row `+0x60`
-  entries, all league modes) while the port, the matrix and `transfer` count the mode 1 list
-  (`topology_entries`). Both agree where the first entries are all mode 1 (`G1_2` 15:0 matches);
-  an area with other-mode topologies early in its list would show as failures of every seed of
-  a topology in the matrix. Check with the first areas that fail all 50 seeds.
+- Forced topology index (settled 2026-10-22): the client checks `map_force_topology` against the
+  **raw** `WorldAreas` list (row `+0x60` entries, all league modes) and takes entry `stat - 1` of
+  row `+0x68` (`0x141ff9280` checks `stat <= row +0x60`, else throws "Cannot force graph N because
+  area X does not have that many topologies"; `0x141ff90f0` indexes the array, no mode filter).
+  The mode filter (`0x141fdfe30`: mode equal, else 0x39, else mode 1) is only used when nothing is
+  forced. In all 442 areas the mode 1 (or 0x39) entries are a **prefix** of the raw list, so the
+  1-based index into the port's `topology_entries` list is the same index into the raw list and
+  the matrix ids, the batch plan and the server's `transfer` agree. 11 areas list further
+  entries of mode 54 after the mode 1 ones (G1_2 33 raw / 18 mode 1, G1_6 8/4, G1_11 24/12,
+  G1_13_1 32/16, G2_4_1 8/4, G2_5_2 8/4, G2_8 8/4, G3_2_1 18/9, G3_3 16/8, G3_4 8/4, G3_7 8/4);
+  forcing an index past the mode 1 entries picks those (not in the matrix). The port's forced
+  handling (`area::generate_probed_files`) now indexes `area::raw_topology_entries` and fails
+  like the client for an index past its end. Evidence from the full batch: topologies 1 to 18 of
+  `G1_2` and 1 to 4 of `G1_6` match for many seeds.
+- Data-path failures of the 50-seed batch (fixed on the `terrain-c` branch, 2026-10-22; replay of the full batch: no match lost, +295 matches, G2_3a 50 and G4_5_2 245):
+  `//` in joined game paths (`Shipwrecks//...`, `3_14//Subarea/...`: `generate::normalize_path`
+  collapses repeated `/` in every lookup); `.dgr` graphs with an `EnvironmentOverride: "<id>"` line
+  before the ground types (G2_3, G2_3a, G4_5_2: the header was read one line off); container
+  graphs whose master names no `RoomSet`, `TileSet` or `FillTiles` (MapKarst, MapDerelictMansion,
+  P1_6, HideoutVampireManor: empty set and master, no outer fill of their own); rooms whose root
+  slot is not a key (MapWetlands `forced_rare.arm`: an empty key). These jobs now run but still
+  fail further on: Wetlands and the vampire/derelict manors differ in tiles (the second
+  subgraph of a container diverges, probably the RNG between subgraphs; needs a client generator
+  trace of `P1_6 13489297 1:0`), `FileGroups` (G2_3, G3_1) and `could not fix heights` (MapKarst)
+  are not ported.
 - `IncursionTemple*` (and any other terrain plugin that needs data from the player's session) cannot
   be generated without that data: `error` rows with "No walkable area in the level".
 - Layouts only: objects, doodad entries and the collision grid of a job are written for the export

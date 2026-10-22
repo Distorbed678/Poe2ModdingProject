@@ -192,6 +192,15 @@ objects, not sent by the server.
     client batch's rows (area, seed, topology, orientation, hashes) with the same forced choice
     and writes `match|fail` plus the first difference per row, the input of the matrix's seed
     counts (WP7.16; the doodad hash is compared once the port has one).
+  - `layout_diff <export dir | run dir> [--job NAME] [--first N] [--map auto] [--ppm auto]
+    [--filter S] [--threads N]`: generates the job named by a client export's `meta.txt` (area,
+    seed, forced topology and orientation) with the port and compares the layout with the export's
+    `layout.tsv` cell by cell: map size, number of differing cells with their bounding box, the
+    first N in generation order (the port's piece index) with tile, orientation, sub-tile and
+    height on both sides; `--map auto` / `--ppm auto` write a text / PPM diff map to
+    `runtime/layout_diff/<job>.*`. On a run dir (for example
+    `dumps/0.5.5e/terrain/batch/fails1/exports`) it prints one line per job (`match`, `diff` with
+    the first cell, or the port's error), in parallel.
   - `town_check <town export> 1 <trace>`: the room-pass placements of Clearfell Encampment.
   - `river_gen <export> 1000`: Riverbank graph layout (jitter, room nodes, routing).
   - `smooth_check <trace>`: replays the logged arc steps of edge smoothing.

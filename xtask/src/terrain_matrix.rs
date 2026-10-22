@@ -114,7 +114,9 @@ pub struct AreaScope {
     pub act: i64,
     pub kind: Kind,
     /// `(graph path, orientation mask)` per topology, in the order the client indexes them
-    /// (`map_force_topology` is the 1-based index into this list).
+    /// (`map_force_topology` is the 1-based index into this list; the client indexes the raw
+    /// `WorldAreas` list of all league modes, but the mode 1 entries are a prefix of it in every
+    /// area, so the indices agree, docs/re/terrain/batch.md "Open issues").
     pub topologies: Vec<(String, u8)>,
 }
 
