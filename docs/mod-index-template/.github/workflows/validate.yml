@@ -1,0 +1,16 @@
+name: validate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/test_validate.py
+      - run: python3 scripts/validate.py index.json index.example.json
+      # Download every package of the index and compare size and SHA-256 (what the launcher does).
+      - run: python3 scripts/validate.py --online index.json

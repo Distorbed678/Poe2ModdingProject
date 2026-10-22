@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Distorbed678/Poe2Mods/index.schema.json",
+  "title": "Poe2 mod index",
+  "type": "object",
+  "required": ["schema", "mods"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": 1 },
+    "updated": { "type": "string", "maxLength": 40 },
+    "mods": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/mod" } }
+  },
+  "$defs": {
+    "mod": {
+      "type": "object",
+      "required": ["id", "name", "side", "versions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 600 },
+        "author": { "type": "string", "maxLength": 80 },
+        "side": { "enum": ["client", "server", "both"] },
+        "tags": {
+          "type": "array", "maxItems": 12, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9-]{1,24}$" }
+        },
+        "homepage": { "type": "string", "pattern": "^(https://.+)?$", "maxLength": 300 },
+        "licence": { "type": "string", "maxLength": 60 },
+        "versions": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "$ref": "#/$defs/version" } }
+      }
+    },
+    "version": {
+      "type": "object",
+      "required": ["version", "sha256", "size", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "description": "Semantic version, the same as the package's mod.toml" },
+        "released": { "type": "string", "maxLength": 24 },
+        "game_versions": { "type": "array", "maxItems": 16, "items": { "type": "string", "maxLength": 40 } },
+        "hook_api": { "type": ["integer", "null"], "minimum": 0, "description": "The client mod ABI (a mod with a client DLL states it)" },
+        "server_api": { "type": ["integer", "null"], "minimum": 0, "description": "The server API (a mod with a server library states it)" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$", "description": "SHA-256 of the whole <id>-<version>.zip" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 536870912 },
+        "url": { "type": "string", "pattern": "^https://[^\\s]+$", "maxLength": 500 },
+        "yanked": { "type": "boolean", "description": "Withdrawn: shown struck out, never installed by default" }
+      }
+    }
+  }
+}

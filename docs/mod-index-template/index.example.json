@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "updated": "2026-10-22T00:00:00Z",
+  "mods": [
+    {
+      "id": "hud-tweaks",
+      "name": "HUD tweaks",
+      "description": "Moves and resizes parts of the HUD, with a layout editor.",
+      "author": "Ann",
+      "side": "client",
+      "tags": ["ui", "qol"],
+      "homepage": "https://github.com/example/hud-tweaks",
+      "licence": "MIT",
+      "versions": [
+        {
+          "version": "1.2.0",
+          "released": "2026-10-20",
+          "game_versions": ["0.5.5e"],
+          "hook_api": 1,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "size": 52000,
+          "url": "https://github.com/example/hud-tweaks/releases/download/v1.2.0/hud-tweaks-1.2.0.zip"
+        },
+        {
+          "version": "1.1.0",
+          "released": "2026-09-30",
+          "game_versions": ["0.5.5e"],
+          "hook_api": 1,
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size": 51200,
+          "url": "https://github.com/example/hud-tweaks/releases/download/v1.1.0/hud-tweaks-1.1.0.zip",
+          "yanked": true
+        }
+      ]
+    },
+    {
+      "id": "faster-rolls",
+      "name": "Faster rolls",
+      "description": "Rolls resolve 1.5x faster. One package: a client half and a server half.",
+      "author": "Bo",
+      "side": "both",
+      "tags": ["gameplay"],
+      "homepage": "",
+      "licence": "MIT",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "released": "2026-10-22",
+          "game_versions": ["0.5.5e"],
+          "hook_api": 1,
+          "server_api": 1,
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size": 48210,
+          "url": "https://github.com/example/faster-rolls/releases/download/v1.0.0/faster-rolls-1.0.0.zip"
+        }
+      ]
+    }
+  ]
+}
