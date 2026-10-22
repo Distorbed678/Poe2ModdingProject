@@ -13,6 +13,7 @@ dumps/0.5.5e/
                    town_export_*, river_export_*    older hand-made exports, same format
     traces/        act1_traces/, town_trace_*       generator traces kept for the port (area_trace)
     vectors/       terrain-vectors.tsv, sweep-*      test vectors and seed sweeps
+    batch/         <run>/                            in-client batch generation runs (jobs.txt, batch-results.tsv, exports/)
   client-tables/   object_types.txt, terrain_tiles.txt   client DLL (dump_object_types)
   ghidra/          ghidra_named_functions_p*.json, instance_factory*_s2c.json, packet_classes_*.json
   captures/
@@ -25,6 +26,7 @@ dumps/0.5.5e/
 |---|---|---|
 | `terrain/grids/`, `terrain/layouts/` | Client DLL (`dump_object_types`), written when an area loads. The server reads them to place the spawn and for the walkability grid. `scripts/test-run.sh` deletes them before a run. | Play the area (any server). |
 | `terrain/area-exports/<session>/` | Client DLL, `[features] area_export` (on by default, also read-only); `generator_trace.tsv` with `generator_trace` or `POE_HOOK_GEN_TRACE=1`. `<session>` is the DLL session folder name (`<date>_<time>_<pid>`). Checked with `cargo run -p poe-world --example check_exports`. | Play, or run a seed sweep (`scripts/re/sweep_drive.py`). |
+| `terrain/batch/<run>/` | `scripts/re/terrain_batch.py plan` (`jobs.txt`, `seeds.json`) and the client DLL's `gen_batch` (`batch-results.tsv`: area, seed, topology, orientation, status, tile hash, doodad hash, size, ms, detail; `exports/<job>/` for the jobs of `export.txt`); the script adds `crashes.tsv`, `state.json`, `suspects.txt`. Format and files: [docs/re/terrain/batch.md](../docs/re/terrain/batch.md). | `scripts/re/terrain_batch.py plan <run> ...` then `run <run>` (a few minutes per 10,000 layouts, no login). |
 | `terrain/traces/` | `generator_trace.tsv` copies of areas the port is compared against (`area_trace`, `town_check`, `river_gen` examples). | Re-export with `generator_trace` on. |
 | `terrain/vectors/terrain-vectors.tsv` | `scripts/re/clientlog_terrain.py <Client.txt> <out.tsv>` from a real play log (`[dev] known_seeds`). | Rerun the script. |
 | `terrain/vectors/area-vectors-results.txt`, `probe-results.tsv`, `forced-results.tsv` | Inputs of `cargo xtask terrain-matrix`: `area_vectors` stdout, `area_probe` stdout, forced-layout client verifications (format in `xtask/src/terrain_matrix.rs`). | `cargo run --release -p poe-world --example area_vectors -- <vectors.tsv> all > ...`; `... --example area_probe > ...`; forced results per [docs/plans/terrain-all-areas.md](../docs/plans/terrain-all-areas.md). |

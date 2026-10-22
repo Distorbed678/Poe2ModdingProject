@@ -331,3 +331,22 @@ Algorithm and evidence: [pathfinding.md](pathfinding.md). Signature `path_plan` 
 | `0x1419c5810` / `0x1419c56a0` / `0x1419c5900` | | open-list push / pop (MSVC `push_heap`/`pop_heap` on `f`) and the node array `0x1445d8920` (16-byte nodes, 0x110 x 0x110) |
 | `0x14212eb60`, vfunc `+0x1d8` | | world constructor; vfunc `+0x1d8` returns 2 for frame mode 2 (lockstep) |
 | `0x1421302c0` | | frame playback: speed factor 1.01 with one spare frame queued (the client's steady walking step is 1.2333 = 1.01 x 1.221; short steps when it waits for the next frame) |
+
+## In-client batch generation (`gen_batch`, 2026-10-22)
+Details, field meanings and the exception handling: [terrain/batch.md](terrain/batch.md). Signature entries (feature `gen_batch`) in `modules/client-hook/signatures/0.5.5e.toml`.
+
+| Address | Name | What |
+|---|---|---|
+| `0x14167d2f0` | `world_construct_client` | `ClientWorld` constructor `(this, u8 frame mode, u8 flag)`, object size `0x17e8`; vtable `0x14339cf18` |
+| `0x14212eb60` | | base world constructor (called by the ClientWorld one only); vtable `0x1435082f0`, vfunc `+0x1e0` is `HeadlessWorld_LoadArea` |
+| `0x141fefa20` / `0x141fefe40` | `terrain_gen_construct` / `terrain_gen_destroy` | base generator constructor `(generator, world)` / destructor; generator `+0xe` (u8, 1 after construction) enables the tile map validation pass, which `ClientWorld_LoadArea` clears |
+| `0x141ff9280` | `terrain_topology_pick` | generator vtable `+0`: reads stats `0xb92` (forced topology, 1-based, `<= row +0x60`) and `0xb93` (forced orientation + 1), world `+0xb8` (league mode); `0x141ff90f0` picks the graph |
+| `0x141ffdab0` / `0x141f9df00` / `0x141f9d9c0` | | validation pass (only when generator `+0xe`) / driver / "Invalid TileMap: ..." checks |
+| `0x1423ba400` / `0x1423ba2a0` / `0x1423ba350` | `flat_map_set` / get / contains | sorted `(i32 key, i32 value)` map at `container +8 .. +0x10`; the world stats at world `+0x128` |
+| `0x140223710` | `world_areas_table` | `Data/Balance/WorldAreas.dat` table getter `(out)` -> counted reference; table `+0x28` -> `(begin, end)`, 442 rows of `0x2e0`, row `+0` id string pointer, `+0x2a` hash16, `+0x60` / `+0x68` topologies, `+0x1b4` kind |
+| `0x1421d6e30` | `resource_wait_loaded` | blocks until resource state `+0x40` is 2 |
+| `0x142bba3c0` / `0x142bba2a0` | `game_alloc` / `game_free` | the game's allocator (per-thread heaps, free from any thread) |
+| `0x142c14288` | `vcrt_getptd` | the statically linked C++ runtime's per-thread data; `+0x58` chain of catch-block frame infos (`_IsExceptionObjectToBeDestroyed` `0x142c13a00`) |
+| `0x141eff290` | | Incursion temple room object constructor: reads the `WorldAreas` table from world `+0xa0` |
+| world `+0x98` / `+0xa0` / `+0xb8` | `world.area` / `world.area_table` / `world.league_mode` | area row / counted table reference / league mode |
+| world `+0x4b0` / `+0x4b4` / `+0x663` / `+0x8d0` | `world.gen_state` / `world.gen_seed` / `world.gen_flag` / terrain | generation state (u32 first LoadArea argument; seed) / headless flag / the embedded terrain object |

@@ -271,6 +271,19 @@ Each entry is one line; the DLL reads the file and posts the input to the game w
 - Before each batch the DLL posts `WM_ACTIVATEAPP(1)`: the game ignores input while it thinks it is in the background, and this changes only its own flag, not the real focus.
 - Click-to-move needs `user_input_mode=mouse_and_keyboard` in the test prefix's `poe2_production_Config.ini` (edit it only while the client is closed: the client rewrites it on exit). W/A/S/D move the player only with `user_input_mode=wasd` (plus `last_selected_KBM_input_mode=wasd`); `use_wasd_to_move` is a different setting and does not switch the mode. Neither mode needs the game window to be active for injected keys.
 
+## Terrain batch generation
+The DLL can run the client's own terrain generator for thousands of `area seed topology orientation` jobs without a login: `[gen_batch]`, driven by `scripts/re/terrain_batch.py` (what it does and why it is the same generator: [../re/terrain/batch.md](../re/terrain/batch.md)). Private mode only. Steam must be running (the client exits without it); no server is needed, the client stays at its login screen. The script refuses a GameFiles deployed in official mode and never logs in anywhere.
+```sh
+python3 scripts/re/terrain_batch.py plan act1 --act 1 --seeds 50       # jobs.txt for every combination of docs/status/terrain-matrix.tsv x 50 random seeds
+                                                                       # (--area G1_*,G2_1 --kind tgr,dgr,town --master-seed N --vectors --limit N)
+python3 scripts/re/terrain_batch.py run act1                           # cargo xtask deploy-client, starts the client (8 worker threads), watches, restarts after a crash, resumes
+                                                                       # (--threads N --max-rss-gb 16 --restart-every N --no-deploy)
+python3 scripts/re/terrain_batch.py status act1 --watch 30             # done / remaining / rate / ETA
+python3 scripts/re/terrain_batch.py verify vectors                     # after `plan vectors --vectors` and `run vectors`: equal to the known client vectors?
+python3 scripts/re/terrain_batch.py stop                               # ends a running `run` and its client
+```
+A run is `dumps/<version>/terrain/batch/<run>/`: `jobs.txt`, `batch-results.tsv` (`area seed topology orientation status tile_hash doodad_hash width height ms detail`, `status` ok / error / crash-skip), optional `export.txt` (same format as `jobs.txt`: those jobs also write `exports/<job>/layout.tsv`, `doodads.tsv`, `grids.bin`), `crashes.tsv`, `state.json`, `rss.tsv` (time, launch, results, client RSS in MB, threads). The client's memory is about 5 GB at its login screen and grows with the data it loads and about 1 MB per layout it does not give back: above `--max-rss-gb` (default 16, the game process under Proton) the jobs in flight finish, the client is stopped and started again, and the run resumes (about every 10,000 layouts in act 10); `--restart-every N` restarts after N layouts as well. `run` can be stopped and started again at any time (jobs with a result are skipped); a job that crashes the client twice, the second time running alone, is marked `crash-skip`. The client window opens on the desktop like any test client (title "PoE2 Batch Generator"). The DLL takes its settings from `POE_HOOK_GEN_BATCH=<run dir>` and `POE_HOOK_GEN_BATCH_THREADS=<n>` (or `[gen_batch]` in `poe-hook.toml`); the script sets both.
+
 ## Logs
 - Client: `GameFiles/logs/Client.txt`.
 - DLL: `GameFiles/poe-hook.log`, plus a per-process session folder `GameFiles/logs/poe-hook/<date_time>_<pid>/` (logs, `packets.jsonl`, `packets.txt`, snapshots) and the in-game overlay (Insert). What the DLL logs and how: [../architecture/client-dll.md](../architecture/client-dll.md).

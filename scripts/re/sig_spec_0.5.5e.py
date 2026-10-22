@@ -16,7 +16,9 @@ BUILD = dict(
 )
 
 DUMP = ["dump_object_types"]
-EXPORT = ["area_export"]
+# gen_batch (in-client batch terrain generation) needs everything the area export needs, plus its own.
+EXPORT = ["area_export", "gen_batch"]
+BATCH = ["gen_batch"]
 TRACE = ["generator_trace"]
 
 SIGS = [
@@ -73,7 +75,8 @@ SIGS = [
     dict(name="game_update", addr=0x14167EA40, features=DUMP),
     dict(name="set_orientation", addr=0x141DDC6A0, features=DUMP),
     dict(name="load_area_client", addr=0x14167B270, features=DUMP),
-    dict(name="load_area_headless", addr=0x14212F500, features=DUMP),
+    dict(name="load_area_headless", addr=0x14212F500, features=DUMP + BATCH,
+         note="HeadlessWorld_LoadArea (base world vfunc +0x1e0): the sequence gen_batch repeats; anchor of the world generation fields"),
     dict(name="positioned_reader", addr=0x141DD8820, features=DUMP + EXPORT),
     dict(name="terrain_construct", addr=0x1415A37E0, features=DUMP + EXPORT,
          note="sets the terrain vtable; anchor of terrain_vtable"),
@@ -95,6 +98,33 @@ SIGS = [
     dict(name="tile_doodads", addr=0x141FF3310, features=EXPORT + TRACE),
     dict(name="doodad_hash_site", addr=0x141FF3643, kind="site", anchor="tile_doodads",
          features=EXPORT, note="right after a doodad's path hash: eax = hash, r15 = tile entry"),
+    # ---- gen_batch: a synthetic world and generator (docs/re/terrain/batch.md) ----
+    dict(name="world_construct_client", addr=0x14167D2F0, features=BATCH,
+         note="ClientWorld constructor (this, frame mode u8, flag u8); the batch makes its own worlds"),
+    dict(name="terrain_gen_construct", addr=0x141FEFA20, features=BATCH,
+         note="TerrainGen_Construct(generator, world): base generator vtable 0x1434ede68"),
+    dict(name="terrain_gen_destroy", addr=0x141FEFE40, features=BATCH, note="generator destructor"),
+    dict(name="terrain_topology_pick", addr=0x141FF9280, features=BATCH,
+         note="reads map_force_topology (0xb92) / map_force_orientation (0xb93) from the world stats; anchor of fields"),
+    dict(name="world_replace", addr=0x14100B110, features=BATCH,
+         note="creates the in-game world and destroys the old one through vfunc +0x20 (deleting destructor)"),
+    dict(name="vcrt_getptd", addr=0x142C14288, features=BATCH,
+         note="__vcrt_getptd(): the thread's C++ exception state (+0x20/+0x28 exception and context records, +0x58 frame info chain, +0x70 ...); gen_batch restores it after a recovered throw"),
+    dict(name="game_alloc", addr=0x142BBA3C0, features=BATCH, note="the game's allocator: (size) -> block"),
+    dict(name="game_free", addr=0x142BBA2A0, features=BATCH, note="the game's free: (block)"),
+    dict(name="flat_map_anchor", addr=0x140B59740, features=BATCH,
+         note="calls flat_map_set once; anchor of it (the set function itself has no unique prefix)"),
+    dict(name="flat_map_set", addr=0x1423BA400, kind="ref", anchor="flat_map_anchor", index=0,
+         features=BATCH, expect_fn=True,
+         note="sorted (i32 key, i32 value) vector set (this, key, value); the world stats at world +0x128"),
+    dict(name="world_areas_table", addr=0x140223710, features=BATCH,
+         note="(out) -> reference-counted Data/Balance/WorldAreas.dat table object"),
+    dict(name="resource_wait_loaded", addr=0x1421D6E30, features=BATCH,
+         note="blocks until a resource (state +0x40 == 2) is loaded"),
+    dict(name="room_check_user", addr=0x141EFF290, features=BATCH,
+         note="Incursion temple room constructor: reads the WorldAreas table object from world +0xa0; anchor of world.area_table"),
+    dict(name="table_rows_user", addr=0x141D02BA0, features=BATCH,
+         note="reads table +0x28 -> (begin, end) of the rows; anchor of table.rows"),
     # ---- generator trace (research, off by default) ----
     dict(name="terrain_seed_rng", addr=0x141F9C020, features=TRACE),
     dict(name="mt_next", addr=0x140A58A70, features=TRACE, pdata=False),
@@ -212,14 +242,41 @@ FIELDS = [
         dict(name="world.frame_queue", disp=0x6A8, at=0x142130891)]),
     dict(anchor="game_update", features=INSPECT, items=[
         dict(name="game.update_accumulator", disp=0x17CC, at=0x14167EA7D)]),
-    dict(anchor="load_area_client", features=["area_export", "dump_object_types"], items=[
+    dict(anchor="load_area_client", features=["area_export", "dump_object_types", "gen_batch"], items=[
         dict(name="world.area", disp=0x98, at=0x14167B28F),
         dict(name="area.kind", disp=0x1B4, at=0x14167B29B),
     ]),
-    dict(anchor="load_area_client", features=["area_export", "dump_object_types"], items=[
+    dict(anchor="load_area_client", features=["area_export", "dump_object_types", "gen_batch"], items=[
         dict(name="world.tile_hash", disp=0x114, at=0x14167B4CC)]),
-    dict(anchor="load_area_client", features=["area_export", "dump_object_types"], items=[
+    dict(anchor="load_area_client", features=["area_export", "dump_object_types", "gen_batch"], items=[
         dict(name="world.doodad_hash", disp=0x118, at=0x14167B56E)]),
+    # gen_batch: what a synthetic world needs (docs/re/terrain/batch.md)
+    dict(anchor="load_area_client", features=BATCH, items=[
+        dict(name="world.stats", disp=0x128, at=0x14167B75B,
+             note="the world's stat map (sorted i32 key/value pairs at +8..+0x10; map_force_* live here)")]),
+    dict(anchor="load_area_headless", features=BATCH, items=[
+        dict(name="world.gen_flag", disp=0x663, at=0x14212F531, note="u8, cleared before a headless generation"),
+        dict(name="world.gen_state", disp=0x4B0, at=0x14212F538, note="the generation state (u32 +0, seed u32 +4)"),
+        dict(name="world.gen_seed", disp=0x4B4, at=0x14212F53E),
+    ]),
+    dict(anchor="terrain_topology_pick", features=BATCH, items=[
+        dict(name="world.league_mode", disp=0xB8, at=0x141FF948C, note="u32 mode column the topologies are filtered by"),
+        dict(name="area.topology_count", disp=0x60, at=0x141FF9317),
+        dict(name="area.topology_list", disp=0x68, at=0x141FF932E, note="16-byte entries"),
+    ]),
+    dict(anchor="terrain_gen_construct", features=BATCH, items=[
+        dict(name="generator.validate", disp=0xE, at=0x141FEFA4C,
+             note="u8, 1 after construction: runs the tile map validation pass (0x141ffdab0, throws TerrainGenerationException); the client clears it")]),
+    dict(anchor="world_replace", features=BATCH, items=[
+        dict(name="world.vt_delete", disp=0x20, at=0x14100B81B, note="vtable slot: deleting destructor (this, 1)")]),
+    dict(anchor="resource_wait_loaded", features=BATCH, items=[
+        dict(name="resource.state", disp=0x40, at=0x1421D6E42, note="2 = loaded")]),
+    dict(anchor="table_rows_user", features=BATCH, items=[
+        dict(name="table.rows", disp=0x28, at=0x141D02C41, note="pointer to (begin, end) of the table rows"),
+        dict(name="resource.refs", disp=0x3C, at=0x141D02BE4, note="i32 reference count (lock inc / lock dec)")]),
+    dict(anchor="room_check_user", features=BATCH, items=[
+        dict(name="world.area_table", disp=0xA0, at=0x141EFF395,
+             note="reference-counted WorldAreas table object (the world's area row belongs to it); the world's destructor releases it")]),
     # ---- generator and terrain ----
     dict(anchor="terrain_driver", features=EXPORT, items=[
         dict(name="generator.world", disp=0x38, at=0x141FFEEA2),

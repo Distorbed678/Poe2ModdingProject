@@ -9,6 +9,7 @@ base `0x140000000`). How far the port has come is in [../../status/terrain.md](.
 | this file | Where generation runs, phases, RNG, hashes, tile records, doodads, tools, the area data chain, a town trace |
 | [tgr.md](tgr.md) | `.tgr` graph areas: generation order, node jitter, room placement, routing, smoothing, virtual edges, node tiles, edge tiles |
 | [dungeon.md](dungeon.md) | `.dgr` dungeon areas (most of act 1): call chain, file fields, rooms, corridors, tile pass |
+| [batch.md](batch.md) | Running the client's generator in a loop from the DLL (`gen_batch`): world, forced topology and orientation, threads, exceptions, files, addresses |
 | [shared-passes.md](shared-passes.md) | Passes both kinds use: topology choice, pruning, region orientation, lattice, fill, de-repetition, outer buffer, overlays |
 
 ## Where generation runs
@@ -154,6 +155,11 @@ objects, not sent by the server.
   `generator_trace.tsv` in the area export, every seed, raw MT draw, bounded draw (with the
   calling functions) and phase in order. Diff it against the server port to find the first
   divergence. A Riverbank layout is ~23,000 lines.
+- **In-client batch generation** (`[gen_batch]`, `scripts/re/terrain_batch.py`): the DLL runs the
+  client's own generator for `area seed topology orientation` jobs on worker threads, with no
+  login (tens of layouts per second instead of one per 20 s) and writes tile hash, doodad hash and
+  size per job to `batch-results.tsv`; how it works, the exceptions the generator throws, files and
+  addresses: [batch.md](batch.md). The data source of the 50-seed acceptance test.
 - **Seed sweep:** the server's `[dev] sweep` (or `POE_SWEEP=<file>`) lists
   `<WorldAreas.Id> <seed> [count]`. Each instance session then generates the next entry instead
   of the character's area, appends `area, seed, tile hash, doodad hash` to `sweep_results`
@@ -168,17 +174,24 @@ objects, not sent by the server.
   - `area_trace <area> <seed> <trace dir> [topo[:o] | all]`: draws, layout and tile hash against a
     client trace in `dumps/0.5.5e/terrain/traces/act1_traces/<area>_<seed>/`; `all` searches every
     topology and orientation.
-  - `area_vectors <vectors.tsv> all [area]`: regression against client tile hashes (for example
-    `dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv`). It tries forced topologies when the natural
-    choice fails.
+  - `area_vectors <vectors.tsv> [all|build|>=N] [area] [--natural] [--threads N] [--hints F]
+    [--probe F [--runnable-only]]`: regression against client tile hashes (for example
+    `dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv`, or the play-log `terrain_vectors.tsv`). It
+    tries forced topologies when the natural choice fails, on threads, with
+    `POE_VECTOR_BUDGET=<seconds>` per (area, seed); see the example's header.
   - `check_exports`: recomputes the tile and doodad hashes of every DLL area export.
-  - `area_probe [seed] [area|all] [timeout]`: tries every topology of every `WorldAreas` row (first
-    allowed orientation) and prints `ok` / `error` / `panic` / `timeout` per topology (no hash check);
-    group the errors by unported system with `scripts/re/probe_classes.py`.
+  - `area_probe [seed] [area|all] [timeout] [--seeds a,b,c] [--orientations first|all|N] [--threads N]`:
+    tries every topology of every `WorldAreas` row and prints one line per attempt (seed and
+    orientation included): `ok` / `error` / `panic` / `timeout` (no hash check); group the errors
+    by unported system with `scripts/re/probe_classes.py`.
   - `cargo xtask terrain-matrix`: writes `docs/status/terrain-matrix.tsv` (area x topology x
     orientation -> untested/fail/match) from the game data, `area_vectors` output, forced-layout
     results and the probe; the README tracker renders it. Plan:
     [../../plans/terrain-all-areas.md](../../plans/terrain-all-areas.md).
+  - `forced_verify <batch-results.tsv> [--out forced-results.tsv] [--threads N]`: replays the
+    client batch's rows (area, seed, topology, orientation, hashes) with the same forced choice
+    and writes `match|fail` plus the first difference per row, the input of the matrix's seed
+    counts (WP7.16; the doodad hash is compared once the port has one).
   - `town_check <town export> 1 <trace>`: the room-pass placements of Clearfell Encampment.
   - `river_gen <export> 1000`: Riverbank graph layout (jitter, room nodes, routing).
   - `smooth_check <trace>`: replays the logged arc steps of edge smoothing.
