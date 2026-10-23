@@ -17,7 +17,7 @@ Progress and the current task: the tracker in [README.md](README.md).
 
 ## Roadmap (details: [docs/plans/orchestration-2026-10.md](docs/plans/orchestration-2026-10.md), status: README tracker)
 Done (2026-10-20/21): foundation (restructure, dumps, repo split, docs, config, tracker); server-authoritative movement from official captures; accounts with the standalone login; remote hosting; shared instance world with two-client multiplayer; web API + web admin; launcher (end-to-end test with a depot download pending); consistency pass.
-**Current state and next steps:** [docs/plans/handoff-orchestrator-3.md](docs/plans/handoff-orchestrator-3.md) (user gates: end-to-end test, G-PARTY capture, Windows). After that: terrain port to all areas, following [docs/plans/terrain-all-areas.md](docs/plans/terrain-all-areas.md).
+**Current state and next steps:** [docs/plans/handoff-orchestrator-4.md](docs/plans/handoff-orchestrator-4.md) (user gates: end-to-end test, G-PARTY capture, Windows; open items; terrain wave 4 of the 1:1 port, [docs/plans/terrain-all-areas.md](docs/plans/terrain-all-areas.md)).
 Open elsewhere: movement gaps #11/#12 (docs/protocol/movement.md), party/trade replies, remote equipment visuals.
 
 ## Where things are
