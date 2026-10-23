@@ -59,7 +59,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
-| [Launcher](#launcher) | `█████████░ 86%` | 5/7 |
+| [Launcher](#launcher) | `██████████ 100%` | 7/7 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `█████████░ 90%` | 9/10 |
 
@@ -672,8 +672,8 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 | ✅ | [Releases and auto-update (AppImage, NSIS installer, signed latest.json)](docs/guides/launcher.md#releasing) | WP E1-E3, 2026-10-21: v0.1.0 and v0.1.1 released by the tag workflow; on Linux an installed 0.1.0 found, downloaded, verified and installed 0.1.1 and restarted as 0.1.1; the Windows installer and its update are built in CI but untested (no Windows machine) |
 | ✅ | [Server profiles and account login through the web API](docs/guides/launcher.md#the-flow) | profiles, register, login (kind launcher), token in the OS keyring, logout revokes; tested with a mock keyring and a real server |
 | ✅ | [Game-token exchange for auto-login (`POST /api/v1/game-token`)](docs/architecture/web-api.md#endpoints) | launcher token -> one-off game_remember token (the game's rolling login would revoke the launcher token) |
-| 🟡 | [Install 0.5.5e from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned, args/prompts/progress tested with a stand-in; the real Steam login and download not run yet; verification values unconfirmed |
-| 🟡 | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | deploy, token file and Proton command tested with a fake Proton; real game start not run; Windows path untested |
+| ✅ | [Install 0.5.5e from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested |
+| ✅ | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | the user's end-to-end test on Linux (2026-10-23): hook download and deploy, Host a server (update from server-v0.1.0 to 0.2.1), Play, web admin, restart all passed; Windows path untested |
 | ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4) |
 
 ### Web Admin

@@ -445,14 +445,14 @@ link = "docs/architecture/web-api.md#endpoints"
 
 [[subsystem.item]]
 name = "Install 0.5.5e from Steam depots"
-status = "partial"
-note = "DepotDownloader 3.4.0 pinned, args/prompts/progress tested with a stand-in; the real Steam login and download not run yet; verification values unconfirmed"
+status = "done"
+note = "DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested"
 link = "docs/guides/launcher.md#install-in-detail"
 
 [[subsystem.item]]
 name = "Deploy and launch via poe-hook-deploy"
-status = "partial"
-note = "deploy, token file and Proton command tested with a fake Proton; real game start not run; Windows path untested"
+status = "done"
+note = "the user's end-to-end test on Linux (2026-10-23): hook download and deploy, Host a server (update from server-v0.1.0 to 0.2.1), Play, web admin, restart all passed; Windows path untested"
 link = "docs/guides/launcher.md#play-in-detail"
 
 [[subsystem.item]]

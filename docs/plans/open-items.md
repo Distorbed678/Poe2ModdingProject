@@ -4,9 +4,10 @@ Everything that is still to do outside the terrain port ([terrain-all-areas.md](
 
 ## Needs the user
 
+The launcher end-to-end test (v0.4.0 on Linux) passed on 2026-10-23.
+
 | Item | What | Where |
 |---|---|---|
-| End-to-end test | launcher v0.4.0 AppImage: install the game, get the hook, Host (server update from server-v0.1.0 to 0.2.1), Play, web admin, restart | [guides/launcher.md](../guides/launcher.md#end-to-end-test-on-a-real-machine) |
 | G-PARTY capture | official capture where a friend answers a party invite and a trade request; implementing accept and decline is deferred (below) | [protocol/entities.md](../protocol/entities.md#party-and-trade-flows-wp-c3) |
 | Movement problem 5 | same capture session: sprint ended with W held since before the roll (client coasts 30 frames and resumes) | [protocol/movement.md](../protocol/movement.md) |
 | Windows | launcher installer and update, Host a server (zip, `taskkill`), Play, restart under the launcher; needs a Windows machine or VM | [guides/launcher.md](../guides/launcher.md) |
