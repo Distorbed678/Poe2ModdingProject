@@ -46,6 +46,13 @@ pub trait GridSource: Walkable + Send + Sync {
 ```
 `Walkable` (per cell `walkable(x, y)`, optional `clearance`) is the trait `Mover` and the A* already used. Implementations: `Grid` (the DLL's `terrain_grid_<tile hash>.bin`; parsing moved here from `instance-server/src/spawn.rs`, which re-exports it), `VecGrid` (tests, tools), `Open` (no terrain). `poe-world` will implement it for its generated collision output; the world only sees the trait.
 
+### Terrain grid sources
+The world takes any `GridSource`; the instance server (`servers/instance-server/src/lib.rs`) chooses where the grid comes from:
+- **The client's grid** (default): the DLL's `terrain_grid_<tile hash>.bin`, found in the layout cache or uploaded ([../protocol/side-channel.md](../protocol/side-channel.md#terrain-upload)).
+- **The generated grid** (`[terrain] generated_grid = true`): `poe_world::area::generate_with` makes the layout and doodads, `poe_world::collision::build(&map, files, &doodads)` the four cell layers, and `.pwg1()` their bytes in the same `PWG1` format the DLL exports; `poe_game::grid::Grid::parse` reads them. It is used only when the generated tile hash equals the one the client reported; otherwise (error, panic or a different layout) the server logs a warning and keeps the client's grid. Byte-for-byte status per area: [../re/terrain/doodads.md](../re/terrain/doodads.md).
+
+**Dependency decision (2026-10-22):** `poe-world` depends neither on `poe-game` nor on `poe-config`, and `poe-game` does not depend on `poe-world`. `PWG1` is the contract between them (a byte format both already had), and the instance server is the adapter. The cost is one serialise/parse per instance; the gain is that the generator stays a pure library (game data in, bytes out) that tools and tests use without the simulation, and the simulation does not depend on generator internals. A direct `impl GridSource for CellGrid` can replace the adapter later without touching either crate's callers.
+
 ### Movement component (`Locomotion`)
 Server-authoritative movement for the client's lockstep mode, built from [../protocol/movement.md](../protocol/movement.md). Inputs mirror the client packets; the output events are semantic and in the order the official server sends the messages.
 

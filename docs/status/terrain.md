@@ -172,6 +172,10 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   MapWoodland, MapHeadland, G1_12, MapSump, MapBloodwood, MapWetlands, MapMire, MapDeforestation.
   Open items per class and the client traces taken for them (`batch/b1`, `b2`, `b3`, `c1`, `a1`,
   `a2`): [../re/terrain/dungeon.md](../re/terrain/dungeon.md), [../re/terrain/tgr.md](../re/terrain/tgr.md).
+- **Doodads and collision grid (2026-10-22, WP7.11/7.12, merged):** all 72,718 tile-matching
+  layouts also match the client's doodad hash; the generated collision grid equals the client's
+  `grids.bin` for 273 of 303 exports (details and open grid fails:
+  [../re/terrain/doodads.md](../re/terrain/doodads.md)); server switch `[terrain] generated_grid`.
 - Settled (agent C): the client checks the forced topology against the unfiltered topology list (all league
   modes); the matrix counts the mode 1 list. The 11 areas with other-mode topologies need a check.
 

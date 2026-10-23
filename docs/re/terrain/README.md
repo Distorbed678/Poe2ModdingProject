@@ -10,6 +10,7 @@ base `0x140000000`). How far the port has come is in [../../status/terrain.md](.
 | [tgr.md](tgr.md) | `.tgr` graph areas: generation order, node jitter, room placement, routing, smoothing, virtual edges, node tiles, edge tiles |
 | [dungeon.md](dungeon.md) | `.dgr` dungeon areas (most of act 1): call chain, file fields, rooms, corridors, tile pass |
 | [batch.md](batch.md) | Running the client's generator in a loop from the DLL (`gen_batch`): world, forced topology and orientation, threads, exceptions, files, addresses |
+| [doodads.md](doodads.md) | The doodad pass (cells, `.ao` picks and their draws, the doodad hash filter) and the collision grid (`0x141d0e5f0`: tile planes, doodad hulls), checks and open failures |
 | [shared-passes.md](shared-passes.md) | Passes both kinds use: topology choice, pruning, region orientation, lattice, fill, de-repetition, outer buffer, overlays |
 
 ## Where generation runs
@@ -110,7 +111,8 @@ collision. The corner-lattice flags that give walkability are in
 - both reach the world through generator vfunc +0x38 `TerrainGen_AddObject` `0x141ff7770`.
 On the Riverbank the generator creates ~134 objects: `Doodad`/`DoodadNoBlocking`, flow
 markers (`Environment/NonDefaultFlows/…`), audio and camera-zoom markers. They are client-side
-objects, not sent by the server.
+objects, not sent by the server. The port's doodad pass and the collision grid built from the
+tiles and doodad hulls: [doodads.md](doodads.md).
 
 ## Client-side facts (offline analysis, 2026-10-13)
 

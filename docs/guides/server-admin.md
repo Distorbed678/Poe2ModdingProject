@@ -41,6 +41,11 @@ client's own choice). Any area in `WorldAreas` works, not only act 1. Topology n
 1-based in the area's topology list; orientations are checked against that topology's allowed
 ones.
 
+## Terrain switches (`[terrain]`)
+
+- `generate` (default `false`): the server also generates each new instance's terrain and logs whether its tile hash equals the client's (the `terrain` command does it for one instance).
+- `generated_grid` (default `false`): the instance's collision grid (walkability for movement and spawns) comes from the server's own generator instead of the grid the client uploaded or the layout cache holds. It applies only when the server's tile hash equals the client's; otherwise the log says `generated collision grid unavailable` and the uploaded grid is used, so the switch is safe to leave on. When the grid is used the log has `using the generated collision grid` with the generation time. How the grid is built and how far it equals the client's: [../re/terrain/doodads.md](../re/terrain/doodads.md); where it plugs in: [../architecture/instance-world.md](../architecture/instance-world.md#terrain-grid-sources).
+
 ## Mods
 
 Server mods are managed on the server with `poe-server mod` (offline; the server does not need to run; every change applies at the next start):

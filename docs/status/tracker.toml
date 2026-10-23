@@ -294,8 +294,9 @@ link = "docs/status/terrain.md"
 
 [[subsystem.item]]
 name = "Doodads and the doodad hash"
-status = "missing"
-link = "docs/status/terrain.md"
+status = "done"
+note = "2026-10-22 (WP7.11): doodads.rs; every one of the 72,718 tile-matching client layouts also matches the client's doodad hash; 302 of 303 exports equal in list, hash and angles (MapVaalVault: 2 angles)"
+link = "docs/re/terrain/doodads.md"
 
 [[subsystem.item]]
 name = "Per-area x topology x orientation matrix (cargo xtask terrain-matrix)"
@@ -322,8 +323,8 @@ link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unloc
 
 [[subsystem.item]]
 name = "Collision and walkability output for server movement"
-status = "planned"
-note = "poe-world emits the PWG1 cell grid that poe_game::grid::Grid reads (GridSource); checked against the DLL's grids; the client's upload covers it until then"
+status = "partial"
+note = "2026-10-22 (WP7.12): collision.rs builds the PWG1 grid (0x141d0e5f0 + doodad hulls); 273 of 303 client exports equal grids.bin in all 4 layers (fails: lattice flag 8 in MapSlash and others); [terrain] generated_grid (default off) uses it when the tile hash equals the client's; no live movement test yet"
 link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
 
 # ---------------------------------------------------------------------------------------------
