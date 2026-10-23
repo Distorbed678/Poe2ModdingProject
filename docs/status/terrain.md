@@ -181,6 +181,19 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Wave 4 (2026-10-23, agents A, B, C, merged into Poe2Server `03d738b`):** 176,336 of
+  218,705 client layouts match (from 108,545), 0 lost; 176,308 of them also match the doodad hash
+  (28 differ, all ExpeditionLogBook_Heath topology 1 orientation 6). Combinations 1990 match,
+  1888 partial, 591 fail. Dungeon wrong output (agent A): branch-pass corridor heights, overlay
+  pick weights and the `room_fits` ground flag, `place_tile` mirror bit, `DungeonFillRoomHeightOverride`,
+  special rooms vs feature rooms, case-sensitive corridor key sort, typed-room door rules,
+  pre-unique room. Dungeon errors (agent B): 3x3 door spots `0x14209dc90` (WP7.8), FileGroups
+  subgraphs, the ShipPlugin second graph job (G4 ship areas), per-graph StoreyHeight, outer fill
+  height overrides, multi-rotation `.gft` lines. `.tgr` and towns (agent C): hideouts run the
+  terrain RNG disabled, room settle spiral, loop chains split in halves, side-by-side virtual
+  edges. Biggest gains: G1_13_1, G1_11, G3_2_1, G2_1, MapUniqueWildwood, MapBackwash, MapLostTowers,
+  the hideouts, G4_7, MapBazaar. Findings and open items: the "Wave 4" sections of
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md) and [../re/terrain/tgr.md](../re/terrain/tgr.md).
 - **Doodads and collision grid (2026-10-22, WP7.11/7.12, merged):** all 72,718 tile-matching
   layouts also match the client's doodad hash; the generated collision grid equals the client's
   `grids.bin` for 273 of 303 exports (details and open grid fails:
@@ -196,8 +209,8 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
 4. G1_11: height-change edges.
 5. G1_13–15: the user records client traces, then port what they need.
 6. Doodads (the doodad hash), not ported anywhere yet.
-7. Generator features no tested area uses yet: `0x14209dc90` (3×3 door spots), FileGroups
-   subgraphs, nested subgraphs, request-driven extra rooms and shrines (`0x1420aab60`,
+7. Generator features no tested area uses yet (3×3 door spots and `.dgr` FileGroups subgraphs
+   were ported in wave 4): nested subgraphs, request-driven extra rooms and shrines (`0x1420aab60`,
    `0x1420aacf0`, `0x1420abf60`), injector and blank special rooms.
 8. Later: collision and walkability.
 9. Done 2026-10-17: forced topology/orientation in AreaInfo, area transfer (command and

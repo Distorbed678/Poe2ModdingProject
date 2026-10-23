@@ -334,3 +334,68 @@ Each item was found by comparing the port with client exports or traces of faili
   correction). The two banks then run off the map instead of meeting in a node that no tile
   fits. The nodes the splits make join the tile list of the tile stage unless fixed, so these dead
   ends are pushed one cell off the map (`MapCrimsonShores`).
+
+## Wave 4 (agent C, 2026-10-23)
+
+Found with the client traces of `batch/b3` and the fails1 exports; code in `modules/server/crates/poe-world`
+(branch `terrain-c` of the wave-4 worktree). Effect on the 28,633 jobs of agent C's areas: 8,102 more matches in
+the first measurement (after the hideout, settle, fill-group and virtual-node changes), 0 lost.
+
+- **Hideouts seed the RNG disabled.** `TerrainGen_Run` (`0x141ffe940`, call at `0x141ffebd3`) passes
+  `disabled = WorldAreas.IsHideout` (row `+0x12a`, schema column `IsHideout`) to `TerrainRng_Seed`: every draw
+  returns its lower bound, so a hideout's layout does not depend on the seed (the client's batch hash is the
+  same for all 50 seeds). Towns (`IsTown`) are not disabled; `G1_town` uses the batch seed. Ported in
+  `area.rs` (`rng.disabled`). 3,750 of the 4,100 hideout/town-class jobs match, their doodad hashes too.
+  Still failing: `Design` and `G_login` (unported master/room features), `G3_town`, `HideoutArenaIncursion`
+  (`FileGroups` subgraph), `HideoutLimestone` (four 3x3 fill tiles carry height 26 in the port, 0 in the
+  client; a trace is requested), `P1_3`, `P2_1`. "Some client hashes vary with quest state": not seen; the
+  doodad hash of every matching hideout and town equals the client's.
+- **Master paths starting with `Metadata/` are absolute** (`HideoutLight`'s `master.tsi` names its files in
+  full).
+- **Room settle (`0x1420c9260`, start of `0x1420c9970`).** Before a room (or node tile) is placed its margin
+  rectangle is tested: left and top margin `align` where those sides have an edge, right and bottom margin
+  the edge's `.et` size; the cells must be free (`0x141d0d880`), no side with a non-wildcard edge may touch the
+  map border, and the four corner grounds must agree with the lattice's where it is set (equal, or both
+  none/`.gt` flag 8, `0x141d0daf0`/`0x141d02530`). When any test fails the room moves in a square spiral of
+  `align`-sized steps (step counts 1,1,2,2,..9, directions through the 9x9 orientation table `0x141f8c430`,
+  vectors `0x142f0c608`), first with the margin rectangle, then with the room alone; no place throws
+  "Overlapping node tiles". `rooms::settle`. This was the whole `G2_1` failure (rooms next to each other
+  after the repulsion; the client moves them apart): 396 of 462 sampled jobs match now.
+- **Empty fill groups do not exist.** A `.gft` section whose lines are all commented out (`DefaultHyenas`)
+  is not a group: the ground fills from `default`.
+- **Virtual-list nodes are placed at the room stage** (`0x1420caa40`, second loop; lists built by
+  `0x1420c7400`: `+0x00` virtual, `+0x18` tile, `+0x30` typed, `+0x48` no-edge nodes with points). Nodes
+  touching a virtual edge that are not dead ends try `0x1420c87a0` like rooms (rooms of the empty type,
+  else tiles); the ones nothing fits are exploded later. `place_node_opt`. Gave `G1_1` (189 jobs) and
+  `MapUniqueWildwood`.
+- **Loop chains** (`0x1420b5f30`): a chain that ends where it started is split at point `n/2` into two
+  halves that share the middle point (the second takes the first edge's far node's other edge), both are
+  fitted as loops, the second half's tiles minus its first and last are appended to the first, a closing
+  duplicate is dropped and the tiles are made at once (`0x1420b7f30`, crossings from `0x1420b70e0`: ten
+  control points round the loop, one crossing per tile). The client reads crossing `i + 1` for the last
+  tile's far side, one past the vector; the port uses (0, 0) there (unchecked).
+- **Only `(any)` nodes take the quarter turn** (`0x1420c87a0` tests the node orientation byte against 8):
+  `(best)` (9) and fixed orientations run the side check `0x1420b8b70` instead. `MapInferno` boss clearing.
+- Open: the quarter turn's bottom border test is `h + x == map width` in the client (a typo for
+  `y == map height`; not copied, nothing needed it yet). Room-less nodes in the tile list also try rooms
+  of the empty type first (`G2_1` topology 4: `stromacliff_join*.arm` for a node whose edges are
+  `desert_dune_stromatolite.et` and `desert_dune.et`; `MapSinterRift`): `node_tiles::choose` only has the
+  tile branch. A draft of the edge adjustment for tile nodes is in `runtime/wave4/c/adjust-tile-nodes.patch`
+  (did not help alone).
+- **Two virtual edges side by side at a tile-less virtual node** (`0x1420c64f0`, from `0x1420c6cd0`): one width
+  `below(max-min+1)+min` from the first edge's range, the corner of the two offset lines (candidate chosen by
+  the side tests against the midpoint and the third edge) goes to both edges as one virtual end point
+  (`node_tiles::virtual_corner`). `MapBackwash` 783 jobs (33 of 36 sampled now match), `MapSinterRift`.
+- Measured on the 41,464-job gate (agent C's 28,633 failing/area jobs plus the 15,000 match sample, commit
+  7a54698): 11,311 gained, 0 lost.
+- **No rectangle overlap test at room choice** (`0x1420c87a0` tests the map, which is still empty then, and
+  `0x1420c4b30`, a neighbour-exit check that needs placed tiles): rooms may overlap after the draw, the settle
+  spiral separates them. Dropping the port's overlap test gave `G2_1` another 313 jobs.
+- **Nodes made by the virtual-junction split are not in the tile list** (the list was built from the original
+  nodes at the start of the tile stage). `G2_1` topology 4 and `MapSinterRift`.
+- Gate (agent C's failing jobs plus the 15,000 match sample, 41,464 jobs, bd26b25): 11,705 gained, 0 lost.
+- Tried and rejected: the levelling rounds of `fill_black` (`0x141fd71c0`) with the lower middle
+  (`min + (max-min)/2`) instead of the upper one: `HideoutLimestone` (50 jobs, four fill tiles at height 26
+  instead of 0) would match, but 3,929 other matches break. The cause there is elsewhere.
+- Open for `MapCrimsonShores` topology 2 (400 jobs): "no edge tile to expand the outer buffer" with a key
+  whose exits are 1 and 7 (a slanted crossing); needs a client trace (requested: runtime/wave4/c/client-requests.txt).

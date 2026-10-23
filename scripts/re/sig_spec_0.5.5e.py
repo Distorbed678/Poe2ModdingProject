@@ -139,6 +139,8 @@ SIGS = [
     dict(name="node_place", addr=0x1420C87A0, features=TRACE),
     dict(name="node_candidates", addr=0x1420C76D0, features=TRACE),
     dict(name="route_edge", addr=0x1420CD460, features=TRACE),
+    dict(name="room_fits", addr=0x141F9D200, features=TRACE,
+         note="TileKey fits the terrain at a position: (lattice ctx, &pos, key, wild) -> 0 or a failure code; traced for the overlay candidate scan"),
     dict(name="split_virtual", addr=0x1420BC400, features=TRACE),
     dict(name="smooth_edges", addr=0x1420BD650, features=TRACE),
     dict(name="arc_start", addr=0x1420D1B70, features=TRACE),
