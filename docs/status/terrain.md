@@ -172,6 +172,15 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   MapWoodland, MapHeadland, G1_12, MapSump, MapBloodwood, MapWetlands, MapMire, MapDeforestation.
   Open items per class and the client traces taken for them (`batch/b1`, `b2`, `b3`, `c1`, `a1`,
   `a2`): [../re/terrain/dungeon.md](../re/terrain/dungeon.md), [../re/terrain/tgr.md](../re/terrain/tgr.md).
+- **Wave 3 (2026-10-22/23, agents D, E, F, merged into Poe2Server `2167c89`):** 108,545 of
+  218,705 client layouts match (from 72,718), 0 lost; 108,518 of them also match the doodad hash
+  (27 differ). Combinations 1074 match, 1658 partial, 1737 fail. Dungeon fixes (agent D):
+  overlays inside the `.dgr` tile pass, per-room lattice settle `0x142099e90` with the graph
+  grounds' `.gt` flags and the uniform-walk rule, pass-context grounds, default edge type,
+  overlay exclusions and MatchAllTileKeys; chirality guard removed, blank special rooms, overlay
+  room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
+  MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
 - **Doodads and collision grid (2026-10-22, WP7.11/7.12, merged):** all 72,718 tile-matching
   layouts also match the client's doodad hash; the generated collision grid equals the client's
   `grids.bin` for 273 of 303 exports (details and open grid fails:
