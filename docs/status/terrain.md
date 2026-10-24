@@ -181,6 +181,20 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Wave 5 (2026-10-23/24, agents A, B, C in three runs each, merged into Poe2Server `b021b44`):**
+  196,094 of 218,705 client layouts match (from 176,336), 0 lost; 196,093 of them also match the
+  doodad hash. Combinations 3286 match, 877 partial, 306 fail. Dungeon wrong output (agent A):
+  the `Spawner` flag from the art `.tmd` or the `.tdt`'s own `.tmd`, case-insensitive `grid_fits`,
+  corner writes of tiles overhanging the region replayed with place's rule `0x141d0bad0` and
+  `set_heights` outside the map. Dungeon errors (agent B): the tile lookup's second index with
+  flattened corner heights `0x141d0a4c0`, EdgeFields by `.dgr` version, lettered unique tags with a
+  per-job history, `.tgr` subgraphs inside a `.dgr` window, world-map panels without a sub-seed,
+  comma-list room types. `.tgr`, towns and league (agent C): node-tile settle, border dead ends of
+  junction splits, `.tst` includes, lock-orientation nodes, league mechanic rooms (StoneCircle) for
+  `.tgr` and `.dgr` maps including the mission-room path `0x1420aacf0`. Biggest gains: MapCrimsonShores,
+  MapOrbalasCrossing, MapSwampTower, G3_1, G3_6_2, the world maps, the league seeds of every map.
+  Findings and open items: the "Wave 5" sections of [../re/terrain/dungeon.md](../re/terrain/dungeon.md)
+  and [../re/terrain/tgr.md](../re/terrain/tgr.md).
 - **Wave 4 (2026-10-23, agents A, B, C, merged into Poe2Server `03d738b`):** 176,336 of
   218,705 client layouts match (from 108,545), 0 lost; 176,308 of them also match the doodad hash
   (28 differ, all ExpeditionLogBook_Heath topology 1 orientation 6). Combinations 1990 match,
