@@ -25,11 +25,13 @@ A Rust private server for Path of Exile 2 client 0.5.5e. The hub (`/home/distorb
 ## 4. Terrain 1:1 port: the main task
 Goal ([terrain-all-areas.md](terrain-all-areas.md)): the server's generator (crate `poe-world` in Poe2Server) reproduces the client's layout exactly (tile hash, doodad hash, collision grid) for every topology x orientation combination of the default league mode (4508 combinations), checked against a client batch of 218,705 layouts (50 random seeds each, `dumps/0.5.5e/terrain/batch/full/batch-results.tsv`).
 
-**Pushed state:** **196,094 of 218,705** match (Poe2Server `b021b44`, after wave 5; 108,545 before wave 4, 176,336 after it); doodad hash equal on all matches but one; matrix 3286 match / 877 partial / 306 fail / 39 untested ([../status/terrain-matrix.tsv](../status/terrain-matrix.tsv), history [../status/terrain.md](../status/terrain.md)). Collision grid equal to the client's for 273 of 303 exports; `[terrain] generated_grid` (default off) uses it only when the tile hash matches.
+**Pushed state:** **206,746 of 218,705** match (Poe2Server `a1e3279`, wave 6 merged 2026-10-25; 108,545 before wave 4, 176,336 after it, 196,094 after wave 5); doodad hash equal on all matches; matrix 4025 match / 259 partial / 185 fail / 39 untested ([../status/terrain-matrix.tsv](../status/terrain-matrix.tsv), history [../status/terrain.md](../status/terrain.md)). Collision grid equal to the client's for 273 of 303 exports; `[terrain] generated_grid` (default off) uses it only when the tile hash matches.
 
 **Baseline** for the regression gate: `runtime/forced-baseline.tsv` (`area seed topology(1-based) orientation match|fail detail`).
 
-### 4.1 Wave 6: three unmerged branches (do this first)
+### 4.1 Wave 6: three unmerged branches (DONE 2026-10-25)
+Merged into Poe2Server `a1e3279`, one full gate +10,652 / 0 lost (`runtime/wave6/gate/forced-w6.tsv`, now the baseline; the wave 5 baseline is `runtime/forced-baseline-pre-w6.tsv`); worktrees and branches removed. The table below is kept for the commit history.
+
 Wave 6 ran with three agents and was stopped; nothing of it is merged. Each branch is a Poe2Server worktree, local only (not pushed):
 
 | Worktree | Branch | Commits on top of `b021b44` | Gate status |
@@ -58,8 +60,9 @@ The wave 6 docs sections are committed in the hub (`docs/re/terrain/dungeon.md` 
 - **Ghidra:** the user must open Ghidra for the Ghidra MCP; load its tools with ToolSearch (`select:mcp__ghidra__decompile_function,mcp__ghidra__get_xrefs_to,mcp__ghidra__disassemble_function`); fallback `scripts/re/disasm.py`. RE how-to: `docs/re/README.md`.
 - Port the client's logic with addresses in the docs; never special-case an area.
 
-### 4.3 What fails (22,611 jobs at the baseline; wave 6 fixes a part of it)
+### 4.3 What fails (11,959 jobs after wave 6; the counts below are from before it)
 - `.dgr` 22,419 (20,473 wrong output), `.tgr` 92, towns 100. Biggest areas: G1_13_1 2,623 and G1_13_2 1,842 (fixed by wave 6 A once merged), G2_4_1 1,600, MapFrozenFalls 1,548, G4_1_1 981, G2_4_3 777, G2_4_2 709, MapUberBoss_JadeCitadel 600, G3_1 561, G3_6_1 441, G4_13 / MapSunTemple / MapKarst / MapExcavation 400 each.
+- **After wave 6** (`runtime/forced-baseline.tsv`): G2_4_1 1,600, MapFrozenFalls 1,122, G2_4_3 777, MapUberBoss_JadeCitadel 600, G4_13 / MapSunTemple / MapKarst / MapExcavation 400 each, G4_11_2 345, ExpeditionLogBook_Basin 307, G3_12 305, G3_11 300, G3_1 187, G1_13_2 7; G1_13_1, G4_1_1, G2_4_2 and G3_6_1 now match fully.
 - **Leads, by expected value** (details in the wave 6 handoffs and docs sections):
   1. **Unclassified wrong output in A's 96 areas:** finish the trace run `w6-a-1` (144 jobs, 18 done: `nohup runtime/wave6/a/runclient.sh w6-a-1 &`), then `runtime/wave5/a/sum.sh dumps/0.5.5e/terrain/batch/w6-a-1/exports runtime/wave6/a/sum-a1` to class G2_4_1, MapFrozenFalls, G4_1_1, G2_4_3, G2_4_2, JadeCitadel, G3_6_1 by first divergence.
   2. **World maps (359 jobs):** tagged blank rooms (`Location_Label_02`, `Compass_02`) must own their ground in `dungeon_tiles.rs` `settle_rooms`; `POE_OWN_TAG=1` makes all 898 world-map jobs match but loses 95 match-sample jobs (G3_1, Delirium_HungerBoss, HideoutRemidusMonastery_): find the condition that separates them.

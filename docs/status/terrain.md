@@ -181,6 +181,17 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Wave 6 (2026-10-24/25, agents A, B, C, merged into Poe2Server `a1e3279`):** 206,746 of
+  218,705 client layouts match (from 196,094), 0 lost; all of them also match the doodad hash.
+  Combinations 4025 match, 259 partial, 185 fail. Agent A: `.dgr` node slots by edge index
+  `0x141d1c580` (with the merged-edge rule `0x141fec1c0`), post-unique tiles for `.dgr` regions
+  `0x141ff2090`, edgeless typed nodes accessible. Agent B: oversized `.tgr` subgraphs keep their
+  overhanging cells, nested subgraphs depth first, key ground with `.gt` flag 0x10 read as none,
+  the world-map `ForceOuterGT` ring and G4_13's Kalguur extra job (not matching yet). Agent C:
+  league mission rooms sorted by placed-room index `0x1420cf1d0`, mission rooms as overlay feature
+  rooms with one league feature list per job. Biggest gains: G1_13_1, G1_13_2, G3_1, MapSinkhole,
+  the stone-circle league seeds. Findings and open items: the "Wave 6" sections of
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md) and [../re/terrain/tgr.md](../re/terrain/tgr.md).
 - **Wave 5 (2026-10-23/24, agents A, B, C in three runs each, merged into Poe2Server `b021b44`):**
   196,094 of 218,705 client layouts match (from 176,336), 0 lost; 196,093 of them also match the
   doodad hash. Combinations 3286 match, 877 partial, 306 fail. Dungeon wrong output (agent A):
