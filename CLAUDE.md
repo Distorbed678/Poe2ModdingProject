@@ -17,7 +17,7 @@ Progress and the current task: the tracker in [README.md](README.md).
 
 ## Roadmap (details: [docs/plans/orchestration-2026-10.md](docs/plans/orchestration-2026-10.md), status: README tracker)
 Done (2026-10-20/21): foundation (restructure, dumps, repo split, docs, config, tracker); server-authoritative movement from official captures; accounts with the standalone login; remote hosting; shared instance world with two-client multiplayer; web API + web admin; launcher (end-to-end test with a depot download pending); consistency pass.
-**Current state and next steps:** [docs/plans/handoff-orchestrator-5.md](docs/plans/handoff-orchestrator-5.md) (terrain 196,094 of 218,705 client layouts after wave 5, wave 6 plan, working method), with [handoff-orchestrator-4.md](docs/plans/handoff-orchestrator-4.md) for the terrain method and the rest of the original plan (user gates: G-PARTY capture, Windows; small open items; the terrain plan [docs/plans/terrain-all-areas.md](docs/plans/terrain-all-areas.md)).
+**Current state and next steps:** [docs/plans/handoff-orchestrator-6.md](docs/plans/handoff-orchestrator-6.md) (wave 6 stopped with agent handoffs, how to resume and merge), then [handoff-orchestrator-5.md](docs/plans/handoff-orchestrator-5.md) (terrain 196,094 of 218,705 client layouts after wave 5, wave 6 plan, working method), with [handoff-orchestrator-4.md](docs/plans/handoff-orchestrator-4.md) for the terrain method and the rest of the original plan (user gates: G-PARTY capture, Windows; small open items; the terrain plan [docs/plans/terrain-all-areas.md](docs/plans/terrain-all-areas.md)).
 Open elsewhere: movement gaps #11/#12 (docs/protocol/movement.md), party/trade replies, remote equipment visuals.
 
 ## Where things are
