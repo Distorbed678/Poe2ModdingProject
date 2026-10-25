@@ -1,5 +1,7 @@
 # Handoff: orchestrator 6 (2026-10-24)
 
+> Superseded as the start point by [handoff-agent-7.md](handoff-agent-7.md) (2026-10-25), which also has the final state of the wave 6 branches.
+
 For a new orchestrator. Read [CLAUDE.md](../../CLAUDE.md), your MEMORY.md, [docs/overview.md](../overview.md), [handoff-orchestrator-3.md](handoff-orchestrator-3.md) (repos, releases, how to work), [handoff-orchestrator-4.md](handoff-orchestrator-4.md) (terrain method, regression gate, user decisions), [handoff-orchestrator-5.md](handoff-orchestrator-5.md) (waves 4 and 5, working-method additions, the wave 6 plan), then this file. Everything in those files is still valid; this one only adds the state of wave 6.
 
 ## State
