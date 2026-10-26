@@ -1,6 +1,6 @@
 # Terrain generator: status and next steps
 
-Last updated 2026-10-22 (G1_12 and bulk verification tools 2026-10-22, matrix 2026-10-21, results consolidated 2026-10-20). This is the only place
+Last updated 2026-10-26 (single-agent fixes after wave 6; G1_12 and bulk verification tools 2026-10-22, matrix 2026-10-21, results consolidated 2026-10-20). This is the only place
 for terrain status and the resume point for the server-side terrain generator (`modules/server/crates/poe-world`).
 How the client's generator works, and the tools used below, are in
 [../re/terrain/](../re/terrain/README.md): [README](../re/terrain/README.md#tools) (tools),
@@ -181,6 +181,20 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Single agent, 2026-10-25/26 (handoff 8, Poe2Server `f447d9f` to `d9f296b`, gated in one full replay):** 213,860 of
+  218,705 client layouts match (from 206,746), 0 lost. Combinations 4222 match, 167 partial, 80
+  fail. Subgraph windows share the parent's occupancy (G2_4_1), a second lattice settle after
+  overlay pass 1 (MapFrozenFalls), no league rolls on `EndgameMaps` column 28 (JadeCitadel,
+  CopperCitadel, logbooks), `OverrideSpawns` with `DefaultKillZone` only (MapExcavation), corridor
+  height marking of asymmetric door types (G3_11, G3_12, G3_16), de-repetition skipping
+  wildcard-edged uniform tiles (G4_11_2), door-less exits of any height in the `(best)` room pick
+  (ExpeditionSubArea_Catacomb), side slots in the prune's order and fill slots in the overlay
+  room height (ExpeditionLogBook_Basin), case-sensitive `door` feature (ExpeditionLogBook_Tundra),
+  `MatchAllTileKeys` over all slots (P2_3, MapOrnateChambers). After the gate, pushed and gated on
+  the match sample only: the filler double count from a virtual default door type (`13d9132`).
+  Findings and open items: "Single agent, 2026-10-25 (after wave 6)" in
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md); next steps:
+  [../plans/handoff-agent-9.md](../plans/handoff-agent-9.md).
 - **Wave 6 (2026-10-24/25, agents A, B, C, merged into Poe2Server `a1e3279`):** 206,746 of
   218,705 client layouts match (from 196,094), 0 lost; all of them also match the doodad hash.
   Combinations 4025 match, 259 partial, 185 fail. Agent A: `.dgr` node slots by edge index
