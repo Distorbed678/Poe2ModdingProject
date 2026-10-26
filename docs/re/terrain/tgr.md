@@ -294,6 +294,21 @@ Each item was found by comparing the port with client exports or traces of faili
   `0xf 0x20 0x21 0x23 0x13` or `0x27`, or a special stat; the port rolls only for `IsMapArea` areas
   (acts show no such draws). Stat conditions of `0x141e22c40` / `0x141e223d0` are skipped (no
   area stats).
+- **Roll details and the Incursion request** (2026-10-26, P3_1..P3_6): the chance test is the
+  callback `0x142003150`: a chance below 1 fails and one of 100 or more succeeds, both without a
+  draw; only 1..99 draw `below(100) < chance` (for a chance above 100 the remainder is tested the
+  same way, so a multiple of 100 draws nothing). The rolls are not limited to map areas: `bVar18`
+  skips towns (WorldAreas `+0x14` `IsTown`), hideouts (`+0x12a` `IsHideout`), area kinds (column
+  45, `+0x1b4`) 0xf, 0x13, 0x20, 0x21, 0x23, 0x27 and areas with the tag hash `0x939d55cf` in
+  `Tags` (`+0x133`, not ported). The Act 4 interlude areas (P3_*) have an Incursion chance of 100:
+  no draw, one `IncursionEncounter` request (`0x141fef180`), served by `0x1420aacf0` with the room
+  set's `ridge_mission_*` rooms like the stone circle; the request's tile is the area's
+  `Incursion2EncounterTilePerArea` path (`0x141fef610`), else `SpecialTiles` row 3
+  (`DefaultIncursion`, `WaygateDeviceBase.tdt`, `0x141633960`), added to the tile set (a `.tst`
+  would add a tile set). In P3_2 the container graph tries the request first (two `below(7)` with
+  shuffles, nothing fits), then the subgraph serves it. Ported in `league.rs` (switches
+  `POE_OLD_ROLL`, `POE_ROLL_MAPS_ONLY`, `POE_NO_INCURSION`); P3_1..P3_4 and P3_6 match, P3_5 (50)
+  differs in its second region's fill (no trace yet).
 - **Axis constraint flags turn with the region** (`region.rs`): node values 9 and 10 (x and y
   constraint flags) swap for odd orientations. Without it every area with a constrained node
   (`G1_1` orientation 7, ...) differed from the first repulsion on.
