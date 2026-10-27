@@ -1,0 +1,27 @@
+{
+  // Keep VS Code's file watcher, search index and Rust analyzer out of the large generated folders
+  // (dumps/ holds 50+ GB of terrain exports; runtime/ holds agent worktrees and build targets).
+  "files.watcherExclude": {
+    "**/dumps/**": true,
+    "**/runtime/**": true,
+    "**/GameFiles/**": true,
+    "**/third_party/**": true,
+    "**/target/**": true,
+    "**/node_modules/**": true,
+    "**/.git/objects/**": true
+  },
+  "search.exclude": {
+    "**/dumps": true,
+    "**/runtime": true,
+    "**/GameFiles": true,
+    "**/third_party": true,
+    "**/target": true,
+    "**/node_modules": true
+  },
+  "search.followSymlinks": false,
+  "files.exclude": {
+    "**/runtime/wt": true
+  },
+  "rust-analyzer.files.excludeDirs": ["dumps", "runtime", "GameFiles", "third_party"],
+  "rust-analyzer.cargo.targetDir": true
+}
