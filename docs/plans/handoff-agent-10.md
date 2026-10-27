@@ -38,9 +38,23 @@ Tile layout and doodad hash are 1:1 for what can be tested: both client batches 
    - Smaller unported paths no tested job uses: the height fallback of `0x14209f050`, off-map ends of virtual edge splits (`0x1420ba340`), transition tiles (`0x141fe0b40`), de-repetition ground fix-ups (`0x141fde880`); list in [../status/terrain.md](../status/terrain.md) "Not ported yet".
 4. **Stages after the tile layout** (not needed for the client to draw the same map, needed for a server that uses it): the walkability grid (collision) is built but only checked on a few dozen exports (`check_grids`), not at scale (known differences: MapSlash, MapCrimsonShores); entities and spawns are not ported (deferred); server-side generation is still off by default (`[terrain] generate`, the user's decision).
 
+## Entities (area transitions, waypoints, checkpoints, NPCs, chests)
+Not doodads: the client places doodads itself from the layout (decorative `.ao` objects; the doodad hash covers them, and the waypoint models in `doodads.tsv` such as `waypoint_DigSIte_Decorative.ao` are only the decoration). Clickable objects are server entities: the client shows a transition only when the server sends it (`AddObject`, S->C `0x2f7`, [../protocol/entities.md](../protocol/entities.md)), even on a matching map. No manual placement is needed: their positions follow from the generated layout. Nothing of this is ported; the server has no in-world transitions (area changes only through the `transfer` command or the web admin, [../guides/server-admin.md](../guides/server-admin.md#transfers)).
+
+Where they come from:
+- **Tile objects** (`.tmd`, the quoted object type is the last field of a line): e.g. `metadata/terrain/woods/grimtangle/areatransitions/grimtangletransitiondown_02.tmd`, `woods/lumbermill/encampment_01.tmd`, `jungle/aggorat/features/doryanissanctumentrance_01.tmd`. The generator already reads them for the `Spawner` flag (`generate.rs`); tiles with an `AreaTransition` or `waypoint` `InteractionAction` object get tile data `+0x16f` bit 0 ("sealed", `0x141d053a0`, not ported; tgr.md).
+- **Room files** (`.arm` object / point-of-interest entries): e.g. `maps/uniquereactor_03/rooms/unique/entrance_01.arm`, `outer_entrance.arm`, `checkpoint_01.arm`.
+- **Graph node tags**: `teleport1`, `telepad1`, `entrance1`, `default`, `killzone=N` mark exits, arrival points and spawn zones (G3_10's end node gets `teleport1` only from area level 75).
+
+To do:
+1. An entity pass in `poe-world` after the doodads: collect the objects (type, cell, orientation, height) from the placed tiles' `.tmd`, the rooms' `.arm` entries and the node tags. Find the client's pass first (the entity stage after `TerrainGen_Doodads` `0x141ff5550`; status doc "Verified stages": the calls after `0x1415a5005` belong to the doodad/entity stage) and verify it against DLL exports with `entities.tsv` (a client-hook export to add).
+2. Encode them in `AddObject`: the components a transition needs (Positioned, Animated, InteractionAction, Transitionable, the target area). NPC components are partly decoded; transition objects are not: needs an official capture of the user walking through one (Claude never logs in to official servers; captures are the user's).
+3. The click: the interaction request handled by sending the player through the existing transfer flow to the target area (`WorldAreas` connections, or the transition object's own target).
+4. Then waypoints and checkpoints (the same pass, their own components), chests and monster spawns (`killzone`, `.arm` points of interest; deferred until the rest works).
+
 ## Next
 1. Traces with more logging (client-hook) for the remaining classes: Chayula (subgraph outer fill heights), G2_12 (the room grid before the placeholder fill), G1_13_2 (tile pass slot visit order: log the ground-cell list), RitualLeagueBoss (overlay occupancy). BossRush_Area1 crashes the client.
 2. Port the natural topology and orientation choice (`0x141fa6440`) and verify it with unforced client generations.
 3. Make the client-error and untested combinations checkable.
 4. Real area level and league state as inputs, checked against client captures.
-5. The walkability grid at scale; then entities, WP7.13, WP7.15 and the `[terrain] generate` default question (handoff 7 section 4.3).
+5. The walkability grid at scale; then entities (section above), WP7.13, WP7.15 and the `[terrain] generate` default question (handoff 7 section 4.3).
