@@ -26,6 +26,21 @@ Read [handoff-agent-7.md](handoff-agent-7.md) first (preferences, commit rules, 
 - **RitualLeagueBoss (6):** one extra 2x3 overlay candidate (ours (1,5), client frame (23,11)); something one row off in the occupancy. `runtime/w8/ofitdiff.py` (fixed for a first collection) with offset 22,6.
 - MapCaldera (2), MapCrimsonShores (1): older open cases (tgr.md). Traces of 3 G1_13_2, 2 RitualLeagueBoss and 2 MapCaldera jobs of the new batch are in `batch/w10-1/exports`.
 
+## What is left for a full 1:1 port (any seed, orientation and topology the client supports)
+Tile layout and doodad hash are 1:1 for what can be tested: both client batches match 99.90 %, every matching job also matches the doodad hash; matrix 4,457 of 4,508 combinations match (8 partial, 4 fail, 39 untested, 10 areas without topologies). What remains:
+
+1. **The remaining failure classes** (about 215 jobs per batch, 7 areas; section above): each needs client traces with more logging, the current traces cannot show the cause.
+2. **Combinations no batch can check** (39 untested, plus 6,598 client errors per batch): the client itself errors on some forced combinations (G2_10_1, MapBackwash, MapUniqueVault, MapRockpools, ExpeditionLogBook_Heath, ...); Sanctum_1-4, IncursionTemple(Present) and HideoutPietyArena have no comparable client result. Fix or work around the hook's forced-generation path for them, or capture them another way.
+3. **Inputs the batches hold fixed but real play varies** (the biggest gap for "any seed"; the batches force topology and orientation and use each area's default state):
+   - Natural topology and orientation choice from the seed alone: the client's world-map match (`0x141fa6440`) is not ported (the port takes the lowest allowed orientation). Port it and check it against unforced client generations.
+   - Area level: G3_10's level 75+ path and the trial's chosen rooms (UltimatumPlugin `0x141f10060`) are untested.
+   - League and session state: league roll outcomes, Incursion and other extra-feature rooms, and the `unique<N>` lettered tags from session history (not ported). Feed in the server's real league state and check against client captures in those states.
+   - Smaller unported paths no tested job uses: the height fallback of `0x14209f050`, off-map ends of virtual edge splits (`0x1420ba340`), transition tiles (`0x141fe0b40`), de-repetition ground fix-ups (`0x141fde880`); list in [../status/terrain.md](../status/terrain.md) "Not ported yet".
+4. **Stages after the tile layout** (not needed for the client to draw the same map, needed for a server that uses it): the walkability grid (collision) is built but only checked on a few dozen exports (`check_grids`), not at scale (known differences: MapSlash, MapCrimsonShores); entities and spawns are not ported (deferred); server-side generation is still off by default (`[terrain] generate`, the user's decision).
+
 ## Next
 1. Traces with more logging (client-hook) for the remaining classes: Chayula (subgraph outer fill heights), G2_12 (the room grid before the placeholder fill), G1_13_2 (tile pass slot visit order: log the ground-cell list), RitualLeagueBoss (overlay occupancy). BossRush_Area1 crashes the client.
-2. Then WP7.13, WP7.15 and the `[terrain] generate` default question (handoff 7 section 4.3).
+2. Port the natural topology and orientation choice (`0x141fa6440`) and verify it with unforced client generations.
+3. Make the client-error and untested combinations checkable.
+4. Real area level and league state as inputs, checked against client captures.
+5. The walkability grid at scale; then entities, WP7.13, WP7.15 and the `[terrain] generate` default question (handoff 7 section 4.3).
