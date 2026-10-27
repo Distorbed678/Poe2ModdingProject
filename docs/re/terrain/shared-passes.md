@@ -24,6 +24,46 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
   are none does `0x141ff90f0` pick from the whole list. The map-pin part is not ported, so
   `G1_2` seed 1001 picks topology 15 (`felling_S_N_W`) in the client, while the plain index
   gives 3.
+- **World-map pin directions in detail** (2026-10-27, decompiles; not ported, not yet checked
+  against a live load):
+  - The direction list lives in the generation state (generator `+0x30` → `+0x70`, 0x18-byte
+    entries: u8 direction, `MapPins` row, its table reference). `0x141ff9280` rebuilds it only
+    when the area is a town (WorldAreas `+0x14`, IsTown) or of kind 2 (`+0x1b4`):
+    `0x141fa5f30(out, area, generator +0x280, state seed (state +0), league mode)`. After a pick
+    `0x141fa6c80` writes the chosen topology's direction keys (Topologies `+0x24`, 8 = keep) into
+    the entries that matched the area's connections. If the state outlives one generation (to
+    check with the `map_pins` / `pin_dirs` trace lines of a live load), the natural choice of an
+    act area depends on the last town's seed and the areas generated since.
+  - Generator `+0x280..+0x288` (zeroed by `TerrainGen_Construct`, filled by the client's world
+    load, empty in `gen_batch`): 0x18-byte entries i32 x, i32 y, `MapPins` row (positions are
+    not in `MapPins`; their source is open).
+  - `0x141fa5f30`: looks up the area's pin (a map world area → pin), builds the whole layout
+    `0x141fa4da0` and copies the pin's record (0x88-byte records sorted by pin), else the plain
+    neighbour list `0x141fa47b0`.
+  - `0x141fa47b0(pin)`: for every other entry of `+0x280` connected to it
+    (`0x141fa4b70`: a `Data/Balance/MapConnections.dat` row (pin, pin) in either order; table via
+    `0x140b544e0`), the direction of (dx, dy) = other − own: dx = 0 → 2 (dy > 0) / 0 (dy < 0);
+    dy = 0 → 1 (dx > 0) / 3 (dx < 0); else the angle to (1, 0) from `0x1421c4e50`
+    (`c = (2·dx·127 / isqrt(dx² + dy²)) / 2` as a signed byte, `+127`, clamped to 0..254, u16
+    acos table `0x142f10760` with 0x8000 = 180°), sector `(angle + 0x1000) >> 13` (0..4) mapped
+    by `[1, 5, 0, 4, 3]` (dy < 0) or `[1, 6, 2, 7, 3]` (dy > 0). `isqrt` `0x14196e010` is the
+    bitwise integer square root (floor). Entries sorted by pin.
+  - `0x141fa4da0(pins, seed, mode)`: a neighbour list per pin with world areas (`MapPins`
+    `+0x18` WorldAreasKeys); pins sorted by row, then stably by neighbour count, most first.
+    Per pin in that order: candidates `0x141fa6440(first world area, its list, mode, 8)`; with
+    candidates, LCG (`0x141025cf0`, seeded with `seed`) picks one; its direction keys (≠ 8)
+    replace the list's directions one by one, each kept only if candidates remain. Then every
+    neighbour's entry pointing back takes the opposite direction (`0x141f8c430(dir, 2)` row of
+    the 9×9 table), again only if the neighbour still has candidates.
+  - `0x141fa6150`: per distinct connection (by WorldAreas hash16 `+0x2a`) of the area, its pin
+    (skipped when the pin lists the area itself); the direction of the list entry for that pin
+    (or whose `ParentMapPin`, `MapPins +0x84`, is it).
+  - Matching: a candidate is (topology, orientation) when the counts are equal and, per
+    connection, `0x141f8c430(direction, turn[orientation])` equals the topology's key
+    (`turn` = `0x142f0bf40` = [0, 3, 2, 1, 4, 5, 6, 7]; `0x141f8c430` is a 9×9 byte table, row =
+    turn code, column = direction). Pass 2 accepts key 8, pass 3 also the adjacent directions
+    (0: 4, 5; 1: 5, 6; 2: 7, 6; 3: 4, 7; 4: 0, 3; 5: 0, 1; 6: 2, 1; 7: 2, 3). Orientation 8
+    (unforced) tries the topology's allowed list (`+0x34`, an entry 8 = all of 0..7).
 - Stats on the area (generator +0x38 → +0x128, filled from AreaInfo's flags0 bit 7 stat
   records, `0x1423baa70`: varuint count, then big-endian u16 key and value per stat):
   `map_force_topology` (key 0xb92, Stats row 2961) = 1-based index into the filtered list,
