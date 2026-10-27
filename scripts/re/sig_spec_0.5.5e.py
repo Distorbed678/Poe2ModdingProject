@@ -165,7 +165,7 @@ SIGS = [
     dict(name="tdiff_outer_buffer", addr=0x141FD8360, features=TRACE),
     dict(name="tdiff_grid_fd0", addr=0x141FE0FD0, features=TRACE),
     dict(name="tdiff_grid_ea0", addr=0x141FE0EA0, features=TRACE),
-    dict(name="tdiff_overlay_scan", addr=0x141FA1830, features=TRACE),
+    dict(name="tdiff_overlay_scan", addr=0x141FA23E0, features=TRACE),
     dict(name="tdiff_placeholder", addr=0x1420A6140, features=TRACE),
     dict(name="tdiff_preunique", addr=0x14209C150, features=TRACE),
     dict(name="tdiff_topology", addr=0x141FF9280, features=TRACE),
