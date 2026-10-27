@@ -1,6 +1,6 @@
 # Terrain generator: status and next steps
 
-Last updated 2026-10-26 (single-agent fixes after wave 6; G1_12 and bulk verification tools 2026-10-22, matrix 2026-10-21, results consolidated 2026-10-20). This is the only place
+Last updated 2026-10-27 (single-agent fixes of handoffs 9 and 10, second 50-seed client batch; single-agent fixes after wave 6 2026-10-26; G1_12 and bulk verification tools 2026-10-22, matrix 2026-10-21, results consolidated 2026-10-20). This is the only place
 for terrain status and the resume point for the server-side terrain generator (`modules/server/crates/poe-world`).
 How the client's generator works, and the tools used below, are in
 [../re/terrain/](../re/terrain/README.md): [README](../re/terrain/README.md#tools) (tools),
@@ -181,6 +181,20 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Single agent, 2026-10-26/27 (handoffs 9 and 10, Poe2Server `801ae2a` to `df606a3`, gated in one full replay):** 218,490 of
+  218,705 client layouts match (from 213,860), 0 lost. Combinations 4457 match, 8 partial, 4
+  fail. A second client batch with new seeds (`full2`, master seed 20261026, 50 seeds per area
+  on every topology and orientation, 225,400 jobs, 6,598 client errors): 218,585 of 218,802
+  match; its 217 failures are all in the areas still open in the first batch. Fixes: door-edge
+  walkways, the subgraph window ring, map bounds, league roll chances and Incursion requests,
+  PairedRoomLayoutPlugin, the repair flag, subgraph slot alignment, post-unique overhang,
+  feature rooms, fill-slot heights, a room's own ground, key-less overlay roots and the extra
+  jobs' strip (G4_13), UltimatumPlugin's `end_lowlevel` (G3_10), fill-room heights without a
+  passed height (G1_11), the `.tgr` height passes with world-unit heights (Design, P2_1), and
+  overhanging subgraph tiles' storey (BossRush_Area3). Still failing: ChayulaLeague_Tower(+Boss),
+  BossRush_Area1, G2_12, G1_13_2, RitualLeagueBoss, MapCaldera, MapCrimsonShores. Findings:
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md), [../re/terrain/tgr.md](../re/terrain/tgr.md);
+  next steps: [../plans/handoff-agent-10.md](../plans/handoff-agent-10.md).
 - **Single agent, 2026-10-25/26 (handoff 8, Poe2Server `f447d9f` to `d9f296b`, gated in one full replay):** 213,860 of
   218,705 client layouts match (from 206,746), 0 lost. Combinations 4222 match, 167 partial, 80
   fail. Subgraph windows share the parent's occupancy (G2_4_1), a second lattice settle after
