@@ -5,6 +5,7 @@
     "**/dumps/**": true,
     "**/runtime/**": true,
     "**/GameFiles/**": true,
+    "**/GameFiles-*/**": true,
     "**/third_party/**": true,
     "**/target/**": true,
     "**/node_modules/**": true,
@@ -14,6 +15,7 @@
     "**/dumps": true,
     "**/runtime": true,
     "**/GameFiles": true,
+    "**/GameFiles-*": true,
     "**/third_party": true,
     "**/target": true,
     "**/node_modules": true
@@ -22,6 +24,6 @@
   "files.exclude": {
     "**/runtime/wt": true
   },
-  "rust-analyzer.files.excludeDirs": ["dumps", "runtime", "GameFiles", "third_party"],
+  "rust-analyzer.files.excludeDirs": ["dumps", "runtime", "GameFiles", "GameFiles-0.5.5e", "third_party"],
   "rust-analyzer.cargo.targetDir": true
 }

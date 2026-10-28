@@ -1,5 +1,7 @@
 # Game data and RE databases (never committed)
 /GameFiles/
+# An old build kept next to it while moving to a new one (docs/guides/new-game-version.md)
+/GameFiles-*/
 /GhidraProject/
 
 # Build output

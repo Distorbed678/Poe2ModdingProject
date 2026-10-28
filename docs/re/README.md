@@ -5,12 +5,21 @@ How the client is analysed and where the results are written down. The rules (st
 **Scope of what is committed.** Everything under `docs/re/` is research about the 0.5.5e client: addresses, struct offsets, opcode meanings, formats and function names, written in our own words. No decompiler output, game code, assets, bundles or data tables are pasted here or anywhere in the repositories (the datamined dumps stay in the git-ignored `dumps/<version>/`). The addresses are for build 0.5.5e only and change with every client update ([update-compatibility.md](update-compatibility.md)). The project is unofficial and not affiliated with Grinding Gear Games ([disclaimer](../../README.md#disclaimer)).
 
 ## Reverse engineering access
-- **Ghidra MCP** (`mcp__ghidra__*`). Call `connect_instance("Poe2ModdingProject")` first; `/PathOfExileSteam.exe` (image base 0x140000000) is open and analyzed.
+- **Ghidra MCP** (`mcp__ghidra__*`). Call `connect_instance("Poe2ModdingProject")` first; `/PathOfExileSteam.exe` (image base 0x140000000, client **0.5.5e**) is open and analyzed. The game in `GameFiles/` is 0.5.5e Hotfix 1 (`0.5.5e.hotfix1`) since 2026-10-28: until the project has that build ([below](#a-new-build-in-the-ghidra-project)), Ghidra addresses are 0.5.5e addresses; translate them with `dumps/0.5.5e.hotfix1/addr_map.tsv` or `scripts/re/addr_map.py dumps/0.5.5e/exe/PathOfExileSteam.exe GameFiles/PathOfExileSteam.exe --map <va>` (code moved by +0x0 to +0x2d0; 16 functions changed, none of them documented).
   - Use targeted calls (`search_strings`, `get_xrefs_to`, `decompile_function`).
   - Huge functions (packet factories) give 20k+ token decompiles, so prefer `disassemble_function` on ranges or search by constant.
   - Rename functions and add comments in Ghidra as understanding grows, and record stable findings in [addresses-0.5.5e.md](addresses-0.5.5e.md).
 - **x64dbg / dynamic debugging**: not installed. **Ask the user** when it would help, for example runtime values such as keys, crash triage, or verifying a hook.
 - The client DLL can log plaintext packets (trace feature) for analyzing our own sessions: [../architecture/client-dll.md](../architecture/client-dll.md#packet-capture-packets-packetsrs).
+
+### A new build in the Ghidra project
+The old program stays as it is; the new exe becomes a second program in the same project, and Ghidra's Version Tracking copies the names, comments, labels and signatures over (a hotfix matches almost every function exactly).
+1. Project window: *File > Import File*, `GameFiles/PathOfExileSteam.exe`; format *Portable Executable (PE)*, language `x86:LE:64:default` (both detected); *Destination Folder* `/<version>/` (for example `/0.5.5e.hotfix1/`), so the old `/PathOfExileSteam.exe` keeps its name.
+2. Open the new program; *Analyze* with the default analyzers; wait until the progress bar at the bottom right is gone (the first analysis of this exe took a long time), then *File > Save*.
+3. Project window: *Tools > Version Tracking*; in it *File > New Session*: source = `/PathOfExileSteam.exe` (old), destination = the new program; finish.
+4. *Automatic Version Tracking* (the wand button of the Version Tracking window): runs the exact-match correlators (function bytes, instructions, data, symbol names, implied matches), accepts the unambiguous matches and applies their markup (names, signatures, comments, labels).
+5. Save the session and the destination program. Structs and enums that no matched function or datum uses are not carried: drag the old program's categories from its *Data Type Manager* entry onto the new one.
+6. The MCP then sees both programs; pass `program="/<version>/PathOfExileSteam.exe"` explicitly. Check with `search_functions_enhanced(has_custom_name=true)` on both (0.5.5e: about 1,025) and spot-check against `addr_map.tsv`. Afterwards the old game copy (`GameFiles-<old>/`) can go: the old program keeps its own copy of the exe in the project, and `dumps/<old>/exe/` keeps one for `addr_map.py`.
 
 ## Offline scripts (`scripts/re/`, no Ghidra needed)
 Run them with the project's Python environment, which `third_party/fetch-tools.sh` creates ([../guides/setup.md](../guides/setup.md#tools)): `third_party/pyenv/bin/python scripts/re/<script>.py <args>`. Addresses are Ghidra virtual addresses in hex; `pe.py` holds the shared PE-reading helpers. Most scripts read `GameFiles/PathOfExileSteam.exe`.
@@ -20,6 +29,8 @@ Run them with the project's Python environment, which `third_party/fetch-tools.s
 | `disasm.py <start_va> <length>` | Disassemble a range |
 | `find_disp.py <disp> [min max]`, `find_imm.py <imm> [min max]` | Find instructions using a struct-field displacement or a 32-bit immediate |
 | `sig_gen.py <spec> [exe]` | Generates `modules/client-hook/signatures/<version>.toml` from a spec of Ghidra addresses (`sig_spec_0.5.5e.py`): unique wildcarded function prefixes, anchored site/ref patterns, struct-offset captures. Verify with `cargo run --release -p poe-hook-sig --example resolve -- <exe>` in `modules/client-hook` |
+| `addr_map.py <old exe> <new exe> [--out tsv] [--map <va>...]` | Old-to-new address map of a rebuilt exe from the two `.pdata` function lists (hotfixes: functions keep their order and move by deltas); `same` rows moved, `gap`/`lost` rows are the changed functions. Input of the hotfix signature spec ([../guides/new-game-version.md](../guides/new-game-version.md)) |
+| `bundlediff/` (Rust, `cargo run --release --manifest-path scripts/re/bundlediff/Cargo.toml -- <old game dir> <new game dir>`) | Which virtual files of `Bundles2` a build added, removed or changed (content SHA-256; reads only bundles whose index records moved) |
 | `version.py` | (module) The client version the scripts work on: the newest `modules/protocol/versions/<version>.toml`, or `$POE_VERSION` |
 | `find_switches.py <func_start> <length>` | List the jump-table switches in a function and the opcodes each case handles; prints the arguments `dump_factory.py` needs (base, count, dword and byte table RVAs, default case) |
 | `case_strings.py <func_start> <len> [window]` | Strings referenced near each switch case |

@@ -1,0 +1,8 @@
+[package]
+name = "bundlediff"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+poe_data_tools = "4.0.1"
+sha2 = "0.10"
+[workspace]

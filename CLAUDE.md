@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-A private server for **Path of Exile 2, client 0.5.5e**, written in Rust and built for future client and server modding (personal and educational use).
+A private server for **Path of Exile 2, client 0.5.5e Hotfix 1** (version `0.5.5e.hotfix1`; 0.5.5e stays supported), written in Rust and built for future client and server modding (personal and educational use).
 This repo is the **hub** (docs, plans, RE notes, scripts, `xtask` dev tooling, the tracker); the code is in submodules under `modules/`: the server (`modules/server`, Poe2Server), the shared protocol (`modules/protocol`, Poe2Protocol: opcodes and the version files), the client hook, web admin, launcher, mod SDK, mod index and server list. Which repo does what: [docs/overview.md](docs/overview.md).
 Progress and the current task: the tracker in [README.md](README.md).
 
@@ -13,6 +13,7 @@ Progress and the current task: the tracker in [README.md](README.md).
 - External tools go in `third_party/` (`third_party/fetch-tools.sh`); generated/datamined data in git-ignored `dumps/<version>/`; local runtime files in `runtime/`.
 - Docs go in `docs/` and are updated in the same commit as the code; RE findings and addresses go in `docs/re/`. Run `python3 scripts/check-links.py` after doc changes.
 - Commit and push after each working step (`origin main`). Submodules: commit and push inside the submodule first, then bump the pointer in the hub (the server's own submodules first inside `modules/server`).
+- RE addresses in docs and Ghidra are 0.5.5e addresses until the Ghidra project has the hotfix build; translate with `scripts/re/addr_map.py` / `dumps/0.5.5e.hotfix1/addr_map.tsv` ([docs/re/README.md](docs/re/README.md)).
 - Ask the user for x64dbg/dynamic debugging and for official captures. Steam may be used and started for private-server tests without asking; never log in to official servers.
 
 ## Roadmap (details: [docs/plans/orchestration-2026-10.md](docs/plans/orchestration-2026-10.md), status: README tracker)
