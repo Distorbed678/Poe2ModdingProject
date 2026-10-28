@@ -48,6 +48,17 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     why its natural choice falls back to the index draw. Generation state (`gen +0x30`) comes
     from the persistent world (`TerrainGen_Construct`: world vfunc `+0x1c8`), so its `+0x70`
     direction list lives on between loads (to confirm live).
+  - The pieces of `0x141fa5900`: `Data/Balance/Acts.dat` by act number (`0x14028b0e0`, row map
+    `+0x90`), its `WorldAreaMap` (row `+0x5d`) is the act's world-map area; the act's pins
+    (`0x141fa57d0` → `0x142591b20`, `Data/Balance/MapPins.dat` rows with that `Act`);
+    `0x141fa4280` keys each pin by its `MetadataId` (`MapPins +0x8c`) as a resource; the
+    world-map layout (`0x141fb9fb0` `.tgr`, `0x141fb89d0` `.dgr`) records the cells where
+    objects of those metadata ids land (0x38-byte records per resource, sorted); `0x141fa44c0`
+    → `0x141fa3e40(record, seed, ...)` reduces each record to one position (error "World map did
+    not properly consolidate pins of type ..."); `0x141fa53f0` pairs each pin with its record's
+    first position, sorted. So the pin positions need the world map's object placement (the
+    entity stage of the tile and room objects, not ported yet) before the topology choice can
+    be ported.
   - `0x141fa5f30`: looks up the area's pin (a map world area → pin), builds the whole layout
     `0x141fa4da0` and copies the pin's record (0x88-byte records sorted by pin), else the plain
     neighbour list `0x141fa47b0`.
