@@ -38,6 +38,14 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     checkpoint) is empty (count 0) in all town jobs, so the town's direction list is either
     built after that checkpoint or not in a throw-away world; open. The earlier statement that
     `gen_batch` runs no town job with pins was wrong (it did not trace one).
+    The layout's seed is the generation state's (`0x141ffe7f0`: `r8d = [[gen +0x30]]`, i.e.
+    state `+0`, passed to `0x141fa5900`, which seeds with it at `0x141fa5bd9`); the trace's
+    `seed 141fa5bd9` line shows **0** in the batch jobs and also in a **live** G1_town load through
+    our server (`scripts/test-run.sh`, area export `2026-10-28_16-10-31_336/01_3f70_1` under
+    `dumps/<version>/terrain/area-exports/`), with the same 18 act 1 pins and `pin_dirs` count 0.
+    So with our server the pins are fixed per act. Open: whether official servers make the
+    state seed non-zero (what writes state `+0`, or a traced official town load, the user's), and
+    when `+0x70` gets its entries.
   - The direction list lives in the generation state (generator `+0x30` → `+0x70`, 0x18-byte
     entries: u8 direction, `MapPins` row, its table reference). `0x141ff9280` rebuilds it only
     when the area is a town (WorldAreas `+0x14`, IsTown) or of kind 2 (`+0x1b4`):
