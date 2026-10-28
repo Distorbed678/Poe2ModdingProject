@@ -181,6 +181,17 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Single agent, 2026-10-27 (from handoff 10, Poe2Server `5d6b639` to `95ceda7`, one full replay):** 218,653 of
+  218,705 client layouts match (from 218,490), 0 lost; combinations 4465 match, 3 partial, 1
+  fail, 39 untested. In the second batch (`full2`) 163 of its 217 failures match now (the
+  rest: BossRush_Area1 50, MapCaldera 4). Fixed: ChayulaLeague_Tower and _TowerBoss (outer
+  fill alignment in map coordinates, strip fill fallback to the outer ground's tile, levelling
+  of empty cells, StoreyHeight by the region holding a tile's corner), G2_12 (size map door type
+  from the root slot), G1_13_2 (pre-unique accessibility as listed), RitualLeagueBoss (overlay
+  whole-tile check). New generator-trace checkpoints (`tdiff`, `roomgrid`, `preunique_cells`,
+  `occupancy`, `placeholder_sizes`, `strip_grounds`, `map_pins`; [../re/terrain/batch.md](../re/terrain/batch.md)).
+  Open: BossRush_Area1 (49), MapCaldera (2), MapCrimsonShores (1). Details:
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md) "Session 2026-10-27".
 - **Single agent, 2026-10-26/27 (handoffs 9 and 10, Poe2Server `801ae2a` to `df606a3`, gated in one full replay):** 218,490 of
   218,705 client layouts match (from 213,860), 0 lost. Combinations 4457 match, 8 partial, 4
   fail. A second client batch with new seeds (`full2`, master seed 20261026, 50 seeds per area
