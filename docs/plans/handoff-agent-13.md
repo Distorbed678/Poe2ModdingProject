@@ -11,7 +11,8 @@ Read [handoff-agent-7.md](handoff-agent-7.md) first (preferences, commit rules, 
 6. **Step 3 begun (pins):** the client's pin algorithm is RE'd in full ([../re/terrain/shared-passes.md](../re/terrain/shared-passes.md), "How the pin positions are made") and ported in Poe2Server `poe-world/src/map_pins.rs` (`fc7ea0b`): `act_pins(gd, files, act, seed)`. It uses the *generated* world map (rooms' objects + tiles' `.tmd` objects) and the client's consolidation (positions sorted by (x, y), index `lcg_index(murmur2(MetadataId, 0) ^ seed, n)`). Result against the client's `map_pins` trace lines: acts 1, 2, 4 exact (18, 23, 20 pins), act 3 17 of 19. `lcg_index` now takes the first 15-bit chunk as the high bits like the client (no change for n ≤ 32768).
 
 ## Next (in order)
-1. **The client's node walk for the pins** (fixes act 3 and drops the dependency on the generator). In `map_pins.rs`, replace the generated-layout source with the walk of `0x141fb8b50` / `0x141fba130` (hotfix addresses; documented in shared-passes.md):
+0. **Done (2026-10-28, same session):** the node walk below is ported (Poe2Server `0da535f`): all 102 pins of acts 1, 2, 3, 4, 6 match the client. Continue with item 2.
+1. ~~**The client's node walk for the pins**~~ (fixes act 3 and drops the dependency on the generator). In `map_pins.rs`, replace the generated-layout source with the walk of `0x141fb8b50` / `0x141fba130` (hotfix addresses; documented in shared-passes.md):
    - nodes with orientation `< 8` only (`node_orientation`); `graph` nodes recurse into the sub-graph with offset;
    - rooms whose tag equals the node's room type and whose `orientations` allow the node's orientation (no edge-key matching; `RoomSet` in `rooms.rs`);
    - base = `node / 23 · (RoomUnitSize − RoomOverlap) · 23` + master margins (`+0x174` x, `+0x171` y, presumably `OuterBufferSize` left / top: check) · 23 + sub-graph offset;

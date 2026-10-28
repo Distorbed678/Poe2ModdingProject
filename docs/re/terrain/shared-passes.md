@@ -74,15 +74,24 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     (`0x141025ef0`, `x·0x41c64e6d + 0x3039`, first 15-bit chunk = high bits); that position goes
     first, the others are dropped. The pins are the act's `MapPins` rows with `WorldAreasKeys`
     (18 of 18 in act 1).
-  - **Port (Poe2Server `poe-world/src/map_pins.rs`, 2026-10-28):** generates the world map
-    (topology `lcg_index(seed, n)`, seed `seed`, orientation 0) and takes the placed rooms'
-    objects and the placed tiles' `.tmd` objects, then the consolidation above. Against the
-    client's `map_pins` lines (example `map_pins <act> 0 --trace <trace>`): acts 1, 2, 4 all
-    pins equal (18, 23, 20); act 3 17 of 19: G3_2_2 (437 vs 436) and G3_4 (283 vs 291) come from
-    tiles the generator turned to an orientation other than the first key match (both
-    orientation 4, `Waterways_01`, `SnakePit_01`). To do: walk the graph nodes as the client does
-    instead of the generated layout (rooms per key with the node's orientation, tiles by the
-    first key match), which also makes the pins independent of the generator.
+  - **Corrections and details found while porting (2026-10-28):** the walked graph is the loaded
+    `.dgr` *prepared* with the seeded TerrainRng (`TerrainRng_Seed(seed, 0)` in `0x141fa5a80` right
+    before the load; world maps are area kind 0x21, so no sub-seed draw comes first): random node
+    offsets, comma-list room types reduced to one (`below(count)`), existence rolls, `shuffle`
+    groups (act 4's `"shuffle2"` islands) and `unique` groups, as the generator does; without it
+    act 4's islands trade places. The room lookup `0x141f9bb90` (→ `0x141fae1c0`) is a map by the
+    node's (resolved) type, entries 0x60 bytes with the weight at `+0x58`. The tile of a tagged
+    slot is the first tile of the tag; its orientation is the first one under which the tile set
+    lookup of the slot's key (corner heights above the lowest, as the room pass reads them)
+    gives that tile, else the node's. `0x141d01080` (= 0.5.5e `0x141d00f00`, our
+    `region::compose`) also defines `compose(o, 8) = o` (the port returns 8; unused here). The
+    room's `+0x88` list is the `.arm`'s doodad connections (links between the recorded objects),
+    not a filter. The endgame town (`G_Endgame_Town`) lays out no world map (`map_pins` count 0).
+  - **Port (Poe2Server `poe-world/src/map_pins.rs`, `0da535f`):** `act_pins(gd, files, act,
+    seed)` walks as above (`graph_objects`, `area::prepared_graph`) and consolidates. Against the
+    client's `map_pins` trace lines (example `map_pins <act> 0 --trace <town trace>`): acts 1, 2,
+    3, 4, 6 all 102 pins (18, 23, 19, 20, 22); test `act_1_pins_are_the_clients`. Traces:
+    `w12-pins2` (towns of acts 1 to 4), `w12-pins6` (P1_Town, G_Endgame_Town).
   - The direction list lives in the generation state (generator `+0x30` → `+0x70`, 0x18-byte
     entries: u8 direction, `MapPins` row, its table reference). `0x141ff9280` rebuilds it only
     when the area is a town (WorldAreas `+0x14`, IsTown) or of kind 2 (`+0x1b4`):
