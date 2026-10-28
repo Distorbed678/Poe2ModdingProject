@@ -1,0 +1,29 @@
+# Handoff 12: single working agent (2026-10-28, stopped on the user's request)
+
+Read [handoff-agent-7.md](handoff-agent-7.md) first (preferences, commit rules, CPU limits, method, tools), [handoff-agent-8.md](handoff-agent-8.md) (`runtime/w7/` tools) and [handoff-agent-11.md](handoff-agent-11.md) (state, new trace lines and debug switches of the previous session). This file only adds what changed after handoff 11.
+
+## User decisions (also in memory `decisions-2026-10-27.md`)
+- Order: finish the terrain failures, then the natural topology and orientation choice.
+- **New (2026-10-27):** the natural choice needs an object stage (the map pins are positions of objects in the act's world map). The user chose: **build the object stage first** (tile `.tmd` objects, room `.arm` objects, node-tag objects; verified against client output), then the pins and the natural choice. The same stage is step 1 of the entities work (area transitions, waypoints, checkpoints; handoff 10 "Entities").
+- `[terrain] generate` defaults to on once the natural choice is ported and verified. x64dbg is allowed on the private client. The user captures an official transition/waypoint session later.
+
+## State
+- **Merged baseline** (unchanged since handoff 11): 218,653 of 218,705 (`runtime/forced-baseline.tsv`, Poe2Server `95ceda7`), matrix 4465 / 3 / 1 / 39.
+- **WIP, NOT GATED** on Poe2Server `main`: `bf9ed79` nested subgraphs queue behind the waiting ones (the client generates `_TheForsakenSon.dgr`'s nested `_boss.dgr` after `_CaptainRoth.dgr`, not right after its parent; found with the new `POE_RNG_BT=<draw>` backtrace switch and `POE_DBG_SUBDRAWS`). Checked: all 49 BossRush_Area1 jobs of the first batch match, G3_1 3099/3099 (the only other area with nested subgraphs known). **The gate was stopped before it finished.** First step: build, run `runtime/wave6/match-sample-in.tsv`, `runtime/w7/fails-in.tsv` and `runtime/w11/full2-fails-in.tsv` (8 threads when alone, compare with `runtime/wave5/b/regress.py`); if 0 lost, a full replay (about 2 h, detached with `setsid nohup`; `forced_verify` writes its output only at the end) and merge it like handoff 11 (vectors by key, new baseline, `cargo xtask terrain-matrix && cargo xtask tracker`, tracker note, `docs/status/terrain.md` entry). If something is lost, `POE_SUB_DEPTH=1` restores the old order for comparison. Also document the rule in `docs/re/terrain/dungeon.md` (BossRush_Area1 paragraph of "Session 2026-10-27" still says "open").
+- Expected after it: first batch 52 → 3 failures (MapCaldera 2, MapCrimsonShores 1); second batch: BossRush_Area1 50 fixed too (only MapCaldera 4 left), not yet verified.
+- Nothing of this session runs (gates stopped, client closed).
+
+## Natural topology choice: what is known (`docs/re/terrain/shared-passes.md` "World-map pin directions in detail")
+- Town (WorldAreas `+0x14`) or kind-2 loads: the prepare phase `0x141ffe7f0` calls `0x141fa5900(act, seed, ...)`: `Acts.dat` row of the act (`WorldAreaMap`, row `+0x5d`), its topologies (mode filter), one picked with the LCG from the seed, that world-map `.dgr`/`.tgr` laid out with the act's `MapPins` (`0x141fb9fb0` / `0x141fb89d0`), object positions recorded per pin `MetadataId` (`MapPins +0x8c`), consolidated with the seed (`0x141fa44c0` → `0x141fa3e40`), paired with the pins (`0x141fa53f0`) into generator `+0x280`; then `0x141fa5f30` / `0x141fa4da0` lay out every pin's neighbour directions (`MapConnections.dat`, angle sectors) and the town pin's list goes into the generation state `+0x70`, which (to confirm) persists in the client world; later areas match their connections against it (`0x141fa6440`), pick with the LCG and write their choice back (`0x141fa6c80`).
+- Still to RE: `0x141fb9fb0` / `0x141fb89d0` (what "object positions" are recorded: probably the `.tmd` / `.arm` object entries of the placed tiles and rooms), `0x141fa3e40`.
+
+## Next (in order)
+1. Gate and merge `bf9ed79` (above).
+2. **Ground truth for the pins without a game session:** a `gen_batch` job of a town with topology 0 (natural choice), e.g. `G1_town <seed> 0 0`, traced (`POE_HOOK_GEN_TRACE=1 terrain_batch.py run <run> --threads 1 --no-deploy`, after `cargo xtask deploy-client`): the `map_pins` and `pin_dirs` trace lines (hook `tdiff_topology` checkpoint at `0x141ff9280`) show the pin positions and directions; check the prepare phase actually runs `0x141fa5900` in `gen_batch` (it needs the world's area `+0x98` row to be the town; gen_batch sets it).
+3. **Object stage** in `poe-world` (after the doodads): collect the objects of the placed tiles (`.tmd`, the quoted object type is a line's last field; the generator already reads `.tmd` for the `Spawner` flag in `generate.rs`) and rooms (`.arm` object / point-of-interest entries) with cell, orientation and height; find the client's pass first (RE `0x141fb9fb0` / `0x141fb89d0`; the entity stage after `TerrainGen_Doodads` `0x141ff5550`), then add a client-hook export of those object positions and compare at scale.
+4. Pins from the act's world map, the direction layout, the per-session state in the server, the natural choice; verify against unforced client generations; then WP7.13 / WP7.15 and `[terrain] generate` on.
+5. MapCaldera (2 + 4) and MapCrimsonShores (1); the full replay of the second batch.
+
+## Session notes
+- Commits of this session after handoff 11: Poe2Server `bf9ed79` (WIP above); hub `406cb25`, `ba6ee29`, `5479cb9` (natural topology RE), this handoff.
+- Stray files: a file named `1` once appeared in the hub root from a mistyped redirect; check `git status` for untracked junk before committing.
