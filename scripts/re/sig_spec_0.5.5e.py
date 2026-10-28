@@ -169,6 +169,8 @@ SIGS = [
     dict(name="tdiff_placeholder", addr=0x1420A6140, features=TRACE),
     dict(name="tdiff_preunique", addr=0x14209C150, features=TRACE),
     dict(name="tdiff_topology", addr=0x141FF9280, features=TRACE),
+    dict(name="placeholder_sizes", addr=0x1420A61FD, kind="site", anchor="tdiff_placeholder", features=TRACE,
+         note="after the door type's size list lookup: rdi = the list (begin, end; 12-byte entries w, h, weight; total weight at +0x18)"),
     dict(name="phase_prepare", addr=0x141FFE7F0, features=TRACE),
     dict(name="phase_cad0", addr=0x141FFCAD0, features=TRACE),
     dict(name="phase_c360", addr=0x141FFC360, features=TRACE),
