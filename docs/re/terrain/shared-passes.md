@@ -35,7 +35,7 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     check with the `map_pins` / `pin_dirs` trace lines of a live load), the natural choice of an
     act area depends on the last town's seed and the areas generated since.
   - Generator `+0x280..+0x288` (0x18-byte entries i32 x, i32 y, `MapPins` row): the generator
-    is built on the stack for every load (`ClientWorld_LoadArea` `0x14167b2a0`, client vtable
+    is built on the stack for every load (`ClientWorld_LoadArea` `0x14167b270`, client vtable
     `0x143385c70`), and its prepare phase `0x141ffe7f0` fills `+0x280` only for a town
     (WorldAreas `+0x14`) or kind 2: `0x141fa5900(out, act (WorldAreas +0x10), state seed,
     gen +0x298, league mode)`. That takes the act's world-map area (`0x142445f00(act)`), its
