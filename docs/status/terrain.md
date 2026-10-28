@@ -181,6 +181,14 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Single agent, 2026-10-28 (handoff 12, Poe2Server `bf9ed79`, one full replay):** 218,702 of
+  218,705 client layouts match (from 218,653), 0 lost; combinations 4466 match, 3 partial, 0
+  fail, 39 untested. Fixed: BossRush_Area1, all 49 (nested subgraphs queue behind the subgraphs
+  already waiting instead of running right after their parent). In the second batch (`full2`)
+  213 of its 217 failures match now (BossRush_Area1 50 fixed too; full replay of that batch not
+  rerun). Open: MapCaldera (2, and 4 in `full2`), MapCrimsonShores (1). The replay ran on the
+  0.5.5e.hotfix1 game files, whose terrain inputs are byte-identical to 0.5.5e. Details:
+  [../re/terrain/dungeon.md](../re/terrain/dungeon.md) "Session 2026-10-27" (BossRush_Area1 entry).
 - **Single agent, 2026-10-27 (from handoff 10, Poe2Server `5d6b639` to `95ceda7`, one full replay):** 218,653 of
   218,705 client layouts match (from 218,490), 0 lost; combinations 4465 match, 3 partial, 1
   fail, 39 untested. In the second batch (`full2`) 163 of its 217 failures match now (the

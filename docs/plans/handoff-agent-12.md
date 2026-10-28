@@ -2,6 +2,8 @@
 
 Read [handoff-agent-7.md](handoff-agent-7.md) first (preferences, commit rules, CPU limits, method, tools), [handoff-agent-8.md](handoff-agent-8.md) (`runtime/w7/` tools) and [handoff-agent-11.md](handoff-agent-11.md) (state, new trace lines and debug switches of the previous session). This file only adds what changed after handoff 11.
 
+**Update 2026-10-28:** step 1 is done. `bf9ed79` gated: match sample and both failure lists 0 lost, full replay 218,702 of 218,705 (+49, 0 lost; `runtime/w12/forced-w12.tsv`, now `runtime/forced-baseline.tsv`, previous `runtime/forced-baseline-pre-w12.tsv`), merged into the vectors, matrix 4466 / 3 / 0 / 39, rule documented in `docs/re/terrain/dungeon.md`. The same day the client moved to 0.5.5e Hotfix 1 (`0.5.5e.hotfix1`, [../re/update-compatibility.md](../re/update-compatibility.md#the-first-real-update-055e-hotfix-1-2026-10-28)); the terrain inputs did not change. Continue with step 2.
+
 ## User decisions (also in memory `decisions-2026-10-27.md`)
 - Order: finish the terrain failures, then the natural topology and orientation choice.
 - **New (2026-10-27):** the natural choice needs an object stage (the map pins are positions of objects in the act's world map). The user chose: **build the object stage first** (tile `.tmd` objects, room `.arm` objects, node-tag objects; verified against client output), then the pins and the natural choice. The same stage is step 1 of the entities work (area transitions, waypoints, checkpoints; handoff 10 "Entities").

@@ -118,14 +118,14 @@ G3_WorldMap	3	dgr	1	0	act3_WE_01.dgr	match	50/50	0	error (0/3 ok): dungeon edge 
 G4_WorldMap	4	dgr	1	0	Act4_WE_01.dgr	match	48/48	0	ok 3/3	-	seed 74737681 (forced); seed 83003502 (forced); seed 189757581 (forced); +45 more
 G6_WorldMap	6	dgr	1	0	interlude_01.dgr	match	50/50	0	ok 3/3	-	seed 103358811 (forced); seed 141488660 (forced); seed 145689985 (forced); +47 more
 TN_WorldMap	10	dgr	1	0	maps_test_01.dgr	match	50/50	0	ok 3/3	-	seed 154858605 (forced); seed 568651275 (forced); seed 608296601 (forced); +47 more
-G1_town	1	town	1	0	town_W_1.tgr	match	52/52	0	ok 3/3	21/21	seed 1 (natural); seed 2 (natural); seed 37206551 (forced); +49 more
+G1_town	1	town	1	0	town_W_1.tgr	match	52/52	2	ok 3/3	21/21	seed 1 (natural, build 323943); seed 2 (natural, build 323943); seed 37206551 (forced); +49 more
 G1_1	1	tgr	1	0	intro_1.tgr	match	57/57	7	ok 3/3	19/35	seed 44933114 (forced); seed 91846552 (natural, build 319201); seed 156730579 (forced); +54 more
 G1_1	1	tgr	1	7	intro_1.tgr	match	47/47	0	ok 3/3	19/35	seed 1277159 (forced); seed 48080088 (forced); seed 255326771 (forced); +44 more
 G1_1	1	tgr	2	0	intro_2.tgr	match	47/47	0	error (0/3 ok): node 9: virtual node tile at the room stage is not ported	19/35	seed 80125578 (forced); seed 108007004 (forced); seed 312028730 (forced); +44 more
 G1_1	1	tgr	2	7	intro_2.tgr	match	46/46	0	error (0/3 ok): node 9: virtual node tile at the room stage is not ported	19/35	seed 10898926 (forced); seed 22902294 (forced); seed 90404386 (forced); +43 more
-G1_1	1	tgr	3	0	intro_3.tgr	match	53/53	4	ok 3/3	19/35	seed 1000 (natural); seed 290887877 (forced); seed 321933523 (forced); +50 more
+G1_1	1	tgr	3	0	intro_3.tgr	match	53/53	5	ok 3/3	19/35	seed 1000 (natural, build 323943); seed 290887877 (forced); seed 321933523 (forced); +50 more
 G1_1	1	tgr	3	7	intro_3.tgr	match	49/49	0	error (2/3 ok): node 27 ("lumberjack"): no room fits	19/35	seed 30506306 (forced); seed 125536138 (forced); seed 257547128 (forced); +46 more
-G1_1	1	tgr	4	0	intro_4.tgr	match	52/52	5	ok 3/3	19/35	seed 1001 (natural); seed 1002 (natural); seed 159729256 (forced); +49 more
+G1_1	1	tgr	4	0	intro_4.tgr	match	52/52	7	ok 3/3	19/35	seed 1001 (natural, build 323943); seed 1002 (natural, build 323943); seed 159729256 (forced); +49 more
 G1_1	1	tgr	4	7	intro_4.tgr	match	47/47	0	ok 3/3	19/35	seed 6680744 (forced); seed 134330961 (forced); seed 666085365 (forced); +44 more
 G1_1	1	tgr	5	0	intro_6.tgr	match	49/49	0	error (0/3 ok): node 17: virtual node tile at the room stage is not ported	19/35	seed 126459890 (forced); seed 227982636 (forced); seed 230058446 (forced); +46 more
 G1_1	1	tgr	5	7	intro_6.tgr	match	47/47	0	error (0/3 ok): node 17: virtual node tile at the room stage is not ported	19/35	seed 181705796 (forced); seed 697273704 (forced); seed 698240751 (forced); +44 more
@@ -143,15 +143,15 @@ G1_2	1	tgr	11	0	felling_W_N_E.tgr	match	49/49	0	ok 3/3	5/28	seed 25121519 (force
 G1_2	1	tgr	12	0	felling_W_N_S.tgr	match	49/49	0	error (2/3 ok): node 14 ("campsite"): no room fits	5/28	seed 11530035 (forced); seed 207476842 (forced); seed 247500216 (forced); +46 more
 G1_2	1	tgr	13	0	felling_S_E_N.tgr	match	50/50	0	ok 3/3	5/28	seed 90056097 (forced); seed 486150295 (forced); seed 614180009 (forced); +47 more
 G1_2	1	tgr	14	0	felling_S_E_W.tgr	match	48/48	0	ok 3/3	5/28	seed 38860034 (forced); seed 237996596 (forced); seed 368719265 (forced); +45 more
-G1_2	1	tgr	15	0	felling_S_N_W.tgr	match	53/53	0	ok 3/3	5/28	seed 1001 (forced); seed 1002 (forced); seed 1003 (forced); +50 more
+G1_2	1	tgr	15	0	felling_S_N_W.tgr	match	53/53	3	ok 3/3	5/28	seed 1001 (forced, build 323943); seed 1002 (forced, build 323943); seed 1003 (forced, build 323943); +50 more
 G1_2	1	tgr	16	0	felling_S_N_E.tgr	match	45/45	0	ok 3/3	5/28	seed 32722758 (forced); seed 72431565 (forced); seed 115049015 (forced); +42 more
-G1_2	1	tgr	17	0	felling_S_W_E.tgr	match	52/52	1	error (2/3 ok): could not tilise edge 22	5/28	seed 10438673 (forced); seed 120555763 (forced); seed 152424001 (forced); +49 more
+G1_2	1	tgr	17	0	felling_S_W_E.tgr	match	52/52	2	error (2/3 ok): could not tilise edge 22	5/28	seed 10438673 (forced); seed 120555763 (forced); seed 152424001 (forced); +49 more
 G1_2	1	tgr	18	0	felling_S_W_N.tgr	match	50/50	0	ok 3/3	5/28	seed 7723563 (forced); seed 141162924 (forced); seed 246756384 (forced); +47 more
 G1_3	1	dgr	1	0	mudburrows_NE.dgr	match	50/50	0	ok 3/3	14/18	seed 1085875 (forced); seed 36808483 (forced); seed 113257783 (forced); +47 more
 G1_3	1	dgr	1	1	mudburrows_NE.dgr	match	50/50	0	ok 3/3	14/18	seed 197450410 (forced); seed 265442926 (forced); seed 351087099 (forced); +47 more
 G1_3	1	dgr	1	2	mudburrows_NE.dgr	match	50/50	0	ok 3/3	14/18	seed 48473455 (forced); seed 94521944 (forced); seed 219901013 (forced); +47 more
 G1_3	1	dgr	1	3	mudburrows_NE.dgr	match	50/50	0	ok 3/3	14/18	seed 156278279 (forced); seed 278260690 (forced); seed 307652204 (forced); +47 more
-G1_3	1	dgr	1	4	mudburrows_NE.dgr	match	51/51	0	ok 3/3	14/18	seed 1003 (forced); seed 82573601 (forced); seed 158431732 (forced); +48 more
+G1_3	1	dgr	1	4	mudburrows_NE.dgr	match	51/51	1	ok 3/3	14/18	seed 1003 (forced, build 323943); seed 82573601 (forced); seed 158431732 (forced); +48 more
 G1_3	1	dgr	1	5	mudburrows_NE.dgr	match	50/50	0	ok 3/3	14/18	seed 30734380 (forced); seed 74919554 (forced); seed 106605452 (forced); +47 more
 G1_3	1	dgr	1	6	mudburrows_NE.dgr	match	51/51	1	ok 3/3	14/18	seed 45267090 (forced); seed 65119503 (forced); seed 133419498 (forced); +48 more
 G1_3	1	dgr	1	7	mudburrows_NE.dgr	match	50/50	0	ok 3/3	14/18	seed 162952581 (forced); seed 232165146 (forced); seed 292932900 (forced); +47 more
@@ -159,13 +159,13 @@ G1_3	1	dgr	2	0	mudburrows_NW.dgr	match	50/50	0	ok 3/3	14/18	seed 27806988 (force
 G1_3	1	dgr	2	1	mudburrows_NW.dgr	match	50/50	0	ok 3/3	14/18	seed 86189249 (forced); seed 301918326 (forced); seed 392617442 (forced); +47 more
 G1_3	1	dgr	2	2	mudburrows_NW.dgr	match	50/50	0	ok 3/3	14/18	seed 25205147 (forced); seed 28270954 (forced); seed 29556236 (forced); +47 more
 G1_3	1	dgr	2	3	mudburrows_NW.dgr	match	50/50	0	ok 3/3	14/18	seed 46603592 (forced); seed 103066397 (forced); seed 108739810 (forced); +47 more
-G1_3	1	dgr	2	4	mudburrows_NW.dgr	match	52/52	0	ok 3/3	14/18	seed 1001 (forced); seed 1002 (forced); seed 195271407 (forced); +49 more
+G1_3	1	dgr	2	4	mudburrows_NW.dgr	match	52/52	2	ok 3/3	14/18	seed 1001 (forced, build 323943); seed 1002 (forced, build 323943); seed 195271407 (forced); +49 more
 G1_3	1	dgr	2	5	mudburrows_NW.dgr	match	50/50	0	ok 3/3	14/18	seed 27927835 (forced); seed 117958994 (forced); seed 274608425 (forced); +47 more
 G1_3	1	dgr	2	6	mudburrows_NW.dgr	match	53/53	3	ok 3/3	14/18	seed 1916535 (forced); seed 35666565 (forced, build 313611); seed 35808510 (forced, build 310517); +50 more
 G1_3	1	dgr	2	7	mudburrows_NW.dgr	match	50/50	0	ok 3/3	14/18	seed 54795633 (forced); seed 425394840 (forced); seed 519507367 (forced); +47 more
 G1_3	1	dgr	3	0	mudburrows_SE.dgr	match	52/52	2	ok 3/3	14/18	seed 50123731 (forced); seed 81513136 (forced); seed 117431374 (forced); +49 more
 G1_3	1	dgr	3	1	mudburrows_SE.dgr	match	50/50	0	ok 3/3	14/18	seed 114521334 (forced); seed 234585374 (forced); seed 387509216 (forced); +47 more
-G1_3	1	dgr	3	2	mudburrows_SE.dgr	match	52/52	1	ok 3/3	14/18	seed 32546699 (forced); seed 204522096 (forced); seed 261574451 (forced); +49 more
+G1_3	1	dgr	3	2	mudburrows_SE.dgr	match	52/52	2	ok 3/3	14/18	seed 32546699 (forced); seed 204522096 (forced); seed 261574451 (forced); +49 more
 G1_3	1	dgr	3	3	mudburrows_SE.dgr	match	50/50	0	ok 3/3	14/18	seed 6363892 (forced); seed 182853578 (forced); seed 240875664 (forced); +47 more
 G1_3	1	dgr	3	4	mudburrows_SE.dgr	match	51/51	1	ok 3/3	14/18	seed 4688692 (forced); seed 67770669 (forced); seed 117251104 (forced); +48 more
 G1_3	1	dgr	3	5	mudburrows_SE.dgr	match	50/50	0	ok 3/3	14/18	seed 28125750 (forced); seed 153740035 (forced); seed 188354414 (forced); +47 more
@@ -217,7 +217,7 @@ G1_4	1	tgr	9	6	oldforest_S_W.tgr	match	50/50	0	error (2/3 ok): overlay placement
 G1_4	1	tgr	9	7	oldforest_S_W.tgr	match	48/48	0	error (2/3 ok): overlay placement after the fill (phase 2) is not ported	11/27	seed 84947684 (forced); seed 121010842 (forced); seed 135374536 (forced); +45 more
 G1_4	1	tgr	10	0	oldforest_W_E.tgr	match	46/46	0	error (2/3 ok): overlay placement after the fill (phase 2) is not ported	11/27	seed 56358886 (forced); seed 109072144 (forced); seed 110558963 (forced); +43 more
 G1_4	1	tgr	10	1	oldforest_W_E.tgr	match	50/50	1	error (1/3 ok): overlay placement after the fill (phase 2) is not ported	11/27	seed 20318452 (forced); seed 129290439 (forced); seed 155578474 (forced); +47 more
-G1_4	1	tgr	10	2	oldforest_W_E.tgr	match	49/49	0	ok 3/3	11/27	seed 1001 (forced); seed 1002 (forced); seed 29770106 (forced); +46 more
+G1_4	1	tgr	10	2	oldforest_W_E.tgr	match	49/49	2	ok 3/3	11/27	seed 1001 (forced, build 323943); seed 1002 (forced, build 323943); seed 29770106 (forced); +46 more
 G1_4	1	tgr	10	3	oldforest_W_E.tgr	match	50/50	0	error (2/3 ok): overlay placement after the fill (phase 2) is not ported	11/27	seed 313076153 (forced); seed 322084412 (forced); seed 342250726 (forced); +47 more
 G1_4	1	tgr	11	0	oldforest_W_N.tgr	match	50/50	1	ok 3/3	11/27	seed 12267012 (forced); seed 22957358 (forced); seed 51343963 (forced); +47 more
 G1_4	1	tgr	11	1	oldforest_W_N.tgr	match	47/47	0	ok 3/3	11/27	seed 166058860 (forced); seed 259739574 (forced); seed 306441592 (forced); +44 more
@@ -265,7 +265,7 @@ G1_6	1	dgr	1	2	grimtangle_dungeon_E.dgr	match	50/50	0	ok 3/3	6/28	seed 45805793 
 G1_6	1	dgr	1	3	grimtangle_dungeon_E.dgr	match	50/50	0	ok 3/3	6/28	seed 89040199 (forced); seed 115823315 (forced); seed 124752982 (forced); +47 more
 G1_6	1	dgr	1	4	grimtangle_dungeon_E.dgr	match	50/50	0	ok 3/3	6/28	seed 48004032 (forced); seed 141675712 (forced); seed 212846172 (forced); +47 more
 G1_6	1	dgr	1	5	grimtangle_dungeon_E.dgr	match	50/50	0	ok 3/3	6/28	seed 67948069 (forced); seed 125468946 (forced); seed 129884583 (forced); +47 more
-G1_6	1	dgr	1	6	grimtangle_dungeon_E.dgr	match	51/51	0	ok 3/3	6/28	seed 1003 (forced); seed 239355014 (forced); seed 341693997 (forced); +48 more
+G1_6	1	dgr	1	6	grimtangle_dungeon_E.dgr	match	51/51	1	ok 3/3	6/28	seed 1003 (forced, build 323943); seed 239355014 (forced); seed 341693997 (forced); +48 more
 G1_6	1	dgr	1	7	grimtangle_dungeon_E.dgr	match	50/50	0	ok 3/3	6/28	seed 236017220 (forced); seed 318718998 (forced); seed 414805758 (forced); +47 more
 G1_6	1	dgr	2	0	grimtangle_dungeon_N.dgr	match	50/50	0	ok 3/3	6/28	seed 143978889 (forced); seed 313509568 (forced); seed 327552350 (forced); +47 more
 G1_6	1	dgr	2	1	grimtangle_dungeon_N.dgr	match	50/50	0	ok 3/3	6/28	seed 25505265 (forced); seed 132282869 (forced); seed 185757194 (forced); +47 more
@@ -274,7 +274,7 @@ G1_6	1	dgr	2	3	grimtangle_dungeon_N.dgr	match	50/50	0	ok 3/3	6/28	seed 230486686
 G1_6	1	dgr	2	4	grimtangle_dungeon_N.dgr	match	50/50	0	ok 3/3	6/28	seed 61403109 (forced); seed 91355203 (forced); seed 199393414 (forced); +47 more
 G1_6	1	dgr	2	5	grimtangle_dungeon_N.dgr	match	50/50	0	ok 3/3	6/28	seed 3385087 (forced); seed 40724013 (forced); seed 110305215 (forced); +47 more
 G1_6	1	dgr	2	6	grimtangle_dungeon_N.dgr	match	50/50	0	ok 3/3	6/28	seed 284444268 (forced); seed 331074763 (forced); seed 336844518 (forced); +47 more
-G1_6	1	dgr	2	7	grimtangle_dungeon_N.dgr	match	52/52	0	ok 3/3	6/28	seed 1001 (forced); seed 1002 (forced); seed 266464046 (forced); +49 more
+G1_6	1	dgr	2	7	grimtangle_dungeon_N.dgr	match	52/52	2	ok 3/3	6/28	seed 1001 (forced, build 323943); seed 1002 (forced, build 323943); seed 266464046 (forced); +49 more
 G1_6	1	dgr	3	0	grimtangle_dungeon_S.dgr	match	50/50	0	ok 3/3	6/28	seed 32205266 (forced); seed 301017613 (forced); seed 335311602 (forced); +47 more
 G1_6	1	dgr	3	1	grimtangle_dungeon_S.dgr	match	51/51	1	ok 3/3	6/28	seed 99010508 (forced); seed 101291177 (forced); seed 125392434 (forced); +48 more
 G1_6	1	dgr	3	2	grimtangle_dungeon_S.dgr	match	50/50	0	ok 3/3	6/28	seed 56024554 (forced); seed 94550937 (forced); seed 146018032 (forced); +47 more
@@ -306,7 +306,7 @@ G1_7	1	dgr	2	3	graveyard_E_S.dgr	match	50/50	0	ok 3/3	18/24	seed 57303101 (force
 G1_7	1	dgr	2	4	graveyard_E_S.dgr	match	51/51	1	ok 3/3	18/24	seed 109678776 (forced); seed 169516050 (forced); seed 308556520 (forced); +48 more
 G1_7	1	dgr	2	5	graveyard_E_S.dgr	match	50/50	0	ok 3/3	18/24	seed 1329368 (forced); seed 5270100 (forced); seed 123196697 (forced); +47 more
 G1_7	1	dgr	2	6	graveyard_E_S.dgr	match	50/50	0	ok 3/3	18/24	seed 19975548 (forced); seed 87469463 (forced); seed 92930775 (forced); +47 more
-G1_7	1	dgr	2	7	graveyard_E_S.dgr	match	51/51	0	ok 3/3	18/24	seed 1001 (forced); seed 128791704 (forced); seed 319119581 (forced); +48 more
+G1_7	1	dgr	2	7	graveyard_E_S.dgr	match	51/51	1	ok 3/3	18/24	seed 1001 (forced, build 323943); seed 128791704 (forced); seed 319119581 (forced); +48 more
 G1_7	1	dgr	3	0	graveyard_E_W.dgr	match	50/50	0	ok 3/3	18/24	seed 28701760 (forced); seed 135135008 (forced); seed 440669599 (forced); +47 more
 G1_7	1	dgr	3	1	graveyard_E_W.dgr	match	50/50	0	ok 3/3	18/24	seed 130280763 (forced); seed 243265976 (forced); seed 246032511 (forced); +47 more
 G1_7	1	dgr	3	2	graveyard_E_W.dgr	match	50/50	0	ok 3/3	18/24	seed 70631608 (forced); seed 96968807 (forced); seed 151282969 (forced); +47 more
@@ -343,7 +343,7 @@ G1_7	1	dgr	7	0	graveyard_S_E.dgr	match	50/50	0	ok 3/3	18/24	seed 154822030 (forc
 G1_7	1	dgr	7	1	graveyard_S_E.dgr	match	50/50	0	ok 3/3	18/24	seed 294492106 (forced); seed 393809484 (forced); seed 426689646 (forced); +47 more
 G1_7	1	dgr	7	2	graveyard_S_E.dgr	match	50/50	0	ok 3/3	18/24	seed 30321898 (forced); seed 72291807 (forced); seed 108441665 (forced); +47 more
 G1_7	1	dgr	7	3	graveyard_S_E.dgr	match	50/50	0	ok 3/3	18/24	seed 119726046 (forced); seed 136823048 (forced); seed 148504469 (forced); +47 more
-G1_7	1	dgr	7	4	graveyard_S_E.dgr	match	51/51	0	ok 3/3	18/24	seed 1003 (forced); seed 20929335 (forced); seed 36469517 (forced); +48 more
+G1_7	1	dgr	7	4	graveyard_S_E.dgr	match	51/51	1	ok 3/3	18/24	seed 1003 (forced, build 323943); seed 20929335 (forced); seed 36469517 (forced); +48 more
 G1_7	1	dgr	7	5	graveyard_S_E.dgr	match	52/52	2	ok 3/3	18/24	seed 115637135 (forced); seed 178405175 (forced); seed 200409108 (forced); +49 more
 G1_7	1	dgr	7	6	graveyard_S_E.dgr	match	50/50	0	ok 3/3	18/24	seed 4935033 (forced); seed 9729302 (forced); seed 74829307 (forced); +47 more
 G1_7	1	dgr	7	7	graveyard_S_E.dgr	match	50/50	0	ok 3/3	18/24	seed 21678614 (forced); seed 273511507 (forced); seed 287014408 (forced); +47 more
@@ -367,7 +367,7 @@ G1_7	1	dgr	10	0	graveyard_W_E.dgr	match	32/32	0	ok 3/3	18/24	seed 99170552 (forc
 G1_7	1	dgr	10	1	graveyard_W_E.dgr	match	50/50	0	ok 3/3	18/24	seed 46380740 (forced); seed 66162052 (forced); seed 162892764 (forced); +47 more
 G1_7	1	dgr	10	2	graveyard_W_E.dgr	match	50/50	0	ok 3/3	18/24	seed 195470556 (forced); seed 198312483 (forced); seed 245737799 (forced); +47 more
 G1_7	1	dgr	10	3	graveyard_W_E.dgr	match	36/36	1	ok 3/3	18/24	seed 42829610 (forced); seed 295967141 (forced); seed 368012577 (forced); +33 more
-G1_7	1	dgr	10	4	graveyard_W_E.dgr	match	28/28	0	ok 3/3	18/24	seed 1002 (forced); seed 95455197 (forced); seed 262971257 (forced); +25 more
+G1_7	1	dgr	10	4	graveyard_W_E.dgr	match	28/28	1	ok 3/3	18/24	seed 1002 (forced, build 323943); seed 95455197 (forced); seed 262971257 (forced); +25 more
 G1_7	1	dgr	10	5	graveyard_W_E.dgr	match	27/27	0	ok 3/3	18/24	seed 19705624 (forced); seed 77537363 (forced); seed 116313686 (forced); +24 more
 G1_7	1	dgr	10	6	graveyard_W_E.dgr	match	50/50	0	ok 3/3	18/24	seed 169936511 (forced); seed 214808951 (forced); seed 268660616 (forced); +47 more
 G1_7	1	dgr	10	7	graveyard_W_E.dgr	match	50/50	0	ok 3/3	18/24	seed 256292475 (forced); seed 439661011 (forced); seed 474524298 (forced); +47 more
@@ -390,7 +390,7 @@ G1_7	1	dgr	12	7	graveyard_W_S.dgr	match	50/50	0	ok 3/3	18/24	seed 416445 (forced
 G1_8	1	dgr	1	0	mausoleum_E_1.dgr	match	50/50	0	ok 3/3	16/20	seed 345242620 (forced); seed 502821232 (forced); seed 568502800 (forced); +47 more
 G1_8	1	dgr	1	1	mausoleum_E_1.dgr	match	50/50	0	ok 3/3	16/20	seed 82228709 (forced); seed 117493363 (forced); seed 192200262 (forced); +47 more
 G1_8	1	dgr	1	2	mausoleum_E_1.dgr	match	50/50	0	ok 3/3	16/20	seed 223274038 (forced); seed 380349099 (forced); seed 450545161 (forced); +47 more
-G1_8	1	dgr	1	3	mausoleum_E_1.dgr	match	51/51	0	ok 3/3	16/20	seed 1001 (forced); seed 88677722 (forced); seed 293689632 (forced); +48 more
+G1_8	1	dgr	1	3	mausoleum_E_1.dgr	match	51/51	1	ok 3/3	16/20	seed 1001 (forced, build 323943); seed 88677722 (forced); seed 293689632 (forced); +48 more
 G1_8	1	dgr	1	4	mausoleum_E_1.dgr	match	50/50	0	ok 3/3	16/20	seed 10871518 (forced); seed 26641643 (forced); seed 86952053 (forced); +47 more
 G1_8	1	dgr	1	5	mausoleum_E_1.dgr	match	50/50	0	ok 3/3	16/20	seed 120328713 (forced); seed 136664460 (forced); seed 254434187 (forced); +47 more
 G1_8	1	dgr	1	6	mausoleum_E_1.dgr	match	50/50	0	ok 3/3	16/20	seed 29122447 (forced); seed 89582768 (forced); seed 239253895 (forced); +47 more
@@ -412,7 +412,7 @@ G1_8	1	dgr	3	5	mausoleum_E_3.dgr	match	50/50	0	ok 3/3	16/20	seed 192477714 (forc
 G1_8	1	dgr	3	6	mausoleum_E_3.dgr	match	50/50	0	ok 3/3	16/20	seed 490136231 (forced); seed 535206443 (forced); seed 549645701 (forced); +47 more
 G1_8	1	dgr	3	7	mausoleum_E_3.dgr	match	50/50	0	ok 3/3	16/20	seed 51176120 (forced); seed 178636858 (forced); seed 296968526 (forced); +47 more
 G1_8	1	dgr	4	0	mausoleum_N_1.dgr	match	50/50	0	error (2/3 ok): dungeon: no border tile at (24, 39) for TileKey { edges: [So	16/20	seed 31784926 (forced); seed 75958588 (forced); seed 96377330 (forced); +47 more
-G1_8	1	dgr	4	1	mausoleum_N_1.dgr	match	51/51	0	error (2/3 ok): dungeon: no border tile at (3, 24) for TileKey { edges: [Non	16/20	seed 1003 (forced); seed 71066921 (forced); seed 117602297 (forced); +48 more
+G1_8	1	dgr	4	1	mausoleum_N_1.dgr	match	51/51	1	error (2/3 ok): dungeon: no border tile at (3, 24) for TileKey { edges: [Non	16/20	seed 1003 (forced, build 323943); seed 71066921 (forced); seed 117602297 (forced); +48 more
 G1_8	1	dgr	4	2	mausoleum_N_1.dgr	match	50/50	0	error (2/3 ok): dungeon: no border tile at (24, 3) for TileKey { edges: [Som	16/20	seed 78285549 (forced); seed 83370527 (forced); seed 94396635 (forced); +47 more
 G1_8	1	dgr	4	3	mausoleum_N_1.dgr	match	50/50	0	error (2/3 ok): dungeon: no border tile at (39, 24) for TileKey { edges: [So	16/20	seed 238582294 (forced); seed 309100736 (forced); seed 335416203 (forced); +47 more
 G1_8	1	dgr	4	4	mausoleum_N_1.dgr	match	50/50	0	ok 3/3	16/20	seed 142407825 (forced); seed 267315998 (forced); seed 368483457 (forced); +47 more
@@ -470,7 +470,7 @@ G1_8	1	dgr	10	7	mausoleum_W_1.dgr	match	50/50	0	ok 3/3	16/20	seed 137997111 (for
 G1_8	1	dgr	11	0	mausoleum_W_2.dgr	match	50/50	0	ok 3/3	16/20	seed 23381334 (forced); seed 26342797 (forced); seed 126634161 (forced); +47 more
 G1_8	1	dgr	11	1	mausoleum_W_2.dgr	match	50/50	0	ok 3/3	16/20	seed 74498534 (forced); seed 130531679 (forced); seed 142585509 (forced); +47 more
 G1_8	1	dgr	11	2	mausoleum_W_2.dgr	match	50/50	0	ok 3/3	16/20	seed 22001822 (forced); seed 136866203 (forced); seed 203818451 (forced); +47 more
-G1_8	1	dgr	11	3	mausoleum_W_2.dgr	match	51/51	0	ok 3/3	16/20	seed 1002 (forced); seed 104449516 (forced); seed 134344811 (forced); +48 more
+G1_8	1	dgr	11	3	mausoleum_W_2.dgr	match	51/51	1	ok 3/3	16/20	seed 1002 (forced, build 323943); seed 104449516 (forced); seed 134344811 (forced); +48 more
 G1_8	1	dgr	11	4	mausoleum_W_2.dgr	match	50/50	0	ok 3/3	16/20	seed 20029057 (forced); seed 62761333 (forced); seed 100319513 (forced); +47 more
 G1_8	1	dgr	11	5	mausoleum_W_2.dgr	match	50/50	0	ok 3/3	16/20	seed 39537632 (forced); seed 50839433 (forced); seed 210626447 (forced); +47 more
 G1_8	1	dgr	11	6	mausoleum_W_2.dgr	match	51/51	1	ok 3/3	16/20	seed 66755229 (forced); seed 75025429 (forced); seed 173917462 (forced); +48 more
@@ -497,7 +497,7 @@ G1_9	1	dgr	2	2	tomb_E_2.dgr	match	50/50	0	ok 3/3	14/21	seed 32295643 (forced); s
 G1_9	1	dgr	2	3	tomb_E_2.dgr	match	50/50	0	ok 3/3	14/21	seed 177342167 (forced); seed 269642794 (forced); seed 323531934 (forced); +47 more
 G1_9	1	dgr	2	4	tomb_E_2.dgr	match	51/51	1	ok 3/3	14/21	seed 61215121 (forced); seed 141220808 (forced); seed 143179921 (forced); +48 more
 G1_9	1	dgr	2	5	tomb_E_2.dgr	match	49/49	0	ok 3/3	14/21	seed 10448177 (forced); seed 104537076 (forced); seed 149509797 (forced); +46 more
-G1_9	1	dgr	2	6	tomb_E_2.dgr	match	51/51	0	ok 3/3	14/21	seed 1001 (forced); seed 36849316 (forced); seed 160987332 (forced); +48 more
+G1_9	1	dgr	2	6	tomb_E_2.dgr	match	51/51	1	ok 3/3	14/21	seed 1001 (forced, build 323943); seed 36849316 (forced); seed 160987332 (forced); +48 more
 G1_9	1	dgr	2	7	tomb_E_2.dgr	match	50/50	0	ok 3/3	14/21	seed 72077210 (forced); seed 128760011 (forced); seed 163124154 (forced); +47 more
 G1_9	1	dgr	3	0	tomb_E_3.dgr	match	52/52	2	ok 3/3	14/21	seed 1301411 (forced); seed 90201415 (forced); seed 149643994 (forced); +49 more
 G1_9	1	dgr	3	1	tomb_E_3.dgr	match	50/50	0	ok 3/3	14/21	seed 75051889 (forced); seed 132232607 (forced); seed 178537155 (forced); +47 more
@@ -536,7 +536,7 @@ G1_9	1	dgr	7	1	tomb_S_1.dgr	match	50/50	1	ok 3/3	14/21	seed 120674500 (forced); 
 G1_9	1	dgr	7	2	tomb_S_1.dgr	match	50/50	0	ok 3/3	14/21	seed 13652741 (forced); seed 39048034 (forced); seed 97398600 (forced); +47 more
 G1_9	1	dgr	7	3	tomb_S_1.dgr	match	50/50	0	ok 3/3	14/21	seed 53806069 (forced); seed 83967307 (forced); seed 158359089 (forced); +47 more
 G1_9	1	dgr	7	4	tomb_S_1.dgr	match	50/50	0	ok 3/3	14/21	seed 18071698 (forced); seed 141701134 (forced); seed 361914092 (forced); +47 more
-G1_9	1	dgr	7	5	tomb_S_1.dgr	match	51/51	0	ok 3/3	14/21	seed 1003 (forced); seed 76238519 (forced); seed 90548266 (forced); +48 more
+G1_9	1	dgr	7	5	tomb_S_1.dgr	match	51/51	1	ok 3/3	14/21	seed 1003 (forced, build 323943); seed 76238519 (forced); seed 90548266 (forced); +48 more
 G1_9	1	dgr	7	6	tomb_S_1.dgr	match	50/50	0	ok 3/3	14/21	seed 12786501 (forced); seed 26030543 (forced); seed 75840614 (forced); +47 more
 G1_9	1	dgr	7	7	tomb_S_1.dgr	match	50/50	0	ok 3/3	14/21	seed 3821634 (forced); seed 45944370 (forced); seed 72270553 (forced); +47 more
 G1_9	1	dgr	8	0	tomb_S_2.dgr	match	48/48	0	error (2/3 ok): dungeon: no border tile at (29, 36) for TileKey { edges: [So	14/21	seed 32363539 (forced); seed 33243608 (forced); seed 182422757 (forced); +45 more
@@ -559,7 +559,7 @@ G1_9	1	dgr	10	0	tomb_W_1.dgr	match	51/51	1	ok 3/3	14/21	seed 6881297 (forced); s
 G1_9	1	dgr	10	1	tomb_W_1.dgr	match	50/50	0	ok 3/3	14/21	seed 74287166 (forced); seed 246952315 (forced); seed 257499272 (forced); +47 more
 G1_9	1	dgr	10	2	tomb_W_1.dgr	match	50/50	0	ok 3/3	14/21	seed 56167237 (forced); seed 96902549 (forced); seed 147384430 (forced); +47 more
 G1_9	1	dgr	10	3	tomb_W_1.dgr	match	50/50	0	ok 3/3	14/21	seed 212306366 (forced); seed 357669178 (forced); seed 456573915 (forced); +47 more
-G1_9	1	dgr	10	4	tomb_W_1.dgr	match	52/52	1	ok 3/3	14/21	seed 1002 (forced); seed 6743119 (forced); seed 46296399 (forced); +49 more
+G1_9	1	dgr	10	4	tomb_W_1.dgr	match	52/52	2	ok 3/3	14/21	seed 1002 (forced, build 323943); seed 6743119 (forced); seed 46296399 (forced); +49 more
 G1_9	1	dgr	10	5	tomb_W_1.dgr	match	50/50	0	ok 3/3	14/21	seed 44062154 (forced); seed 49446613 (forced); seed 60529649 (forced); +47 more
 G1_9	1	dgr	10	6	tomb_W_1.dgr	match	50/50	0	ok 3/3	14/21	seed 145535917 (forced); seed 170436152 (forced); seed 240113192 (forced); +47 more
 G1_9	1	dgr	10	7	tomb_W_1.dgr	match	50/50	0	ok 3/3	14/21	seed 226020440 (forced); seed 481162450 (forced); seed 693289455 (forced); +47 more
@@ -722,7 +722,7 @@ G1_12	1	dgr	2	3	CanopyE_S.dgr	match	50/50	0	ok 3/3	5/16	seed 54090572 (forced); 
 G1_12	1	dgr	2	4	CanopyE_S.dgr	match	50/50	0	ok 3/3	5/16	seed 22249406 (forced); seed 137266912 (forced); seed 166581295 (forced); +47 more
 G1_12	1	dgr	2	5	CanopyE_S.dgr	match	50/50	0	ok 3/3	5/16	seed 83647651 (forced); seed 83777853 (forced); seed 188114321 (forced); +47 more
 G1_12	1	dgr	2	6	CanopyE_S.dgr	match	50/50	0	ok 3/3	5/16	seed 36607427 (forced); seed 138619137 (forced); seed 267583514 (forced); +47 more
-G1_12	1	dgr	2	7	CanopyE_S.dgr	match	51/51	0	ok 3/3	5/16	seed 1001 (forced); seed 14152694 (forced); seed 369949910 (forced); +48 more
+G1_12	1	dgr	2	7	CanopyE_S.dgr	match	51/51	0	ok 3/3	5/16	seed 1001 (forced, build 323943); seed 14152694 (forced); seed 369949910 (forced); +48 more
 G1_12	1	dgr	3	0	CanopyE_W.dgr	match	46/46	0	ok 3/3	5/16	seed 22287779 (forced); seed 91541352 (forced); seed 216802161 (forced); +43 more
 G1_12	1	dgr	3	1	CanopyE_W.dgr	match	45/45	0	error (2/3 ok): dungeon: failed to place a special1 room	5/16	seed 29617485 (forced); seed 247657138 (forced); seed 453980141 (forced); +42 more
 G1_12	1	dgr	3	2	CanopyE_W.dgr	match	45/45	0	ok 3/3	5/16	seed 43825765 (forced); seed 118974216 (forced); seed 182827449 (forced); +42 more
@@ -4477,7 +4477,7 @@ Abyss_Depths3	2	dgr	1	0	AbyssalDepths_03.dgr	match	55/55	5	error (0/3 ok): dunge
 Abyss_Boss1	10	dgr	1	0	AbyssalDepths_Boss1_01.dgr	match	41/41	0	error (1/3 ok): dungeon: door tile at (26, 41) (0x14209dc90 not ported)	0/1	seed 553679 (forced); seed 178345698 (forced); seed 266433994 (forced); +38 more
 Abyss_Boss2	10	dgr	1	0	AbyssalDepths_Boss2_01.dgr	match	51/51	1	error (0/3 ok): dungeon: door tile at (11, 32) (0x14209dc90 not ported)	1/2	seed 20153322 (forced); seed 121918740 (forced); seed 170706638 (forced); +48 more
 Abyss_Pinnacle	10	dgr	1	0	AbyssPinnacle_01.dgr	match	50/50	0	ok 3/3	0/9	seed 22370494 (forced); seed 33665943 (forced); seed 117487446 (forced); +47 more
-BossRush_Area1	10	dgr	1	0	BossRushArea1.dgr	fail	0/49	0	error (0/3 ok): dungeon node 0: subgraph file group "SharkBoss" (FileGroups	-	failed: seed 165308980 (forced: tile hash ours 4277648433 client 2863235433); seed 170932982 (forced: tile hash ours 3967209943 client 3988005405); +47 more
+BossRush_Area1	10	dgr	1	0	BossRushArea1.dgr	match	49/49	0	error (0/3 ok): dungeon node 0: subgraph file group "SharkBoss" (FileGroups	-	seed 165308980 (forced); seed 170932982 (forced); seed 259358762 (forced); +46 more
 BossRush_Area2	10	dgr	1	0	BossRushArea2.dgr	match	50/50	0	error (0/3 ok): dungeon node 0: subgraph file group "SilverbackBlackfist" (F	-	seed 83988397 (forced); seed 262483431 (forced); seed 318156224 (forced); +47 more
 BossRush_Area3	10	dgr	1	0	BossRushArea3.dgr	match	50/50	0	error (0/3 ok): dungeon node 0: subgraph file group "YamaTheWhite" (FileGrou	-	seed 34391666 (forced); seed 410964769 (forced); seed 441458367 (forced); +47 more
 G_Endgame_Town	10	town	1	0	ziggurat_town.dgr	match	51/51	1	ok 3/3	9/10	seed 1 (natural, build 309874); seed 5184441 (forced); seed 265996543 (forced); +48 more
