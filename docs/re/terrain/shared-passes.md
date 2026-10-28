@@ -34,9 +34,20 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     the entries that matched the area's connections. If the state outlives one generation (to
     check with the `map_pins` / `pin_dirs` trace lines of a live load), the natural choice of an
     act area depends on the last town's seed and the areas generated since.
-  - Generator `+0x280..+0x288` (zeroed by `TerrainGen_Construct`, filled by the client's world
-    load, empty in `gen_batch`): 0x18-byte entries i32 x, i32 y, `MapPins` row (positions are
-    not in `MapPins`; their source is open).
+  - Generator `+0x280..+0x288` (0x18-byte entries i32 x, i32 y, `MapPins` row): the generator
+    is built on the stack for every load (`ClientWorld_LoadArea` `0x14167b2a0`, client vtable
+    `0x143385c70`), and its prepare phase `0x141ffe7f0` fills `+0x280` only for a town
+    (WorldAreas `+0x14`) or kind 2: `0x141fa5900(out, act (WorldAreas +0x10), state seed,
+    gen +0x298, league mode)`. That takes the act's world-map area (`0x142445f00(act)`), its
+    topologies (`0x141fdfe30`, mode filter), picks one with the LCG `0x141025cf0` seeded with
+    the seed (after `TerrainRng_Seed(seed, 0)`), loads that `.dgr` / `.tgr`, lays it out with
+    the act's pins (`0x141fa57d0(act, 1)`; `.tgr` `0x141fb9fb0`, `.dgr` `0x141fb89d0`), seeds
+    the result (`0x141fa44c0`) and collects the pins' positions (`0x141fa53f0`). So the pin
+    positions are a seeded layout of the act's world map: deterministic from the game data
+    and the town's seed (no capture needed); `gen_batch` runs no town job with pins, which is
+    why its natural choice falls back to the index draw. Generation state (`gen +0x30`) comes
+    from the persistent world (`TerrainGen_Construct`: world vfunc `+0x1c8`), so its `+0x70`
+    direction list lives on between loads (to confirm live).
   - `0x141fa5f30`: looks up the area's pin (a map world area → pin), builds the whole layout
     `0x141fa4da0` and copies the pin's record (0x88-byte records sorted by pin), else the plain
     neighbour list `0x141fa47b0`.
