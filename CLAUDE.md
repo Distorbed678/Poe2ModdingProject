@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-A private server for **Path of Exile 2, client 0.5.5e Hotfix 1** (version `0.5.5e.hotfix1`; 0.5.5e stays supported), written in Rust and built for future client and server modding (personal and educational use).
+A private server for **Path of Exile 2, client 0.5.5e Hotfix 1** (version `0.5.5e.hotfix1`, the server's default since 2026-10-28; 0.5.5e stays supported), written in Rust and built for future client and server modding (personal and educational use).
 This repo is the **hub** (docs, plans, RE notes, scripts, `xtask` dev tooling, the tracker); the code is in submodules under `modules/`: the server (`modules/server`, Poe2Server), the shared protocol (`modules/protocol`, Poe2Protocol: opcodes and the version files), the client hook, web admin, launcher, mod SDK, mod index and server list. Which repo does what: [docs/overview.md](docs/overview.md).
 Progress and the current task: the tracker in [README.md](README.md).
 
