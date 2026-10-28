@@ -46,6 +46,43 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     So with our server the pins are fixed per act. Open: whether official servers make the
     state seed non-zero (what writes state `+0`, or a traced official town load, the user's), and
     when `+0x70` gets its entries.
+  - **How the pin positions are made (2026-10-28, client 0.5.5e.hotfix1 addresses; 0.5.5e =
+    hotfix − 0x180 in this range, `dumps/0.5.5e.hotfix1/addr_map.tsv`).** The layout `0x141fa5a80`
+    does not run the generator: the `.dgr` walk `0x141fb8b50` (`.tgr`: `0x141fba130`) visits the
+    world-map graph's nodes; a `graph` node recurses into its sub-graph (offset by its position);
+    every other node (key at node `+0x20`, orientation byte `+0x40` < 8, position `+0x4c`/`+0x50`
+    in cells) looks up the rooms of its key (`0x141f9bb90`, entries of 0x20 bytes) and runs the
+    callback `0x141fb8fc0` on each **whose orientation equals the node's**:
+    - base = node position `/23 · (graph +0x149 − +0x14b) · 23` + margins (`+0x174`, `+0x171`) · 23 +
+      the sub-graph offset;
+    - the room's object entries (`.arm`, room `+0x70`, 0x58 bytes, type at `+0x30`) whose type is a
+      pin `MetadataId`, filtered by the room's object groups (`+0x88`), turned within the room's
+      W × H (`+0x138`/`+0x139`) by the node orientation (table `0x142f02118` = 0.5.5e `0x142f020c8`,
+      our `turn_cell`) plus base;
+    - when the graph has a tile set (`+0x228`): each tile-key cell of the room (0x78 bytes at room
+      `+0x168`, skipped when `+0x70`/`+0x71` are set, key at `+0x50`) takes the **first** tile of
+      that key, and the callback `0x141fb9c50` adds that tile's `.tmd` objects (tile data `+0x180`):
+      the tile's orientation is the first of the 8 in table `0x142f0bf48` whose oriented key
+      (`0x141d08bc0`, 0x4e bytes) equals the cell's, composed with the node orientation
+      (`0x141d01080`); the object's cell is turned by that within the tile's W × H (`+0x60`/`+0x61`),
+      the room cell (plus its sub-tile offset `+0x20`/`+0x21`) by the node orientation within the
+      room, × 23, plus base.
+    So every room variant of a node contributes candidates (MudBurrow: 5). Then per pin type
+    `0x141fa4640` → `0x141fa3fc0` (0.5.5e `0x141fa44c0` → `0x141fa3e40`): the non-empty positions
+    sorted by (x, y), seed `state seed ^ [type +0x28] +8`, which is **MurmurHash2 (seed 0) of the
+    `MetadataId` as written** (9 of 9 act 1 types with several candidates), index = the LCG draw
+    (`0x141025ef0`, `x·0x41c64e6d + 0x3039`, first 15-bit chunk = high bits); that position goes
+    first, the others are dropped. The pins are the act's `MapPins` rows with `WorldAreasKeys`
+    (18 of 18 in act 1).
+  - **Port (Poe2Server `poe-world/src/map_pins.rs`, 2026-10-28):** generates the world map
+    (topology `lcg_index(seed, n)`, seed `seed`, orientation 0) and takes the placed rooms'
+    objects and the placed tiles' `.tmd` objects, then the consolidation above. Against the
+    client's `map_pins` lines (example `map_pins <act> 0 --trace <trace>`): acts 1, 2, 4 all
+    pins equal (18, 23, 20); act 3 17 of 19: G3_2_2 (437 vs 436) and G3_4 (283 vs 291) come from
+    tiles the generator turned to an orientation other than the first key match (both
+    orientation 4, `Waterways_01`, `SnakePit_01`). To do: walk the graph nodes as the client does
+    instead of the generated layout (rooms per key with the node's orientation, tiles by the
+    first key match), which also makes the pins independent of the generator.
   - The direction list lives in the generation state (generator `+0x30` → `+0x70`, 0x18-byte
     entries: u8 direction, `MapPins` row, its table reference). `0x141ff9280` rebuilds it only
     when the area is a town (WorldAreas `+0x14`, IsTown) or of kind 2 (`+0x1b4`):
