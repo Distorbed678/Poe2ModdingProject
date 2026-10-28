@@ -13,7 +13,7 @@ Progress and the current task: the tracker in [README.md](README.md).
 - External tools go in `third_party/` (`third_party/fetch-tools.sh`); generated/datamined data in git-ignored `dumps/<version>/`; local runtime files in `runtime/`.
 - Docs go in `docs/` and are updated in the same commit as the code; RE findings and addresses go in `docs/re/`. Run `python3 scripts/check-links.py` after doc changes.
 - Commit and push after each working step (`origin main`). Submodules: commit and push inside the submodule first, then bump the pointer in the hub (the server's own submodules first inside `modules/server`).
-- RE addresses in docs and Ghidra are 0.5.5e addresses until the Ghidra project has the hotfix build; translate with `scripts/re/addr_map.py` / `dumps/0.5.5e.hotfix1/addr_map.tsv` ([docs/re/README.md](docs/re/README.md)).
+- Ghidra: `/0.5.5e.hotfix1/PathOfExileSteam.exe` is the current build (names ported from `/PathOfExileSteam.exe`, 0.5.5e). RE addresses written in docs before 2026-10-28 are 0.5.5e addresses; translate with `scripts/re/addr_map.py` / `dumps/0.5.5e.hotfix1/addr_map.tsv` ([docs/re/README.md](docs/re/README.md)).
 - Ask the user for x64dbg/dynamic debugging and for official captures. Steam may be used and started for private-server tests without asking; never log in to official servers.
 
 ## Roadmap (details: [docs/plans/orchestration-2026-10.md](docs/plans/orchestration-2026-10.md), status: README tracker)
