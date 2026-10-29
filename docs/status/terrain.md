@@ -24,18 +24,17 @@ regardless of our generator. The server's copy is what has to match.
 ## Current results
 
 State 2026-10-28 (Poe2Server `af1e7e9`; the history is in the dated entries below):
-- **Forced layouts:** 218,702 of the 218,705 client layouts of the 50-seed batch match (tile hash,
-  and the doodad hash on every match); matrix 4466 match / 3 partial / 0 fail / 39 untested / 10
-  n/a ([terrain-matrix.tsv](terrain-matrix.tsv)). The second batch (`full2`, other seeds, every
-  topology and orientation): 218,585 of 218,802 at its last replay, failures since fixed but not
-  replayed.
+- **Forced layouts:** both 50-seed client batches match on every layout (tile hash, and the
+  doodad hash on every match): batch 1 218,705 of 218,705, batch 2 (`full2`, other seeds) 218,802
+  of 218,802 (2026-10-29, Poe2Server `33981f0`); matrix 4469 match / 0 partial / 0 fail / 39
+  untested / 10 n/a ([terrain-matrix.tsv](terrain-matrix.tsv)). Batch 3 (new seeds, forced and
+  natural) is the last check (roadmap R1).
 - **Natural choice** (no forced layout): ported; 4,173 of 4,173 unforced client generations match
   (batch `w13-nat1`, new seeds), and the instance server forces that choice
   (`[terrain] force_layout`, WP7.13).
 
 ### The rows that do not match (WP7.15, 2026-10-28)
-- **partial (3):** `MapCaldera` 1:0 and 8:0 (one seed each, plus 4 jobs in `full2`) and
-  `MapCrimsonShores` 4:0 (seed 921210055): open, need client traces (handoff 13, item 3).
+- **partial:** none since 2026-10-29 (MapCaldera and MapCrimsonShores fixed, [../re/terrain/tgr.md](../re/terrain/tgr.md) "R1").
 - **untested (39):** the client itself fails on every seed of these combinations, so there is no
   layout to compare (errors from `dumps/0.5.5e/terrain/batch/full/batch-results.tsv`):
   `ExpeditionLogBook_Heath` 1:1/3/5/7 ("Non-feature node overlapping another"), `G2_10_1` 5:1/3/5/7
@@ -184,6 +183,12 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **R1, 2026-10-29 (Poe2Server `33981f0`, two full replays):** batch 1 218,705 of 218,705 and
+  batch 2 218,802 of 218,802 match (from 218,702 and 218,795 expected), 0 lost; matrix 4469 / 0 /
+  0 / 39. Fixed: MapCaldera (league rooms are overlay feature rooms on `.tgr` maps) and
+  MapCrimsonShores (junction explode drops points within twice its step); details
+  [../re/terrain/tgr.md](../re/terrain/tgr.md) "R1". Baseline `runtime/forced-baseline.tsv` (previous
+  `runtime/forced-baseline-pre-r1.tsv`).
 - **Single agent, 2026-10-28 (handoff 13, Poe2Server `0da535f`, `7654c1a`): natural topology
   choice.** The world-map pins (102 of 102, acts 1, 2, 3, 4, 6) and the client's direction
   layout and three-pass match are ported; without a forced layout the generator now picks what
@@ -289,7 +294,7 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
 
 1. Done 2026-10-28: `[terrain] generate` on by default (the user's decision 2026-10-27, once the
    natural choice was verified).
-2. MapCaldera / MapCrimsonShores (client traces), the full replay of the second batch.
+2. Done 2026-10-29: MapCaldera / MapCrimsonShores, the full replay of the second batch (all match).
 3. The object stage for entities (handoff 10 "Entities"): transitions, waypoints, checkpoints.
 4. A live test of `generated_grid` with server movement; then whether it defaults to on.
 
