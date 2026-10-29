@@ -6,6 +6,8 @@ Nothing here is started yet. The original plans this continues are
 [orchestration-2026-10.md](orchestration-2026-10.md) (phase 2: movement; phase 7: terrain) and
 [terrain-all-areas.md](terrain-all-areas.md); the small leftovers are in [open-items.md](open-items.md).
 
+**2026-10-29:** R1.5 ([r1.5-ui-cleanup.md](r1.5-ui-cleanup.md)) was inserted before R2.
+
 ## Decisions (user, 2026-10-28)
 - **Order:** the area generator is finished first (every layout of batches 1 and 2 matches), then a
   third batch; if it matches, the generator is complete.
