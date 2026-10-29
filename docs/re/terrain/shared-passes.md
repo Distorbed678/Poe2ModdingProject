@@ -21,11 +21,12 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
   by each allowed orientation (+0x34 list; 8 = all). There are three passes: exact
   (`0x141fa6960`), with topology wildcards 8 (`0x141fa6a50`), then also adjacent
   directions (`0x141fa6b40`). The LCG index picks among those candidates. Only when there
-  are none does `0x141ff90f0` pick from the whole list. The map-pin part is not ported, so
-  `G1_2` seed 1001 picks topology 15 (`felling_S_N_W`) in the client, while the plain index
-  gives 3.
-- **World-map pin directions in detail** (2026-10-27, decompiles; not ported, not yet checked
-  against a live load):
+  are none does `0x141ff90f0` pick from the whole list. **Ported** (2026-10-28, Poe2Server
+  `poe-world/src/map_dirs.rs`, see "The natural choice as ported" below): `G1_2` seed 1001
+  picks topology 15 (`felling_S_N_W`) like the client (live load through our server), where
+  the plain index gives 3.
+- **World-map pin directions in detail** (2026-10-27/28, decompiles; ported and checked against
+  4,173 unforced client generations, below):
   - **Ground truth from `gen_batch` (2026-10-28, client 0.5.5e.hotfix1, runs `w12-pins2` and
     `w12-pins3` under `dumps/<version>/terrain/batch/`):** town jobs with topology 0
     (`G1_town`..`G4_town`, traced, listed in `export.txt`) do run the prepare phase: every trace
@@ -97,9 +98,12 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     when the area is a town (WorldAreas `+0x14`, IsTown) or of kind 2 (`+0x1b4`):
     `0x141fa5f30(out, area, generator +0x280, state seed (state +0), league mode)`. After a pick
     `0x141fa6c80` writes the chosen topology's direction keys (Topologies `+0x24`, 8 = keep) into
-    the entries that matched the area's connections. If the state outlives one generation (to
-    check with the `map_pins` / `pin_dirs` trace lines of a live load), the natural choice of an
-    act area depends on the last town's seed and the areas generated since.
+    the entries that matched the area's connections. **The state does not outlive a load**
+    (2026-10-28, live trace through our server, area exports `2026-10-28_20-13-42_336`): after
+    `G1_town`, `G1_2`'s topology checkpoint shows `pin_dirs` count 0, so every load starts with an
+    empty list. Act areas are kind 2 (G1_2: `area_kind 0x2` in the export, 18 `map_pins` lines in
+    its own trace), so they lay the pins out and rebuild the list themselves; an area that is
+    neither a town nor kind 2 has no list and takes the index draw.
   - Generator `+0x280..+0x288` (0x18-byte entries i32 x, i32 y, `MapPins` row): the generator
     is built on the stack for every load (`ClientWorld_LoadArea` `0x14167b270`, client vtable
     `0x143385c70`), and its prepare phase `0x141ffe7f0` fills `+0x280` only for a town
@@ -110,10 +114,10 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     the act's pins (`0x141fa57d0(act, 1)`; `.tgr` `0x141fb9fb0`, `.dgr` `0x141fb89d0`), seeds
     the result (`0x141fa44c0`) and collects the pins' positions (`0x141fa53f0`). So the pin
     positions are a seeded layout of the act's world map: deterministic from the game data
-    and the town's seed (no capture needed); `gen_batch` runs no town job with pins, which is
-    why its natural choice falls back to the index draw. Generation state (`gen +0x30`) comes
-    from the persistent world (`TerrainGen_Construct`: world vfunc `+0x1c8`), so its `+0x70`
-    direction list lives on between loads (to confirm live).
+    and the state seed (no capture needed). The generation state is world `+0x4b0`
+    (`TerrainGen_Construct`: world vfunc `+0x1c8`); its seed (`+0`) is the `LoadArea` word `p2`
+    ([batch.md](batch.md#how-the-generator-is-run)), 0 with our server, an instance number in an
+    official export (537884335).
   - The pieces of `0x141fa5900`: `Data/Balance/Acts.dat` by act number (`0x14028b0e0`, row map
     `+0x90`), its `WorldAreaMap` (row `+0x5d`) is the act's world-map area; the act's pins
     (`0x141fa57d0` → `0x142591b20`, `Data/Balance/MapPins.dat` rows with that `Act`);
@@ -152,6 +156,48 @@ Details (`modules/server/crates/poe-world/src/area.rs` `topologies`, `generate_w
     turn code, column = direction). Pass 2 accepts key 8, pass 3 also the adjacent directions
     (0: 4, 5; 1: 5, 6; 2: 7, 6; 3: 4, 7; 4: 0, 3; 5: 0, 1; 6: 2, 1; 7: 2, 3). Orientation 8
     (unforced) tries the topology's allowed list (`+0x34`, an entry 8 = all of 0..7).
+  - **The natural choice as ported (2026-10-28, client 0.5.5e.hotfix1 addresses, 0.5.5e =
+    hotfix − 0x180; Poe2Server `poe-world/src/map_dirs.rs`, `area.rs` `generate_stated`).** Read
+    in full from the decompiles of `0x141ff9400`, `0x141fa60b0`, `0x141fa4f20`, `0x141fa4930`,
+    `0x141fa4cf0`, `0x1421c5090`, `0x141fa65c0`, `0x141fa62d0`, `0x141fa6ae0` / `6bd0` / `6cc0`,
+    `0x141fa6e00`, `0x141ff9270`, `0x141fa98e0`, `0x141fb7f00`, `0x141fb8210`:
+    - Neighbour list (`0x141fa4930`): for each other pin of `+0x280` with a `MapConnections` row
+      (pin, other) in either order (a map keyed by the pair), the direction of other − own,
+      deduplicated and sorted by pin row; (0, 0) gives 8. The angle `0x1421c5090(a, (1, 0))` is
+      `acos` from the u16 table `0x142f10780` (255 entries, 0x8000 = 180°) at index
+      `(i8)(((|b|² − |b − a|² + |a|²) · 127 / max(isqrt(|a|²·|b|²), 1)) / 2) + 127`, clamped to
+      0..254.
+    - Layout (`0x141fa4f20`): pins with `WorldAreasKeys`, sorted by row, then a stable insertion
+      sort by neighbour count, most first. Per pin: candidates of its first area with its list
+      (orientation 8); with any, `lcg_index(seed, n)` with the LCG **reset to the state seed for
+      every pin**; if the picked topology has a key ≠ 8 and as many keys as the list has entries,
+      key i replaces entry i (index order, not connection order) unless that leaves no
+      candidates. The topology's orientation is not applied to the keys. Then for each list
+      entry whose pin has areas, the neighbour's entry for this pin takes `TURN[2][dir]`
+      (opposite), again only while the neighbour keeps candidates.
+    - The area's list (`0x141fa60b0`): the pin whose `WorldAreasKeys` holds the area (unique in
+      the data), its list from the layout, else its plain neighbour list.
+    - Connections (`0x141fa62d0`): `WorldAreas.Connections` in order, once per `HASH16`; the
+      connected area's pin, skipped when that pin also lists the area; the first list entry whose
+      pin is it or whose `ParentMapPin` (`+0x84`) is it gives the direction.
+    - Candidates (`0x141fa65c0`): empty when the list is empty or the first topology has no
+      keys; the client throws when no connection has a list entry. Per pass, per topology of the
+      mode-filtered list, per orientation (the forced one, else the topology's list, an entry 8 =
+      all eight): the connection count must equal the key count and each
+      `TURN[ORIENTATION_TURN[o]][dir]` (`0x141f8c5b0`, turn codes `0x142f0bf50` = 0, 3, 2, 1, 4,
+      5, 6, 7) must equal the key (pass 2: or key 8; pass 3: or an adjacent direction). The
+      candidates are a **set sorted by (`Topologies` row, orientation)** (`0x141fa98e0`), not in
+      list order (16 of 4,173 checks differed before this: G1_11, G2_9_1, G2_9_2, G3_7).
+    - Pick (`0x141ff9400`): one `below(0xffffffff)` draw (the state seed for kind 0x21), index
+      `lcg_index(v, n)` into the candidates, then the write-back `0x141fa6e00`. Without
+      candidates `0x141ff9270` makes the same draw, topology `lcg_index(v, n)` and orientation
+      `region::pick(mask, lcg_index(v, 0x348))` with the LCG reset to `v` for both (the port took
+      the lowest allowed orientation before).
+    - **Checked** against the client: run `w13-nat1` under `dumps/<version>/terrain/batch/`
+      (every non-fixed area of the matrix × 10 seeds, topology 0, orientation −1 = unforced; 147
+      client errors), `area_vectors --natural` on its 4,173 results: all match; and the live
+      `G1_2` 1001 load. Example `map_dirs <area> [seed ...]` prints an area's list, candidates and
+      picks.
 - Stats on the area (generator +0x38 → +0x128, filled from AreaInfo's flags0 bit 7 stat
   records, `0x1423baa70`: varuint count, then big-endian u16 key and value per stat):
   `map_force_topology` (key 0xb92, Stats row 2961) = 1-based index into the filtered list,

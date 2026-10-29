@@ -288,9 +288,9 @@ link = "docs/status/terrain.md"
 
 [[subsystem.item]]
 name = "World-map pins (natural topology choice)"
-status = "missing"
-note = "forced topology covers it for now"
-link = "docs/status/terrain.md"
+status = "done"
+note = "2026-10-28: pins from the client's node walk (102 of 102), direction layout and three-pass match ported (map_dirs.rs); 4,173 of 4,173 unforced client generations match"
+link = "docs/re/terrain/shared-passes.md"
 
 [[subsystem.item]]
 name = "Doodads and the doodad hash"

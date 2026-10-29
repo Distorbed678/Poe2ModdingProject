@@ -181,6 +181,12 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **Single agent, 2026-10-28 (handoff 13, Poe2Server `0da535f`, `7654c1a`): natural topology
+  choice.** The world-map pins (102 of 102, acts 1, 2, 3, 4, 6) and the client's direction
+  layout and three-pass match are ported; without a forced layout the generator now picks what
+  the client picks: 4,173 of 4,173 unforced client generations (batch `w13-nat1`, every non-fixed
+  area × 10 seeds) and a live `G1_2` load. Forced results unchanged (the forced path is not
+  touched). Details: [../re/terrain/shared-passes.md](../re/terrain/shared-passes.md).
 - **Single agent, 2026-10-28 (handoff 12, Poe2Server `bf9ed79`, one full replay):** 218,702 of
   218,705 client layouts match (from 218,653), 0 lost; combinations 4466 match, 3 partial, 0
   fail, 39 untested. Fixed: BossRush_Area1, all 49 (nested subgraphs queue behind the subgraphs
