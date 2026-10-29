@@ -676,7 +676,7 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 | ✅ | [Install the game from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested |
 | ✅ | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | the user's end-to-end test on Linux (2026-10-23): hook download and deploy, Host a server (update from server-v0.1.0 to 0.2.1), Play, web admin, restart all passed; Windows path untested |
 | ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4) |
-| 🟡 | [R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web](docs/plans/r1.5-ui-cleanup.md) | 2026-10-29: 0.5.5e dropped everywhere (version files, signature table, opcode folder renamed, RE addresses moved to Hotfix 1 with scripts/re/convert_addrs.py, dumps moved); launcher, web admin and hook work follows the plan |
+| 🟡 | [R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web](docs/plans/r1.5-ui-cleanup.md) | 2026-10-29: 0.5.5e dropped everywhere; launcher: several hosted servers, Host tab, Manage with usage, no account creation, decluttered pages; web admin: register and first-run pages, New account, decluttered pages; the game's Create account button opens the server's register page. Releases after the user's sign-off |
 
 ### Web Admin
 

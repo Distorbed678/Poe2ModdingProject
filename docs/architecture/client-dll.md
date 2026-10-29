@@ -174,6 +174,10 @@ How the latch treats each kind of server:
 | In `trusted_servers` | allowed | no | yes | yes (reports go to the trusted address) |
 | Anything else (official) | refused; allowed if `block_external = false` or in official mode | **yes**, permanently for the process | no (real handshake) | no |
 
+### The "Create account" button (`register_link.rs`)
+
+The login screen's *Create account* button opens `https://<official host>/account/create?theme=poe2` (the path is a UTF-16 string in `.rdata`) with `ShellExecuteW`, which the client imports from shell32. With `register_url` set in `poe-hook.toml` (the launcher writes the selected server's `<address>/#/register` at Play; `cargo xtask deploy-client` writes the dev server's), the loader hooks that export in `DllMain` (no game address or signature) and opens the private server's register page instead. Only URLs with `/account/create` are swapped, never while the read-only latch is on, and official mode empties `register_url` (deploy and config both). Decision: `poe_hook_shared::register_link::redirect` (unit-tested).
+
 ### Network guard: connect APIs
 Which APIs the game really uses (static imports of `PathOfExileSteam.exe`, checked again at runtime): **only `connect`** (5 call sites; `WSAConnect` is not imported). `WSAIoctl` is imported but called with `SIO_KEEPALIVE_VALS` and one other control code, never `SIO_GET_EXTENSION_FUNCTION_POINTER`; there is no `ConnectEx` GUID, no `mswsock`/`WinHTTP`/`WinINet` import and no `WSAConnectByName`/`List`. Details and addresses: [../re/network-apis.md](../re/network-apis.md). In game the log shows `api=connect` for every connection and never a `ConnectEx ... hooked` line.
 

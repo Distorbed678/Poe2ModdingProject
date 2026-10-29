@@ -473,7 +473,7 @@ link = "docs/guides/launcher.md#mods"
 name = "R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web"
 status = "partial"
 link = "docs/plans/r1.5-ui-cleanup.md"
-note = "2026-10-29: 0.5.5e dropped everywhere (version files, signature table, opcode folder renamed, RE addresses moved to Hotfix 1 with scripts/re/convert_addrs.py, dumps moved); launcher, web admin and hook work follows the plan"
+note = "2026-10-29: 0.5.5e dropped everywhere; launcher: several hosted servers, Host tab, Manage with usage, no account creation, decluttered pages; web admin: register and first-run pages, New account, decluttered pages; the game's Create account button opens the server's register page. Releases after the user's sign-off"
 
 [[subsystem]]
 name = "Web Admin"

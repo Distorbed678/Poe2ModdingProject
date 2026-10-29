@@ -389,6 +389,11 @@ fn deploy_client(
         // are forced to the Steam login (and an empty trusted list) by the deploy.
         login_mode,
         trusted_servers: trusted_servers(config),
+        // The game's "Create account" button opens the server's register page (web admin).
+        register_url: config
+            .web
+            .enabled
+            .then(|| format!("http://{}:{}/#/register", config.network.public_host, config.web.bind.port())),
     })?;
     match (&report.gateway, official) {
         (Some(entry), false) => println!("gateway -> {entry}"),

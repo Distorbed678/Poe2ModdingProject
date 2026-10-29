@@ -67,6 +67,8 @@ All under `/api/v1`. Full schemas: [openapi.json](../../modules/server/docs/open
 |---|---|---|
 | `GET /server` | none | name, version, cluster id, players online, `open_registration`, `login_host`/`login_port` (where the game client connects; the public login port), `instance_port` (public), `gateway_region`, uptime, `motd` (the message of the day, plain text of at most 280 characters; absent when there is none) and `mods` (the client mods players need, an array; absent when there are none; [below](#mods)) |
 | `POST /register` `{username, password}` | none | new player account; `403` unless `open_registration`, `409` when taken |
+| `GET /setup` | none | first run: `{needed, local, open_registration, name}`; `needed` is true only for a direct request from the server's own computer (loopback peer, no `X-Forwarded-For` / `Forwarded` header) while the server has no account |
+| `POST /setup` `{username, password}` | none (this computer only, as above) | creates the first account with the admin role and signs it in (the `POST /login` response, `kind: "web"`); `403` once any account exists or from elsewhere. The launcher no longer asks for an admin password: its "Open web admin" leads here on a new server |
 | `POST /login` `{username, password, kind?}` | none | `{token, kind, expires_at, account}` |
 | `POST /logout` | any token | revokes the token used (`204`) |
 | `POST /password` `{old_password, new_password}` | any token | changes the password, revokes every token of the account (game Remember Me included) and returns a fresh token of the same kind |
@@ -87,6 +89,7 @@ All under `/api/v1`. Full schemas: [openapi.json](../../modules/server/docs/open
 | `POST /admin/bans` `{account` or `ip, reason?, duration_secs?` or `expires_at?}` | admin | bans an account (logins refused, tokens revoked, sessions ended) or an address; `201`. `400` for yourself, an admin, your own address, a bad address, reason or length; `404` unknown account; `409` already banned |
 | `POST /admin/bans/{id}/lift` | admin | lifts an active ban early (`404` unknown, `409` already over) |
 | `GET /admin/metrics[?since=<ms>&range_secs=&max_points=]` | admin | the samples of the dashboard charts ([Metrics](#metrics)) |
+| `GET /local/metrics` | none (a direct request from the server's own computer only, the `/setup` check) | `{enabled, uptime_secs, latest}`: the newest sample, for the launcher that hosts the server (its Manage > Overview usage tiles) |
 | `GET /mods/{id}/{version}.zip` | none | the package of an offered client mod ([Mods](#mods)) |
 | `GET /admin/mods` | admin | every mod with its state, `restart_required`, and the check options |
 | `POST /admin/motd` `{motd}` | admin | sets the message of the day: live, and written into the config file ([Message of the day](#message-of-the-day)) |
@@ -104,6 +107,7 @@ All under `/api/v1`. Full schemas: [openapi.json](../../modules/server/docs/open
 | `POST /admin/server/cancel` | admin | cancels the pending stop or restart while its countdown runs (`404` nothing pending, `409` too late) |
 | `GET /admin/server/shutdown` | admin | `{pending: null}` or `{pending: {action, remaining_secs, delay_secs, message, requested_by, cancellable}}` |
 | `GET /admin/accounts` | admin | every account (never the password hash) |
+| `POST /admin/accounts` `{username, password, role?}` | admin | creates an account (`player` unless `role` is `admin`); `409` when taken |
 | `POST /admin/accounts/{name}/disable` / `enable` | admin | returns the account; disabling revokes its tokens and ends its sessions |
 | `POST /admin/accounts/{name}/role` `{role}` | admin | `player` or `admin`; not on yourself |
 | `GET /admin/characters[?account=name]` | admin | characters of all accounts or one, with an `online` flag |
@@ -167,9 +171,9 @@ A binary that was replaced while running (an upgrade) is found again at its path
 
 `poe_cluster::metrics` (`modules/server/crates/poe-cluster/src/metrics.rs`). The instance actors record the time of every simulation frame in `Actors::ticks` (`TickStats`); a sampler task (`spawn_sampler`, started by `poe-server`) takes a `Sample` every `[metrics] interval_secs` into a ring buffer sized for `[metrics] retention_hours` (24 h at 5 s: 17 280 samples, a few MB; lost on a restart).
 
-Each sample holds the time (ms), `players` (sessions in game), `instances` and `occupied` (with a player), the frames of the interval (`tick_count`) with their mean and longest time in microseconds (the meter is read and reset by each sample; no frames while nobody is in game), `rss_bytes` of the server process and `cpu_pct` (percent of one core since the previous sample). Memory and CPU come from `/proc/self` on Linux (`VmRSS`, `utime + stime` at 100 ticks per second); elsewhere they are `0` and absent.
+Each sample holds the time (ms), `players` (sessions in game), `instances` and `occupied` (with a player), the frames of the interval (`tick_count`) with their mean and longest time in microseconds (the meter is read and reset by each sample; no frames while nobody is in game), `rss_bytes` of the server process and `cpu_pct` (percent of one core since the previous sample). Memory and CPU come from `/proc/self` on Linux (`VmRSS`, `utime + stime` at 100 ticks per second); elsewhere they are `0` and absent. `net_in_bps` / `net_out_bps` are the bytes per second the game connections read and wrote since the previous sample (TCP payload of every `poe_net::Connection`, counted in `poe_net::stats`; the UDP side channel is not counted).
 
-`GET /admin/metrics` answers `{enabled, interval_secs, retention_secs, now, samples}`. `since` (ms) returns only newer samples, `range_secs` the last N seconds, `max_points` (2 to 5000, default 600) merges longer ranges into buckets that keep the peak of players, instances, memory and longest frame, the frame-weighted mean frame time and the mean CPU. The dashboard reloads its range every 5 s (15 min, 1 h) up to every minute (24 h) instead of using a WebSocket or SSE stream; `since` is there for other clients that want to append.
+`GET /admin/metrics` answers `{enabled, interval_secs, retention_secs, now, samples}`. `since` (ms) returns only newer samples, `range_secs` the last N seconds, `max_points` (2 to 5000, default 600) merges longer ranges into buckets that keep the peak of players, instances, memory and longest frame, the frame-weighted mean frame time, the mean CPU and the mean network rates. The dashboard reloads its range every 5 s (15 min, 1 h) up to every minute (24 h) instead of using a WebSocket or SSE stream; `since` is there for other clients that want to append.
 
 ### Config editor
 
@@ -233,6 +237,8 @@ Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the
 |---|---|
 | Login | `POST /login` with `kind: "web"`; accounts that are not admins are refused and their token revoked |
 | `#/token-login?t=<token>` | the launcher's one-time sign-in link: strips the token from the URL, redeems it with `POST /web-token/redeem`, then behaves like a login (same admin check); failures land on the login page with a notice |
+| `#/register` | public, no sign-in: the server's page for new player accounts (`GET /server` for the name and whether registration is open, then `POST /register`). The launcher's *Create one* link and the game's *Create account* button (through the hook's `register_url`) open it |
+| first run (any address) | while signed out, `GET /setup`: when `needed` (no account yet, and the browser runs on the server's computer) the login page is replaced by *Welcome*: the first admin's name and password go to `POST /setup`, which signs it in |
 | `#/dashboard` | `GET /server`, `/admin/instances`, `/admin/sessions`, every 5 s; the **server control** card: Restart and Stop each open a confirmation dialog (optional message to the players, countdown in seconds) and call `POST /admin/server/restart|stop`; a running countdown shows with a Cancel button (`POST /admin/server/cancel`). The **Activity** card draws players and instances, simulation frame time (mean and longest), memory and CPU from `GET /admin/metrics` (range picker 15 min, 1 h, 6 h, 24 h; hand-rolled SVG with the theme's tokens, hover or arrow keys for exact values, reloaded every 5 to 60 s depending on the range). The **Message of the day** card calls `POST /admin/motd` |
 | every page | a banner at the top of the page from `GET /server` and `GET /admin/server/shutdown` (every 5 s, every 1.5 s while a shutdown is pending or the server does not answer): countdown, restarting, stopped, unreachable; when the server answers again the page checks the session (`GET /me`), toasts and reloads the dashboard |
 | `#/logs` | `POST /admin/logs/ws-ticket`, then `GET /admin/logs/ws?ticket=...` for every connection attempt: level, target and text filters go to the server as the filter message (after 300 ms of typing); pause, autoscroll, at most 3000 lines in the DOM, colour by level, reconnect with backoff (0.5 s doubling to 15 s). A socket that never opens triggers an authenticated call so an expired token returns to the login |
@@ -240,7 +246,7 @@ Repo [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) (private), the
 | `#/schedule` | `GET /admin/schedule` every 10 s: tasks with next run (relative and in the server's zone), last result, an on/off switch; New or Edit task (restart countdown and message; daily, weekly days, interval, cron) with the server's preview of the next 5 runs (`POST /admin/schedule/preview`); History per task; Delete |
 | `#/config` | `GET /admin/config`: **Form** (keys grouped by section with help, defaults, bounds and a "live" or "needs a restart" mark) and **Raw TOML** (live syntax check with line and column, Go to line); **Review changes** shows the diff and the validation, then **Save** or **Save and restart** (`POST /admin/config/save`); Backups lists the saved previous files and loads one into the editor |
 | `#/instances` | `GET /admin/instances`; close, create |
-| `#/accounts` | `GET /admin/accounts`; role change, disable and enable |
+| `#/accounts` | `GET /admin/accounts`: one toolbar (search, *All* / *Admins* / *Disabled*, **New account** = `POST /admin/accounts`); a row opens a drawer with the role, state, dates, the link to its characters, *Disable* / *Enable* and *Ban* |
 | `#/characters`, `#/characters/{id}` | `GET /admin/characters[?account=]`, `/admin/characters/{id}` |
 | Announce (sidebar dialog) | `POST /admin/announce` |
 | `#/inventory`, `#/passives` | stubs ("waiting for the inventory work"), only when built with `VITE_FEATURE_INVENTORY` / `VITE_FEATURE_PASSIVES` = `true` |
