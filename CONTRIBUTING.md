@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking at the project. This is an unofficial, personal and educational private server for **Path of Exile 2 client 0.5.5e**, in Rust. Read the [disclaimer in the README](README.md#disclaimer) first: it is not affiliated with Grinding Gear Games, no game files are distributed, and nothing here is meant for official servers.
+Thanks for looking at the project. This is an unofficial, personal and educational private server for **Path of Exile 2 client 0.5.5e Hotfix 1**, in Rust. Read the [disclaimer in the README](README.md#disclaimer) first: it is not affiliated with Grinding Gear Games, no game files are distributed, and nothing here is meant for official servers.
 
 The work is spread over several repositories (the overview with a dependency diagram: [docs/overview.md](docs/overview.md)). This one is the hub: docs, plans, reverse-engineering notes, scripts and the dev tooling (`xtask`); the code is in git submodules under `modules/`:
 
@@ -97,7 +97,7 @@ It checks relative links and heading anchors. Style: say what is, concisely, in 
 
 Findings from analysing the client go in [docs/re/](docs/re/README.md), not in code comments or commit messages alone. [docs/re/README.md](docs/re/README.md#where-findings-go) says which file takes which topic (addresses, crypto, standalone login, captures, terrain, data mining). The rules:
 
-- **Addresses** (functions, structs, offsets) go in [docs/re/addresses-0.5.5e.md](docs/re/addresses-0.5.5e.md), for the 0.5.5e build only, with the Ghidra name and what it does. If the DLL uses the address, it is a signature in `modules/client-hook/signatures/<version>.toml`, not a literal ([docs/re/update-compatibility.md](docs/re/update-compatibility.md) explains the inventory).
+- **Addresses** (functions, structs, offsets) go in [docs/re/addresses.md](docs/re/addresses.md), for the supported build (0.5.5e Hotfix 1) only, with the Ghidra name and what it does. If the DLL uses the address, it is a signature in `modules/client-hook/signatures/<version>.toml`, not a literal ([docs/re/update-compatibility.md](docs/re/update-compatibility.md) explains the inventory).
 - **Wire formats** go in [docs/protocol/](docs/protocol/framing.md), with the opcode in `modules/protocol/opcodes/<version>/*.toml`, never as a number in code.
 - Write what you found and how you know: the function, the constant, the capture evidence (by session description, not by pasting packets), and what is still a guess. Do not paste decompiler output or any part of the game's code, assets or tables; describe the behaviour in your own words. A few names and offsets are research notes, long listings are copying.
 - Official-server captures belong to the user who played them and stay in the git-ignored `dumps/<version>/captures/`; docs quote at most the field names and numeric values needed to define a layout. No account names, character names, other players' names or chat lines.

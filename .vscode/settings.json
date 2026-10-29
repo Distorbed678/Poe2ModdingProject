@@ -24,6 +24,6 @@
   "files.exclude": {
     "**/runtime/wt": true
   },
-  "rust-analyzer.files.excludeDirs": ["dumps", "runtime", "GameFiles", "GameFiles-0.5.5e", "third_party"],
+  "rust-analyzer.files.excludeDirs": ["dumps", "runtime", "GameFiles", "third_party"],
   "rust-analyzer.cargo.targetDir": true
 }

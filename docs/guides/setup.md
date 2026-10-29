@@ -8,7 +8,7 @@ This is the only place in `docs/` for commands, log locations and unattended tes
 - clang and lld (`clang-cl`, `lld-link`), used by cargo-xwin to link the Windows DLL.
 - `gh` and `git`, for the tool downloads.
 - Steam with Proton Experimental, to run the client.
-- `GameFiles/`: a copy of the 0.5.5e client install (not in git). The Steam install itself is never used or modified.
+- `GameFiles/`: a copy of the 0.5.5e Hotfix 1 client install (not in git). The Steam install itself is never used or modified.
 
 ## Tools
 Run `third_party/fetch-tools.sh` to download every external tool into `third_party/` (listed in [third_party/README.md](../../third_party/README.md)): poe_data_tools CLI, dat-schema, LibGGPK3, cargo-xwin, the Python venv `pyenv` for `scripts/re` ([../re/README.md](../re/README.md)), reference repos and the pinned toolchain.
@@ -250,7 +250,7 @@ With Steam running (without it the client logs `Unable to init Steam API` and ex
   - `POE_HOOK_AUTO_KEYS=20000:13` (Enter at 20 s, press Login; `[[ms, vk], ...]` in `auto_keys` form);
   - `POE_HOOK_MOVEMENT_LOG=1` (per-frame movement log, `movement_log` in the config);
   - `POE_HOOK_PATH_LOG=1` (the client's pathfinder plans as `PATHPLAN` lines, `path_log` in the config);
-  - `POE_HOOK_FAKE_FOCUS=1` (the hooked `GetForegroundWindow` returns the game's own window, `*[0x1445d8308]`, so a client on another desktop still sends cursor reports; never while read-only);
+  - `POE_HOOK_FAKE_FOCUS=1` (the hooked `GetForegroundWindow` returns the game's own window, `*[0x1445d8350]`, so a client on another desktop still sends cursor reports; never while read-only);
   - `POE_HOOK_WINDOW_TITLE="PoE2 Test Client"` (the hooks on `CreateWindowExW`/`SetWindowTextW` give the game's main window (class `POEWindowClass`; message boxes and other windows keep their titles) that title, so a desktop rule can match it).
 - `scripts/agent-desktop.sh on|off|status` (KDE Plasma) creates a virtual desktop "Agents" and adds KWin rules that force the game client (window class `steam_app_2694490`), the launcher (`poe2-launcher`) and a test browser (class `poe-agent-browser`) onto it and never let them take focus (otherwise a window that activates itself makes KWin switch the view to its desktop). While the rules are on you cannot type into those windows; tests drive the client through `poe-hook.keys`. Start a visible test browser with `firefox --new-instance --name poe-agent-browser --class poe-agent-browser --profile runtime/agent-browser-profile <url>`. The game rule also matches the official game started from Steam: run `off` before playing it.
 - `scripts/re/send_dev.py <command>` sends a server command over the debug link (like the overlay). The link is authenticated per session, so the script queues a `cmd:<command>` entry in `GameFiles/poe-hook.keys` and the running client DLL sends it.

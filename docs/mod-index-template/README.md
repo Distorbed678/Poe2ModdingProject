@@ -36,7 +36,7 @@ Each version:
 |---|---|---|
 | `version` | yes | A semantic version, the one in the package's `mod.toml`. Unique per mod. |
 | `released` | no | A date such as `2026-10-22`, for display. |
-| `game_versions` | no | The client builds it was made for, for example `["0.5.5e"]`. The launcher offers a version only for a game version it lists (empty means "not stated"). |
+| `game_versions` | no | The client builds it was made for, for example `["0.5.5e.hotfix1"]`. The launcher offers a version only for a game version it lists (empty means "not stated"). |
 | `hook_api` | for a client DLL | The client mod ABI it was built for (`game.hook_api` / `client.hook_api`). The launcher compares it with the ABI of the installed hook. |
 | `server_api` | for a server library | The server API it was built for. |
 | `sha256` | yes | The SHA-256 of the whole zip, 64 hex digits. |

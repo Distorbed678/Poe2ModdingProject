@@ -3,8 +3,8 @@
 Usage: dump_factory.py <switch_base_opcode hex> <count hex> <table_rva hex> <default_va hex> [out.json] [--bytes <byte_table_rva hex>]
 `find_switches.py <func> <len>` prints the numbers (base, count, table rvas, default) of a function's
 switches. With --bytes the switch has an index table (MSVC `movzx idx, [bytes+k]; mov [dwords+idx*4]`).
-Output goes to dumps/0.5.5e/ghidra/ (git-ignored), e.g. instance_factory_s2c.json.
-For the 0.5.5e instance factory (FUN_142170380): dump_factory.py d 35f 217305c 142173040
+Output goes to dumps/0.5.5e.hotfix1/ghidra/ (git-ignored), e.g. instance_factory_s2c.json.
+For the instance factory (FUN_142170500): dump_factory.py d 35f 217305c 142173040
 The vtable is the first rip-relative LEA into .rdata within the case that is stored as a
 pointer; vtable slot 2 is the deserializer (slot 1 the serializer).
 """
@@ -46,7 +46,7 @@ for i in range(count):
             if rdata_lo <= tgt < rdata_hi and vtable is None:
                 vtable = tgt
         if ins.mnemonic == "call" and size is not None and ctor is None and ins.operands[0].type == x86.X86_OP_IMM:
-            if ins.operands[0].imm != 0x142bba3c0:
+            if ins.operands[0].imm != 0x142bba600:
                 ctor = ins.operands[0].imm
         if ins.mnemonic in ("jmp", "ret") or (vtable and ctor):
             break

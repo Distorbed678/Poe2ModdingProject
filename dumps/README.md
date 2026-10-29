@@ -2,10 +2,10 @@
 
 Local datamined and generated outputs. Everything here except this file is git-ignored, so a fresh clone has an empty tree. Anything below can be regenerated (see the last column); the captures and the tables the client DLL writes need a play session.
 
-Versioned by client build: `dumps/0.5.5e/`. The folder is written by the client DLL (`dump_dir` in `GameFiles/poe-hook.toml`, set by `cargo xtask deploy-client`) and read by the server (`[spawn] layout_dir`, `[dev] known_seeds`, `[dev] sweep_results` in `modules/server/config/server.toml`).
+Versioned by client build: `dumps/0.5.5e.hotfix1/`. The folder is written by the client DLL (`dump_dir` in `GameFiles/poe-hook.toml`, set by `cargo xtask deploy-client`) and read by the server (`[spawn] layout_dir`, `[dev] known_seeds`, `[dev] sweep_results` in `modules/server/config/server.toml`).
 
 ```
-dumps/0.5.5e/
+dumps/0.5.5e.hotfix1/
   terrain/
     grids/         terrain_grid_<tile hash>.bin     client DLL, on every area load
     layouts/       terrain_layout_<tile hash>.tsv   client DLL, on every area load

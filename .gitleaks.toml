@@ -7,10 +7,10 @@ useDefault = true
 # The only allowlisted finding: `key_xor` in the HNC opcode table. It is the 64-byte XOR table the
 # game client keeps for its anti-cheat side channel (docs/re/crypto.md), kept on purpose as a
 # documented reverse-engineering constant. It is not a credential. One rule, one file:
-# `opcodes/0.5.5e/hnc.toml` (the Poe2Protocol submodule and its nested checkouts) and, in the
+# `opcodes/0.5.5e.hotfix1/hnc.toml` (the Poe2Protocol submodule and its nested checkouts) and, in the
 # history, `protocol/0.5.5e/hnc.toml` (where the file lived before the repository split).
 [[allowlists]]
-description = "HNC key_xor table: RE constant from the 0.5.5e client, not a credential (D-01)"
+description = "HNC key_xor table: RE constant from the 0.5.5e Hotfix 1 client, not a credential (D-01)"
 targetRules = ["generic-api-key"]
 paths = [
   '''(^|/)opcodes/0\.5\.5e/hnc\.toml$''',

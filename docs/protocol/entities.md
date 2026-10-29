@@ -1,16 +1,16 @@
-# Entity initial state (0.5.5e)
+# Entity initial state (0.5.5e Hotfix 1)
 
-The blob in `AddObject` (S→C `0x2f7`) is read by `0x141e71120(entity, stream)`:
+The blob in `AddObject` (S→C `0x2f7`) is read by `0x141e712a0(entity, stream)`:
 
 ```
 u8  flags          bit 0 -> entity +0x8d |= 1, bit 1 -> |= 4
-u8  n              then n × (u32, u8, data via 0x141e7e9d0)   (0x141e71420)
+u8  n              then n × (u32, u8, data via 0x141e7eb50)   (0x141e715a0)
 ... component sections, in object-template order (vtable +0x98 of each)
-u8  m              then m × (u16 LE key, data via 0x141e7dbe0)
+u8  m              then m × (u16 LE key, data via 0x141e7dd60)
 ```
 
 - Integers inside the blob are **little-endian** (copied raw).
-- Compact integers use the packet varint coding (`0x1419970a0` unsigned, `0x141e25d50` signed).
+- Compact integers use the packet varint coding (`0x141997220` unsigned, `0x141e25ed0` signed).
 - Only the first *k* components are serialized, where *k* = object type +0x28 → +0x78. Client-only components (Render, Targetable, BuffOrbs) follow them.
 - The client does not check that the blob is fully consumed.
 
@@ -19,31 +19,31 @@ Components in order, with their readers. Sizes are measured with every flag and 
 
 | # | Component | Reader | Bytes | Layout (zero flags) |
 |---|---|---|---|---|
-| 0 | Positioned | `0x141dd8820` | 17 | `i32 grid x (+0x444), i32 grid y (+0x448), u32 (+0x44c), u16 team (+0x1e0), u8 flags[3]`; a type flag adds a leading 8 bytes for some objects. Flags0: bit 2 `u32, u32` explicit height (+0x440/+0x48c), bit 5 `3 × u32` (+0x474/+0x46c/+0x470), bit 6 `2 × u32` world position (else from the grid), bit 7 → +0x1e5 bit 1. Flags1: bit 0 `3 × u32 + 2 bytes + u32 + 4 bytes`, bit 1 `u8, u8`, bit 2 `4 × u32`, bit 3 `u8, u8`, bit 4 `u32`, bit 6 `u8`, bit 7 `u8`. Flags2: bit 1 sub-reader `0x141ec9ba0` |
-| 1 | Stats | `0x142180fe0` | 13 | `varuint n, (varuint stat, varint value)[n]`, player section `u8, u8 (ShapeshiftForms row+1), u8[3] (ShapeshiftForms rows+1), u8 count`, `u32, u8, u8` |
+| 0 | Positioned | `0x141dd89a0` | 17 | `i32 grid x (+0x444), i32 grid y (+0x448), u32 (+0x44c), u16 team (+0x1e0), u8 flags[3]`; a type flag adds a leading 8 bytes for some objects. Flags0: bit 2 `u32, u32` explicit height (+0x440/+0x48c), bit 5 `3 × u32` (+0x474/+0x46c/+0x470), bit 6 `2 × u32` world position (else from the grid), bit 7 → +0x1e5 bit 1. Flags1: bit 0 `3 × u32 + 2 bytes + u32 + 4 bytes`, bit 1 `u8, u8`, bit 2 `4 × u32`, bit 3 `u8, u8`, bit 4 `u32`, bit 6 `u8`, bit 7 `u8`. Flags2: bit 1 sub-reader `0x141ec9d20` |
+| 1 | Stats | `0x142181160` | 13 | `varuint n, (varuint stat, varint value)[n]`, player section `u8, u8 (ShapeshiftForms row+1), u8[3] (ShapeshiftForms rows+1), u8 count`, `u32, u8, u8` |
 | 2 | Pathfinding | – | 0 | |
-| 3 | Buffs | `0x141db4f00` | 2 | `u16 count` |
-| 4 | Life | `0x141d8c0e0` | 125 | pools long/short/long/short/long/long (`u32, (u32, i16), u32` + `u32` in the long form), 3 × `(u32, i16)` (count from the type), `(u32, i16)`, `u8 flags` |
-| 5 | Animated | `0x141da6540` | 1 | `u8 flags`; bit 0: animated object, as `u32` row (bit 1) or `u32 count + UTF-16LE path` (skipped if equal to the current AO); bit 2 sub-reader `0x141da9e40`; bit 3 `u32 animation, f32, u32` starts an animation (`0x141d439e0`; index into the AO's `.amd`, e.g. `OneRig.amd` has only `idle_01`), then bit 5 `u32, u32`; bit 4 `u32`; bit 6 → +0x18a; bit 7 `5 × u32` (+0x25c..+0x278) |
-| 6 | Player | `0x141dcf320` | 39 + 2×name | `u32 len + UTF-16LE name, u8 class (PlayerClass +0x158), u32 (0x141dd11e0), u32 (+0x1d0), u32 (+0x1d4), u16 (+0x200), u16 (+0x202), u16 n + (u8, u64)[n], u16 n + (u8, u64)[n], u8[5], u16, u16 (two Hideouts.dat keys), u8 flags (bit 0: "WashedUp" intro, bit 1, bit 2, bit 3), u8, u8, varuint n + u32[n], u8 n + entries` |
+| 3 | Buffs | `0x141db5080` | 2 | `u16 count` |
+| 4 | Life | `0x141d8c260` | 125 | pools long/short/long/short/long/long (`u32, (u32, i16), u32` + `u32` in the long form), 3 × `(u32, i16)` (count from the type), `(u32, i16)`, `u8 flags` |
+| 5 | Animated | `0x141da66c0` | 1 | `u8 flags`; bit 0: animated object, as `u32` row (bit 1) or `u32 count + UTF-16LE path` (skipped if equal to the current AO); bit 2 sub-reader `0x141da9fc0`; bit 3 `u32 animation, f32, u32` starts an animation (`0x141d43b60`; index into the AO's `.amd`, e.g. `OneRig.amd` has only `idle_01`), then bit 5 `u32, u32`; bit 4 `u32`; bit 6 → +0x18a; bit 7 `5 × u32` (+0x25c..+0x278) |
+| 6 | Player | `0x141dcf4a0` | 39 + 2×name | `u32 len + UTF-16LE name, u8 class (PlayerClass +0x158), u32 (0x141dd1360), u32 (+0x1d0), u32 (+0x1d4), u16 (+0x200), u16 (+0x202), u16 n + (u8, u64)[n], u16 n + (u8, u64)[n], u8[5], u16, u16 (two Hideouts.dat keys), u8 flags (bit 0: "WashedUp" intro, bit 1, bit 2, bit 3), u8, u8, varuint n + u32[n], u8 n + entries` |
 | 7 | PlayerClass | – | 0 | |
-| 8 | Inventories | `0x141d82a40` | 2 | `u8 n + (u8 slot, inventory ref 0x1426c3f60)[n], u8 k + u32[k]` |
-| 9 | Actor | `0x1416d8090` → `0x142147180` | 48 + skills | partly decoded: 3 × (`u8`, `u8`, `u32` length + UTF-16 string), sub-reader `0x142149390` (`u8` flags, then the [skill list](#actor-skills)), flags (`0x14214c4e0`), 4 × (u8 flags + up to 3 × u32), `u32` (+0x4bc); flags bit 1 wstring, bit 2 `u8` (`0x141e52b90`), bit 3 `u32` (+0x230, then stat 0x77a `actor_scale_+%` is read); if a component's +0x1e0 < 1, `u16 animation, u8, u32` (current animation). Zeros work |
+| 8 | Inventories | `0x141d82bc0` | 2 | `u8 n + (u8 slot, inventory ref 0x1426c41a0)[n], u8 k + u32[k]` |
+| 9 | Actor | `0x1416d8210` → `0x142147300` | 48 + skills | partly decoded: 3 × (`u8`, `u8`, `u32` length + UTF-16 string), sub-reader `0x142149510` (`u8` flags, then the [skill list](#actor-skills)), flags (`0x14214c660`), 4 × (u8 flags + up to 3 × u32), `u32` (+0x4bc); flags bit 1 wstring, bit 2 `u8` (`0x141e52d10`), bit 3 `u32` (+0x230, then stat 0x77a `actor_scale_+%` is read); if a component's +0x1e0 < 1, `u16 animation, u8, u32` (current animation). Zeros work |
 
 Class and default stats (character panel, Ranger level 1): Str 7, Dex 15, Int 7, Life 28, Mana 34, Evasion 5%, mana regeneration 1.4/s. The object type is the class (`Characters.Id`). Stats come from the merged object template (`Character.ot`) plus the class's base attributes and per-level stats (`poe_game::stats`); the Player component sends the class byte, and Animated the class's `.ao`.
 
 Status: with these sections plus the inventories and InitialState from [instance.md](instance.md) (including its frame length), the player is drawn with the class's model and default stats, in town and in the washed-up intro.
 
 ## NPCs (`Metadata/NPC/NPC.ot`)
-Serialized components: Positioned, Animated, InteractionAction (`0x141d81300`), NPC (`0x141d966a0`), MinimapIcon, Transitionable (`0x142180310`, `u8`: bits 0-6 state, bit 7), StateMachine (`0x14214cad0`/`0x141dfa320`).
+Serialized components: Positioned, Animated, InteractionAction (`0x141d81480`), NPC (`0x141d96820`), MinimapIcon, Transitionable (`0x142180490`, `u8`: bits 0-6 state, bit 7), StateMachine (`0x14214cc50`/`0x141dfa4a0`).
 
 StateMachine: `u8 shared-state count, u8 second count, then per shared state (flag +0x2c in the type) varint value + u8 flags, per second-kind entry u32 + u8`. The counts must equal the number of states the template defines (`define_shared_state`), else "Number of shared states is different on client and server! Delta: N". Example: `Una` defines `visible`, so `[1, 0, 1, 0]`.
 
-Spawning `Una` that way gets through the readers but crashes in the client's script interpreter (`0x1426f2220`, null bytecode). Its states are per-player quest flags, which the server does not send yet. Client-only types (doodads such as `EzomyteCivilianMale01`) are rejected: "Unknown object type serialized by server".
+Spawning `Una` that way gets through the readers but crashes in the client's script interpreter (`0x1426f2460`, null bytecode). Its states are per-player quest flags, which the server does not send yet. Client-only types (doodads such as `EzomyteCivilianMale01`) are rejected: "Unknown object type serialized by server".
 
 ## Actor skills
-The Actor component's skill container (`0x14218a850`, read after the sub-reader's flags byte; all integers little-endian):
-1. `u8` skill count, then that many skills (`0x14218afb0` → `0x142188bd0`).
+The Actor component's skill container (`0x14218a9d0`, read after the sub-reader's flags byte; all integers little-endian):
+1. `u8` skill count, then that many skills (`0x14218b130` → `0x142188d50`).
 2. `u8` count + (`u32` ActiveSkills row, `u32`, `u32`) entries.
 3. `u8` count + `u8` entries.
 4. `u32` count + (`u32` skill id, `u32 n`, `n` × 4 × `u32`) entries.
@@ -54,7 +54,7 @@ One skill:
 |---|---|
 | `u32` id | skill instance id; use requests (`0x1a5`) and actions (`0x1c8`) refer to it |
 | `u8` slot | bits 6–7 and 0–5 select a weapon set / item slot; 0 = the character |
-| effect | `u8, u32 GrantedEffectsPerLevel row`, then a stat-set reference (`u8 b, [u8 if b], u32 GrantedEffectStatSetsPerLevel row`) for the base stat set and one per `GrantedEffects.AdditionalStatSets` entry (`0x142683e50`, `0x142683b70`) |
+| effect | `u8, u32 GrantedEffectsPerLevel row`, then a stat-set reference (`u8 b, [u8 if b], u32 GrantedEffectStatSetsPerLevel row`) for the base stat set and one per `GrantedEffects.AdditionalStatSets` entry (`0x142684090`, `0x142683db0`) |
 | `u8` flags | bit 0: `u32 parent object, u32` follow |
 | `u8` count | supports: (effect, `u32`) each |
 | `u32, u32, u32, u8` | |
@@ -66,7 +66,7 @@ The table rows are resolved with `poe_data::views::GrantedSkill` (DodgeRollPlaye
 
 # Other players: add, actions, remove, party and trade (WP3.5)
 
-Source: the read-only official town capture `dumps/0.5.5e/captures/official/2026-10-20_21-51-49_336/` (the first zone, then Clearfell Encampment with three other players for about 150 seconds; session row in [../re/captures.md](../re/captures.md#town-capture-with-other-players-2026-10-20)). Character names and chat text never go into the repository: this page calls the other players `<player-1>` (a Ranger-line class, class byte 2, level 10), `<player-2>` (Witch-line, class 7, level 10) and `<player-3>` (class 11, level lower) with entity ids 12000, 12002 and 12009; the local player is 12013. Decoders: `modules/protocol/poe-proto/src/player_blob.rs` (blobs) and `remote.rs` (messages), tests with the real bytes re-encoded under placeholder names (`poe-proto/tests/data/*.hex` are anonymised blobs).
+Source: the read-only official town capture `dumps/0.5.5e.hotfix1/captures/official/2026-10-20_21-51-49_336/` (the first zone, then Clearfell Encampment with three other players for about 150 seconds; session row in [../re/captures.md](../re/captures.md#town-capture-with-other-players-2026-10-20)). Character names and chat text never go into the repository: this page calls the other players `<player-1>` (a Ranger-line class, class byte 2, level 10), `<player-2>` (Witch-line, class 7, level 10) and `<player-3>` (class 11, level lower) with entity ids 12000, 12002 and 12009; the local player is 12013. Decoders: `modules/protocol/poe-proto/src/player_blob.rs` (blobs) and `remote.rs` (messages), tests with the real bytes re-encoded under placeholder names (`poe-proto/tests/data/*.hex` are anonymised blobs).
 
 ## Findings in one list
 - **A remote player is one `AddObject`** (`0x02f7`) with the same header, the same component list and the same blob layout as the local player. There is **no** `LocalPlayers`, `PlayerEntity`, `AddInventory` or `InitialState` `PlayerState` for it (the town `InitialState` is 121 bytes, as in a solo zone). Which entity is "mine" is only decided by the session's `PlayerEntity` id.
@@ -83,7 +83,7 @@ Both use the layout of the first half of this page; the decoder is `PlayerBlob::
 |---|---|---|
 | header | `AddObject` header `(entity, 0xffffffff, 0, 0)`, type key = the class's `Metadata/Characters/...` path (`Dex/DexFour`, `Int/IntFourb`, `StrInt/StrIntFourb`) | same |
 | `u8 flags` | 2 (wake zone) | 2 |
-| link records | `u8 n`, each `u32 key, u8 tag, u8 count, [u8 kind, count × u32]` read by `0x141e71420`/`0x141e7e9d0`. Kind 1 = **entity ids** (forward references are queued), kind `0x0b` = plain integers. Observed: key `0xb350ac3a`, tag 1, kind 1, one id = the object the player last **interacted with** (35 = an NPC, 83 = the stash); `<player-3>`'s pet adds key `0x951dd509` (tag 0, kind `0x0b`, the pet entity 12010) first. A pet's own blob has `0x40f0fc9c` (tag 0, kind 1, its owner) and `0xcd30e41f` (tag 1, kind `0x0b`, 1) | none (`n = 0`) |
+| link records | `u8 n`, each `u32 key, u8 tag, u8 count, [u8 kind, count × u32]` read by `0x141e715a0`/`0x141e7eb50`. Kind 1 = **entity ids** (forward references are queued), kind `0x0b` = plain integers. Observed: key `0xb350ac3a`, tag 1, kind 1, one id = the object the player last **interacted with** (35 = an NPC, 83 = the stash); `<player-3>`'s pet adds key `0x951dd509` (tag 0, kind `0x0b`, the pet entity 12010) first. A pet's own blob has `0x40f0fc9c` (tag 0, kind 1, its owner) and `0xcd30e41f` (tag 1, kind `0x0b`, 1) | none (`n = 0`) |
 | Positioned | `i32 x, i32 y` (grid), `f32` facing (+0x44c), `u16` team 1, `u8[3]` 0 (no optional sections) | same layout |
 | Stats | 58-77 base stats (key 1 = `level`: remote 10; also `maximum_life`, resistances, accuracy, `cannot_die` = 1 in town, ...), `u8 0, u8 0, u8[3] = 2, 2, 2`, then **4 stat sets** `(u8 id, stat list)` with ids `0x40`/`0x41` (weapon sets 1/2) and `0x80`/`0x81` (main/off hand weapon; `0x81` empty), then `u32 0, u8 0, u8 1` | 73 base stats, the same four sets |
 | Buffs | `u16 n`; each: `u16 id, u8, u16 buff row, u16, u32 duration f32 bits (0x7f800000 = infinite), u32 1.0f, u16, u32 owner entity (the player), u16, u16, u32, u32, varuint, u8, i32 k, k × u32`. A town player has one hidden permanent buff (row `0x4a4`); the list at the end is non-empty for `<player-3>`. Definition-dependent fields (see `BuffAdded`) are assumed absent | 0 buffs at entry |
@@ -159,13 +159,13 @@ Built in `modules/server/servers/instance-server/src/social.rs` (`Social`, held 
 
 A session that ends (or is replaced) cancels what it had open: an invitee that leaves is a cancel for the inviter, a leader that leaves ends every invitation, a trade partner that leaves closes the trade. Party ids and trade ids count up from `Social::starting_at` (the tests start at the capture's `0xcfc43` and 1). Refusals (not online, yourself, already invited or trading) come back as a server chat line.
 
-**How the invitee's side was derived (static RE, `docs/re/addresses-0.5.5e.md`)**
-- `PartyUpdate` is handled by `Session_HandleAccountMessage` (`0x142106a30`) case `0xc8`. The member roles map to a state: role 2 = leader, 1 = member, 0 = **invited**, other = none (`0x1421063f0`). The client takes its own state from `members[unk_0]` (`unk_0` = the local player's index in the list, `0xff` = none; the capture's inviter is at 0). A new `PartyUpdate` whose own state is "invited" and whose party id is not the current party creates an **invitation record** (`Social_AddPartyInvitation` `0x14210b630`, keyed by party id, kept in a list at session `+0x7620`), which raises the UI event "party invitation received" (`FourSocialPartyReceive`, listener `0x140feb9c0` builds the popup). The record carries the leader's social entry, looked up by name in the session's social list (`+0x27d8`, case-insensitive), so the server sends the leader's `SocialEntry` first; without character data on the entry no popup is shown (`0x14210b740`).
+**How the invitee's side was derived (static RE, `docs/re/addresses.md`)**
+- `PartyUpdate` is handled by `Session_HandleAccountMessage` (`0x142106bb0`) case `0xc8`. The member roles map to a state: role 2 = leader, 1 = member, 0 = **invited**, other = none (`0x142106570`). The client takes its own state from `members[unk_0]` (`unk_0` = the local player's index in the list, `0xff` = none; the capture's inviter is at 0). A new `PartyUpdate` whose own state is "invited" and whose party id is not the current party creates an **invitation record** (`Social_AddPartyInvitation` `0x14210b7b0`, keyed by party id, kept in a list at session `+0x7620`), which raises the UI event "party invitation received" (`FourSocialPartyReceive`, listener `0x140feb9c0` builds the popup). The record carries the leader's social entry, looked up by name in the session's social list (`+0x27d8`, case-insensitive), so the server sends the leader's `SocialEntry` first; without character data on the entry no popup is shown (`0x14210b8c0`).
 - When the own state becomes "member" (role 1) the record is removed and `FourSocialPartyAccept` is raised; `PartyEnded` for an id that is not the current party removes the record (`0xc9`: the id is compared with session `+0x2278`, the party the player is in). Whether an open popup closes by itself is not known.
 - `TradeState` (`0xd9`) copies its fields into the session's trade record (`+0x7a28`) and raises an event; `TradeInvite_OnTradeState` (`0x1402c3cb0`) opens the popup string `TradeInviteFrom;` only if the trade id is not 0, record flag byte (`unk_c`) has **bit 1 set and bit 0 clear**, and the other character's `SocialEntry` is in the social list (looked up by the name in the state). The requester's `0x31` has bit 0 set, so the client does not show a popup for its own request; the target's value `0x32` is verified in game. `TradeAck` (`0xda`) clears the record and raises its event; `0xe0` (the two `TradeEvent`s) is the inventory handler of the client (clear the trade-window inventories 2 and 1).
 
 **Gate G-PARTY: accept and decline are not implemented**
-- Party **accept** and **decline** are *decoded from the client's code but never seen on the wire*: C→S `0x00b8` `PartyAccept` and `0x00b9` `PartyDecline`, both `u8 local, u32 party id` (the invite popup's callbacks `PartyInvitePopup_Accept` `0x140c9ef70` and `PartyInvitePopup_Decline` `0x140c9eee0` -> `Social_SendPartyDecline` `0x142110ab0`). They are registered in `instance.toml` and `poe-proto` (`PartyAccept`, `PartyDecline`), the server **only logs** them: `party answer not implemented: needs capture G-PARTY`. The server-side effect of an accept is probably a `PartyUpdate` with the invitee's role 1 (member) for everyone, which the client turns into `FourSocialPartyAccept`; nothing else is known (the `PartyUpdate` `unk_1`, `unk_2`, `state`, what a member's `tail` means, the party list for 3+ members, the reason code for "declined" or "timed out" in `PartyEnded`).
+- Party **accept** and **decline** are *decoded from the client's code but never seen on the wire*: C→S `0x00b8` `PartyAccept` and `0x00b9` `PartyDecline`, both `u8 local, u32 party id` (the invite popup's callbacks `PartyInvitePopup_Accept` `0x140c9ef70` and `PartyInvitePopup_Decline` `0x140c9eee0` -> `Social_SendPartyDecline` `0x142110c30`). They are registered in `instance.toml` and `poe-proto` (`PartyAccept`, `PartyDecline`), the server **only logs** them: `party answer not implemented: needs capture G-PARTY`. The server-side effect of an accept is probably a `PartyUpdate` with the invitee's role 1 (member) for everyone, which the client turns into `FourSocialPartyAccept`; nothing else is known (the `PartyUpdate` `unk_1`, `unk_2`, `state`, what a member's `tail` means, the party list for 3+ members, the reason code for "declined" or "timed out" in `PartyEnded`).
 - Trade **accept** and **decline**: not found; the in-game check showed that the popup's 15 s timeout is a client `TradeCancel`, which a decline most likely is too. The trade popup (`TradeInvite_ShowPopup` `0x1402c3fb0`) returns a bool through a promise object (`0x1402c3c30`) and the sender was not traced; a decline may well be `TradeCancel` and an accept a `TradeRequest` back to the requester (PoE1 style), but nothing is known, so the server logs those client messages as unknown (`received` + hex dump, batch skipped) if they are anything else.
 - **What the official capture must contain** (a second human answering; the user's client is the one that logs; read-only on the official server, [the capture how-to](../re/captures.md)): play with a friend in the same town and do these in this order, a few seconds apart, **once with the user as the inviter and once with the user as the invitee**:
   1. Friend invites the user to a party; the user **accepts** (popup button). Then leave the party (the social panel or `/leave`), and kick/let the friend leave once if easy.
@@ -244,7 +244,7 @@ Built in `modules/server/servers/instance-server/src/actor.rs` and `appearance.r
 - **Pause** is for a lone player only; with company the request is refused and the client is told "not paused" (UNVERIFIED reply).
 
 ## Remote player look (WP C2)
-Why the remote player looked darker and orange in the two-client test, and what the remote blob now contains. Evidence: the decoded blobs of the town capture (`dumps/0.5.5e/captures/official/2026-10-20_21-51-49_336`, entities 12000, 12002, 12009 remote, 12013 and 91 local) against what `remote_blob` produced until WP C2. The anonymised official blobs are `modules/protocol/poe-proto/tests/data/*.hex`; the test `the_remote_blob_has_the_official_parts_and_flags` (`appearance.rs`) checks field presence, flags and constants against them.
+Why the remote player looked darker and orange in the two-client test, and what the remote blob now contains. Evidence: the decoded blobs of the town capture (`dumps/0.5.5e.hotfix1/captures/official/2026-10-20_21-51-49_336`, entities 12000, 12002, 12009 remote, 12013 and 91 local) against what `remote_blob` produced until WP C2. The anonymised official blobs are `modules/protocol/poe-proto/tests/data/*.hex`; the test `the_remote_blob_has_the_official_parts_and_flags` (`appearance.rs`) checks field presence, flags and constants against them.
 
 **The cause is not proven.** No bisect was run in the game yet (the client was in use). What the diff shows:
 

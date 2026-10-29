@@ -3,9 +3,9 @@
 
 Sources, later ones win:
 1. Ghidra's named functions (MSVC runtime and library names), exported with the Ghidra MCP
-   `search_functions_enhanced(has_custom_name=true)` into dumps/0.5.5e/ghidra/ghidra_named_functions_p*.json.
+   `search_functions_enhanced(has_custom_name=true)` into dumps/<version>/ghidra/ghidra_named_functions_p*.json.
 2. Our documented addresses: the first column of every table row in
-   docs/re/addresses-0.5.5e.md (`| `0x14...` | description | ...`); the description
+   docs/re/addresses.md (`| `0x14...` | description | ...`); the description
    becomes the name.
 
 The DLL shows `name+offset` for addresses inside a named function and `FUN_<start>+offset` for
@@ -40,7 +40,7 @@ def main():
         inner = json.loads(outer["result"]) if isinstance(outer.get("result"), str) else outer
         for f in inner.get("results", []):
             names[int(f["address"], 16)] = f["name"]
-    doc = (ROOT / "docs/re" / f"addresses-{current_version()}.md").read_text()
+    doc = (ROOT / "docs/re" / "addresses.md").read_text()
     for line in doc.splitlines():
         m = re.match(r"^\|\s*`(0x14[0-9a-fA-F]{7})`\s*\|\s*([^|]+)\|", line)
         if m:

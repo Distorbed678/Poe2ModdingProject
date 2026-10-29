@@ -74,7 +74,7 @@ def check_entry(i, e, seen_ids, seen_addrs):
     if len(e.get("region", "")) > 24:
         p.append(f"{where}: region is at most 24 characters")
     if not VERSION.match(e["game_version"]):
-        p.append(f"{where}: game_version looks like 0.5.5e")
+        p.append(f"{where}: game_version looks like 0.5.5e.hotfix1")
     tags = e.get("tags", [])
     if not isinstance(tags, list) or len(tags) > 8 or not all(isinstance(t, str) and TAG.match(t) for t in tags) or len(set(tags)) != len(tags):
         p.append(f"{where}: tags: at most 8, unique, a-z 0-9 and - (24 characters each)")

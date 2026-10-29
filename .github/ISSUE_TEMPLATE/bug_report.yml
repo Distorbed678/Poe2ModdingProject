@@ -24,7 +24,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "Commit hash or release tag of Poe2ModdingProject, and the game client build (0.5.5e is the supported one)."
+      description: "Commit hash or release tag of Poe2ModdingProject, and the game client build (0.5.5e.hotfix1 is the supported one)."
     validations:
       required: true
   - type: dropdown

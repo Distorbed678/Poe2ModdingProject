@@ -6,7 +6,7 @@
 //   dumps/0.5.5e.hotfix1/addr_map.tsv /PathOfExileSteam.exe
 // Functions outside .pdata (leaf functions, thunks) are placed with a neighbour's delta and
 // accepted only when their first bytes are equal; what cannot be placed is listed. Comments
-// outside functions are not ported: in the 0.5.5e program they were all analysis output (RTTI,
+// outside functions are not ported: in the old program they were all analysis output (RTTI,
 // imports), which the new program's analysis makes again. docs/re/README.md
 //@category PoE2
 import ghidra.app.script.GhidraScript;

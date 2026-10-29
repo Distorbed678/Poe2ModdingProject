@@ -1,7 +1,7 @@
 """Spec for scripts/re/sig_gen.py: the 0.5.5e.hotfix1 entries of modules/client-hook/signatures/0.5.5e.hotfix1.toml.
 
 Addresses are Ghidra addresses (image base 0x140000000) of client 0.5.5e.hotfix1 (0.5.5e Hotfix 1, revision 326410).
-Made from sig_spec_0.5.5e.py with scripts/re/addr_map.py (every address moved by its function's delta). `features` names the
+Made from sig_spec_0.5.5e.hotfix1.py with scripts/re/addr_map.py (every address moved by its function's delta). `features` names the
 DLL features that are off when the entry does not resolve (see poe-hook-core `start_features`).
 For another build, run the generator on that exe with the (moved) addresses.
 """

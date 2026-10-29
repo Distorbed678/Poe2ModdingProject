@@ -86,9 +86,9 @@ Same as plan 1, which has the full text. Specifically:
 
 **WP A1: assessment (analysis only, no code)**
 - Inventory everything that breaks when GGG ships a new build:
-  - fixed Ghidra addresses: the DLL hooks, `login_patch` (`ClientPlatform_Detect` 0x142196ec0, `StandalonePatcher_Run`), the side-channel key hook 0x14212aa90, the trace and dump hooks, `symbols.tsv`, and `docs/re/addresses-0.5.5e.md`;
+  - fixed Ghidra addresses: the DLL hooks, `login_patch` (`ClientPlatform_Detect` 0x142197010, `StandalonePatcher_Run`), the side-channel key hook 0x14212ac10, the trace and dump hooks, `symbols.tsv`, and `docs/re/addresses.md`;
   - struct offsets (Positioned +0x444/+0x490, Actor +0x400, Player slots +0x214);
-  - opcodes (`modules/protocol/opcodes/0.5.5e/*.toml`);
+  - opcodes (`modules/protocol/opcodes/0.5.5e.hotfix1/*.toml`);
   - message layouts (poe-proto);
   - the dat-schema and table columns (poe-data);
   - the bundle paths and the version string in config, xtask, launcher `versions/*.toml`, and DepotDownloader manifests;
@@ -148,7 +148,7 @@ Same as plan 1, which has the full text. Specifically:
   - Verify in game with the drift checker. Target: under 8 cells, and about 0 after the stop.
 - **WP C2: multiplayer polish:**
   - spread the spawn cells, so a second player doesn't stand on the first;
-  - fix the remote player's dark or orange tint by comparing our remote blob with the official ones in `dumps/0.5.5e/captures/official/2026-10-20_21-51-49_336`: the missing stat sets, buffs, flag words and equipment visuals (see `docs/protocol/entities.md`);
+  - fix the remote player's dark or orange tint by comparing our remote blob with the official ones in `dumps/0.5.5e.hotfix1/captures/official/2026-10-20_21-51-49_336`: the missing stat sets, buffs, flag words and equipment visuals (see `docs/protocol/entities.md`);
   - check the remote roll animation;
   - verify with `scripts/test-mp.sh`.
 - **WP C3: party and trade replies:**

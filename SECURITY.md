@@ -14,7 +14,7 @@ Out of scope: Grinding Gear Games' game, services and anti-cheat; bugs in Path o
 
 ## Supported versions
 
-The project follows **Path of Exile 2 client 0.5.5e**. Only the latest commit on `main` (and the latest release, if there is one) gets fixes.
+The project follows **Path of Exile 2 client 0.5.5e Hotfix 1**. Only the latest commit on `main` (and the latest release, if there is one) gets fixes.
 
 ## Notes for users
 

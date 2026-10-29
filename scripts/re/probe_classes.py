@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Groups the errors of `area_probe` (dumps/0.5.5e/terrain/vectors/probe-results.tsv) by the
+"""Groups the errors of `area_probe` (dumps/0.5.5e.hotfix1/terrain/vectors/probe-results.tsv) by the
 unported system that causes them, and ranks the systems by how many areas each unlocks.
 
 Usage: scripts/re/probe_classes.py [probe-results.tsv] [--areas]
@@ -15,12 +15,12 @@ import collections
 import re
 import sys
 
-DEFAULT = "dumps/0.5.5e/terrain/vectors/probe-results.tsv"
+DEFAULT = "dumps/0.5.5e.hotfix1/terrain/vectors/probe-results.tsv"
 CLASSES = [
     ("dungeon edge types with height change / virtual edge (chirality)", r"chirality not ported"),
-    ("3x3 door spots (0x14209dc90)", r"door tile at"),
+    ("3x3 door spots (0x14209de10)", r"door tile at"),
     ("FileGroups subgraphs", r"FileGroups"),
-    ("height fallback (0x141d05560 / 0x14209fb00)", r"could not fix heights"),
+    ("height fallback (0x141d056e0 / 0x14209fc80)", r"could not fix heights"),
     ("overlays: phase 2, SizeOrder, exclusions, MatchAllTileKeys", r"overlay"),
     ("special rooms: blank, injector, split", r"special room|injector"),
     ("lettered unique tags (session history)", r"lettered unique"),

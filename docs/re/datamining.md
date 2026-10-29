@@ -23,6 +23,6 @@ Format of `.datc64`:
 
 The schema is `third_party/dat-schema/schema-poe2.min.json` (dat-schema version 7, the rolling `latest` release). It is filtered to `validFor & 2` (PoE2). Many PoE2 columns are still unnamed; name them through RE when the server needs them.
 
-## Verified against 0.5.5e
+## Verified against 0.5.5e (the same data in Hotfix 1)
 - `Characters`: 12 rows. The ids are `Metadata/Characters/<Attr>/<Attr>Four` and `...Fourb` (male/female variants).
 - `WorldAreas`: `G1_1` = "The Riverbank", act 1, level 1, HASH16 3860. The schema row width (736) matches the file.

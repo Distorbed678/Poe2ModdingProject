@@ -64,8 +64,8 @@ Acceptance: the sample is byte-identical; live movement collides like the client
 
 ### R3. Movement overhaul (1:1 with the official game)
 1. RE of the timing: the `0x2f4` tick message, the client's frame queue and playback
-   (`0x1421302c0`, speed factors), where the per-frame dt comes from (InitialState `frame_ms` at
-   world `+0x11c`, the frame-queue values read by `0x1421306c0`), and whether the official server's
+   (`0x142130440`, speed factors), where the per-frame dt comes from (InitialState `frame_ms` at
+   world `+0x11c`, the frame-queue values read by `0x142130840`), and whether the official server's
    ticks carry a time. Output: a timing section in [../protocol/movement.md](../protocol/movement.md).
 2. Server clock: deadline scheduling (no `tokio::time::interval` bursts), measured frame dt,
    catch-up rules after a stall, target 33 ms; the same dt goes into the simulation and (if the

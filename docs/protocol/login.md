@@ -1,4 +1,4 @@
-# Login protocol (0.5.5e)
+# Login protocol (0.5.5e Hotfix 1)
 
 Connection: client to the login host from `gateway_list.txt` (ours: `[network] public_host` and `[network.login]` port, written by `cargo xtask deploy-client`).
 
@@ -19,20 +19,20 @@ Verified 2026-10-12: the server decrypts the client stream correctly (clean `00 
 
 ## Message layouts
 
-Encodings: integers big-endian. `wstring` uses the compact per-character encoding (see [framing.md](framing.md)). `astring` = u16 length + bytes. Rust types: `modules/protocol/poe-proto/src/login.rs`. Opcodes: `modules/protocol/opcodes/0.5.5e/login.toml`.
+Encodings: integers big-endian. `wstring` uses the compact per-character encoding (see [framing.md](framing.md)). `astring` = u16 length + bytes. Rust types: `modules/protocol/poe-proto/src/login.rs`. Opcodes: `modules/protocol/opcodes/0.5.5e.hotfix1/login.toml`.
 
-### C→S `0x0005` Authenticate (client serializer `0x1420e34f0`, built in `0x1420e7e00`)
+### C→S `0x0005` Authenticate (client serializer `0x1420e3670`, built in `0x1420e7f80`)
 | Field | Type | Notes |
 |---|---|---|
 | ticket_len | u16 | |
-| flags_lo | u8 | UI language id (global `DAT_143a0c054`, 0 = English) `\| 0x40` |
-| client_hash | 32 bytes | `LoginClientHash_Get32` `0x1420e7580`: a hash (SHA-256 family, `0x1421bbdf0`) of **the file named by argv[0], the client executable**, computed once on a worker thread at start (`0x1420eb470`; the getter waits until it is done). Confirmed in game (2026-10-21, standalone `0x0003` of 0.5.5e): the value the server saw is the exe's SHA-256, `7157984534da1b146e9b0be342aa9fd24272915b6f478aadef9830fc7873f89f`. Since WP A4 the login server judges it against `[client] hashes` of `modules/protocol/versions/<version>.toml` and refuses an unknown build with code 8 (`InvalidProtocolVersion`) once `hashes_confirmed` is set ([../guides/new-game-version.md](../guides/new-game-version.md#what-the-server-does-with-the-clients-version)); it logs the value while unconfirmed (only for a hash that is not in the list). `hashes_confirmed = true` for 0.5.5e; the refusal was seen in game: the popup "There has been a patch that you need to update to. Please restart Path of Exile." and our notice in the log pane |
-| machine_hash | 32 bytes | `0x1421c1340`: cached 32-byte machine id built by `0x1421c0d20` (fallback `0x1421c0c20` when all zero); stable per machine; the removed dev machine-hash login used it as the account key, our server ignores it now |
+| flags_lo | u8 | UI language id (global `DAT_143a0c068`, 0 = English) `\| 0x40` |
+| client_hash | 32 bytes | `LoginClientHash_Get32` `0x1420e7700`: a hash (SHA-256 family, `0x1421bbf40`) of **the file named by argv[0], the client executable**, computed once on a worker thread at start (`0x1420eb5f0`; the getter waits until it is done). Confirmed in game (2026-10-21, standalone `0x0003` of 0.5.5e): the value the server saw is the exe's SHA-256, `7157984534da1b146e9b0be342aa9fd24272915b6f478aadef9830fc7873f89f`. Since WP A4 the login server judges it against `[client] hashes` of `modules/protocol/versions/<version>.toml` and refuses an unknown build with code 8 (`InvalidProtocolVersion`) once `hashes_confirmed` is set ([../guides/new-game-version.md](../guides/new-game-version.md#what-the-server-does-with-the-clients-version)); it logs the value while unconfirmed (only for a hash that is not in the list). `hashes_confirmed = true` for 0.5.5e; the refusal was seen in game: the popup "There has been a patch that you need to update to. Please restart Path of Exile." and our notice in the log pane |
+| machine_hash | 32 bytes | `0x1421c1580`: cached 32-byte machine id built by `0x1421c0f60` (fallback `0x1421c0e60` when all zero); stable per machine; the removed dev machine-hash login used it as the account key, our server ignores it now |
 | flags_hi | u8 | optional login-state byte (`LoginState +0x529`, valid when `+0x52a`), 0 when unset |
 | ticket | bytes[ticket_len] | Steam encrypted app ticket (from `GetEncryptedAppTicket`). Encrypted for GGG, so the server cannot read it |
 
 ### C→S `0x0003` Credentials (standalone platform)
-Sent instead of `0x0005` when the client platform is 0 (email/password screen). Serializer `0x1420e3b60`, builder `0x1420e7af0`; analysis and the patch that forces this path on the Steam exe: [../re/standalone-login.md](../re/standalone-login.md).
+Sent instead of `0x0005` when the client platform is 0 (email/password screen). Serializer `0x1420e3ce0`, builder `0x1420e7c70`; analysis and the patch that forces this path on the Steam exe: [../re/standalone-login.md](../re/standalone-login.md).
 Opcode in `login.toml` (`Credentials`), Rust type `poe_proto::login::Credentials`; handled by `modules/server/servers/login-server/src/auth.rs`.
 | Field | Type | Notes |
 |---|---|---|
@@ -49,9 +49,9 @@ Opcode in `login.toml` (`Credentials`), Rust type `poe_proto::login::Credentials
 Answer with the same `0x0004`. With `save_login = 1` (or a token login) a successful answer carries a fresh 32-byte `session_token`, which the client saves for Remember Me; without it the token is all zeros. `password_hash` is checked against the argon2id hash of the digest ([../architecture/accounts.md](../architecture/accounts.md)). Failures are listed under [Authentication results](#authentication-results).
 
 ### Authentication results
-**The client has one code table: `Data/Balance/BackendErrors.dat`** (715 rows, `Id` and `Text`; the text of code *n* is row *n − 1*, so row 0 is code 1). `BackendError_GetText` (`0x1425cb780`) looks it up; the language picks a translated copy of the table under `data/balance/<language>/`. Every result code on the login connection goes through it: `0x0004` `result`, `0x0013` CharacterCreated `result`, `0x000d` DeleteCharacterResult `result`. An unknown row prints `bad-error-code`. The table is game data: read it with `poe_data_tools ... extract <dir> 'data/balance/backenderrors.datc64'` (`docs/guides/setup.md`) and let the server name codes by the `Id` column instead of hardcoding texts.
+**The client has one code table: `Data/Balance/BackendErrors.dat`** (715 rows, `Id` and `Text`; the text of code *n* is row *n − 1*, so row 0 is code 1). `BackendError_GetText` (`0x1425cb9c0`) looks it up; the language picks a translated copy of the table under `data/balance/<language>/`. Every result code on the login connection goes through it: `0x0004` `result`, `0x0013` CharacterCreated `result`, `0x000d` DeleteCharacterResult `result`. An unknown row prints `bad-error-code`. The table is game data: read it with `poe_data_tools ... extract <dir> 'data/balance/backenderrors.datc64'` (`docs/guides/setup.md`) and let the server name codes by the `Id` column instead of hardcoding texts.
 
-(The 16-entry table at `0x1421ee510`, which an earlier version of this page took for the login table, belongs to the standalone patcher only. Its caller is `StandalonePatcher_Run`.)
+(The 16-entry table at `0x1421ee750`, which an earlier version of this page took for the login table, belongs to the standalone patcher only. Its caller is `StandalonePatcher_Run`.)
 
 Codes the login server uses (`modules/server/servers/login-server/src/auth.rs`, `auth::code`, which take the numbers from `poe_proto::backend_error`: one named list of the table rows the server uses, each with its `Id`; the server checks them against the real table at start and warns on a mismatch, `login-server/src/codes.rs`). `*` = special handling in `LoginState_HandleAuthenticationError` `0x140ef63a0`:
 
@@ -86,7 +86,7 @@ If `notice` is non-empty it replaces the table text in the popup (language-tagge
 ### Password attempt limits
 `[security]` in `modules/server/config/server.toml` (`modules/server/crates/poe-accounts/src/ratelimit.rs`, one `LoginLimiter` shared by the login server and the web API). Failed password attempts (wrong password, or an unknown name) are counted per account name (case-insensitive, existing or not) and per client IP (IPv6 per /64) in a sliding window `login_failure_window_secs`. At `login_max_failures_per_account` (5) or `login_max_failures_per_ip` (20) the key is locked for `login_lockout_secs`; attempts while locked are answered `0x49` before the password is checked and do not extend the lock. A right password clears the account's count (not the IP's). Token logins are not counted or refused (a token cannot be guessed). `0` turns a limit off. The `0x49` reply carries the wait in the notice ("... Try again in 10 minutes."), because the table text has none. The Steam dev path has no password and is not limited. The web API answers the same condition with HTTP 429 ([web-api.md](../architecture/web-api.md)).
 
-### S→C `0x0004` AuthenticationResult (deserializer `0x14214da60`, handler `0x1420e829d`)
+### S→C `0x0004` AuthenticationResult (deserializer `0x14214dbe0`, handler `0x1420e841d`)
 | Field | Type | Notes |
 |---|---|---|
 | account_id | u32 | stored in the logged-in account record (account entry +0x20, 0x78 bytes each, vector at login session +0xef0) |
@@ -97,7 +97,7 @@ If `notice` is non-empty it replaces the table text in the popup (language-tagge
 | account_name | astring (+0x68) | the account name kept by the login session (official: 17 bytes, the `Name#1234` form). The short `0x0004` that answers a resume is 46 bytes: the name is empty |
 
 ### AuthenticationResult flags and the suspicious-activity popup
-`0x1420e8391`..`0x1420e8427` (case 4 of `ClientLoginSession_ProcessPacket`) splits the two flag bytes into ten booleans of the account entry. `LoginState_AuthenticationResultHandler` (`0x140ef5140`) and the screens read them:
+`0x1420e8511`..`0x1420e85a7` (case 4 of `ClientLoginSession_ProcessPacket`) splits the two flag bytes into ten booleans of the account entry. `LoginState_AuthenticationResultHandler` (`0x140ef5140`) and the screens read them:
 
 | Wire bit | Entry field | Meaning (client code) | Official / ours |
 |---|---|---|---|
@@ -124,34 +124,34 @@ Until WP B2 the default `[accounts] flags = [0x63, 0x03]` set both bit 5 and bit
 
 Related but different: the error code `0x1cf` (`LoginRequiresUnlockCodeStrict`) opens the Unlock window with the same red text in front. The server never sends it.
 
-**"Get Full Access" is not an account flag.** The escape-menu button comes from the in-game InitialState flag at `+0x3edc` (`0x1420edbd6`, `[accounts] full_access`), not from `0x0004`. The earlier note that `[0x63, 0x03]` removes it was wrong: bits 0, 1, 5, 6 only added the select-screen widgets above.
+**"Get Full Access" is not an account flag.** The escape-menu button comes from the in-game InitialState flag at `+0x3edc` (`0x1420edd56`, `[accounts] full_access`), not from `0x0004`. The earlier note that `[0x63, 0x03]` removes it was wrong: bits 0, 1, 5, 6 only added the select-screen widgets above.
 
 ## Incoming packet factory
-The client's login factory is `0x14214fa60` (opcode → class, then vtable slot 2 = deserialize). Classes by opcode (vtable):
+The client's login factory is `0x14214fbe0` (opcode → class, then vtable slot 2 = deserialize). Classes by opcode (vtable):
 
 | Opcode(s) | Vtable | Size |
 |---|---|---|
-| 0x01 | `0x143506518` | 0x10 |
-| 0x02 | `0x143506228` | 0x50 |
-| 0x04 | `0x143509d40` | 0x90 |
-| 0x0b, 0x0d, 0x0f, 0x44 | `0x143509d60` (u32 + u16) | 0x18 |
-| 0x11 | `0x143509ea0` | 0x60 |
-| 0x13 | `0x143509d00` | 0x18 |
-| 0x14 | `0x143509e20` | 0x88 |
-| 0x15 | `0x143509e80` | 0x78 |
-| 0x16 | `0x143509e00` | 0x18 |
-| 0x17, 0x1e | `0x143509d80` (u16) | 0x18 |
-| 0x1a | `0x143509da0` | 0x30 |
-| 0x1b | `0x143509e60` | 0x38 |
-| 0x1f, 0x20 | `0x143506248` (u32) | 0x18 |
-| 0x24, 0x25, 0x26, 0x28, 0x29 | `0x143509ce0` (string) | 0x30 |
-| 0x3c | `0x143509dc0` | 0x20 |
-| 0x3e | `0x143509e40` | 0x18 |
-| 0x41 | `0x143509ec0` | 0x30 |
-| 0x43 | `0x143509de0` | 0x38 |
-| 0x47 | `0x143509d20` | 0x30 |
+| 0x01 | `0x143506450` | 0x10 |
+| 0x02 | `0x1435061d0` | 0x50 |
+| 0x04 | `0x143509ed8` | 0x90 |
+| 0x0b, 0x0d, 0x0f, 0x44 | `0x143509f18` (u32 + u16) | 0x18 |
+| 0x11 | `0x14350a038` | 0x60 |
+| 0x13 | `0x143509e98` | 0x18 |
+| 0x14 | `0x143509f78` | 0x88 |
+| 0x15 | `0x143509f98` | 0x78 |
+| 0x16 | `0x143509e58` | 0x18 |
+| 0x17, 0x1e | `0x14350a018` (u16) | 0x18 |
+| 0x1a | `0x143509f38` | 0x30 |
+| 0x1b | `0x143509fd8` | 0x38 |
+| 0x1f, 0x20 | `0x143506270` (u32) | 0x18 |
+| 0x24, 0x25, 0x26, 0x28, 0x29 | `0x143509e78` (string) | 0x30 |
+| 0x3c | `0x143509f58` | 0x20 |
+| 0x3e | `0x143509fb8` | 0x18 |
+| 0x41 | `0x143509ff8` | 0x30 |
+| 0x43 | `0x143509ef8` | 0x38 |
+| 0x47 | `0x143509eb8` | 0x30 |
 
-Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatcher is the switch at `0x1420e8193`, inside a function starting at `0x1420e8130`.
+Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatcher is the switch at `0x1420e8313`, inside a function starting at `0x1420e82b0`.
 
 ## Login flow after authentication (verified 2026-10-12)
 | Step | Direction | Message | Notes |
@@ -162,16 +162,16 @@ Vtable slots: 0 = destructor, 1 = serialize, 2 = deserialize, 3 = ?. The dispatc
 | 4 | C→S | `0x0010` RequestCharacterDetails | `u32 account_id, u8 index`; sent automatically for the selected character |
 | 5 | S→C | `0x0011` CharacterDetails | same tail layout as the list; empty blob/pairs are accepted |
 | — | C→S | `0x0012` CreateCharacter | `astring name, astring league, u32 account_id, u32 0, u32 0, wstring start_state, 32 bytes` (official capture: the first `u32` is the account id, the next two are 0; `start_state` is `<class>Default`-style text such as the metadata name plus `Default`; sender not decoded yet) |
-| — | S→C | `0x0013` CharacterCreated | `u16 result (0 = ok), u8 notify, u32 account_id` (deserializer `0x14214ea70`); then a fresh CharacterList. **Result codes: see [Create and delete result codes](#create-and-delete-result-codes).** On 0 the create screen (callback `CreateCharacterState_OnCharacterCreated` `0x140ed2ab0`) plays the creation scene, finds the new character **by name** in the list (`0x140ec8b20`) and sends PlayCharacter (`0x140ecee50`, "character_creation_done"), so a new character goes straight into the game. Before 2026-10-14 the server sent `0x0016`, which is a different message (handler `0x1420e8da6`, signal +0x288, meaning unknown): the first character still worked because the client fell back to the select screen, but a second character left the create screen stuck after Continue |
+| — | S→C | `0x0013` CharacterCreated | `u16 result (0 = ok), u8 notify, u32 account_id` (deserializer `0x14214ebf0`); then a fresh CharacterList. **Result codes: see [Create and delete result codes](#create-and-delete-result-codes).** On 0 the create screen (callback `CreateCharacterState_OnCharacterCreated` `0x140ed2ab0`) plays the creation scene, finds the new character **by name** in the list (`0x140ec8b20`) and sends PlayCharacter (`0x140ecee50`, "character_creation_done"), so a new character goes straight into the game. Before 2026-10-14 the server sent `0x0016`, which is a different message (handler `0x1420e8f26`, signal +0x288, meaning unknown): the first character still worked because the client fell back to the select screen, but a second character left the create screen stuck after Continue |
 
 New characters are stored with their start area (`[player] start_area`).
 
 ### CharacterList entry fields
-Wire order of one entry (reader `CharacterEntries_Read` `0x1427164c0`, 0x58-byte client struct): `wstring name (+0x00), wstring league (+0x20), u8 +0x4d, u8 +0x51, u8 +0x4c, u32 +0x40, u8 +0x4e, u16 +0x44, u16 +0x46, u16 +0x48, u16 +0x4a, u8 +0x4f, u8 +0x50`. Consumers: `SelectScreen_SetEntry` (`0x1406b9b90`) fills one select-screen row from it.
+Wire order of one entry (reader `CharacterEntries_Read` `0x142716700`, 0x58-byte client struct): `wstring name (+0x00), wstring league (+0x20), u8 +0x4d, u8 +0x51, u8 +0x4c, u32 +0x40, u8 +0x4e, u16 +0x44, u16 +0x46, u16 +0x48, u16 +0x4a, u8 +0x4f, u8 +0x50`. Consumers: `SelectScreen_SetEntry` (`0x1406b9b90`) fills one select-screen row from it.
 
 | Field | Meaning | Official values seen |
 |---|---|---|
-| +0x4e (u8) | **bits 0-4: class** (`Characters.IntegerId`; drives the 3D preview and the icon `Art/2DArt/UIImages/Common/Icon<class>`); **bits 5-7: ascendancy index** (0 = none, up to 6; adds a suffix to the icon name, `0x1425ff110`) | `2` (no ascendancy) |
+| +0x4e (u8) | **bits 0-4: class** (`Characters.IntegerId`; drives the 3D preview and the icon `Art/2DArt/UIImages/Common/Icon<class>`); **bits 5-7: ascendancy index** (0 = none, up to 6; adds a suffix to the icon name, `0x1425ff350`) | `2` (no ascendancy) |
 | +0x4a (u16) | current area: `WorldAreas.HASH16`. Looked up first (`0x1406b8e90`); if the area is not found the row falls back to +0x48 | **0 for a brand-new character and after logging out in a town**; the zone's hash after logging out in a field zone (the intro zone, 3860) |
 | +0x48 (u16) | fallback area: `WorldAreas.HASH16`; if the row is not a town the client shows its parent town (`WorldAreas` +0x70) | the intro zone (3860) for a new character; the town's hash after logging out in a town |
 | +0x4c (u8) | level | 1, 2 |
@@ -179,28 +179,28 @@ Wire order of one entry (reader `CharacterEntries_Read` `0x1427164c0`, 0x58-byte
 | +0x40 (u32) | experience (51 after three 17-xp kills, the same values as the Player component delta's mask `0x0001` field) | |
 | +0x51 (u8) | flags: bit 3 goes to the select-screen entry (`0x1406b9b90` → `0x1406b8890`); official characters that have played have `0x40` | `0x40` (`0x00` while the character is brand new) |
 | +0x44 (u16) | **MTX portrait frame id**: 0 = `DefaultIconFrame`; non-zero = `Art/2DArt/UIImages/Common/MTX/SupporterIconFrame<id>` (`SelectScreen_SetEntryPortraitFrame` `0x1406b8460`) | 0 |
-| +0x46 (u16) | **portrait variation row**: 0 = the class icon; non-zero = `Art/2DArt/UIImages/Common/PortraitVariations/<name of the row>` (`0x1425ff110`) | 0 |
+| +0x46 (u16) | **portrait variation row**: 0 = the class icon; non-zero = `Art/2DArt/UIImages/Common/PortraitVariations/<name of the row>` (`0x1425ff350`) | 0 |
 | +0x50 (u8) | **`MiniQuestStates.dat` row** of the character's quest state, used for the "Act N" label of a row whose two area hashes find no area (`SelectScreen_SetEntryLocation` `0x1406b9010`, text "Act {0}" with the row's act number). If both hashes are 0 the row shows a fixed text (string id 205) instead | 0 |
 | +0x4f (u8) | stored, no reader found in the select or create screens (read through an accessor, or unused) | 0 |
 
 Official lists of characters that have played also carry a blob (`blob_30`, 91 to 131 bytes) and (stat id, value) pairs (`pairs_48`); a fresh character has neither.
 
 ### CharacterList trailer (and the CharacterDetails tail)
-`0x0015` handler: case at `0x1420e8534`; `0x0011` CharacterDetails has the same tail. The tail describes **one character, the one the select screen previews**; the handler builds an event with it (`0x1420e8660`..`0x1420e8852`) that reaches `SelectScreen_OnCharacterDetails` (`0x140f0c090`), which caches it per character index.
+`0x0015` handler: case at `0x1420e86b4`; `0x0011` CharacterDetails has the same tail. The tail describes **one character, the one the select screen previews**; the handler builds an event with it (`0x1420e87e0`..`0x1420e89d2`) that reaches `SelectScreen_OnCharacterDetails` (`0x140f0c090`), which caches it per character index.
 
 | Field | Meaning | Official |
 |---|---|---|
-| +0x28 (u8) | **index of the character the tail belongs to** (in the list). The handler builds the preview event only when the list has more entries than this value (`0x1420e8655`: count > +0x28), with `0xffffffff` otherwise. Inferred from the handler, not verified at runtime | 0 |
+| +0x28 (u8) | **index of the character the tail belongs to** (in the list). The handler builds the preview event only when the list has more entries than this value (`0x1420e87d5`: count > +0x28), with `0xffffffff` otherwise. Inferred from the handler, not verified at runtime | 0 |
 | +0x29 (u8) | character slot limit. The select screen refuses creation when the count reaches it (`0x140f0d475`; the create button popup `CreateCharacterButtonMaxCharactersReachedPopup`) | `0x18` (24) |
 | +0x74, +0x76 (u16, u16) | passed on to the cached preview (`0x140f0c090` reads them at event +0xf88 / +0xf8a); meaning unknown | 0, 0 |
-| +0x30 blob (u16 length + bytes) | the **31 visible equipment slots** (a decoded array of 31 items of 128 bytes each, `0x1420e5a90`) | 91 to 131 bytes |
+| +0x30 blob (u16 length + bytes) | the **31 visible equipment slots** (a decoded array of 31 items of 128 bytes each, `0x1420e5c10`) | 91 to 131 bytes |
 | +0x48 pairs (varuint count, `u16 key, varint value`) | stat (id, value) pairs, copied into the preview event as 8-byte entries | about 33 pairs |
 | +0x68 (u32) | kept in the preview event (+0xfb0); meaning unknown | 0 |
-| +0x6c (u32) | **`ShapeshiftForms.dat` row** (the form the preview shows, Druid); looked up by `FUN_1423e55b0` against that table (`0x140495730`) | 0 |
+| +0x6c (u32) | **`ShapeshiftForms.dat` row** (the form the preview shows, Druid); looked up by `FUN_1423e57f0` against that table (`0x140495730`) | 0 |
 
 Unknown pieces and what would settle them: +0x74/+0x76 and +0x68 (always 0 in every official capture, so any value works; a capture of a character with a non-default form or a supporter pack, or the consumer `FUN_140ec6670`, would name them), +0x4f (same), account flag +0x30 (no reader found).
 
-### LeagueEntry (0xe8 bytes, reader `0x142716bd0`)
+### LeagueEntry (0xe8 bytes, reader `0x142716e10`)
 Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the select screen, +0x80, +0xa0), three u64 (+0xd0 start, +0xd8, +0xc8 end), 3 flag bytes (+0xe0), u8 +0xc0, u8 +0xc1, u8 +0xc2. After the list: a flags byte (bit 0 → +0x30, bit 1 → +0x31).
 
 | Bit | Meaning |
@@ -220,11 +220,11 @@ Wire order: five wstrings (+0x10 id, +0x40, +0x60 display name used by the selec
 
 ## Deleting a character (verified 2026-10-14)
 1. **C→S `0x000c` DeleteCharacter**, sent after the confirmation dialog (builder `0x140ed8149`, delete screen state): `astring name` (`u16` byte length + bytes), `u8 slot`, `u32 account_id`. In the official capture the byte is 0 and the `u32` is the account id; the older local note `01 00 00 00 01` is the same layout with other values. The byte is the low byte of a `u32` at screen +0x214 that the select screen stores when the delete screen opens (`0xffffffff` when unset; probably the list index or the local player); our server identifies the character by name and may ignore it.
-2. **S→C `0x000d` DeleteCharacterResult**: `u16 result, u32 account_id` (class `0x143509d60`, shared with 0x0b/0x0f/0x44; official: `00 00` + the account id). The handler signals event +0xb88. The delete screen's callback (`0x140ed8710`) closes on result 0; any other code is looked up in `BackendErrors.dat` and shown as an error text. Until the reply arrives, the dialog shows "Waiting for response...".
+2. **S→C `0x000d` DeleteCharacterResult**: `u16 result, u32 account_id` (class `0x143509f18`, shared with 0x0b/0x0f/0x44; official: `00 00` + the account id). The handler signals event +0xb88. The delete screen's callback (`0x140ed8710`) closes on result 0; any other code is looked up in `BackendErrors.dat` and shown as an error text. Until the reply arrives, the dialog shows "Waiting for response...".
 3. **S→C `0x0015` CharacterList**: the client keeps its old list after a delete and does not ask for a new one, so the server sends it.
 
 ## Create and delete result codes
-Both results go through `BackendError_GetText` (`0x1425cb780`) as described under [result codes](#authentication-results): the client shows the table text of the code in the create screen (`0x140ec96b0`, a message line) or the delete screen. **The packets carry no text**, so the server picks the code and the client prints the string. Official captures only contain result 0 for both (create and delete of a test character, several times); the failure codes below are read from the table and the callbacks, not captured.
+Both results go through `BackendError_GetText` (`0x1425cb9c0`) as described under [result codes](#authentication-results): the client shows the table text of the code in the create screen (`0x140ec96b0`, a message line) or the delete screen. **The packets carry no text**, so the server picks the code and the client prints the string. Official captures only contain result 0 for both (create and delete of a test character, several times); the failure codes below are read from the table and the callbacks, not captured.
 
 | Situation | Code | `Id` | Text |
 |---|---|---|---|
@@ -245,10 +245,10 @@ Both results go through `BackendError_GetText` (`0x1425cb780`) as described unde
 | delete: cosmetics still on items | 94 | CantDeleteWithMicrotransactions | Please remove all cosmetic effects from items on this character first. ... |
 | any: database failure | 19 | DatabaseError | An unexpected database error occurred. Try again. |
 
-Until WP B2 the server sent `1` for every create failure and for a failed delete (row 1 is `AccountNameAlreadyExists`, the wrong text for both). Now (`login-server/src/session.rs`): a name under 3 characters `23`, over 23 `24`, other characters than letters, digits and `_` `22` (the client's text says letters and underscores only; the server accepts digits, but the client's name box already drops digits, spaces and other characters), unknown league `26`, no free slot (`[accounts] max_characters`) `49`, unknown start state `25`, name taken `21`, store error `19` (seen in game: name taken shows "A character with this name already exists."; `22`, `23` and `24` cannot be reached from the stock client, which filters characters, keeps Continue disabled under 3 characters and caps the box at 23, so only the server tests cover them); flags `27` is named but cannot occur (the create packet has no flag field). Delete: no such character `16`, a character of another account `17`, store error `19`, and the reply carries the account id in its `u32`. The `notify` byte of CharacterCreated must stay 0: when it is non-zero the client builds a request to `https://<web host>/api/tracking-conversions/` (`0x1420e89c1`..`0x1420e8ac0`), a marketing call to the official website.
+Until WP B2 the server sent `1` for every create failure and for a failed delete (row 1 is `AccountNameAlreadyExists`, the wrong text for both). Now (`login-server/src/session.rs`): a name under 3 characters `23`, over 23 `24`, other characters than letters, digits and `_` `22` (the client's text says letters and underscores only; the server accepts digits, but the client's name box already drops digits, spaces and other characters), unknown league `26`, no free slot (`[accounts] max_characters`) `49`, unknown start state `25`, name taken `21`, store error `19` (seen in game: name taken shows "A character with this name already exists."; `22`, `23` and `24` cannot be reached from the stock client, which filters characters, keeps Continue disabled under 3 characters and caps the box at 23, so only the server tests cover them); flags `27` is named but cannot occur (the create packet has no flag field). Delete: no such character `16`, a character of another account `17`, store error `19`, and the reply carries the account id in its `u32`. The `notify` byte of CharacterCreated must stay 0: when it is non-zero the client builds a request to `https://<web host>/api/tracking-conversions/` (`0x1420e8b41`..`0x1420e8c40`), a marketing call to the official website.
 
 ## Keep-alive and resuming (verified 2026-10-14)
-- The client keeps its login connection open while in game (unless the server sends `0x0017`, below) and sends **`0x0001` KeepAlive** (no body) every 10 seconds. The server answers with an empty `0x0001` (the factory maps it to the empty class `0x143506518`).
+- The client keeps its login connection open while in game (unless the server sends `0x0017`, below) and sends **`0x0001` KeepAlive** (no body) every 10 seconds. The server answers with an empty `0x0001` (the factory maps it to the empty class `0x143506450`).
 - **C→S `0x0008` ResumeSession**: `u32 account id, u64 token` (raw). Sent on a new login connection right after the key exchange, after the instance server's `0x174` ExitSession ("Exit to character selection"; see [instance.md](instance.md#leaving-the-game-2026-10-14)). The server redeems the ticket (`TicketRegistry::redeem_resume`, single use) and answers like a login (AuthenticationResult). The client then requests the character list.
 
 ## Hand-off to the instance server
@@ -257,12 +257,12 @@ Until WP B2 the server sent `1` for every create failure and for a failed delete
 | C→S `0x0e` PlayCharacter | `u8 flags, varuint count, (u32 character_index, u32 account_id)[count]` (one entry per local split-screen player) |
 | S→C `0x14` InstanceDetails | `astring host, u16 port (+0x38), u32 (+0x30), u16 area HASH16 (+0x3a, must exist in WorldAreas), u32 (+0x34), 64-byte key material (+0x3c), 8 bytes (+0x7c), u8 (+0x84)` |
 
-- **S→C `0x0017`** (`u16` reason): the client closes its login connection (handler case in `0x1420e8130`, `ClientLoginSession_ProcessPacket` → `0x1420e7140` → `0x1420e71d0`: `shutdown()`). Official servers send `0x0017 0x0014` right after InstanceDetails; we do not (in-game transfers use the open connection, see [server-admin.md](../guides/server-admin.md#transfers)).
+- **S→C `0x0017`** (`u16` reason): the client closes its login connection (handler case in `0x1420e82b0`, `ClientLoginSession_ProcessPacket` → `0x1420e72c0` → `0x1420e7350`: `shutdown()`). Official servers send `0x0017 0x0014` right after InstanceDetails; we do not (in-game transfers use the open connection, see [server-admin.md](../guides/server-admin.md#transfers)).
 - InstanceDetails while the client is in an instance is received and ignored; at character selection it is followed even unasked.
 
-Evidence: deserializer `0x14214ece0`; handler `0x1420e8ef8`; the instance connect (`0x14211dbb0`) logs host = the string and port = struct +0x80 (packet +0x38).
+Evidence: deserializer `0x14214ee60`; handler `0x1420e9078`; the instance connect (`0x14211dd30`) logs host = the string and port = struct +0x80 (packet +0x38).
 
-Unknown parts of `InstanceDetails`: the connect routine (`0x14211dbb0`) uses only the host, port `+0x38` and area `+0x3a` plus the key material; the byte **`+0x84`** is compared with 7 and the result is kept in the instance session (`+0x2184`, meaning unknown). Official `0x0014` is redacted in the captures, so the values of `+0x30`, `+0x34`, the 8 bytes at `+0x7c` and `+0x84` are not known from the wire. What would settle them: an unredacted capture of one hand-off, or the readers of session `+0x2184`.
+Unknown parts of `InstanceDetails`: the connect routine (`0x14211dd30`) uses only the host, port `+0x38` and area `+0x3a` plus the key material; the byte **`+0x84`** is compared with 7 and the result is kept in the instance session (`+0x2184`, meaning unknown). Official `0x0014` is redacted in the captures, so the values of `+0x30`, `+0x34`, the 8 bytes at `+0x7c` and `+0x84` are not known from the wire. What would settle them: an unredacted capture of one hand-off, or the readers of session `+0x2184`.
 
 ## Still unknown (login protocol)
 | Item | Where | What would settle it |
@@ -273,7 +273,7 @@ Unknown parts of `InstanceDetails`: the connect routine (`0x14211dbb0`) uses onl
 | `CharacterList` +0x74, +0x76, +0x68, entry +0x4f | tail table | always 0 officially; a capture of a Druid in a shapeshift form or with MTX portrait settings |
 | `CharacterList` +0x28 as "preview index" | tail table | a capture of a list with two characters (official lists seen have one) |
 | `InstanceDetails` `+0x30`, `+0x34`, `+0x7c`, `+0x84` | hand-off | unredacted capture |
-| `CreateCharacter` the two zero `u32` and the trailing 32 bytes | login flow table | decode the sender (not found by the opcode searches); official values are in `dumps/0.5.5e/captures/official/*/packets.jsonl` |
+| `CreateCharacter` the two zero `u32` and the trailing 32 bytes | login flow table | decode the sender (not found by the opcode searches); official values are in `dumps/0.5.5e.hotfix1/captures/official/*/packets.jsonl` |
 | Create/delete failure codes at runtime | result codes | **gate G-LOGIN** (see below) only if the table mapping must be checked at runtime |
 
 **Gate G-LOGIN is not needed to implement WP B2.** The code-to-text mapping comes from the client's own table (`BackendErrors.dat`) and the callbacks that print it. A read-only official capture of a failed create (taken or invalid name) and a delete of a missing character would only confirm which code official servers pick for each case (`21`, `22` and `16` are the expected ones); ask the user for it if B2 wants to match them exactly.

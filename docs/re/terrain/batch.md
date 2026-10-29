@@ -5,8 +5,8 @@ seed, forced topology and forced orientation, with no login and no session, and 
 hash, doodad hash and map size. This is the data source of the 1:1 terrain port's acceptance test
 (every area, every topology and orientation, 50 random seeds:
 [../../plans/terrain-all-areas.md](../../plans/terrain-all-areas.md), WP7.16). Findings from
-2026-10-22; addresses are Ghidra addresses of 0.5.5e (image base `0x140000000`) and are found by
-signature at run time (`modules/client-hook/signatures/0.5.5e.toml`, feature `gen_batch`). Private
+2026-10-22; addresses are Ghidra addresses of 0.5.5e Hotfix 1 (image base `0x140000000`) and are found by
+signature at run time (`modules/client-hook/signatures/0.5.5e.hotfix1.toml`, feature `gen_batch`). Private
 mode only: the feature is refused when `poe-hook.toml` says `mode = "official"` and again before
 every job when the loader's read-only latch is on.
 
@@ -29,10 +29,10 @@ job and result file formats), `scripts/re/terrain_batch.py` (plan, run, status).
 
 ## How the generator is run
 
-`HeadlessWorld_LoadArea` `0x14212f500` is not a class of its own: it is the **base world**'s vfunc
-`+0x1e0` (vtable `0x1435082f0`, constructor `0x14212eb60`). The in-game world, `ClientWorld`
-(constructor `0x14167d2f0`, `new(0x17e8)`, vtable `0x14339cf18`), overrides it with
-`ClientWorld_LoadArea` `0x14167b270`. The base world has no terrain (its vfuncs `+0x1a0/+0x1a8`
+`HeadlessWorld_LoadArea` `0x14212f680` is not a class of its own: it is the **base world**'s vfunc
+`+0x1e0` (vtable `0x143508470`, constructor `0x14212ece0`). The in-game world, `ClientWorld`
+(constructor `0x14167d470`, `new(0x17e8)`, vtable `0x14339d1d0`), overrides it with
+`ClientWorld_LoadArea` `0x14167b3f0`. The base world has no terrain (its vfuncs `+0x1a0/+0x1a8`
 raise an "unimplemented" exception), so a world that can generate has to be a `ClientWorld`: its
 vfunc `+0x1a8` returns the terrain object embedded at world `+0x8d0` (built by the constructor),
 `+0x1c8` the generation state at world `+0x4b0`.
@@ -41,22 +41,22 @@ Both LoadAreas do the same, which is all `gen_batch` repeats per job:
 
 1. `world +0x4b0 = p2` (u32, 0 in 904 of 929 area exports; the other value is an instance
    number), `world +0x4b4 = seed`, `+0x663 = 0` (headless; the client sets 1), the `LoadArea`
-   vectors `p4` (u8 indices into a 0x65-byte table, `0x141d02ba0`) and `p5` (u64 list, `+0x508`)
+   vectors `p4` (u8 indices into a 0x65-byte table, `0x141d02d20`) and `p5` (u64 list, `+0x508`)
    stay empty.
-2. `TerrainGen_Construct(generator, world)` `0x141fefa20` (base generator vtable `0x1434ede68`,
-   704 bytes in the headless version), `TerrainGen_Run` `0x141ffe940`, read tile hash (world
-   `+0x114`) and doodad hash (`+0x118`), the generator destructor `0x141fefe40`.
+2. `TerrainGen_Construct(generator, world)` `0x141fefba0` (base generator vtable `0x1434edf80`,
+   704 bytes in the headless version), `TerrainGen_Run` `0x141ffeac0`, read tile hash (world
+   `+0x114`) and doodad hash (`+0x118`), the generator destructor `0x141feffc0`.
 
-Differences between the base generator and the client's (`0x143385c70`), which matter:
+Differences between the base generator and the client's (`0x143387098`), which matter:
 
 | What | Base (headless) | Client |
 |---|---|---|
-| vtable `+0x20` | `0x141ff45d0` | `0x1415a1700` (the "create this object?" filter, adds the client's own tests) |
+| vtable `+0x20` | `0x141ff4750` | `0x1415a1880` (the "create this object?" filter, adds the client's own tests) |
 | vtable `+0x68`, `+0x78`, `+0x80`, `+0xa0`.. | empty or minimal | rendering hooks |
 | **generator `+0xe`** | 1 (set by the constructor) | cleared by `ClientWorld_LoadArea` (`local_2fa = 0`) |
 
-`generator +0xe` switches the **tile map validation pass** (`0x141ffdab0` → `0x141f9df00` →
-`0x141f9d9c0`, "Invalid TileMap: Mismatching ground types on corner ..."): the server's
+`generator +0xe` switches the **tile map validation pass** (`0x141ffdc30` → `0x141f9e080` →
+`0x141f9db40`, "Invalid TileMap: Mismatching ground types on corner ..."): the server's
 generator validates and throws, the client's does not. Without clearing it, layouts the client
 generates happily (`G1_4 1001 10:2`) throw. `gen_batch` clears it after the constructor, so its
 output is what the client's generator produces; the generator's other phases are shared and the
@@ -67,13 +67,13 @@ hashes agree.
 | Field | Value | Notes |
 |---|---|---|
 | `+0x98` | the `WorldAreas` row | see below; `+0x1b4` area kind, `+0x2a` hash16, `+0x60` topology count, `+0x68` topology list (16-byte entries) |
-| `+0xa0` | the `WorldAreas` table object | a counted reference (`+0x3c`): the Incursion temple rooms (`0x141eff290`) read the table from here, and the world's destructor releases it; without it `IncursionTemplePresent` crashed |
-| `+0xb8` | league mode, **1** | the `Mode` column the topologies are filtered by (`0x141fdfe30`: mode equal, else 0x39, else mode 1) |
-| `+0x128` | the stat map | sorted `(i32 key, i32 value)` pairs, begin `+0x128+8`, end `+0x128+0x10`; set `0x1423ba400(map, key, value)`, get `0x1423ba2a0(map, key)` (returns 0 when absent), 978 callers |
+| `+0xa0` | the `WorldAreas` table object | a counted reference (`+0x3c`): the Incursion temple rooms (`0x141eff410`) read the table from here, and the world's destructor releases it; without it `IncursionTemplePresent` crashed |
+| `+0xb8` | league mode, **1** | the `Mode` column the topologies are filtered by (`0x141fdffb0`: mode equal, else 0x39, else mode 1) |
+| `+0x128` | the stat map | sorted `(i32 key, i32 value)` pairs, begin `+0x128+8`, end `+0x128+0x10`; set `0x1423ba640(map, key, value)`, get `0x1423ba4e0(map, key)` (returns 0 when absent), 978 callers |
 | `+0x58` | terrain plugin list | from AreaInfo; empty |
 
 The `WorldAreas` table object comes from `0x140223710(&out)` (a counted reference; its state
-`+0x40` is 2 when loaded, else wait with `0x1421d6e30`); `*(table+0x28)` points at `(begin, end)` of
+`+0x40` is 2 when loaded, else wait with `0x1421d7070`); `*(table+0x28)` points at `(begin, end)` of
 the rows: **442 rows of 0x2e0 bytes**, row `+0` a pointer to the NUL-terminated UTF-16 id string.
 `gen_batch` builds an id → row map once (the count comes from `poe-hook-data/areas.tsv`, which
 `deploy-client` writes from the same game data).
@@ -83,10 +83,10 @@ the rows: **442 rows of 0x2e0 bytes**, row `+0` a pointer to the NUL-terminated 
 `map_force_topology` (stat `0xb92`) and `map_force_orientation` (`0xb93`) are plain entries of the
 world's stat map; the server sends them in the first stat record of AreaInfo
 (`modules/server/servers/instance-server/src/lib.rs`, `transfer`), the client's AreaInfo reader
-(`0x14211d1c0`) stores them in `world +0x128`. `TerrainGen` vfunc 0 (`0x141ff9280`, topology pick)
+(`0x14211d340`) stores them in `world +0x128`. `TerrainGen` vfunc 0 (`0x141ff9400`, topology pick)
 reads them: topology `ebx` = stat `0xb92` (0: not forced) and must be `<= row +0x60`, orientation =
-stat `0xb93` − 1 when that is in `1..=8`, else 8 (not forced); then `0x141ff90f0(generator, out, topology, orientation, {count, row +0x68})`
-picks the graph. `gen_batch` sets the same two stats with `0x1423ba400` before the generator is
+stat `0xb93` − 1 when that is in `1..=8`, else 8 (not forced); then `0x141ff9270(generator, out, topology, orientation, {count, row +0x68})`
+picks the graph. `gen_batch` sets the same two stats with `0x1423ba640` before the generator is
 built: `topology` 1-based as the server's `transfer` does, `orientation + 1`.
 
 ## Threads
@@ -97,12 +97,12 @@ Safe, as far as 1 to 12 workers over 48,300 + 3,864 + 9,016 jobs showed:
   same hashes on 1, 2, 4, 8 and 12 threads ([Measurements](#measurements)).
 - The shared caches (`.tdt`/`.arm`/`.tgr` loads, the tile-set indexes) are the ones the client uses
   from its own worker threads (it generates world-map panels in parallel). Resources load on first
-  use (async, `0x1421d6e30` waits), so the first jobs of an area are slower.
+  use (async, `0x1421d7070` waits), so the first jobs of an area are slower.
 - Every job builds its own world and generator and destroys them (`world` vfunc `+0x20` with 1:
-  the deleting destructor; the generator `0x141fefe40`), allocated with the game's allocator
-  (`0x142bba3c0` / `0x142bba2a0`; per-thread heaps that accept frees from any thread).
+  the deleting destructor; the generator `0x141feffc0`), allocated with the game's allocator
+  (`0x142bba600` / `0x142bba4e0`; per-thread heaps that accept frees from any thread).
 - Memory: about 5 GB idle, 8 GB after act 1, and about 1 MB per layout in act 10 that is not given back; see Measurements (the driver restarts the client above a cap).
-- The ClientWorld constructor bumps a global world counter (`0x1445d8140`) without a lock; two
+- The ClientWorld constructor bumps a global world counter (`0x1445d8188`) without a lock; two
   workers can get the same id. Nothing seen depends on it.
 
 ## Exceptions: generation failures
@@ -130,10 +130,10 @@ An unhandled throw ends the process, so `cxx_guard.rs` makes a guarded call inst
 - Returning `EXCEPTION_CONTINUE_EXECUTION` from the filter is not possible (a C++ throw is
   noncontinuable: `0xC0000025`); the filter calls `RtlRestoreContext` itself.
 - **The C++ runtime's per-thread state must be put back.** The game's statically linked runtime
-  keeps a chain of the catch blocks being executed in the thread's `__vcrt_ptd` (`0x142c14288`,
+  keeps a chain of the catch blocks being executed in the thread's `__vcrt_ptd` (`0x142c144c8`,
   field `+0x58`, also `+0x20/+0x28/+0x70`); the abandoned catch blocks leave entries that point into
   dead stack, and the next throw on the thread reads them (`_IsExceptionObjectToBeDestroyed`
-  `0x142c13a00`: access violation after a few hundred recovered exceptions). `call` saves the first
+  `0x142c13c40`: access violation after a few hundred recovered exceptions). `call` saves the first
   `0x98` bytes of that state and writes them back after a recovery.
 - What the skipped frames held stays held (memory, a lock): the generator and the world are
   destroyed afterwards in guarded calls anyway; a destructor that throws leaks.
@@ -158,27 +158,27 @@ in official mode. The hooks of the area export (driver, add object, doodad hash 
 installed for it; a batch generation is never exported by the area export itself, and objects and
 doodads are only collected for the jobs of `export.txt`.
 
-## Addresses (0.5.5e)
+## Addresses
 
 | Address | What |
 |---|---|
-| `0x14167d2f0` | `ClientWorld` constructor `(this, frame mode u8, flag u8)`, size `0x17e8`; vtable `0x14339cf18` (`+0x1a8` terrain at `+0x8d0`, `+0x1c8` state at `+0x4b0`, `+0x1e0` LoadArea, `+0x20` deleting destructor) |
-| `0x14212eb60` | base world constructor (only caller: the ClientWorld constructor); vtable `0x1435082f0` |
-| `0x14212f500` | `HeadlessWorld_LoadArea` (base vfunc `+0x1e0`): `(world, u32 p2, u32 seed, vector<u8>* p4, vector<u64>* p5)` |
-| `0x141fefa20` / `0x141fefe40` | `TerrainGen_Construct(generator, world)` / generator destructor |
-| `0x141ffe940` | `TerrainGen_Run` (the batch calls it through the area export's driver hook, which passes batch generations through) |
-| `0x141ff9280` | topology pick (generator vtable `+0`): reads stats `0xb92` / `0xb93` from `world +0x128`, `world +0xb8`, row `+0x60/+0x68` |
-| `0x141ff90f0` | picks the graph for a forced topology and orientation |
-| `0x141ffdab0` / `0x141f9df00` / `0x141f9d9c0` | the validation pass (runs when generator `+0xe`) / its driver / the checks ("Invalid TileMap: ...") |
-| `0x141d0e130` | "Mismatching ground types at (x, y): Cannot place A over B" (throws; tile placement) |
-| `0x1423ba400` / `0x1423ba2a0` | sorted `(i32 key, i32 value)` map set / get (the world stats at `+0x128`) |
+| `0x14167d470` | `ClientWorld` constructor `(this, frame mode u8, flag u8)`, size `0x17e8`; vtable `0x14339d1d0` (`+0x1a8` terrain at `+0x8d0`, `+0x1c8` state at `+0x4b0`, `+0x1e0` LoadArea, `+0x20` deleting destructor) |
+| `0x14212ece0` | base world constructor (only caller: the ClientWorld constructor); vtable `0x143508470` |
+| `0x14212f680` | `HeadlessWorld_LoadArea` (base vfunc `+0x1e0`): `(world, u32 p2, u32 seed, vector<u8>* p4, vector<u64>* p5)` |
+| `0x141fefba0` / `0x141feffc0` | `TerrainGen_Construct(generator, world)` / generator destructor |
+| `0x141ffeac0` | `TerrainGen_Run` (the batch calls it through the area export's driver hook, which passes batch generations through) |
+| `0x141ff9400` | topology pick (generator vtable `+0`): reads stats `0xb92` / `0xb93` from `world +0x128`, `world +0xb8`, row `+0x60/+0x68` |
+| `0x141ff9270` | picks the graph for a forced topology and orientation |
+| `0x141ffdc30` / `0x141f9e080` / `0x141f9db40` | the validation pass (runs when generator `+0xe`) / its driver / the checks ("Invalid TileMap: ...") |
+| `0x141d0e2b0` | "Mismatching ground types at (x, y): Cannot place A over B" (throws; tile placement) |
+| `0x1423ba640` / `0x1423ba4e0` | sorted `(i32 key, i32 value)` map set / get (the world stats at `+0x128`) |
 | `0x140223710` | `WorldAreas.dat` table getter `(out)`; sibling getters exist for every table (one function per table) |
-| `0x1421d6e30` | resource "ensure loaded" (state `+0x40` == 2) |
-| `0x142bba3c0` / `0x142bba2a0` | the game's allocator / free |
-| `0x142c14288` | `__vcrt_getptd`: the thread's C++ exception state |
-| `0x142c13a00` | `_IsExceptionObjectToBeDestroyed` (walks the frame info chain at ptd `+0x58`) |
-| `0x141eff290` | Incursion temple room object constructor (reads `world +0xa0`, throws "[INCURSION2] Present-day temple contains Past-only room") |
-| `0x14100b110` | creates the in-game world (`new(0x17e8)`, constructor `(2, multi)`) and destroys the old one |
+| `0x1421d7070` | resource "ensure loaded" (state `+0x40` == 2) |
+| `0x142bba600` / `0x142bba4e0` | the game's allocator / free |
+| `0x142c144c8` | `__vcrt_getptd`: the thread's C++ exception state |
+| `0x142c13c40` | `_IsExceptionObjectToBeDestroyed` (walks the frame info chain at ptd `+0x58`) |
+| `0x141eff410` | Incursion temple room object constructor (reads `world +0xa0`, throws "[INCURSION2] Present-day temple contains Past-only room") |
+| `0x14100b2a0` | creates the in-game world (`new(0x17e8)`, constructor `(2, multi)`) and destroys the old one |
 
 ## Measurements
 
@@ -245,9 +245,9 @@ of act 10 or 50,000 of act 1; 12 threads add under 1 GB and gain 17 % throughput
 
 - Forced topology index (settled 2026-10-22): the client checks `map_force_topology` against the
   **raw** `WorldAreas` list (row `+0x60` entries, all league modes) and takes entry `stat - 1` of
-  row `+0x68` (`0x141ff9280` checks `stat <= row +0x60`, else throws "Cannot force graph N because
-  area X does not have that many topologies"; `0x141ff90f0` indexes the array, no mode filter).
-  The mode filter (`0x141fdfe30`: mode equal, else 0x39, else mode 1) is only used when nothing is
+  row `+0x68` (`0x141ff9400` checks `stat <= row +0x60`, else throws "Cannot force graph N because
+  area X does not have that many topologies"; `0x141ff9270` indexes the array, no mode filter).
+  The mode filter (`0x141fdffb0`: mode equal, else 0x39, else mode 1) is only used when nothing is
   forced. In all 442 areas the mode 1 (or 0x39) entries are a **prefix** of the raw list, so the
   1-based index into the port's `topology_entries` list is the same index into the raw list and
   the matrix ids, the batch plan and the server's `transfer` agree. 11 areas list further
@@ -272,12 +272,12 @@ of act 10 or 50,000 of act 1; 12 threads add under 1 GB and gain 17 % throughput
   be generated without that data: `error` rows with "No walkable area in the level".
 - Layouts only: objects, doodad entries and the collision grid of a job are written for the export
   list; the doodad hash and the size of every job are in the results. The server-only
-  doodad scatter (globals `0x1445c991c` / `0x14458c705`) is not run.
+  doodad scatter (globals `0x1445c995c` / `0x14458c74c`) is not run.
 - The generator's natural topology choice (no forced stats) uses the world map pins; with none it
-  falls back to a draw (`0x141ff9280`). Jobs with topology 0 run that fallback.
+  falls back to a draw (`0x141ff9400`). Jobs with topology 0 run that fallback.
 
 ## Traces in batch mode
 
 `POE_HOOK_GEN_TRACE=1 python3 scripts/re/terrain_batch.py run <name> --threads 1` writes `generator_trace.tsv` next to the export of every job in `export.txt` (the trace buffer is global: one worker thread only).
 
-Tile-map checkpoints (2026-10-27, `terrain_tools.rs` `TILE_CHECKPOINTS`): at the entry of the graph pipeline `0x141ff05f0`, the post-layout stage `0x141ff7a10`, the outer fill `0x141fd5ff0`, the outer buffer `0x141fd8360`, the grid passes `0x141fe0fd0` / `0x141fe0ea0`, the overlay candidate scan `0x141fa23e0` (with `occupancy` rows: its occupancy bytes, bit 0 taken; not the per-position fit test `0x141fa1830`, called per candidate position, which made traced jobs hang), the placeholder fill `0x1420a6140`, the pre-unique room `0x14209c150`, the topology choice `0x141ff9280` and every phase, `tdiff pre_<name> <caller>` lines list the tile records changed since the previous checkpoint (`x y h<old>-><new> o<old>-><new> s<skip>`, result the tile file, `old>new` when it changed), closed by a `tdiff_end` count; replaying them gives the tile map at any checkpoint. The placeholder fill adds `roomgrid` rows (its room grid, 0 = free), the pre-unique room `preunique_cells` (its ground-only cell list before the shuffle: index, x, y, accessible, height, ground), the outer buffer's row strips `strip_grounds` (site `0x141fdbc74`: row y, walk limit and the two grounds compared), the placeholder fill also `placeholder_sizes` (site `0x1420a61fd`: the door type's size list, `w×h:weight` and the total), the topology choice `map_pins` (generator `+0x280`) and `pin_dirs` (generation state `+0x70`), see [shared-passes.md](shared-passes.md#topology-choice). Runs of 2026-10-22 under `dumps/0.5.5e/terrain/batch/`: `a1` (63 act 1 / dgr jobs), `a2`, `b1`, `b3`, `c1`; `b2` has exports without traces.
+Tile-map checkpoints (2026-10-27, `terrain_tools.rs` `TILE_CHECKPOINTS`): at the entry of the graph pipeline `0x141ff0770`, the post-layout stage `0x141ff7b90`, the outer fill `0x141fd6170`, the outer buffer `0x141fd84e0`, the grid passes `0x141fe1150` / `0x141fe1020`, the overlay candidate scan `0x141fa2560` (with `occupancy` rows: its occupancy bytes, bit 0 taken; not the per-position fit test `0x141fa19b0`, called per candidate position, which made traced jobs hang), the placeholder fill `0x1420a62c0`, the pre-unique room `0x14209c2d0`, the topology choice `0x141ff9400` and every phase, `tdiff pre_<name> <caller>` lines list the tile records changed since the previous checkpoint (`x y h<old>-><new> o<old>-><new> s<skip>`, result the tile file, `old>new` when it changed), closed by a `tdiff_end` count; replaying them gives the tile map at any checkpoint. The placeholder fill adds `roomgrid` rows (its room grid, 0 = free), the pre-unique room `preunique_cells` (its ground-only cell list before the shuffle: index, x, y, accessible, height, ground), the outer buffer's row strips `strip_grounds` (site `0x141fdbdf4`: row y, walk limit and the two grounds compared), the placeholder fill also `placeholder_sizes` (site `0x1420a637d`: the door type's size list, `w×h:weight` and the total), the topology choice `map_pins` (generator `+0x280`) and `pin_dirs` (generation state `+0x70`), see [shared-passes.md](shared-passes.md#topology-choice). Runs of 2026-10-22 under `dumps/0.5.5e.hotfix1/terrain/batch/`: `a1` (63 act 1 / dgr jobs), `a2`, `b1`, `b3`, `c1`; `b2` has exports without traces.

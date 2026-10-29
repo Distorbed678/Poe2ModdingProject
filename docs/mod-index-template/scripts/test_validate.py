@@ -22,7 +22,7 @@ def good():
                 "id": "hud-tweaks", "name": "HUD tweaks", "description": "d", "author": "Ann", "side": "client",
                 "tags": ["ui"], "homepage": "https://example.org/x", "licence": "MIT",
                 "versions": [
-                    {"version": "1.0.0", "game_versions": ["0.5.5e"], "hook_api": 1, "sha256": "a" * 64,
+                    {"version": "1.0.0", "game_versions": ["0.5.5e.hotfix1"], "hook_api": 1, "sha256": "a" * 64,
                      "size": 10, "url": "https://example.org/hud-tweaks-1.0.0.zip"}
                 ],
             }
@@ -72,7 +72,7 @@ class Validate(unittest.TestCase):
             ("version", "1.0"), ("version", "v1.0.0"), ("sha256", "zz"), ("sha256", "a" * 63), ("size", 0),
             ("size", 600 << 20), ("size", True), ("url", "http://example.org/a.zip"),
             ("url", "https://user:pw@example.org/a.zip"), ("url", "https://example.org/a b.zip"),
-            ("hook_api", -1), ("hook_api", "1"), ("game_versions", "0.5.5e"), ("yanked", "yes"),
+            ("hook_api", -1), ("hook_api", "1"), ("game_versions", "0.5.5e.hotfix1"), ("yanked", "yes"),
         ]
         for key, value in cases:
             d = good(); d["mods"][0]["versions"][0][key] = value

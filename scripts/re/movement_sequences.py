@@ -16,7 +16,7 @@ Usage:
                                                          per-scenario sequences (see SCENARIOS)
   movement_sequences.py never  [session ...]            S->C opcodes that are never sent for movement
 
-`session` is a folder name under dumps/0.5.5e/captures/official/ (or local/ with --local), a path
+`session` is a folder name under dumps/0.5.5e.hotfix1/captures/official/ (or local/ with --local), a path
 to a session folder, or a path to a packets.jsonl. Without sessions, all official ones are used.
 Analysis only: nothing here connects to anything.
 

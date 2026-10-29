@@ -197,7 +197,7 @@ Each sample holds the time (ms), `players` (sessions in game), `instances` and `
 "mods": [{
   "id": "hello-both", "name": "Hello both", "version": "0.1.0", "side": "both",
   "sha256": "<64 lower-case hex of the zip>", "size": 288813,
-  "required": true, "hook_api": 1, "game_versions": ["0.5.5e"], "code": true,
+  "required": true, "hook_api": 1, "game_versions": ["0.5.5e.hotfix1"], "code": true,
   "authors": ["..."], "description": "...",
   "sources": [
     {"type": "server", "path": "/api/v1/mods/hello-both/0.1.0.zip"},

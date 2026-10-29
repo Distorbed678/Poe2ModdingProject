@@ -16,11 +16,11 @@ Read [handoff-agent-7.md](handoff-agent-7.md) first (preferences, commit rules, 
 `run.sh <area regex> <out.tsv> [threads]` (per-area gate vs baseline), `sum.sh <run> <outdir>` (first divergence of every export of a run), `runclient.sh`. Debug switches: `POE_DBG_FILL`, `POE_DBG_WIN`, `POE_DBG_MARK=x,y`, `POE_DUMP_LAT2`, `POE_DBG_BLANK`; off switches `POE_NO_INHERIT`, `POE_NO_RESETTLE`, `POE_OWN_ROOMSET_ONLY`, `POE_OVSP_ANY`. `tsi_keys <key>...` lists masters with those keys.
 
 ## Next leads by value (classes from `runtime/w7/sum/`, current build)
-1. **Door-pick candidate count `0x141fa81a3`** (client 1 candidate, ours 2-4): G3_11 300, G3_16, G3_12 likely, earlier G2_4_2 class. Every G3_11/G3_16 export diverges there.
+1. **Door-pick candidate count `0x141fa8323`** (client 1 candidate, ours 2-4): G3_11 300, G3_16, G3_12 likely, earlier G2_4_2 class. Every G3_11/G3_16 export diverges there.
 2. **Sub-dungeon / outer "failed to find a fill tile or room at (-1,-1)"**: G3_14, G3_8, MapAlpineRidge, MapAzmerianRanges, P3_2, Abyss_Pinnacle, ChayulaLeague_TowerBoss, MapUberBoss_Delirium: probably the same window-occupancy family as `inherit_cells` (a fill at x or y = -1).
-3. **Encounter requests `0x1420ab667`** (P3_1..P3_6, see dungeon.md "Encounter requests").
-4. **Overlay candidate totals `0x141fa249c` / `0x141fa2692`**: G4_13 (400), G1_11 several topologies, world maps (G1/G4), MapBloomingField, P2_3, MapOrnateChambers.
-5. **Doodads `0x141ff6049`** (layout matches, doodad pass differs): MapBloodwood, MapRiverside (4 cells), MapHiddenGrotto, MapStronghold, MapPenitentiary (9 cells), MapTerrace: small layout diffs after all draws in step.
-6. `0x14209ea03` (MapUniqueFreight_, CopperCitadel_Quest, G4_6), `0x141fdfd6d` G4_11_2, `0x14209c29e` G1_13_2 (7), `0x1420aff12` ExpeditionLogBook_Basin, CopperCitadel `0x1420b2652` (filler size total 1 vs ours 2: a non-square room listed as turned too where the client does not).
+3. **Encounter requests `0x1420ab7e7`** (P3_1..P3_6, see dungeon.md "Encounter requests").
+4. **Overlay candidate totals `0x141fa261c` / `0x141fa2812`**: G4_13 (400), G1_11 several topologies, world maps (G1/G4), MapBloomingField, P2_3, MapOrnateChambers.
+5. **Doodads `0x141ff61c9`** (layout matches, doodad pass differs): MapBloodwood, MapRiverside (4 cells), MapHiddenGrotto, MapStronghold, MapPenitentiary (9 cells), MapTerrace: small layout diffs after all draws in step.
+6. `0x14209eb83` (MapUniqueFreight_, CopperCitadel_Quest, G4_6), `0x141fdfeed` G4_11_2, `0x14209c41e` G1_13_2 (7), `0x1420b0092` ExpeditionLogBook_Basin, CopperCitadel `0x1420b27d2` (filler size total 1 vs ours 2: a non-square room listed as turned too where the client does not).
 7. World-map own ground: room data +10 is set by the `.arm` parser for some rooms (labels have arm bool 1) but bool 1 alone lost 10 G4_WorldMap jobs (`POE_ARM_OWN=1`).
 8. MapKarst (paired rooms), DerelictMansion (StoneCircle feature room), "could not fix heights" (G2_12, Design_Lite, G4_4_3).

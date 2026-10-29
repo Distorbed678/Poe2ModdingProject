@@ -7,7 +7,7 @@ For each opcode:
 2. takes the vtable stored at +0 nearby (`lea rax, [rip+X]` ... `mov [rcx], rax`);
 3. disassembles vtable slot 1 (serializer, `this, stream`) and slot 2 (deserializer) and
    lists, in order, the stream calls with their size and source field:
-   `write(+off, n)` for the raw writer `0x142197e60` (`n` from r8), byte swaps
+   `write(+off, n)` for the raw writer `0x142197fb0` (`n` from r8), byte swaps
    (`htons`/`htonl` imports), and other calls (nested serializers, varint writers).
 Conditional jumps are listed too, so optional fields stand out. This is a linear sweep: read
 the output alongside the disassembly when branches matter.
@@ -20,15 +20,15 @@ from capstone import x86
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from pe import Image
 
-WRITE = 0x142197E60
-READ = 0x142197D30
+WRITE = 0x142197FB0
+READ = 0x142197E80
 KNOWN = {
-    0x142197E60: "write",
-    0x142197D30: "read",
+    0x142197FB0: "write",
+    0x142197E80: "read",
     0x140872560: "write_varuint",
     0x1408719A0: "read_varuint",
-    0x141CFB3C0: "read_wstring",
-    0x141CFBFE0: "read_varint",
+    0x141CFB540: "read_wstring",
+    0x141CFC160: "read_varint",
 }
 
 img = Image()

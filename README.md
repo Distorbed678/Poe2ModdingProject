@@ -1,6 +1,6 @@
 # Poe2ModdingProject
 
-A private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust and designed for future client and server modding. It is a personal, educational project: it never touches the official Steam install, and on official servers the client hook only observes and logs (read-only).
+A private server for **Path of Exile 2 (client 0.5.5e Hotfix 1)**, written in Rust and designed for future client and server modding. It is a personal, educational project: it never touches the official Steam install, and on official servers the client hook only observes and logs (read-only).
 
 ## How the repos fit together
 
@@ -13,18 +13,18 @@ This repository is the **project hub**: the documentation, the plans, the revers
 | [Poe2Protocol](https://github.com/Distorbed678/Poe2Protocol) | `modules/protocol` | `poe-proto`, `poe-net` (codec and ciphers), the opcode tables `opcodes/<version>/*.toml` and the supported-build definitions `versions/<version>.toml` |
 | [Poe2ClientHook](https://github.com/Distorbed678/Poe2ClientHook) | `modules/client-hook` | The client DLLs (`version.dll` loader, hot-reloadable debug core with the in-game overlay, mod loader), `poe-hook-deploy`, `poe-hook-mods`; releases `hook-v*` |
 | [Poe2WebAdmin](https://github.com/Distorbed678/Poe2WebAdmin) | `modules/web-admin` | Web admin site (Svelte 5 + Vite + TypeScript) on top of the server's web API ([docs/guides/setup.md](docs/guides/setup.md#web-admin-build), [docs/architecture/web-api.md](docs/architecture/web-api.md)) |
-| [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) | `modules/launcher` | Player and host launcher (Tauri 2 + Svelte 5): server profiles and login, installs 0.5.5e from Steam depots, deploys the hook, starts the game, hosts a server, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)); releases `v*` |
+| [Poe2Launcher](https://github.com/Distorbed678/Poe2Launcher) | `modules/launcher` | Player and host launcher (Tauri 2 + Svelte 5): server profiles and login, installs the game from Steam depots, deploys the hook, starts the game, hosts a server, manages mods ([docs/guides/launcher.md](docs/guides/launcher.md)); releases `v*` |
 | [Poe2ModSDK](https://github.com/Distorbed678/Poe2ModSDK) | `modules/mod-sdk` | SDK for server and client mods (`poe-mod-api`, `poe-mod` tool, examples) |
 | [Poe2Mods](https://github.com/Distorbed678/Poe2Mods) | `modules/mod-index` | Public mod index read by the launcher |
 | [Poe2ServerList](https://github.com/Distorbed678/Poe2ServerList) | `modules/server-list` | Public server list read by the launcher |
 
-Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (server data and logs, git-ignored), `dumps/` (datamined outputs, git-ignored; [dumps/README.md](dumps/README.md)), `GameFiles/` (your copy of the 0.5.5e client, never in git). Every crate and server: [docs/architecture/crates.md](docs/architecture/crates.md).
+Other folders: `third_party/` (downloaded tools, git-ignored), `runtime/` (server data and logs, git-ignored), `dumps/` (datamined outputs, git-ignored; [dumps/README.md](dumps/README.md)), `GameFiles/` (your copy of the 0.5.5e Hotfix 1 client, never in git). Every crate and server: [docs/architecture/crates.md](docs/architecture/crates.md).
 
 **Players** use the launcher ([docs/guides/client.md](docs/guides/client.md)); **hosts** take a [server release](https://github.com/Distorbed678/Poe2Server/releases) or the launcher's *Host a server* page ([hosting guide](modules/server/docs/hosting.md)); **developers** clone with `git clone --recursive`.
 
 ## Quick start
 
-Needs Linux with rustup, Steam with Proton Experimental, and a copy of the 0.5.5e client in `GameFiles/`. The full requirements, options and the unattended test tools are in [docs/guides/setup.md](docs/guides/setup.md).
+Needs Linux with rustup, Steam with Proton Experimental, and a copy of the 0.5.5e Hotfix 1 client in `GameFiles/`. The full requirements, options and the unattended test tools are in [docs/guides/setup.md](docs/guides/setup.md).
 
 The steps are in [docs/guides/setup.md](docs/guides/setup.md): [clone](docs/guides/setup.md#clone) with submodules, [fetch the tools](docs/guides/setup.md#tools), [build](docs/guides/setup.md#build-and-test), [start the server and deploy the client](docs/guides/setup.md#run) into `GameFiles/`, and [play](docs/guides/setup.md#playing-from-steam-non-steam-game-shortcut) or launch the client through Proton. `revert-client` restores `GameFiles/`.
 
@@ -45,7 +45,7 @@ This is an unofficial, fan-made project for personal and educational use. It is 
 Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xtask tracker`; do not edit this block by hand. The history of what was built when is in [docs/status/history.md](docs/status/history.md), the terrain generator in [docs/status/terrain.md](docs/status/terrain.md).
 
 <!-- tracker:start -->
-> **Current task:** [Terrain port to all areas (docs/plans/terrain-all-areas.md)](docs/plans/terrain-all-areas.md)
+> **Current task:** [R1.5: launcher and web admin cleanup, Hotfix 1 only (docs/plans/r1.5-ui-cleanup.md)](docs/plans/r1.5-ui-cleanup.md)
 
 | Subsystem | Progress | Done |
 |---|---|---|
@@ -59,7 +59,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
-| [Launcher](#launcher) | `██████████ 100%` | 7/7 |
+| [Launcher](#launcher) | `█████████░ 94%` | 7/8 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `█████████░ 90%` | 9/10 |
 
@@ -162,8 +162,8 @@ Docs: [docs/status/terrain.md](docs/status/terrain.md)
 | ✅ | [Per-area x topology x orientation matrix (cargo xtask terrain-matrix)](docs/plans/terrain-all-areas.md) | 2026-10-29 (R1 complete, Poe2Server 3b05682): all three 50-seed client batches match on every layout the client generates: batch 1 218,705, batch 2 218,802, batch 3 (new seeds) 218,678; batch 3 natural part 8,368 of 8,368; 4508 combinations: 4469 match, 0 partial, 0 fail, 39 untested (client errors on every seed, listed in terrain.md) |
 | ✅ | [Verification at scale: bulk vectors (WP7.2, done), forced-layout sweeps (WP7.3) and the client batch (WP7.16)](docs/plans/terrain-all-areas.md#2-verification-at-scale) | 2026-10-22: bulk vectors, multi-seed probe, forced_verify and the in-client batch are done; full run: 225,400 client layouts (every combination x 50 seeds) in 1.3 h, one launch, 0 crashes; 218,705 generated by the client, 6,695 client-side generator errors; the port matches 37,380 (17%); forced login sweeps (WP7.3) only as a cross-check |
 | ❌ | [Dungeon height-change and virtual edge types (chirality), unlocks 44 areas](docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked) | 149 topologies stop at the guard in dungeon.rs; G1_11 is the first test |
-| ❌ | [3x3 door spots (0x14209dc90), unlocks 27 areas; FileGroups and nested subgraphs, 11 areas](docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked) |  |
-| 🟡 | [Collision and walkability output for server movement](docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked) | 2026-10-22 (WP7.12): collision.rs builds the PWG1 grid (0x141d0e5f0 + doodad hulls); 273 of 303 client exports equal grids.bin in all 4 layers (fails: lattice flag 8 in MapSlash and others); [terrain] generated_grid (default off) uses it when the tile hash equals the client's; no live movement test yet |
+| ❌ | [3x3 door spots (0x14209de10), unlocks 27 areas; FileGroups and nested subgraphs, 11 areas](docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked) |  |
+| 🟡 | [Collision and walkability output for server movement](docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked) | 2026-10-22 (WP7.12): collision.rs builds the PWG1 grid (0x141d0e770 + doodad hulls); 273 of 303 client exports equal grids.bin in all 4 layers (fails: lattice flag 8 in MapSlash and others); [terrain] generated_grid (default off) uses it when the tile hash equals the client's; no live movement test yet |
 
 ### Terrain matrix
 
@@ -673,9 +673,10 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 | ✅ | [Releases and auto-update (AppImage, NSIS installer, signed latest.json)](docs/guides/launcher.md#releasing) | WP E1-E3, 2026-10-21: v0.1.0 and v0.1.1 released by the tag workflow; on Linux an installed 0.1.0 found, downloaded, verified and installed 0.1.1 and restarted as 0.1.1; the Windows installer and its update are built in CI but untested (no Windows machine) |
 | ✅ | [Server profiles and account login through the web API](docs/guides/launcher.md#the-flow) | profiles, register, login (kind launcher), token in the OS keyring, logout revokes; tested with a mock keyring and a real server |
 | ✅ | [Game-token exchange for auto-login (`POST /api/v1/game-token`)](docs/architecture/web-api.md#endpoints) | launcher token -> one-off game_remember token (the game's rolling login would revoke the launcher token) |
-| ✅ | [Install 0.5.5e from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested |
+| ✅ | [Install the game from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested |
 | ✅ | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | the user's end-to-end test on Linux (2026-10-23): hook download and deploy, Host a server (update from server-v0.1.0 to 0.2.1), Play, web admin, restart all passed; Windows path untested |
 | ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4) |
+| 🟡 | [R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web](docs/plans/r1.5-ui-cleanup.md) | 2026-10-29: 0.5.5e dropped everywhere (version files, signature table, opcode folder renamed, RE addresses moved to Hotfix 1 with scripts/re/convert_addrs.py, dumps moved); launcher, web admin and hook work follows the plan |
 
 ### Web Admin
 

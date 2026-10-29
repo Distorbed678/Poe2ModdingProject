@@ -1,6 +1,6 @@
 # Project overview
 
-The Path of Exile 2 (client 0.5.5e) private server project is spread over nine repositories under [`Distorbed678`](https://github.com/Distorbed678). This page says which repository does what, how they depend on each other, where the releases are, and how a player, a host and a developer get started. The rules for working on all of them are in [../CLAUDE.md](../CLAUDE.md).
+The Path of Exile 2 (client 0.5.5e Hotfix 1) private server project is spread over nine repositories under [`Distorbed678`](https://github.com/Distorbed678). This page says which repository does what, how they depend on each other, where the releases are, and how a player, a host and a developer get started. The rules for working on all of them are in [../CLAUDE.md](../CLAUDE.md).
 
 ## The repositories
 
@@ -76,7 +76,7 @@ The server releases `server-v0.1.0` and `server-v0.2.0` were made in this reposi
 
 ## Getting started
 
-- **Player.** Install the [launcher](https://github.com/Distorbed678/Poe2Launcher/releases) and follow [guides/client.md](guides/client.md): it installs the 0.5.5e client from Steam depots, deploys the hook, signs in to a server from the server list or an address, and starts the game.
+- **Player.** Install the [launcher](https://github.com/Distorbed678/Poe2Launcher/releases) and follow [guides/client.md](guides/client.md): it installs the 0.5.5e Hotfix 1 client from Steam depots, deploys the hook, signs in to a server from the server list or an address, and starts the game.
 - **Host.** Either the launcher's *Host a server* page (it downloads the server release matching your client build and runs it), or a [server release](https://github.com/Distorbed678/Poe2Server/releases) by hand: [hosting.md](../modules/server/docs/hosting.md). Mods for a server: [guides/modding.md](guides/modding.md).
 - **Developer.** Clone everything and build:
 

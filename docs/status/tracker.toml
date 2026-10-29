@@ -8,8 +8,8 @@
 # status = "done" (1.0) | "partial" (0.5) | "missing" (0) | "planned" (0).
 #   missing = needed and not started or known broken; planned = scheduled in a plan document.
 
-current_task = "Terrain port to all areas (docs/plans/terrain-all-areas.md)"
-current_task_link = "docs/plans/terrain-all-areas.md"
+current_task = "R1.5: launcher and web admin cleanup, Hotfix 1 only (docs/plans/r1.5-ui-cleanup.md)"
+current_task_link = "docs/plans/r1.5-ui-cleanup.md"
 
 # ---------------------------------------------------------------------------------------------
 
@@ -323,14 +323,14 @@ note = "149 topologies stop at the guard in dungeon.rs; G1_11 is the first test"
 link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
 
 [[subsystem.item]]
-name = "3x3 door spots (0x14209dc90), unlocks 27 areas; FileGroups and nested subgraphs, 11 areas"
+name = "3x3 door spots (0x14209de10), unlocks 27 areas; FileGroups and nested subgraphs, 11 areas"
 status = "missing"
 link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
 
 [[subsystem.item]]
 name = "Collision and walkability output for server movement"
 status = "partial"
-note = "2026-10-22 (WP7.12): collision.rs builds the PWG1 grid (0x141d0e5f0 + doodad hulls); 273 of 303 client exports equal grids.bin in all 4 layers (fails: lattice flag 8 in MapSlash and others); [terrain] generated_grid (default off) uses it when the tile hash equals the client's; no live movement test yet"
+note = "2026-10-22 (WP7.12): collision.rs builds the PWG1 grid (0x141d0e770 + doodad hulls); 273 of 303 client exports equal grids.bin in all 4 layers (fails: lattice flag 8 in MapSlash and others); [terrain] generated_grid (default off) uses it when the tile hash equals the client's; no live movement test yet"
 link = "docs/plans/terrain-all-areas.md#4-unported-systems-ranked-by-areas-unlocked"
 
 # ---------------------------------------------------------------------------------------------
@@ -450,7 +450,7 @@ note = "launcher token -> one-off game_remember token (the game's rolling login 
 link = "docs/architecture/web-api.md#endpoints"
 
 [[subsystem.item]]
-name = "Install 0.5.5e from Steam depots"
+name = "Install the game from Steam depots"
 status = "done"
 note = "DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested"
 link = "docs/guides/launcher.md#install-in-detail"
@@ -468,6 +468,12 @@ note = "files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4)"
 link = "docs/guides/launcher.md#mods"
 
 # ---------------------------------------------------------------------------------------------
+
+[[subsystem.item]]
+name = "R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web"
+status = "partial"
+link = "docs/plans/r1.5-ui-cleanup.md"
+note = "2026-10-29: 0.5.5e dropped everywhere (version files, signature table, opcode folder renamed, RE addresses moved to Hotfix 1 with scripts/re/convert_addrs.py, dumps moved); launcher, web admin and hook work follows the plan"
 
 [[subsystem]]
 name = "Web Admin"

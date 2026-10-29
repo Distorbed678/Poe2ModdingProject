@@ -2,13 +2,13 @@
 
 How a player gets the game client onto a private server of this project: through the launcher, or by hand with `cargo xtask`, on Linux (Proton) or Windows. For running a server for others see [hosting.md](../../modules/server/docs/hosting.md); for developers [setup.md](setup.md) has every command.
 
-**Unofficial.** This project is not affiliated with or endorsed by Grinding Gear Games. No game files are distributed: you need your own legal copy of Path of Exile 2, on the build the server supports (**0.5.5e**; the exact build and its executable checksum are in `modules/protocol/versions/0.5.5e.toml`). The client hook is a DLL that is loaded into the game; the game's anti-cheat may detect it. Use it only for the private server and never on an account you care about; if you want to use it to observe an official session, read [official-mode.md](official-mode.md) first ([overview](#going-back-to-the-official-game)). See the [disclaimer](../../README.md#disclaimer).
+**Unofficial.** This project is not affiliated with or endorsed by Grinding Gear Games. No game files are distributed: you need your own legal copy of Path of Exile 2, on the build the server supports (**0.5.5e Hotfix 1**; the exact build and its executable checksum are in `modules/protocol/versions/0.5.5e.hotfix1.toml`). The client hook is a DLL that is loaded into the game; the game's anti-cheat may detect it. Use it only for the private server and never on an account you care about; if you want to use it to observe an official session, read [official-mode.md](official-mode.md) first ([overview](#going-back-to-the-official-game)). See the [disclaimer](../../README.md#disclaimer).
 
 ## What gets installed
 
 | Piece | What it is | Where |
 |---|---|---|
-| The game (0.5.5e) | Your own copy of the client files | a folder you choose; never the folder Steam keeps your real install in |
+| The game (0.5.5e Hotfix 1) | Your own copy of the client files | a folder you choose; never the folder Steam keeps your real install in |
 | `version.dll` | The hook loader (our `poe_hook.dll`, under the name the game loads from its own folder), plus `poe_hook_core.dll` (features and the in-game overlay) | next to `PathOfExileSteam.exe` |
 | `poe-hook.toml` | The hook's config: mode, login mode, the servers it trusts | next to the exe |
 | `gateway_list.txt` | The realm list, replaced by one entry that points at your server (the original is kept as `gateway_list.txt.orig`) | next to the exe |
@@ -19,7 +19,7 @@ Everything the deploy changes is inside the game copy; `cargo xtask revert-clien
 
 ## Option 1: through the launcher (recommended)
 
-The launcher does all of the above for you: it downloads client 0.5.5e from Steam with your own Steam login into its own folder, installs the hook, writes the config for the server you pick, signs your account in and starts the game. Download, install and update of the launcher itself, the one-time set-up (hook DLL directory, Linux keyring, Proton) and the step-by-step flow are in [launcher.md](launcher.md). In short:
+The launcher does all of the above for you: it downloads client 0.5.5e Hotfix 1 from Steam with your own Steam login into its own folder, installs the hook, writes the config for the server you pick, signs your account in and starts the game. Download, install and update of the launcher itself, the one-time set-up (hook DLL directory, Linux keyring, Proton) and the step-by-step flow are in [launcher.md](launcher.md). In short:
 
 1. Get the launcher: Linux AppImage or Windows installer from the Poe2Launcher releases ([launcher.md](launcher.md#download-install-and-update)).
 2. **Servers**: add your server's web API address (the server owner gives it to you, for example `https://play.example.org`); **Account**: log in or create an account.
@@ -34,7 +34,7 @@ For developers and people who build from source. You need a checkout of the hub 
 
 ### The game files
 
-Copy a complete 0.5.5e install into `GameFiles/` of the checkout (the folder with `PathOfExileSteam.exe` and `Bundles2`). Copy it, do not point the tooling at Steam's own folder: the deploy replaces `gateway_list.txt` and adds DLLs, which would change your real install and make Steam "repair" it. The copy must be the same build as the server's `[game] version`. The checkout's git ignores `GameFiles/`.
+Copy a complete 0.5.5e Hotfix 1 install into `GameFiles/` of the checkout (the folder with `PathOfExileSteam.exe` and `Bundles2`). Copy it, do not point the tooling at Steam's own folder: the deploy replaces `gateway_list.txt` and adds DLLs, which would change your real install and make Steam "repair" it. The copy must be the same build as the server's `[game] version`. The checkout's git ignores `GameFiles/`.
 
 ### Linux (Proton)
 
@@ -86,7 +86,7 @@ The project also has an `--official` mode that lets the hook *observe* a session
 |---|---|---|
 | The client exits at once, log says `Unable to init Steam API` | Steam is not running | Start Steam first |
 | The login screen shows the official realms, or the client never contacts the server | `gateway_list.txt` was not replaced, or the client remembered an earlier realm | Deploy again; `cargo xtask select-gateway` resets the remembered gateway (Proton prefix); check `gateway_list.txt` |
-| "There has been a patch that you need to update to" | The server does not know your executable (another build) | Use the 0.5.5e build the server names; the server owner can allow unknown builds ([hosting.md](../../modules/server/docs/hosting.md#troubleshooting)) |
+| "There has been a patch that you need to update to" | The server does not know your executable (another build) | Use the build the server names (0.5.5e Hotfix 1); the server owner can allow unknown builds ([hosting.md](../../modules/server/docs/hosting.md#troubleshooting)) |
 | Login screen offers Steam login, not account and password | `login_mode = "steam"` in `poe-hook.toml` | Set `login_mode = "standalone"` or deploy without `--login-mode steam` |
 | Account does not exist / wrong password | No account yet, or a typo | Ask the server owner, or "Create account" in the launcher if registration is open. Too many failures lock the account for a few minutes |
 | Stuck on the loading screen, or a freeze right after entering | Port 6112 (TCP) not reachable, or the server does not have the area's layout yet | Tell the server owner; see [hosting.md](../../modules/server/docs/hosting.md#troubleshooting) |

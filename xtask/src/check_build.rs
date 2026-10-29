@@ -697,7 +697,7 @@ fn opcodes(root: &Path, v: &VersionFile, file: &[u8], image: &Image, r: &mut Rep
                 },
                 _ => r.add(OPCODES, "HNC key_xor (64 bytes by value)", "invalid", Level::Fail, "hnc.toml key_xor is not 64 hex bytes"),
             }
-            r.add(OPCODES, "HNC swaps", "not checked", Level::Info, "derived from the code at the swap routine (0x1421c50b0 in 0.5.5e); check by the live handshake");
+            r.add(OPCODES, "HNC swaps", "not checked", Level::Info, "derived from the code at the swap routine (0x1421c52f0); check by the live handshake");
             fingerprints(&dir, &p, image, r);
         }
         Err(e) => r.add(
@@ -1428,7 +1428,7 @@ mod tests {
         let mut file = std::fs::read(&exe).unwrap();
         let mapped = map_file(&file).unwrap();
         let image = Image::from_mapped(&mapped).unwrap();
-        let version = VersionFile::load(&root, "0.5.5e").unwrap();
+        let version = VersionFile::load(&root, "0.5.5e.hotfix1").unwrap();
         let table = Table::parse(
             &std::fs::read_to_string(version.signatures_path(&root).unwrap()).unwrap(),
         )

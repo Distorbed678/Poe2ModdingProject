@@ -24,7 +24,7 @@ In official mode the DLL sets its **read-only latch** at start and the latch nev
 - **It can be detected.** Anti-cheat and the game's terms of service can treat any injected DLL as a violation, even a passive one. The game can also load server-delivered code modules that inspect the process. There is no guarantee that this has not been, or will not be, noticed.
 - **Your account is what is at risk**: a warning, a temporary or a permanent ban are possible. Do not use official mode on an account you care about, on an account with purchases, or on one you cannot afford to lose. A throw-away account is the safer choice, although the terms apply to it too.
 - **Captures contain your play.** They hold what the server sent you: your character's data, inventory, chat and the names of other players near you. The login messages are redacted, nothing else is. Do not post a capture or log anywhere without reading it, and never attach one to a public issue.
-- **The hook is built for one client build.** With an unverified build (the game was patched and the signature tables do not match) only the pure observers start. Use the build the repository names (`modules/protocol/versions/0.5.5e.toml`) and update your `GameFiles/` copy first when the game is patched.
+- **The hook is built for one client build.** With an unverified build (the game was patched and the signature tables do not match) only the pure observers start. Use the build the repository names (`modules/protocol/versions/0.5.5e.hotfix1.toml`) and update your `GameFiles/` copy first when the game is patched.
 - The launcher offers this mode only as the explicit **Official (read-only)** entry of its game version dropdown, after the warning above is accepted ([From the launcher](#from-the-launcher)); it never uses it by itself.
 
 If any of that is not acceptable to you, stop here: playing the game on the official servers through Steam's own, untouched install is unaffected by this project.
@@ -77,6 +77,6 @@ The [launcher](launcher.md#official-read-only) has the same mode for players who
 |---|---|
 | The client exits at once, log says `Unable to init Steam API` | Steam is not running |
 | The login screen shows the private server's realm, or the account-name screen | `GameFiles/` was last deployed for the private server: run `deploy-client --official` again |
-| The overlay is missing or features are off, `NOT verified` in the log | The game build differs from the one the hook knows: update the `GameFiles/` copy to the build in `modules/protocol/versions/0.5.5e.toml`, or wait for a hook release for the new build ([new-game-version.md](new-game-version.md)) |
+| The overlay is missing or features are off, `NOT verified` in the log | The game build differs from the one the hook knows: update the `GameFiles/` copy to the build in `modules/protocol/versions/0.5.5e.hotfix1.toml`, or wait for a hook release for the new build ([new-game-version.md](new-game-version.md)) |
 | The game freezes for seconds when monsters appear | A tracing option from an earlier private session is on (`entity_trace`); set it to `false` in `poe-hook.toml` |
 | You were disconnected or warned | Stop using the mode and see the risk section; the project cannot help with an account decision |

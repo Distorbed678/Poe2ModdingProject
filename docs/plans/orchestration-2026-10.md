@@ -61,7 +61,7 @@ Poe2ModdingProject/
   xtask/             (was tools/xtask)
   scripts/           (was tools/: test-run.sh, shot.sh, re/*.py)
   third_party/       (was Tools/: downloaded tools, reference repos, proton prefix; git-ignored except README + fetch script)
-  dumps/0.5.5e/      git-ignored datamined data (see WP1.2)
+  dumps/0.5.5e.hotfix1/      git-ignored datamined data (see WP1.2)
   runtime/           (was data/: sqlite, logs, traces, crash dumps; git-ignored)
   GameFiles/  GhidraProject/   (unchanged, git-ignored)
 ```
@@ -107,7 +107,7 @@ Poe2ModdingProject/
 - Acceptance: `cargo build`, `cargo test` and `cargo xtask build-dll` pass, and `grep -r` finds no stale `Tools/`, `tools/`, `data/` or `Documentation/` paths.
 
 **WP1.2 Dumps folder (task 12)**
-- Create `dumps/0.5.5e/` with this structure:
+- Create `dumps/0.5.5e.hotfix1/` with this structure:
   - `terrain/grids/` (terrain_grid_*.bin)
   - `terrain/layouts/` (terrain_layout_*.tsv)
   - `terrain/area-exports/` (area_export and generator_trace sessions)
@@ -118,7 +118,7 @@ Poe2ModdingProject/
   - `captures/official/` and `captures/local/` (packet sessions copied from `GameFiles/logs/poe-hook/`)
   - `strings/`
 - Add a committed `dumps/README.md` and a `scripts/dumps/migrate.sh` that sorts the existing files from GameFiles and runtime into place. Moving out of GameFiles is allowed here, because these are our generated outputs, not game files.
-- Add a DLL setting `dump_dir` (poe-hook.toml, written by deploy as an absolute path), used by `client/poe-hook-core/src/dump_types.rs`. Server `[spawn] layout_dir` becomes `dumps/0.5.5e/terrain`.
+- Add a DLL setting `dump_dir` (poe-hook.toml, written by deploy as an absolute path), used by `client/poe-hook-core/src/dump_types.rs`. Server `[spawn] layout_dir` becomes `dumps/0.5.5e.hotfix1/terrain`.
 - Fix `test-run.sh` so it also cleans grids. Delete unreferenced duplicates (`terrain_vectors.tsv`) only after showing the list.
 - Acceptance: the server still spawns correctly in an in-game test, and nothing new appears in GameFiles.
 
@@ -180,7 +180,7 @@ Move the commands and the RE how-to into `docs/guides/setup.md` and `docs/re/REA
 ## Phase 2: Movement rewrite (task 4, then config pass 2, task 11b)
 
 **WP2.1 Capture analysis (RE, no code)**
-- Work through the 6 official sessions (now in `dumps/0.5.5e/captures/official/`; files are `packets.jsonl` and `packets.txt`). Use `crates/poe-proto/examples/check_capture.rs` and `scripts/re/packets_diff.py`.
+- Work through the 6 official sessions (now in `dumps/0.5.5e.hotfix1/captures/official/`; files are `packets.jsonl` and `packets.txt`). Use `crates/poe-proto/examples/check_capture.rs` and `scripts/re/packets_diff.py`.
 - Decode `0x1ae`/`0x1af`/`0x1b1` (they look like replies to `0x1a5`/`0x1a8`/`0x1ac`), using Ghidra for the field layouts. Also decode `0x1ac`.
 - Extract the exact sequences for each of these, with frame timing against `0x2f4` ticks:
   - WASD start, turn and stop
@@ -216,7 +216,7 @@ Move the commands and the RE how-to into `docs/guides/setup.md` and `docs/re/REA
 ## Phase 3: Accounts and multiplayer (task 5; follows docs/guides/multiplayer, formerly multiplayer.md)
 
 **WP3.1 RE spike: standalone login on the Steam exe (Ghidra MCP)**
-- Find how `PathOfExileSteam.exe` chooses the Steam login vs the email/password login screen: look for the strings for login UI and the "Steam" checks around the `0x0005` builder (`crates/poe-proto/src/login.rs:94`, addresses in `docs/re/addresses-0.5.5e.md`). Also find what the standalone path sends: credentials, field layout and flags.
+- Find how `PathOfExileSteam.exe` chooses the Steam login vs the email/password login screen: look for the strings for login UI and the "Steam" checks around the `0x0005` builder (`crates/poe-proto/src/login.rs:94`, addresses in `docs/re/addresses.md`). Also find what the standalone path sends: credentials, field layout and flags.
 - Output: `docs/re/standalone-login.md`, plus the hook point and patch.
 - If static RE stalls, ask the user for x64dbg help.
 - **Fallback (decide here):** the launcher token goes into the auth packet's unused bytes or the ticket field, and the Steam main menu is kept.
@@ -312,7 +312,7 @@ Move the commands and the RE how-to into `docs/guides/setup.md` and `docs/re/REA
 - Review `docs/status/terrain.md`, `docs/re/terrain/`, `crates/poe-world` (24 modules, 16 examples) and the verification tools (`area_vectors`, `area_trace`, `check_exports`, sweep).
 - Write `docs/plans/terrain-all-areas.md` for the next agent. It covers:
   1. **Scope inventory:** every WorldAreas row that generates terrain (from poe-data). For each, its generator type (.dgr/.tgr/town/fixed) and the topologies and orientations it supports (from the graph files and AreaInfo). The output is a `cargo xtask terrain-matrix` that writes the tracker matrix: area × topology × orientation → untested/fail/match.
-  2. **Verification at scale:** client traces for forced topologies and orientations through the already-verified AreaInfo stat records, sweep automation across all acts, and storage in `dumps/0.5.5e/terrain/`.
+  2. **Verification at scale:** client traces for forced topologies and orientations through the already-verified AreaInfo stat records, sweep automation across all acts, and storage in `dumps/0.5.5e.hotfix1/terrain/`.
   3. **Known blockers carried over:**
      - G1_12 grid overlap (+0x14b)
      - G1_4 overlay phase 2

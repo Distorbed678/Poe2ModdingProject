@@ -61,9 +61,9 @@ for R4"; tell the user when you are ready for it, and stop every client job befo
   unforced client generations; `map_dirs <area> [seed...]` prints an area's pin directions,
   candidates and picks; `area_vectors --natural` checks the natural pick.
 - Baselines: `runtime/forced-baseline.tsv` (= `runtime/r1/g4-b1.tsv`, all match; previous
-  `runtime/forced-baseline-pre-r1.tsv`); vectors in `dumps/0.5.5e/terrain/vectors/
+  `runtime/forced-baseline-pre-r1.tsv`); vectors in `dumps/0.5.5e.hotfix1/terrain/vectors/
   forced-results{,-full2,-batch3}.tsv`; the final gate script is `runtime/r1/gate4.sh` (all three
-  batches, about 6 h at 8 threads). Batch runs: `dumps/0.5.5e/terrain/batch/
+  batches, about 6 h at 8 threads). Batch runs: `dumps/0.5.5e.hotfix1/terrain/batch/
   {full,full2}`, `dumps/0.5.5e.hotfix1/terrain/batch/{batch3,batch3-nat,w13-nat1,r1-tr1}`.
 - Rebuild an example before using it (`cargo build --release -p poe-world --example <name>`): an
   old `forced_natural` binary almost replayed batch 3 on pre-fix code.

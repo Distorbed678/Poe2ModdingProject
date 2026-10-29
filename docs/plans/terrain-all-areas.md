@@ -57,7 +57,7 @@ generator WPs keep their order, with the batch results as their regression gate.
 
 **Which rows.** Every `WorldAreas` row whose `Topologies` column is not empty generates terrain
 from a graph file: 432 of 442. The matrix reads them with `poe_data` (`WorldAreas`, `Topologies`)
-and `poe_world::area::topology_entries`, which applies the client's selection (`0x141fdfe30`: the
+and `poe_world::area::topology_entries`, which applies the client's selection (`0x141fdffb0`: the
 topologies whose mode column equals 1, else those marked 0x39). The 1141 topologies of mode 1 are
 what `generate` uses and what `map_force_topology` indexes (1-based). The unfiltered list has 1225;
 the 84 others belong to other league modes of 11 areas (for example `G1_2` 33 raw, 18 in mode 1)
@@ -95,7 +95,7 @@ shared code (`region::turn_graph`, edge-type chirality), so it is sampled, not e
 verification plan (section 2).
 
 **The matrix.** `cargo xtask terrain-matrix [--dumps <dir>] [--out <file>]` reads the game data
-(`GameFiles/`) and these optional result files in `dumps/0.5.5e/terrain/vectors/`, then writes
+(`GameFiles/`) and these optional result files in `dumps/0.5.5e.hotfix1/terrain/vectors/`, then writes
 `docs/status/terrain-matrix.tsv` (columns `area act kind topology orientation graph status probe
 area_vectors evidence`; `cargo xtask tracker` renders it, so the tracker needs no game files):
 
@@ -115,7 +115,7 @@ sweep vectors (365 matches, 128 combinations), the forced result for `G1_12` (ma
 Rerun the three producers and the matrix after every generator change:
 
 ```
-V=dumps/0.5.5e/terrain/vectors            # in the hub, so GameFiles/ and dumps/ resolve
+V=dumps/0.5.5e.hotfix1/terrain/vectors            # in the hub, so GameFiles/ and dumps/ resolve
 cargo run --release --manifest-path modules/server/Cargo.toml -p poe-world --example area_probe -- \
   --seeds 1001,1002,1003 --orientations all > $V/probe-results.tsv      # about 15 minutes
 cat $V/sweep-vectors.tsv $V/terrain_vectors.tsv | sort -u > runtime/all-vectors.tsv
@@ -148,7 +148,7 @@ probe must run several of both (WP7.2).
    `POE_SWEEP`, `scripts/re/sweep_drive.py`) does not use it yet: its entries go through the dev
    `area_info_command` with no stats and a `<area> <seed> [count]` list, and the results file has
    no topology or orientation columns (WP7.3).
-2. *Play-log vectors.* `dumps/0.5.5e/terrain/vectors/terrain_vectors.tsv` (1940 rows, 260 areas,
+2. *Play-log vectors.* `dumps/0.5.5e.hotfix1/terrain/vectors/terrain_vectors.tsv` (1940 rows, 260 areas,
    from the user's `Client.txt` through `scripts/re/clientlog_terrain.py`, with the client build).
    Only 5 rows come from the current build 323943; the rest are from 36 older builds, whose
    terrain data may differ. A match from any build is valid (the hash is of the generated output);
@@ -193,7 +193,7 @@ was `fail`.
 Running it needs the client through Proton with Steam running, so ask the user first (CLAUDE.md:
 "before relying on Steam being running"); the runs are unattended (`docs/guides/setup.md`).
 
-**Storage** (git-ignored `dumps/0.5.5e/terrain/`, which is already 4.5 GB):
+**Storage** (git-ignored `dumps/0.5.5e.hotfix1/terrain/`, which is already 4.5 GB):
 
 ```
 vectors/area-vectors-results.txt   area_vectors stdout (matrix input)
@@ -213,7 +213,7 @@ step to `scripts/dumps/`). Document the new files in `dumps/README.md`.
 client), store the trace under `traces/`, then `area_trace <area> <seed> <trace dir> <T>:<O>`
 (first diverging draw) and `POE_LAYOUT_DIFFS=50` (first differing cells) as for `G1_12`.
 
-**Optional acceleration (ask the user first).** `HeadlessWorld_LoadArea` (`0x14212f500`) runs the
+**Optional acceleration (ask the user first).** `HeadlessWorld_LoadArea` (`0x14212f680`) runs the
 base generator without rendering. Driving it from the hook DLL could generate many layouts per
 login with no 20 s round trip, but it needs dynamic debugging and an RE pass (x64dbg is the
 user's call). Worth a day only if T2/T3 are still pending after act 1 to 4 are done.
@@ -232,7 +232,7 @@ user's call). Worth a day only if T2/T3 are still pending after act 1 to 4 are d
 - Next step: read `RoomOverlap` from the `.tsi` (`tsi.get("RoomUnitSize")` at `area.rs:504` shows
   the pattern; default 1; confirm the key's offset in Ghidra at master +0x14b), pass it into
   `dungeon::layout`, rerun `area_vectors` (the 25 matches must stay, `G1_3`/`G1_6`/`G1_7`/`G1_8`/`G1_9`
-  are the dungeon ones) and `area_trace G1_12 1001 dumps/0.5.5e/terrain/traces/act1_traces/G1_12_1001 2:7`.
+  are the dungeon ones) and `area_trace G1_12 1001 dumps/0.5.5e.hotfix1/terrain/traces/act1_traces/G1_12_1001 2:7`.
   The width (169 against 174) may stay different through the subgraph outer buffer; compare with
   `POE_LAYOUT_DIFFS=50` after the height is right. WP7.4.
 
@@ -241,12 +241,12 @@ user's call). Worth a day only if T2/T3 are still pending after act 1 to 4 are d
   (`overlay.rs:758`); seeds 1001 and 1002 match (topology 10, orientation 2). The same class
   stops 22 topologies of 5 areas in the probe (`G1_4`, `MapInferno`, `MapAridPlains`,
   `MapCaldera`, `MapUniqueWildwood`) with four more unported pieces named in `overlay.rs`:
-  `SizeOrder` (`:227`), exclusions `0x141fa3470` (`:395`), `MatchAllTileKeys` `0x141fa3780`
-  (`:398`) and the height offset `0x141fa10b0` (`:429`).
+  `SizeOrder` (`:227`), exclusions `0x141fa35f0` (`:395`), `MatchAllTileKeys` `0x141fa3900`
+  (`:398`) and the height offset `0x141fa1230` (`:429`).
 - Next step: the trace `traces/act1_traces/G1_4_1003` has the client's phase-2 draws (`below(total)`
-  position, `below(sum)` entry, `below(840)` orientation, `0x141fa1a70(ctx, 2, 1)`). Run
+  position, `below(sum)` entry, `below(840)` orientation, `0x141fa1bf0(ctx, 2, 1)`). Run
   `area_trace G1_4 1003 <trace> 10:2`, find the first draw after the fill, port phase 2 on the
-  occupancy grid after the fill (the context `0x141fa0ac0` is shared), then the four missing
+  occupancy grid after the fill (the context `0x141fa0c40` is shared), then the four missing
   pieces, one per sub-step, each checked on an area that uses it. WP7.6.
 
 **G1_5, "could not tilise edge 14".**
@@ -266,9 +266,9 @@ user's call). Worth a day only if T2/T3 are still pending after act 1 to 4 are d
   ported)", a guard at `dungeon.rs:321-325` that rejects every edge type with `height_change != 0`
   or a virtual edge before anything is laid out. The guard covers 149 topologies in 44 areas (all
   solo, the biggest single lever in this plan). The rules are already written down in
-  `docs/re/terrain/dungeon.md` ("Chirality", `0x141d047b0`: chiral when it changes height, has two
+  `docs/re/terrain/dungeon.md` ("Chirality", `0x141d04930`: chiral when it changes height, has two
   grounds, or is a virtual edge whose halves differ; typed nodes require `(edge from == node) xor
-  chirality`; door pairs `0x141fa7fd0` / `0x141fa7bf0`; corridors pass the edge's chirality), and
+  chirality`; door pairs `0x141fa8150` / `0x141fa7d70`; corridors pass the edge's chirality), and
   `dungeon.rs` already has `chiral_type` and a `chiral` map on the grid.
 - Next step: remove the guard, make each of the places the notes list use chirality (typed-node
   requirement, door pairs, corridor A* neighbour test, placeholder matching, mirrored turns flip it,
@@ -278,8 +278,8 @@ user's call). Worth a day only if T2/T3 are still pending after act 1 to 4 are d
 
 **World-map-pin topology choice.**
 - Evidence: the client picks the topology from the directions of the connected areas' map pins
-  against each topology's direction list, three passes from exact to adjacent (`0x141ff9280` ->
-  `0x141fa6440`), and falls back to the index draw. Our `generate` only has the index draw, so it
+  against each topology's direction list, three passes from exact to adjacent (`0x141ff9400` ->
+  `0x141fa65c0`), and falls back to the index draw. Our `generate` only has the index draw, so it
   matches the client's natural choice rarely: of the 25 matching vectors 5 are natural (`G1_1` x3,
   town x2) and 20 needed a forced topology. The Topologies columns that hold the direction lists
   are still unnamed in the schema.
@@ -299,15 +299,15 @@ hidden behind another shows up only after the first is fixed; rerun the probe af
 | Rank | System | Topologies | Areas touched | Areas unlocked alone | Evidence |
 |---|---|---|---|---|---|
 | 1 | Dungeon edge types with height change or virtual edges (chirality) | 149 | 44 | 44 | guard `dungeon.rs:321`; G1_11 |
-| 2 | 3x3 door spots `0x14209dc90` | 77 | 27 | 23 | `dungeon_tiles.rs:867`; `G1_13_1`, `G3_5`, `G4_8a/b`, `G4_10`, `P1_1`, `P2_6` and 20 more |
+| 2 | 3x3 door spots `0x14209de10` | 77 | 27 | 23 | `dungeon_tiles.rs:867`; `G1_13_1`, `G3_5`, `G4_8a/b`, `G4_10`, `P1_1`, `P2_6` and 20 more |
 | 3 | FileGroups subgraphs, nested subgraphs | 29 | 11 | 11 | `dungeon.rs:431` ("Upper" groups), `area.rs:429-440`; `G2_12`, `G3_1`, `P3_5`, `BossRush_Area1-3` |
 | 4 | Dungeon tile pass tails: no border tile, no tile for slot, overlap tile | 12 | 10 | 9 | `dungeon_tiles.rs:406,497,584`; `G3_4`, `G4_3_2`, `G4_12` |
 | 5 | Fill: orientation masks, no fill tile | 20 | 10 | 6 | `fill.rs:32,244`; `G4_1_2`, `G4_2_1`, `G4_9_`, `G1_4`, `G2_1` |
 | 6 | Room set or feature rooms missing (`no RoomSet`, `GetFeatureRooms`, no root key) | 18 | 8 | 8 | `dungeon.rs:493`, `rooms.rs:187`; Incursion temples, `P1_6` |
-| 7 | Height fallback `0x141d05560` / `0x14209fb00` | 8 | 8 | 8 | `outer_buffer.rs:654`; Sanctum levels, `G4_4_3`, `P3_6` |
+| 7 | Height fallback `0x141d056e0` / `0x14209fc80` | 8 | 8 | 8 | `outer_buffer.rs:654`; Sanctum levels, `G4_4_3`, `P3_6` |
 | 8 | Dungeon rooms: no room fits / no suitable room | 6 | 5 | 5 | `dungeon.rs:519,1099` |
 | 9 | Overlays: phase 2, SizeOrder, exclusions, MatchAllTileKeys, height offset | 22 | 5 | 4 | `overlay.rs:227,395,398,429,758`; `G1_4` |
-| 10 | Dungeon corridors: edge ends outside the grid `0x1420a3770`, failed to connect | 5 | 5 | 5 | `dungeon.rs:1525,1536` |
+| 10 | Dungeon corridors: edge ends outside the grid `0x1420a38f0`, failed to connect | 5 | 5 | 5 | `dungeon.rs:1525,1536` |
 | 11 | Data path handling (a `//` in a joined path) | 17 | 4 | 4 | `FileNotFound` on `.../subarea//graphs/...` |
 | 12 | `.dgr` header/edge field parse (`bad number`) | 19 | 4 | 4 | `G2_3`, `G2_3a`, `G4_5_2`, `Programming` |
 | 13 | Special rooms: blank (ground match), injector, split | 11 | 3 | 3 | `dungeon.rs:1917,1921` |
@@ -324,17 +324,17 @@ or as missing output):
 
 | System | Areas | Why it matters | Verification data |
 |---|---|---|---|
-| Doodads and the doodad hash (`TerrainGen_TileDoodads` `0x141ff3310`, cell and angle `0x141fe78d0`, entries at tile data +0x70..+0x78, 0x58 bytes each; hash in `hash.rs`) | all 432 (every area has a doodad hash; towns vary with quest state) | the client sends tile hash and doodad hash; only the tile hash is matched today. Doodads are also the entities and blockers the server will want | `doodads.tsv` in every area export (80 sessions) and the doodad hash column of every vector and sweep result |
+| Doodads and the doodad hash (`TerrainGen_TileDoodads` `0x141ff3490`, cell and angle `0x141fe7a50`, entries at tile data +0x70..+0x78, 0x58 bytes each; hash in `hash.rs`) | all 432 (every area has a doodad hash; towns vary with quest state) | the client sends tile hash and doodad hash; only the tile hash is matched today. Doodads are also the entities and blockers the server will want | `doodads.tsv` in every area export (80 sessions) and the doodad hash column of every vector and sweep result |
 | Collision grid output (feeds `GridSource`, `modules/server/crates/poe-game/src/grid.rs`) | all 432 | server movement and spawning on the generated terrain. Today the DLL's grid (`terrain_grid_<hash>.bin`, `PWG1`) or the client's upload over the instance port (WP3.4) stands in | `grids.bin` in every area export and `dumps/.../grids/*.bin`: compare cell by cell |
-| Extra rooms and shrines, request-driven (`0x1420aab60`, `0x1420aacf0`, `0x1420abf60`) | 0 plain areas | `dungeon.rs:602` notes they place nothing without a request (league mechanics, area mods); matters only once AreaInfo carries such requests | a forced trace with a request, from the user |
-| Off-map virtual ends `0x1420ba340`, transition tiles `0x141fe0b40` and tile-set option `+0x165`, de-repetition corner fix-ups `0x141fde880`, height offset of overlays | unknown | silent; decided by T1/T2 mismatches | forced-layout fails with `area_trace` |
+| Extra rooms and shrines, request-driven (`0x1420aace0`, `0x1420aae70`, `0x1420ac0e0`) | 0 plain areas | `dungeon.rs:602` notes they place nothing without a request (league mechanics, area mods); matters only once AreaInfo carries such requests | a forced trace with a request, from the user |
+| Off-map virtual ends `0x1420ba4c0`, transition tiles `0x141fe0cc0` and tile-set option `+0x165`, de-repetition corner fix-ups `0x141fdea00`, height offset of overlays | unknown | silent; decided by T1/T2 mismatches | forced-layout fails with `area_trace` |
 | World-map panels (6 rows) | 6 | the client generates them, logs no hashes | export compare only |
 
 The first two rows are independent of generator coverage: they apply to the 9 areas that already
 match (`G1_1`, `G1_2`, `G1_3`, `G1_4`, `G1_6`, `G1_7`, `G1_8`, `G1_9`, Town) and can be built and
 checked on those right away, in parallel with the generator work (WP7.11, WP7.12). Collision gets
 one more input: the corner lattice's walkability flags (`shared-passes.md`, "Unwalkable corners",
-flag 8, `0x141fe0fd0`) are the base; whether doodads add blocking cells is what the first
+flag 8, `0x141fe1150`) are the base; whether doodads add blocking cells is what the first
 comparison with `grids.bin` will show.
 
 ## 5. Work packages
@@ -413,7 +413,7 @@ packages' files):
 - Acceptance: `G1_5` 3/3 matches or the first diverging draw and its reason is written into
   `docs/re/terrain/tgr.md`; the probe no longer lists "retries not ported" for `G2_1`.
 
-**WP7.8 3x3 door spots `0x14209dc90`** (medium; 27 areas).
+**WP7.8 3x3 door spots `0x14209de10`** (medium; 27 areas).
 - Port the 3x3 door spot pass (the `dungeon_tiles.rs:867` guard), starting with `G1_13_1`, whose
   traces the user has not recorded yet: get a forced hash from WP7.3 for `G1_13_1`, `G3_5` and
   `G4_8a` first (T1 list for these three areas), or a play-log vector.
@@ -431,14 +431,14 @@ packages' files):
 - a. Data path handling (`//` in joined paths), `.dgr` parse errors (`bad number`), missing room
   sets and root keys: pure data fixes. Acceptance: 12 areas (4 + 4 + 4) leave the probe's error
   list or have a documented reason.
-- b. Height fallback `0x141d05560` / `0x14209fb00` and "could not fix heights": 8 areas
+- b. Height fallback `0x141d056e0` / `0x14209fc80` and "could not fix heights": 8 areas
   (Sanctum levels, `G4_4_3`, `P3_6`).
-- c. Dungeon tile pass tails, dungeon corridors (`0x1420a3770`), "no room fits": 20 areas.
+- c. Dungeon tile pass tails, dungeon corridors (`0x1420a38f0`), "no room fits": 20 areas.
 - d. Fill orientation masks and "no fill tile", virtual nodes and virtual edge pairs: 13 areas.
 - Acceptance for b to d: the class is gone from the probe; one area per class matches a hash.
 
 **WP7.11 Doodads and the doodad hash** (large; all areas; start offline).
-- RE `TerrainGen_TileDoodads` (`0x141ff3310`), `0x141fe78d0` (cell and angle from the entry, the
+- RE `TerrainGen_TileDoodads` (`0x141ff3490`), `0x141fe7a50` (cell and angle from the entry, the
   placement and orientation) and where the tile's doodad entries (tile data +0x70..+0x78) come
   from (probably the tile geometry file the `.tdt` names; `poe_data_tools` may parse it). Add a
   `doodads` module to `poe-world`, the doodad hash into `area::generate`'s result.
@@ -463,7 +463,7 @@ packages' files):
 
 **WP7.13 Server-chosen layout** (small, offline). **Done 2026-10-28** (Poe2Server `af1e7e9`):
 `[terrain] force_layout` (default on) forces `area::choose_layout`, which is now the client's own
-natural choice (`map_dirs.rs`, `7654c1a`; the decision below not to port `0x141fa6440` was
+natural choice (`map_dirs.rs`, `7654c1a`; the decision below not to port `0x141fa65c0` was
 reversed once the pins were ported). Checked: `forced_natural` over 4,173 unforced client
 generations (all match) and live `transfer G1_6` / `G1_8` with random seeds plus `G1_2` 1001
 (server terrain matches the client).
@@ -473,7 +473,7 @@ generations (all match) and live `transfer G1_6` / `G1_8` with random seeds plus
   the admin command.
 - Acceptance: `transfer G1_6` and `transfer G1_8` with random seeds give `Tile hash` equal to the
   server's generation in the server log (user runs it once); `docs/guides/server-admin.md` says what
-  the default is. Do not port `0x141fa6440` unless an official capture needs it.
+  the default is. Do not port `0x141fa65c0` unless an official capture needs it.
 
 **WP7.14 Rare features** (small to medium, last): blank special rooms (ground match) and injector
 special rooms (`dungeon.rs:1917,1921`), lettered `unique<N>` tags (`area.rs:220`, needs a

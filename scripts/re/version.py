@@ -1,6 +1,6 @@
 """The client version the scripts work on: the newest modules/protocol/versions/<version>.toml
 (highest build_revision), or $POE_VERSION. One place, so a new build is a new version file and
-not a search-and-replace of "0.5.5e" in the tools (docs/guides/new-game-version.md)."""
+not a search-and-replace of "0.5.5e.hotfix1" in the tools (docs/guides/new-game-version.md)."""
 import os
 import tomllib
 from pathlib import Path

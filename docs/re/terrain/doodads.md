@@ -1,32 +1,32 @@
-# Doodads and the collision grid (0.5.5e)
+# Doodads and the collision grid (0.5.5e Hotfix 1)
 
 The two passes that run after the tile layout: the doodad pass (which objects the rooms bring,
 the doodad hash) and the collision grid (the four 4-bit cell layers the server needs for walkability).
 Port: `modules/server/crates/poe-world/src/{doodads,collision,tdt}.rs`; checks: the examples
 `check_doodads`, `check_grids`, `forced_verify` ([README.md](README.md#tools)). Status and numbers:
 [../../status/terrain.md](../../status/terrain.md). Reference data: the DLL area exports
-(`doodads.tsv`, `grids.bin`) in `dumps/0.5.5e/terrain/area-exports/`.
+(`doodads.tsv`, `grids.bin`) in `dumps/0.5.5e.hotfix1/terrain/area-exports/`.
 
 ## Doodad pass
 
 Order in `TerrainGen_Run` (see [README.md](README.md#phases-terraingen_run-in-order)): after the
-tile layout (and its random draws), `TerrainGen_Doodads` `0x141ff5550` walks every region's room
+tile layout (and its random draws), `TerrainGen_Doodads` `0x141ff56d0` walks every region's room
 placements (the list the de-repetition pass also uses, region +0x58, 0x38-byte entries) and calls
-`TerrainGen_TileDoodads` `0x141ff3310` for each. The port places the doodads of rooms (`.arm`) only; all 303
+`TerrainGen_TileDoodads` `0x141ff3490` for each. The port places the doodads of rooms (`.arm`) only; all 303
 tile-matching exports agree with that.
 
-1. **Cell and angle** (`0x141fe78d0`). An `.arm` doodad entry has a cell `(ex, ey)` inside the
+1. **Cell and angle** (`0x141fe7a50`). An `.arm` doodad entry has a cell `(ex, ey)` inside the
    room, an angle (`radians1`), a scale, a flip flag, an object type (`stub`, e.g.
    `Metadata/MiscellaneousObjects/Doodad`) and an `.ao` path. The placed cell is the entry cell
    turned by the placement's orientation `o` within the room's `w x h` tiles, plus the placement
-   corner times 23. The turn is the table at `0x142f020c8` (three bytes per orientation, 9 rows),
+   corner times 23. The turn is the table at `0x142f02118` (three bytes per orientation, 9 rows),
    which picks x and y from `(w*23 - ex - 1, ex, h*23 - ey - 1, ey)`: `turn_cell`. The angle:
    orientations 4..7 (mirrored) negate it (`2pi - a`), each quarter turn (`o & 3`) adds `pi/2`,
    wrapped into `0..=2pi`: `turn_angle`.
-2. **AOSet pick** (`0x141fe7520`, orientation pick `0x1421c3d00`). The `.ao` file is looked up
-   (component `AOSet` merged over the `extends` chain, base first; `FUN_141d5ada0` finds the
+2. **AOSet pick** (`0x141fe76a0`, orientation pick `0x1421c3f40`). The `.ao` file is looked up
+   (component `AOSet` merged over the `extends` chain, base first; `FUN_141d5af20` finds the
    component). While the file has `ao = "<weight> <path>"` choices and no `fixed_ao`, one
-   `TerrainRng_Below(total weight)` draw picks the next file (`0x141fe75b7`); the path `null`
+   `TerrainRng_Below(total weight)` draw picks the next file (`0x141fe7737`); the path `null`
    drops the entry (no object). A file without `AOSet`, or with `fixed_ao` entries, ends the
    chain (the leaf); then the last `AOSet` seen draws, in this order and only when it uses the
    feature:
@@ -42,7 +42,7 @@ tile-matching exports agree with that.
    The pick adds its angle and offset to the entry, mirrors the hull (`flip = placement mirrored
    XOR pick mirrored XOR entry flip`) and multiplies the scale. The draws continue the layout's
    MT stream in placement order (the client's generator trace shows the draws after the layout's).
-3. **Hash filter** (`+0x2d0` / `+0x2d4` of the object type's data, `0x141ff3310`). An entry adds
+3. **Hash filter** (`+0x2d0` / `+0x2d4` of the object type's data, `0x141ff3490`). An entry adds
    `y + Murmur2_Utf16(.ao path) + (x << 16)` (cells, the path as the room names it, not the
    leaf) to the doodad hash ([README.md](README.md#hashes)) when its object type exists (it has an
    `.ot` of its own; a path with only an `.ao` extending another type is none) and the type's merged `BaseEvents` sets neither
@@ -56,7 +56,7 @@ and the client's doodad hash. The exception: `MapVaalVault` seed 35611400 topolo
 0 has two angles off by `pi/2` (the `random_orientation` pick, see "Results and open points" below). The hash does not
 include the angle, so that pick difference is invisible to it.
 
-## Collision grid (`0x141d0e5f0`)
+## Collision grid (`0x141d0e770`)
 
 The terrain object holds four 4-bit cell layers (terrain `+0xd0`, `+0xe8`, `+0x100`, `+0x118`, one
 nibble per cell, 23 x 23 cells per tile; exported as `grids.bin`, the `PWG1` format of
@@ -66,20 +66,20 @@ per cell, low nibble first). Every layer starts at 5 ("open"). A cell value is a
 (the server's `walkable`: value above 0), layer 1 the projectile layer; layers 2 and 3 stay at 5 in
 every export checked (both exports and port).
 
-`collision::build(map, files, doodads)` does what `0x141d0e5f0` does, in two stages:
+`collision::build(map, files, doodads)` does what `0x141d0e770` does, in two stages:
 
 **Tiles.** Row by row over the tile records (`ty` outer):
 - the record's sub-tile (`.tdt` sub-tile at the record's index; `SubTile.flags`, `b1`, the LZ4
   list) gives a plane of cell codes (low nibble layer 0, high nibble layer 1) over
   `x0..x0+w, y0..y0+h` of the 23 x 23 tile (planes may reach 4 cells past a side: flag 0x20 up,
   0x40 right, 0x80 down, `b1` bit 0 left);
-- flags 1 and 2 both set: the **default plane** (`0x141d04ed0` + `0x1429173d0`): all cells 0 on a
+- flags 1 and 2 both set: the **default plane** (`0x141d05050` + `0x142917610`): all cells 0 on a
   layer whose blocked bit is set (flag 8 layer 0, flag 0x10 layer 1), else open, with 1..4 ramps in
   the margins that are present;
-- otherwise plane number `i` of the sub-tile's LZ4 stack (`0x141d05040`), where `i` is the first
+- otherwise plane number `i` of the sub-tile's LZ4 stack (`0x141d051c0`), where `i` is the first
   entry of the `.tdt` hull-plane masks (data +0x173; mask bit per orientation, 0 = all) that
   serves the record's orientation;
-- the plane is turned by the orientation (the same `0x142f020c8` table, on a 23-cell tile) and
+- the plane is turned by the orientation (the same `0x142f02118` table, on a 23-cell tile) and
   written as the minimum with what is there (5 counts as unset);
 - the sub-tile flags decide what is written: flag 2 clear: with flag 1 clear and fewer than 4
   unwalkable corners both layers take the plane, else layer 0 is blocked over the tile if flag 8 is
@@ -87,22 +87,22 @@ every export checked (both exports and port).
   0x10 both layers are blocked over the tile, else (flag 1 clear, fewer than 4 unwalkable corners)
   layer 0 takes the plane, else layer 0 is blocked if flag 8 or all four corners are unwalkable;
 - a record without a sub-tile blocks both layers over the whole tile;
-- **blocking a whole tile** (`0x141d0f490`, `0x141d0fa60`) also reaches 4 cells into each of the
+- **blocking a whole tile** (`0x141d0f610`, `0x141d0fbe0`) also reaches 4 cells into each of the
   four neighbours that has a sub-tile open on that layer, with the default plane's 1..4 ramp;
 - a corner is **unwalkable** when it lies outside the map or its lattice flags (the corner-lattice
   of [shared-passes.md](shared-passes.md#corner-lattice)) have bit 8 set.
 
-**Doodad hulls** (`0x141d104d0`). Each placed static object stamps the `Hull` block of its leaf
+**Doodad hulls** (`0x141d10650`). Each placed static object stamps the `Hull` block of its leaf
 `.ao` (merged over `extends`, base first). A block is a list of sections (`section = ...` starts a
 new one) of `walk_tri x0 y0 x1 y1 x2 y2`, `proj_tri ...`, `walk_circle x y r` and
 `proj_circle x y r`. The transform is rotation by the doodad angle times the scale, mirrored in x
 when `flip`. Walk shapes go to layer 0, projectile shapes to layers 0 and 1 (`stamp_hull`):
-- a triangle (`0x141d10be0`) zeroes the cells it covers (the 4-bit fixed-point scan of
-  `0x141d1d250` / `0x141d18d60` with the top-left rule), zeroes each corner and stamps the 48-entry
-  corner kernel `0x1434bfab0` (values 1..4 around the corner), and for each edge stamps the
+- a triangle (`0x141d10d60`) zeroes the cells it covers (the 4-bit fixed-point scan of
+  `0x141d1d3d0` / `0x141d18ee0` with the top-left rule), zeroes each corner and stamps the 48-entry
+  corner kernel `0x1434bfc30` (values 1..4 around the corner), and for each edge stamps the
   distance (rounded perpendicular distance, up to 4 cells) over two triangles on the outer side
   of the edge;
-- a circle (`0x141d19370`) lowers every cell within `r + 4` to `ceil(distance - r)`;
+- a circle (`0x141d194f0`) lowers every cell within `r + 4` to `ceil(distance - r)`;
 - all writes take the minimum (5 counts as unset; 0 always writes), so the order of the doodads
   does not matter.
 
@@ -153,9 +153,9 @@ them is requested in `runtime/f/client-requests.txt` (traces with the lattice du
 
 | Family (exports) | Cells | What differs | Findings |
 |---|---|---|---|
-| `MapSlash` (6) | 771 each | A pocket of three by three tiles around a `CvSM_01.tdt` tile is open in the port and fully blocked in the client | Forcing all nine tiles to four unwalkable corners (a 4 x 4 block of lattice corners with flag 8, so every `clear()` margin falls where the client has it) reproduces `grids.bin` exactly, so the cause is the lattice, not the planes. The pocket's inner corners have no ground in the port's lattice (`-3`), their neighbours are mud. `0x141fe0b40` (ported, `lattice::mark_enclosed_fills`) is not the cause: it needs a uniform edgeless tile whose outline is already flagged. Suspects: the third unported part of `0x141fe0fd0`, the tile-set option `+0x165` block (tiles with `+0x16c & 0x40` whose four corner grounds equal the tile-set's `+0x230`, which flags the whole footprint), or flood paths blocked by the stubbed `sealed_inside` (tile data `+0x16f` bit 0, read by `0x141fe2380` and `0x141fe1df0` through the record at the corner's own index) |
-| `MapSeepage` (5), `MapUberBoss_IronCitadel` (2, partly) | 250 to 690 | The port blocks more than the client: whole tiles cleared with the margin ramp, or a wall plane 4 cells longer | The opposite direction to `MapSlash`: the port flags corners the client does not, which fits the `sealed_inside` stub (a sealed tile stops the flood). The `.tdt` field behind `+0x16f` is not mapped yet (the flag word of `0x1429153f0` is set bit by bit through a vtable slot `+0x40`) |
+| `MapSlash` (6) | 771 each | A pocket of three by three tiles around a `CvSM_01.tdt` tile is open in the port and fully blocked in the client | Forcing all nine tiles to four unwalkable corners (a 4 x 4 block of lattice corners with flag 8, so every `clear()` margin falls where the client has it) reproduces `grids.bin` exactly, so the cause is the lattice, not the planes. The pocket's inner corners have no ground in the port's lattice (`-3`), their neighbours are mud. `0x141fe0cc0` (ported, `lattice::mark_enclosed_fills`) is not the cause: it needs a uniform edgeless tile whose outline is already flagged. Suspects: the third unported part of `0x141fe1150`, the tile-set option `+0x165` block (tiles with `+0x16c & 0x40` whose four corner grounds equal the tile-set's `+0x230`, which flags the whole footprint), or flood paths blocked by the stubbed `sealed_inside` (tile data `+0x16f` bit 0, read by `0x141fe2500` and `0x141fe1f70` through the record at the corner's own index) |
+| `MapSeepage` (5), `MapUberBoss_IronCitadel` (2, partly) | 250 to 690 | The port blocks more than the client: whole tiles cleared with the margin ramp, or a wall plane 4 cells longer | The opposite direction to `MapSlash`: the port flags corners the client does not, which fits the `sealed_inside` stub (a sealed tile stops the flood). The `.tdt` field behind `+0x16f` is not mapped yet (the flag word of `0x142915630` is set bit by bit through a vtable slot `+0x40`) |
 | `MapCrimsonShores` (8) | 400 to 1,800 | A circular blob of radius about 10 with the 1..4 clearance ramp is blocked in the client, absent in the port, centred in a `fill_01.tdt` tile (3 x 3, flags 0x03, plane-less) | Not a tile plane and not one of the room doodads (none near it). Probably a generator object that is not in `doodads.tsv` (an entity from tile data `+0x1b8`, or a scatter object); an export with `entities.tsv` of a failing layout decides |
 | `MapMonument` (2), `MapFortress`, `G4_5_2`, `G2_10_1` (2), `MapReservoir` (2) | 150 to 4,900 | Feature tiles (`PrecursorGroundAnchor_*`, `fortress_boss_01`, `Warden_Office`, `JamanraRitualSite_02`) and fill tiles | Not analysed beyond the tile names; the same two suspects (unported unwalkable-corner rules, objects outside `doodads.tsv`) |
-| `MapVaalVault` (1) | 53 | Two doodads (`SunkenPillar_set.ao`, `random_orientation`, `AOSet` with one choice) have the angle off by pi/2 (ours 3pi and 2.5pi after the pick, the client 2.5pi and 2pi) | `0x1421c3d00` is ported as decompiled (`mask 0xff`: `u & 7`) and the picks of all other sets (`random_flip`, 1,879 doodads) agree, so the draw `u` (99 and 314, `below(0x348)`) or the mapping from the picked orientation to the angle differs for the full eight-way case; two samples are not enough. A client trace of this layout (`MapVaalVault 35611400 1 0`) shows the real draws |
+| `MapVaalVault` (1) | 53 | Two doodads (`SunkenPillar_set.ao`, `random_orientation`, `AOSet` with one choice) have the angle off by pi/2 (ours 3pi and 2.5pi after the pick, the client 2.5pi and 2pi) | `0x1421c3f40` is ported as decompiled (`mask 0xff`: `u & 7`) and the picks of all other sets (`random_flip`, 1,879 doodads) agree, so the draw `u` (99 and 314, `below(0x348)`) or the mapping from the picked orientation to the angle differs for the full eight-way case; two samples are not enough. A client trace of this layout (`MapVaalVault 35611400 1 0`) shows the real draws |
 

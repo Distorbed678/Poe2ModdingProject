@@ -25,7 +25,7 @@ To change or remove your entry, send another pull request. The `id` never change
 | `address` | yes | The address of the web API, the same text a player types under *Servers > Add a server*, for example `https://play.example.org` or `https://play.example.org:8443`. No path, no query. Must be reachable from the internet: `localhost`, `192.168.x.x` and other private addresses are refused. |
 | `description` | no | Up to 400 characters, plain text. |
 | `region` | no | A short region name: `EU`, `NA`, `Asia`, `OCE`, `SA`, ... up to 24 characters. |
-| `game_version` | yes | The client version the server runs, for example `0.5.5e`. Players filter by it (the launcher shows the version the server reports when it answers). |
+| `game_version` | yes | The client version the server runs, for example `0.5.5e.hotfix1`. Players filter by it (the launcher shows the version the server reports when it answers). |
 | `tags` | no | Up to 8 of `a-z`, `0-9`, `-` (24 characters each), for example `pve`, `pvp`, `hardcore`, `seasonal`, `friendly`. |
 | `contact` | no | A Discord invite, a web page (an `https://` link becomes clickable) or an e-mail address, up to 120 characters. |
 | `mods` | no | Mods that players need on their side, up to 16: `{"id": "core-lib", "version": "^1.2", "url": "https://..."}`; only `id` is required and `url` must be `https`. The launcher shows them; it does not install mods for servers yet. |

@@ -24,7 +24,7 @@
         "address": { "type": "string", "maxLength": 200, "description": "The address of the server's web API (what a player types under Servers > Add), for example https://play.example.org. It must be reachable from the internet: no localhost, no private network address. Prefer https." },
         "description": { "type": "string", "maxLength": 400 },
         "region": { "type": "string", "maxLength": 24, "description": "A short region name such as EU, NA, Asia, OCE, SA" },
-        "game_version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,16}$", "description": "The client version the server runs, for example 0.5.5e. The launcher shows the server's own answer when it is reachable." },
+        "game_version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,16}$", "description": "The client version the server runs, for example 0.5.5e.hotfix1. The launcher shows the server's own answer when it is reachable." },
         "tags": { "type": "array", "maxItems": 8, "items": { "type": "string", "pattern": "^[a-z0-9-]{1,24}$" }, "uniqueItems": true },
         "contact": { "type": "string", "maxLength": 120, "description": "A Discord invite, a web page (https link) or an e-mail address, so players can reach the operator" },
         "mods": {
