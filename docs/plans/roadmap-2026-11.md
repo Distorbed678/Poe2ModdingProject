@@ -95,8 +95,8 @@ Acceptance: a character unlocked by an admin can open M in every act but the end
 waypoint, and walk from area to area through transitions without commands.
 
 ## Track U (parallel): launcher and web admin rework
-Separate agent (Opus 5.5, medium effort) in its own worktrees of `modules/launcher` and
-`modules/web-admin`; not before the user has reviewed its brief. Style: game-styled minimal.
+Separate agent (Opus 5.5, medium effort) in its own worktrees of `modules/launcher`,
+`modules/web-admin` and `modules/client-hook`; started 2026-10-28 alongside R1. Style: game-styled minimal.
 1. Brief and design tokens: the top 3 tasks of each app (launcher: play, pick a server, update;
    web admin: see who is online, fix a player, change a setting), a shared token file (colours,
    type scale, spacing, radii, motion durations and easing), a component list; 2 or 3 rendered
@@ -104,8 +104,17 @@ Separate agent (Opus 5.5, medium effort) in its own worktrees of `modules/launch
 2. Launcher: one main screen (Play, server, status), the rest one level down; motion: page and
    state transitions, progress, no layout shift; `prefers-reduced-motion` honoured.
 3. Web admin: a calm dashboard, the advanced tools grouped and out of the way; same tokens.
-4. Checks per repo (`npm run check`, tests, `cargo clippy` for the launcher), screenshots from a
-   headless browser for review, the user's sign-off per app; releases only when the user asks.
+4. DLL overlay (added 2026-10-28, `modules/client-hook` `poe-hook-core/src/ui/`, ImGui): keep the
+   sidebar, but group the 18 tabs into 4 or 5 sidebar groups (e.g. Play, Server, Logs, Research,
+   Settings) with the pages of a group as sub-tabs, research pages collapsed by default; same
+   style tokens as far as ImGui allows. Fix the live-log autoscroll (Log and Game log tabs: after
+   scrolling up and back down the view must follow new lines again; today it only follows while
+   within 40 px of the bottom before the new lines arrive).
+5. Review: 2 or 3 rendered directions of the main screens (launcher, web admin dashboard, DLL
+   overlay) first, and the agent waits for the user's pick (user, 2026-10-28). Checks per repo
+   (`npm run check`, tests, `cargo clippy` for the launcher, `cargo fmt --all --check` and
+   `cargo xtask build-dll` for the hook), screenshots for review, the user's sign-off per app;
+   releases only when the user asks.
 
 ## After the roadmap (backlog, ask before starting)
 - Server release (`server-v0.2.x`) after R1 or R2; launcher release after track U.
