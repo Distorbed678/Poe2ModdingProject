@@ -32,6 +32,10 @@ Nothing here is started yet. The original plans this continues are
 ## Main line
 
 ### R1. Area generator complete (terrain)
+**Done 2026-10-29** (Poe2Server `3b05682`): batches 1, 2 and 3 match on every layout the client
+generates (218,705 + 218,802 + 218,678), batch 3's natural part 8,368 of 8,368; details
+[../status/terrain.md](../status/terrain.md), [../re/terrain/tgr.md](../re/terrain/tgr.md) "R1".
+
 1. MapCaldera (2 layouts in batch 1, 4 in batch 2) and MapCrimsonShores (seed 921210055): client
    traces (`POE_HOOK_GEN_TRACE=1`, `area_trace`), port, gate.
 2. Full replay of batch 2 (`full2`, 218,802 layouts; last replay before the BossRush and later
@@ -95,7 +99,7 @@ Acceptance: a character unlocked by an admin can open M in every act but the end
 waypoint, and walk from area to area through transitions without commands.
 
 ## Track U (parallel): launcher and web admin rework
-**Done 2026-10-28**, signed off by the user per app: direction "Ash & Blood" (C) with the rune seal logo; launcher Poe2Launcher d9ed155 + 1950400 ([../guides/launcher.md](../guides/launcher.md#look-and-motion)), web admin Poe2WebAdmin 6e4afba ([../guides/server-admin.md](../guides/server-admin.md)), overlay Poe2ClientHook b03d9fa + 3360700 + 217596b ([../architecture/client-dll.md](../architecture/client-dll.md)). Open: the nested web-admin pointer in modules/server (to 6e4afba).
+**Done 2026-10-28**, signed off by the user per app: direction "Ash & Blood" (C) with the rune seal logo; launcher Poe2Launcher d9ed155 + 1950400 ([../guides/launcher.md](../guides/launcher.md#look-and-motion)), web admin Poe2WebAdmin 6e4afba ([../guides/server-admin.md](../guides/server-admin.md)), overlay Poe2ClientHook b03d9fa + 3360700 + 217596b ([../architecture/client-dll.md](../architecture/client-dll.md)). The nested web-admin pointer in modules/server was bumped (Poe2Server `b4ecbe1`); released as launcher v0.5.0 and hook-v0.4.0 (2026-10-29).
 
 Separate agent (Opus 5.5, medium effort) in its own worktrees of `modules/launcher`,
 `modules/web-admin` and `modules/client-hook`; started 2026-10-28 alongside R1. Style: game-styled minimal.

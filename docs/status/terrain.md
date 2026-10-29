@@ -24,12 +24,13 @@ regardless of our generator. The server's copy is what has to match.
 ## Current results
 
 State 2026-10-28 (Poe2Server `af1e7e9`; the history is in the dated entries below):
-- **Forced layouts:** both 50-seed client batches match on every layout (tile hash, and the
-  doodad hash on every match): batch 1 218,705 of 218,705, batch 2 (`full2`, other seeds) 218,802
-  of 218,802 (2026-10-29, Poe2Server `33981f0`); matrix 4469 match / 0 partial / 0 fail / 39
-  untested / 10 n/a ([terrain-matrix.tsv](terrain-matrix.tsv)). Batch 3 (new seeds, forced and
-  natural) is the last check (roadmap R1).
-- **Natural choice** (no forced layout): ported; 4,173 of 4,173 unforced client generations match
+- **Complete (2026-10-29, roadmap R1, Poe2Server `3b05682`):** all three 50-seed client batches
+  match on every layout the client generates (tile hash, and the doodad hash on every match):
+  batch 1 218,705 of 218,705, batch 2 (`full2`) 218,802 of 218,802, batch 3 (new seeds) 218,678 of
+  218,678; matrix 4469 match / 0 partial / 0 fail / 39 untested / 10 n/a
+  ([terrain-matrix.tsv](terrain-matrix.tsv)). Vectors: `dumps/0.5.5e/terrain/vectors/
+  forced-results{,-full2,-batch3}.tsv`.
+- **Natural choice** (no forced layout): ported; 4,173 of 4,173 (`w13-nat1`) and 8,368 of 8,368 (batch 3) unforced client generations match
   (batch `w13-nat1`, new seeds), and the instance server forces that choice
   (`[terrain] force_layout`, WP7.13).
 
@@ -183,6 +184,11 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   room height `0x141fa10b0` (agent E). Biggest gains: G2_5_1, MapCrypt, MapPit, MapWillow,
   MapSandspit, G2_9_1, G2_4_2, Kalguur, MapRiverside. Findings and open items:
   [../re/terrain/dungeon.md](../re/terrain/dungeon.md).
+- **R1 complete, 2026-10-29 (Poe2Server `3b05682`, three full replays):** batch 3 (new seeds)
+  found one more failure (P1_4: the pre-unique room is an overlay feature room on `.dgr` maps);
+  after the fix every layout of the three batches matches (218,705 + 218,802 + 218,678) and the
+  natural part 8,368 of 8,368. The generator port is complete for every combination the client can
+  generate.
 - **R1, 2026-10-29 (Poe2Server `33981f0`, two full replays):** batch 1 218,705 of 218,705 and
   batch 2 218,802 of 218,802 match (from 218,702 and 218,795 expected), 0 lost; matrix 4469 / 0 /
   0 / 39. Fixed: MapCaldera (league rooms are overlay feature rooms on `.tgr` maps) and

@@ -482,3 +482,11 @@ checkpoints.
   radius `2 · s` (`lea r8d, [rsi + rsi]`) and adds the exit point `s` = 23 out. Two junctions 45
   cells apart each added a point; the client's second explode dropped the first one's (27 cells
   from it). Code: `node_tiles::explode` (`POE_EXPLODE_R1=1` restores the old radius).
+- **Pre-unique and league rooms are overlay feature rooms on `.dgr` maps too** (batch 3, P1_4
+  1187622552): the rooms placed before the overlay context (the league rooms `0x14209a620`, the
+  pre-unique room `0x14209c150`) are in the generator's room list the overlays read, marked like
+  the `.tgr` league rooms (bit 8, the inner rectangle shrunk by the room's overlap bit 4). Code:
+  `area.rs` `.dgr` path (same switch `POE_NO_LEAGUE_RECTS`).
+- **Result:** all three client batches match on every layout the client generates: batch 1
+  218,705, batch 2 218,802, batch 3 (new seeds, master seed 20261028) 218,678, plus batch 3's
+  natural part 8,368 of 8,368 (`forced_natural`).

@@ -307,7 +307,7 @@ link = "docs/re/terrain/doodads.md"
 [[subsystem.item]]
 name = "Per-area x topology x orientation matrix (cargo xtask terrain-matrix)"
 status = "done"
-note = "2026-10-29 (R1, Poe2Server 33981f0): both 50-seed client batches match on every layout: batch 1 218,705 of 218,705, batch 2 218,802 of 218,802; 4508 combinations: 4469 match, 0 partial, 0 fail, 39 untested (client errors on every seed, listed in terrain.md); batch 3 (new seeds + natural) running"
+note = "2026-10-29 (R1 complete, Poe2Server 3b05682): all three 50-seed client batches match on every layout the client generates: batch 1 218,705, batch 2 218,802, batch 3 (new seeds) 218,678; batch 3 natural part 8,368 of 8,368; 4508 combinations: 4469 match, 0 partial, 0 fail, 39 untested (client errors on every seed, listed in terrain.md)"
 link = "docs/plans/terrain-all-areas.md"
 
 [[subsystem.item]]
