@@ -186,7 +186,10 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
   layout and three-pass match are ported; without a forced layout the generator now picks what
   the client picks: 4,173 of 4,173 unforced client generations (batch `w13-nat1`, every non-fixed
   area × 10 seeds) and a live `G1_2` load. Forced results unchanged (the forced path is not
-  touched). Details: [../re/terrain/shared-passes.md](../re/terrain/shared-passes.md).
+  touched). Details: [../re/terrain/shared-passes.md](../re/terrain/shared-passes.md). WP7.13 done
+  the same day (Poe2Server `af1e7e9`): the instance server forces that choice in AreaInfo
+  (`[terrain] force_layout`, default on); live `transfer G1_6` / `G1_8` match the server's
+  generation.
 - **Single agent, 2026-10-28 (handoff 12, Poe2Server `bf9ed79`, one full replay):** 218,702 of
   218,705 client layouts match (from 218,653), 0 lost; combinations 4466 match, 3 partial, 0
   fail, 39 untested. Fixed: BossRush_Area1, all 49 (nested subgraphs queue behind the subgraphs

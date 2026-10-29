@@ -37,12 +37,14 @@ of the account (checked when the command runs; see Accounts below) and are appen
 | `area_info <area> <seed>` | yes | research: a second AreaInfo on the connection (the client may crash) |
 
 `seed` takes `random` (the server picks), `topology` and `orientation` take `natural` (the
-client's own choice). Any area in `WorldAreas` works, not only act 1. Topology numbers are
+client's own choice; with `[terrain] force_layout`, the default, the server computes that choice
+itself and sends it, see below). Any area in `WorldAreas` works, not only act 1. Topology numbers are
 1-based in the area's topology list; orientations are checked against that topology's allowed
 ones.
 
 ## Terrain switches (`[terrain]`)
 
+- `force_layout` (default `true`): every new instance's AreaInfo forces the layout (`map_force_topology`, `map_force_orientation`). What the instance does not force itself (`transfer <area> <seed> <topology> <orientation>`) is the server generator's natural choice (`poe_world::area::choose_layout`), which is the client's own (ported from the client's world-map pin directions; 4,173 of 4,173 unforced client generations match: [../re/terrain/shared-passes.md](../re/terrain/shared-passes.md)). The layout is the same as without forcing; forcing makes client and server agree by construction. The log line `forcing the layout (AreaInfo stats)` shows the values. `false`: only what the instance forces is sent and the client chooses the rest alone.
 - `generate` (default `false`): the server also generates each new instance's terrain and logs whether its tile hash equals the client's (the `terrain` command does it for one instance).
 - `generated_grid` (default `false`): the instance's collision grid (walkability for movement and spawns) comes from the server's own generator instead of the grid the client uploaded or the layout cache holds. It applies only when the server's tile hash equals the client's; otherwise the log says `generated collision grid unavailable` and the uploaded grid is used, so the switch is safe to leave on. When the grid is used the log has `using the generated collision grid` with the generation time. How the grid is built and how far it equals the client's: [../re/terrain/doodads.md](../re/terrain/doodads.md); where it plugs in: [../architecture/instance-world.md](../architecture/instance-world.md#terrain-grid-sources).
 

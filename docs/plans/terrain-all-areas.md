@@ -461,7 +461,12 @@ packages' files):
   switch), and server movement (`docs/protocol/movement.md` tests) runs on it with the drift under
   one cell.
 
-**WP7.13 Server-chosen layout** (small, offline).
+**WP7.13 Server-chosen layout** (small, offline). **Done 2026-10-28** (Poe2Server `af1e7e9`):
+`[terrain] force_layout` (default on) forces `area::choose_layout`, which is now the client's own
+natural choice (`map_dirs.rs`, `7654c1a`; the decision below not to port `0x141fa6440` was
+reversed once the pins were ported). Checked: `forced_natural` over 4,173 unforced client
+generations (all match) and live `transfer G1_6` / `G1_8` with random seeds plus `G1_2` 1001
+(server terrain matches the client).
 - The instance server always sends `map_force_topology` and `map_force_orientation` equal to the
   generator's own pick (`area::generate`'s index draw and default orientation, exposed as a
   function), so the client's world-map-pin choice never matters. Keep a `natural` override for
