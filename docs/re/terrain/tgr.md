@@ -465,4 +465,20 @@ Branch `terrain6-c` (worktree `runtime/wt/c`). League stone-circle jobs (3,716 o
   - Tile records keep heights in world units (`StoreyHeight` per storey; Design's is 43), for `.tgr` maps too, and the outer buffer of a raised `.tgr` map runs with the height repair like a dungeon's.
 - **G3_town (50)**: first divergence is the fill-group weight (`0x141f900a7` n=10000 in the port vs 100 in the client) after the first 4,789 identical placements; the port places an extra fill tile at (0,48) of the first subgraph window before (1,0) (the client has it earlier). The `92ce0` snapshot in this container job is taken after the first subgraph was merged, so `latcmp.py` against our container dump is not comparable. Not resolved.
 - **Collision grid (`POE_GRID2`)**: not run.
-- **MapCaldera (2)**: the lattice at the `fill` snapshot differs in 229 corners in clusters (flag 2 and grounds), the first RNG divergence is the overlay candidate count (`0x141fa249c`); causes not found (`w5-c-2` traces).
+- **MapCaldera (2)**: the lattice at the `fill` snapshot differs in 229 corners in clusters (flag 2 and grounds), the first RNG divergence is the overlay candidate count (`0x141fa249c`); causes not found (`w5-c-2` traces). **Fixed 2026-10-28** (below).
+
+## R1 (2026-10-28): the last failures of both batches
+Traces: run `r1-tr1` under `dumps/0.5.5e.hotfix1/terrain/batch/` (the 7 jobs, `POE_HOOK_GEN_TRACE=1`).
+`area_trace` now also compares the lattice at the `bdae0` (league rooms) and `be360` (shrines)
+checkpoints.
+- **League rooms are overlay feature rooms** (MapCaldera, 6 jobs of both batches): rooms the league
+  pass places before the overlays (`0x1420bdae0`, e.g. a 3 × 3 `StoneCircle` room) join the
+  generator's room list the overlays read: the whole rectangle gets occupancy bit 8, the inner one,
+  shrunk by the room's own overlap (`.arm` dimensions `uint1`, 1 here), bit 4. Without it the
+  overlay pass of phase 1 found 60 candidates where the client found 50 (`0x141fa261c`). Code:
+  `area.rs` `.tgr` path (`POE_NO_LEAGUE_RECTS=1` turns it off).
+- **Junction explode drops points within twice its step** (MapCrimsonShores 921210055):
+  `0x1420cb200` (hotfix `0x1420cb380`) calls the drop `0x1420c6b80` (hotfix `0x1420c6d00`) with
+  radius `2 · s` (`lea r8d, [rsi + rsi]`) and adds the exit point `s` = 23 out. Two junctions 45
+  cells apart each added a point; the client's second explode dropped the first one's (27 cells
+  from it). Code: `node_tiles::explode` (`POE_EXPLODE_R1=1` restores the old radius).
