@@ -23,29 +23,32 @@ regardless of our generator. The server's copy is what has to match.
 
 ## Current results
 
-Measured with the `area_vectors` example on `dumps/0.5.5e/terrain/vectors/sweep-vectors.tsv` (tools: [../re/terrain/README.md](../re/terrain/README.md#tools)); 26 of 33 vectors match.
+State 2026-10-28 (Poe2Server `af1e7e9`; the history is in the dated entries below):
+- **Forced layouts:** 218,702 of the 218,705 client layouts of the 50-seed batch match (tile hash,
+  and the doodad hash on every match); matrix 4466 match / 3 partial / 0 fail / 39 untested / 10
+  n/a ([terrain-matrix.tsv](terrain-matrix.tsv)). The second batch (`full2`, other seeds, every
+  topology and orientation): 218,585 of 218,802 at its last replay, failures since fixed but not
+  replayed.
+- **Natural choice** (no forced layout): ported; 4,173 of 4,173 unforced client generations match
+  (batch `w13-nat1`, new seeds), and the instance server forces that choice
+  (`[terrain] force_layout`, WP7.13).
 
-| Area | Matching seeds (1001–1003) | Blocker |
-|---|---|---|
-| Town | 2/2 | — |
-| G1_1, G1_2, G1_3, G1_6, G1_7, G1_8, G1_9 | 3/3 each | — |
-| G1_4 | 2/3 | seed 1003: overlay placement after the fill (phase 2, `overlay.rs`) |
-| G1_5 | 0/3 | edge routing: "could not tilise edge 14" |
-| G1_11 | 0/3 | height-change (cliff) edge types: chirality of `woodscliff_height.et` (`0x141d047b0`) |
-| G1_12 | 1/1 | — (forced topology 2, orientation 7; fixed 2026-10-22: `RoomOverlap` from the master, see below) |
-| G1_13–15 | — | no client traces recorded yet |
-
-G1_6 and G1_8 match only with forced topologies (e.g. G1_8 `1:3` / `11:3` / `4:1`, G1_6 `2:7` /
-`2:7` / `1:6`). The client picks its topology from world-map pins, which aren't ported. The
-server can force it (`map_force_topology` / `map_force_orientation`, done for instances
-created with a topology/orientation); the natural choice is still not reproduced.
-
-Other matches:
-- Tile hashes equal the client's for Clearfell Encampment (seeds 1, 2: all 990 tiles, orientations
-  and sub-tiles), `G1_1` (1000–1002), `G1_2` (1001–1003, forced topology 15) and `G1_4` (1001, 1002;
-  topology 10, orientation 2).
-- `check_exports` recomputes the tile and doodad hashes of the DLL's area exports: 42 match, the only
-  2 that differ are doodad files from before the parallel world-map capture fix.
+### The rows that do not match (WP7.15, 2026-10-28)
+- **partial (3):** `MapCaldera` 1:0 and 8:0 (one seed each, plus 4 jobs in `full2`) and
+  `MapCrimsonShores` 4:0 (seed 921210055): open, need client traces (handoff 13, item 3).
+- **untested (39):** the client itself fails on every seed of these combinations, so there is no
+  layout to compare (errors from `dumps/0.5.5e/terrain/batch/full/batch-results.tsv`):
+  `ExpeditionLogBook_Heath` 1:1/3/5/7 ("Non-feature node overlapping another"), `G2_10_1` 5:1/3/5/7
+  and 7:1/3/5/7 ("Failed to connect edge"), `HideoutPietyArena` 1:0 and `MapUniqueVault` 1:1/3/5/7,
+  2:1/3/5/7 ("No possible rooms found for room"), `IncursionTemple` / `IncursionTemplePresent` 1:0
+  ("No walkable area in the level"; Incursion temples are built by their league mechanic, out of
+  scope), `MapBackwash` 1:0..7 ("Failed to tilise at tile"), `MapRockpools` 1:0..3 ("While
+  tilising .../bossman.arm"), `Sanctum_1`..`Sanctum_4` 1:0 (`BufferUnderflow` reading their graph
+  in the headless batch). The natural choice never picks them in the client either (`w13-nat1`
+  has the same errors for these areas).
+- **n/a (10):** areas without `Topologies` rows (`NULL`, `CharacterSelect`, `PersonalHideout`,
+  `GuildHideout__`, `CurrentTown`, `G2_3s`, `G2_8a`, `MapLeaguePortal`, `EndgameDoodad_MeteorCrater`,
+  `EndgameDoodad_BeastGroundZero`); the 6 world-map panels have no client hash.
 
 ## Verified stages
 
@@ -284,18 +287,11 @@ the other 218,705 and its result is the matrix input `dumps/0.5.5e/terrain/vecto
 
 ## To do, in order
 
-1. G1_12 is done (2026-10-22).
-2. G1_4 seed 1003: overlay phase 2.
-3. G1_5: edge routing.
-4. G1_11: height-change edges.
-5. G1_13–15: the user records client traces, then port what they need.
-6. Doodads (the doodad hash), not ported anywhere yet.
-7. Generator features no tested area uses yet (3×3 door spots and `.dgr` FileGroups subgraphs
-   were ported in wave 4): nested subgraphs, request-driven extra rooms and shrines (`0x1420aab60`,
-   `0x1420aacf0`, `0x1420abf60`), injector and blank special rooms.
-8. Later: collision and walkability.
-9. Done 2026-10-17: forced topology/orientation in AreaInfo, area transfer (command and
-   Instances page).
+1. Done 2026-10-28: `[terrain] generate` on by default (the user's decision 2026-10-27, once the
+   natural choice was verified).
+2. MapCaldera / MapCrimsonShores (client traces), the full replay of the second batch.
+3. The object stage for entities (handoff 10 "Entities"): transitions, waypoints, checkpoints.
+4. A live test of `generated_grid` with server movement; then whether it defaults to on.
 
 ## Not ported yet (collected from the RE notes)
 

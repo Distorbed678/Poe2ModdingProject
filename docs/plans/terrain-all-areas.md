@@ -480,7 +480,11 @@ special rooms (`dungeon.rs:1917,1921`), lettered `unique<N>` tags (`area.rs:220`
 session-history trace from the user), request-driven extra rooms and shrines, Incursion temples
 (`GetFeatureRooms`). Acceptance per feature: a forced hash or a documented reason it is deferred.
 
-**WP7.15 Full sweep, matrix closing and the default switch** (medium; needs the user).
+**WP7.15 Full sweep, matrix closing and the default switch** (medium; needs the user). **Done
+2026-10-28:** the 50-seed batches replaced the tiers; every row not `match` has its reason in
+[../status/terrain.md](../status/terrain.md#the-rows-that-do-not-match-wp715-2026-10-28) (3
+partial, 39 untested = client errors, 10 n/a); `[terrain] generate` defaults to on (the user's
+decision 2026-10-27; Poe2Server `6784ec2`). `generated_grid` stays off until a live movement test.
 - Run tiers T1 to T3 over all acts, with re-probes in between; fix or document each `fail`; update
   the matrix, `terrain.md` and the tracker.
 - Acceptance: every combination is `match`, `fail` with a stored reason, or `untested` with a

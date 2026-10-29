@@ -293,6 +293,12 @@ note = "2026-10-28: pins from the client's node walk (102 of 102), direction lay
 link = "docs/re/terrain/shared-passes.md"
 
 [[subsystem.item]]
+name = "Server-chosen layout and server-side generation on (WP7.13, WP7.15)"
+status = "done"
+note = "2026-10-28: [terrain] force_layout (default on) forces the server's natural choice in AreaInfo (live transfer G1_6 / G1_8 match the server's generation); every non-match matrix row has a documented reason; [terrain] generate on by default (at most 2 at once); generated_grid still off (no live movement test)"
+link = "docs/guides/server-admin.md"
+
+[[subsystem.item]]
 name = "Doodads and the doodad hash"
 status = "done"
 note = "2026-10-22 (WP7.11): doodads.rs; every one of the 72,718 tile-matching client layouts also matches the client's doodad hash; 302 of 303 exports equal in list, hash and angles (MapVaalVault: 2 angles)"
