@@ -19,6 +19,11 @@ section 2 and 3 (the user's preferences, commit rules, CPU limits; still valid),
   - **server-v0.4.0** (Latest): `GET/POST /setup` (first admin, loopback only), `POST /admin/accounts`,
     `GET /local/metrics`, network rates in the metrics (`poe_net::stats`), web admin with register
     and first-run pages and calmer pages.
+  - **Launcher v0.7.0** (follow-up the same evening, the user's request): **no launcher login**.
+    Accounts belong to each server; Play starts the game at its own login screen pointed at the
+    selected server, and the player signs in there. Rows offer *Web admin* and *Create account*
+    (server pages in the browser); the plain-http confirmation is gone (the launcher sends no
+    secrets). The first-admin notice follows the server's `GET /setup`.
   - **hook-v0.5.0**: Hotfix 1 only; the login screen's Create account button opens the server's
     register page (`register_url`, `ShellExecuteW` hook; never in official mode).
 - Nothing of ours runs; `runtime/client.lock` absent; the Agents-desktop rules are on. `GameFiles/`
