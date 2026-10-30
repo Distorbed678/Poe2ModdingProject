@@ -8,8 +8,8 @@
 # status = "done" (1.0) | "partial" (0.5) | "missing" (0) | "planned" (0).
 #   missing = needed and not started or known broken; planned = scheduled in a plan document.
 
-current_task = "R1.5: launcher and web admin cleanup, Hotfix 1 only (docs/plans/r1.5-ui-cleanup.md)"
-current_task_link = "docs/plans/r1.5-ui-cleanup.md"
+current_task = "R2: server-side collision (docs/plans/roadmap-2026-11.md)"
+current_task_link = "docs/plans/roadmap-2026-11.md"
 
 # ---------------------------------------------------------------------------------------------
 
@@ -471,9 +471,9 @@ link = "docs/guides/launcher.md#mods"
 
 [[subsystem.item]]
 name = "R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web"
-status = "partial"
+status = "done"
 link = "docs/plans/r1.5-ui-cleanup.md"
-note = "2026-10-29: 0.5.5e dropped everywhere; launcher: several hosted servers, Host tab, Manage with usage, no account creation, decluttered pages; web admin: register and first-run pages, New account, decluttered pages; the game's Create account button opens the server's register page. Releases after the user's sign-off"
+note = "2026-10-29: 0.5.5e dropped everywhere; launcher: several hosted servers, Host tab, Manage with usage, no account creation, decluttered pages; web admin: register and first-run pages, New account, decluttered pages; the game's Create account button opens the server's register page. released server-v0.4.0, launcher v0.6.0, hook-v0.5.0"
 
 [[subsystem]]
 name = "Web Admin"

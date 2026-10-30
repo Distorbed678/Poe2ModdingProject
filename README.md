@@ -45,7 +45,7 @@ This is an unofficial, fan-made project for personal and educational use. It is 
 Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xtask tracker`; do not edit this block by hand. The history of what was built when is in [docs/status/history.md](docs/status/history.md), the terrain generator in [docs/status/terrain.md](docs/status/terrain.md).
 
 <!-- tracker:start -->
-> **Current task:** [R1.5: launcher and web admin cleanup, Hotfix 1 only (docs/plans/r1.5-ui-cleanup.md)](docs/plans/r1.5-ui-cleanup.md)
+> **Current task:** [R2: server-side collision (docs/plans/roadmap-2026-11.md)](docs/plans/roadmap-2026-11.md)
 
 | Subsystem | Progress | Done |
 |---|---|---|
@@ -59,7 +59,7 @@ Generated from [docs/status/tracker.toml](docs/status/tracker.toml) by `cargo xt
 | [Inventory](#inventory) | `██░░░░░░░░ 17%` | 0/3 |
 | [Monsters/Skills](#monstersskills) | `███░░░░░░░ 30%` | 1/5 |
 | [Client Hook](#client-hook) | `████████░░ 83%` | 4/6 |
-| [Launcher](#launcher) | `█████████░ 94%` | 7/8 |
+| [Launcher](#launcher) | `██████████ 100%` | 8/8 |
 | [Web Admin](#web-admin) | `█████████░ 88%` | 7/8 |
 | [Modding](#modding) | `█████████░ 90%` | 9/10 |
 
@@ -676,7 +676,7 @@ Docs: [docs/guides/launcher.md](docs/guides/launcher.md)
 | ✅ | [Install the game from Steam depots](docs/guides/launcher.md#install-in-detail) | DepotDownloader 3.4.0 pinned; the user's end-to-end test of launcher v0.4.0 on Linux (2026-10-23) installed the game from the Steam depots and passed; Windows untested |
 | ✅ | [Deploy and launch via poe-hook-deploy](docs/guides/launcher.md#play-in-detail) | the user's end-to-end test on Linux (2026-10-23): hook download and deploy, Host a server (update from server-v0.1.0 to 0.2.1), Play, web admin, restart all passed; Windows path untested |
 | ✅ | [Mod install and ordering](docs/guides/launcher.md#mods) | files and poe-hook-mods/state.toml; the DLL loader reads them (WP C4) |
-| 🟡 | [R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web](docs/plans/r1.5-ui-cleanup.md) | 2026-10-29: 0.5.5e dropped everywhere; launcher: several hosted servers, Host tab, Manage with usage, no account creation, decluttered pages; web admin: register and first-run pages, New account, decluttered pages; the game's Create account button opens the server's register page. Releases after the user's sign-off |
+| ✅ | [R1.5 cleanup: Hotfix 1 only, multiple hosted servers, decluttered pages, registration on the web](docs/plans/r1.5-ui-cleanup.md) | 2026-10-29: 0.5.5e dropped everywhere; launcher: several hosted servers, Host tab, Manage with usage, no account creation, decluttered pages; web admin: register and first-run pages, New account, decluttered pages; the game's Create account button opens the server's register page. released server-v0.4.0, launcher v0.6.0, hook-v0.5.0 |
 
 ### Web Admin
 
