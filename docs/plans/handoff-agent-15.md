@@ -26,7 +26,7 @@ section 2 and 3 (the user's preferences, commit rules, CPU limits; still valid),
     secrets). The first-admin notice follows the server's `GET /setup`.
   - **hook-v0.5.0**: Hotfix 1 only; the login screen's Create account button opens the server's
     register page (`register_url`, `ShellExecuteW` hook; never in official mode).
-- Nothing of ours runs; `runtime/client.lock` absent; the Agents-desktop rules are on. `GameFiles/`
+- Nothing of ours runs; `runtime/client.lock` absent; the Agents-desktop rules are **off** (the user disabled them on 2026-10-29: do not turn them on unless asked). `GameFiles/`
   has the hook built from `2376961` (same code as hook-v0.5.0) with `register_url` for the dev server.
 
 ## Next: R2, server-side collision
